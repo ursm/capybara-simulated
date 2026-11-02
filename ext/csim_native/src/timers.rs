@@ -439,6 +439,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "agentNextDue", agent_next_due, context_id);
     register(scope, ns, "crossingAdd", crossing_add, context_id);
     register(scope, ns, "crossingNext", crossing_next, context_id);
+    register(scope, ns, "swAsked", sw_asked, context_id);
+    register(scope, ns, "swAnswered", sw_answered, context_id);
     register(scope, ns, "agentFramesOwed", agent_frames_owed, context_id);
     register(scope, ns, "agentAnimDelay", agent_anim_delay, context_id);
     register(scope, ns, "agentRealms", agent_realms, context_id);
@@ -851,7 +853,7 @@ fn agent_next_due(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 // time: each runs once no task of its event loop falls due on its virtual clock before it — any realm's of the agent: the
 // message's task is queued on the receiver's event loop (HTML "queue a global task" on the posted message task source of
 // the target's global), which runs the tasks of the page and its frames in the order they fall due, a frame's 40 ms timer
-// before the page's message from a worker sent at 45 — judged against the realm's own time (agent_clock.rs `ownNow`), no
+// before the page's message from a worker sent at 45 — judged against the realm's own time (agent_clock.rs `own_now`), no
 // lift an earlier message put on its clock — those running first, at their own times, the queue waiting behind them one
 // timer's due at a time; then at once, its clock held at that time (`clockAtLeast`) until its virtual clock passes it. A
 // worker's 1 s computation answered the page ahead of the page's `setTimeout(…, 300)` and `(…, 600)`, its `Date` lifted
@@ -863,12 +865,15 @@ fn agent_next_due(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 // (…in order of their time, then of their arrival — a storm of 40,000 messages sorted the whole queue at each arrival and
 // scanned it at each run: 8.9 s — with each key's last time and how many of it wait, which a key's next one is run no
 // earlier than; and whether a turn of the queue's is queued on the event loop, which runs it on as it comes)
+// (…and, of the realm's requests a service worker answers, the time each was asked at, by its fetch id, which its answer
+// lands at the time it took from: `swAnswered`)
 #[derive(Default)]
 pub(crate) struct Crossings {
     queue: std::collections::BTreeMap<(Due, u64), (String, v8::Global<v8::Value>)>,
     keys: HashMap<String, (f64, u32)>,
     seq: u64,
     turn: bool,
+    asked: HashMap<u32, f64>,
 }
 
 // __dom.crossingAdd(key, at, run) -> whether the queue is to be run now: `run`, sent by `key`'s sender at `at` (on the
@@ -982,4 +987,31 @@ fn agent_settle_gen(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbac
     let sum = event_loop.settle_retired + now.values().map(|&g| u64::from(g)).sum::<u64>();
     event_loop.settle_seen = now;
     rv.set_double(sum as f64);
+}
+
+// __dom.swAsked(fetchId) — the calling realm's request `fetchId` is asked of its service worker now: the time it was asked
+// at on its own clock (agent_clock.rs `own_now`, no hold of a message's in it), on the agent's `Date` scale, as a crossing
+// takes a time.
+fn sw_asked(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let asked = crate::agent_clock::own_now(d, cid) + crate::agent_clock::agent_shift_of(d, cid);
+    d.arena.enter(cid).crossings.asked.insert(id, asked);
+}
+
+// __dom.swAnswered(fetchId, spent, took) -> the time the answer to the calling realm's request `fetchId` is run at, in its
+// crossing queue (timers.js `atItsTime`) — 0 for one not asked — the request let go of: the time it was asked at, and the
+// time the worker spent on it after that (`spent`) — from when it was due to take it, so a service worker spinning 2 s on
+// `Date.now()` in its fetch event answers 2 s on, whatever real time the page waited for it meanwhile, and one busy with
+// an earlier event first after that one's time too — no less than the time from its event's dispatch (`took`). Lengths of
+// time, which the worker's window's clock is none of: a time on it, carried to another window's page, held that page's
+// clock at the first window's time — 28.9 s on, after the first ran a 30 s timer chain.
+fn sw_answered(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let spent = args.get(1).number_value(scope).unwrap_or(0.0);
+    let took = args.get(2).number_value(scope).unwrap_or(0.0);
+    let cid = realm_id(scope, &args);
+    let asked = dom(scope).arena.enter(cid).crossings.asked.remove(&id);
+    rv.set_double(asked.map_or(0.0, |asked| asked + if spent > took { spent } else { took }));
 }

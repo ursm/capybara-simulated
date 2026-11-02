@@ -255,7 +255,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register_fast(scope, ns, "hrNow", hr_now, HR_NOW_FAST, context_id);
     register_fast(scope, ns, "dateNow", date_now, DATE_NOW_FAST, context_id);
     register(scope, ns, "realmTime", realm_time, context_id);
-    register(scope, ns, "ownNow", own_now_op, context_id);
     register(scope, ns, "wireNow", wire_now, context_id);
     register(scope, ns, "windowTimeHere", window_time_here, context_id);
     register(scope, ns, "spentSince", spent_since, context_id);
@@ -345,11 +344,7 @@ fn realm_time(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     rv.set_double(read.epoch + read.hr_now());
 }
 
-// __dom.ownNow() -> the calling realm's own time, no hold of a message's in it (`Read::own`).
-fn own_now_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_double(own_now(dom(scope), cid));
-}
+// Realm `cid`'s own time, no hold of a message's in it (`Read::own`).
 pub(crate) fn own_now(d: &mut Dom, cid: i32) -> f64 {
     read(d, cid, true).own()
 }
