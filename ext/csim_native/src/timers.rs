@@ -437,6 +437,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "agentStep", agent_step, context_id);
     register(scope, ns, "agentNext", agent_next, context_id);
     register(scope, ns, "agentNextDue", agent_next_due, context_id);
+    register(scope, ns, "crossingAdd", crossing_add, context_id);
+    register(scope, ns, "crossingNext", crossing_next, context_id);
     register(scope, ns, "agentFramesOwed", agent_frames_owed, context_id);
     register(scope, ns, "agentAnimDelay", agent_anim_delay, context_id);
     register(scope, ns, "agentRealms", agent_realms, context_id);
@@ -837,16 +839,97 @@ fn agent_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     rv.set_int32(next.map_or(-1, |(_, realm)| realm));
 }
 
-// __dom.agentNextDue(turns) -> when the event loop's next task falls due, any realm's of it, or undefined for none — with
-// `turns` false, none of the crossing queues' turns: what a crossing queue's head waits behind (timers.js
-// `runCrossings`), which another realm's turn, itself waiting, is not — two realms' queues, each seeing the other's turn
-// due now, queued theirs again at one instant ever after.
-fn agent_next_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let arena = &dom(scope).arena;
-    let first = if args.get(0).is_false() { arena.agent_first_task() } else { arena.agent_first() };
-    if let Some(((Due(due), ..), _)) = first {
+// __dom.agentNextDue() -> when the event loop's next task falls due, any realm's of it, or undefined for none.
+fn agent_next_due(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(((Due(due), ..), _)) = dom(scope).arena.agent_first() {
         rv.set_double(due);
     }
+}
+
+// What another agent sent a realm — a message on any channel, a service worker's answer — run at the time it was sent at
+// (its sender's clock as it sent it, before any offset), among the realm's own work, in ONE queue of the realm's, by that
+// time: each runs once no task of its event loop falls due on its virtual clock before it — any realm's of the agent: the
+// message's task is queued on the receiver's event loop (HTML "queue a global task" on the posted message task source of
+// the target's global), which runs the tasks of the page and its frames in the order they fall due, a frame's 40 ms timer
+// before the page's message from a worker sent at 45 — judged against the realm's own time (agent_clock.rs `ownNow`), no
+// lift an earlier message put on its clock — those running first, at their own times, the queue waiting behind them one
+// timer's due at a time; then at once, its clock held at that time (`clockAtLeast`) until its virtual clock passes it. A
+// worker's 1 s computation answered the page ahead of the page's `setTimeout(…, 300)` and `(…, 600)`, its `Date` lifted
+// by it for good; and with two senders waiting, each saw the other's turn in the queue as a timer of the page's, or the
+// clock the other had lifted, and ran ahead of the page's timers. The virtual clock moves only to the realm's own due
+// times, the same every run: what the senders' scripts took, real time, moves no task of the realm's. Per key (a
+// worker's, a port's, a channel's, a request's) in the order they came: one is run no earlier than one of its key before
+// it.
+// (…in order of their time, then of their arrival — a storm of 40,000 messages sorted the whole queue at each arrival and
+// scanned it at each run: 8.9 s — with each key's last time and how many of it wait, which a key's next one is run no
+// earlier than; and whether a turn of the queue's is queued on the event loop, which runs it on as it comes)
+#[derive(Default)]
+pub(crate) struct Crossings {
+    queue: std::collections::BTreeMap<(Due, u64), (String, v8::Global<v8::Value>)>,
+    keys: HashMap<String, (f64, u32)>,
+    seq: u64,
+    turn: bool,
+}
+
+// __dom.crossingAdd(key, at, run) -> whether the queue is to be run now: `run`, sent by `key`'s sender at `at` (on the
+// agent's `Date` scale, as a message's wire carries it — agent_clock.rs `agentShift` — 0 for no time), put in the
+// calling realm's crossing queue; none while a turn of it is queued, which runs it in its order.
+fn crossing_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = args.get(0).to_rust_string_lossy(scope);
+    let mut at = args.get(1).number_value(scope).unwrap_or(0.0);
+    let run = v8::Global::new(scope, args.get(2));
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    if at > 0.0 {
+        at -= crate::agent_clock::agent_shift_of(d, cid);
+    }
+    let crossings = &mut d.arena.enter(cid).crossings;
+    let last = crossings.keys.get(&key).map_or(0.0, |&(last, _)| last);
+    let when = if at > last { at } else { last };
+    let waiting = crossings.keys.get(&key).map_or(0, |&(_, n)| n);
+    let seq = crossings.seq;
+    crossings.seq += 1;
+    crossings.queue.insert((Due(when), seq), (key.clone(), run));
+    crossings.keys.insert(key, (when, waiting + 1));
+    rv.set_bool(!crossings.turn);
+}
+
+// __dom.crossingNext(turnEnds) -> the calling realm's crossing queue's next to run, now: its head, taken, the realm's clock
+// held at its time (agent_clock.rs `clockAtLeast`) — or, where a task of the event loop's falls due before its time on
+// the realm's own clock, the time to that task, at which a turn of the queue's is to be queued (timers.js
+// `runCrossings`): due with the event loop's next task, after those due with it — the agent's own tasks the only ones it
+// waits for, none of the queues' turns: another realm's queue's, itself waiting, is none of them (`agent_first_task`) —
+// two realms' queues, each seeing the other's turn due now, queued theirs again at one instant ever after. Undefined for
+// an empty queue. `turnEnds`: called by a turn of it, which is over.
+fn crossing_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let turn_ends = args.get(0).is_true();
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let crossings = &mut d.arena.enter(cid).crossings;
+    if turn_ends {
+        crossings.turn = false;
+    }
+    let Some(&(Due(when), seq)) = crossings.queue.keys().next() else { return };
+    let ahead = if when > 0.0 { when - crate::agent_clock::own_now(d, cid) } else { 0.0 };
+    if ahead > 0.0 {
+        let now = d.arena.event_loop.clock;
+        if let Some(((Due(next), ..), _)) = d.arena.agent_first_task().filter(|&((Due(next), ..), _)| next <= now + ahead) {
+            d.arena.enter(cid).crossings.turn = true;
+            return rv.set_double(next - now);
+        }
+    }
+    let crossings = &mut d.arena.enter(cid).crossings;
+    let Some((key, run)) = crossings.queue.remove(&(Due(when), seq)) else { return };
+    if let Some(entry) = crossings.keys.get_mut(&key) {
+        entry.1 -= 1;
+        if entry.1 == 0 {
+            crossings.keys.remove(&key);
+        }
+    }
+    if when > 0.0 {
+        crate::agent_clock::hold(d, cid, when);
+    }
+    rv.set(v8::Local::new(scope, run));
 }
 
 // __dom.agentFramesOwed(animations) -> whether a rendering update is owed to a document of the event loop's: an animation

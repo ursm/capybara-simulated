@@ -1167,6 +1167,8 @@ pub(crate) struct RealmState {
     pub(crate) time_origin: Option<crate::agent_clock::TimeOrigin>,
     // …and what its clock reads beside its agent's: where it is held, a worker's catching up with its window.
     pub(crate) clock: crate::agent_clock::RealmClock,
+    // …and its crossing queue: what other agents sent it, run at the times they were sent at (timers.rs `Crossings`).
+    pub(crate) crossings: crate::timers::Crossings,
     // Its Window's user activation (user_activation.rs): its last activation timestamp — None for positive infinity, a
     // window never activated — and how many activation notifications reached it, which its close watcher manager
     // groups by.

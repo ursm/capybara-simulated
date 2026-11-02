@@ -238,7 +238,7 @@ fn state_of(arena: &mut RealmArena, cid: i32, script: f64) -> &mut RealmState {
 // leave on the agent's scale and come in from it (timers.js `atItsTime`), so a worker that outlives the document it was
 // made by — or one a pop-up made, whose opener navigates — reads them all on one scale, the agent's, whatever document
 // posted them. A worker's, its maker's as it began (`WorkerClock::anchor_shift`).
-fn agent_shift_of(d: &mut Dom, cid: i32) -> f64 {
+pub(crate) fn agent_shift_of(d: &mut Dom, cid: i32) -> f64 {
     let script = d.agent_time.now(Instant::now());
     let state = state_of(&mut d.arena, cid, script);
     if state.clock.worker {
@@ -255,7 +255,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register_fast(scope, ns, "hrNow", hr_now, HR_NOW_FAST, context_id);
     register_fast(scope, ns, "dateNow", date_now, DATE_NOW_FAST, context_id);
     register(scope, ns, "realmTime", realm_time, context_id);
-    register(scope, ns, "ownNow", own_now, context_id);
+    register(scope, ns, "ownNow", own_now_op, context_id);
     register(scope, ns, "wireNow", wire_now, context_id);
     register(scope, ns, "windowTimeHere", window_time_here, context_id);
     register(scope, ns, "spentSince", spent_since, context_id);
@@ -346,9 +346,12 @@ fn realm_time(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 }
 
 // __dom.ownNow() -> the calling realm's own time, no hold of a message's in it (`Read::own`).
-fn own_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+fn own_now_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    rv.set_double(read(dom(scope), cid, true).own());
+    rv.set_double(own_now(dom(scope), cid));
+}
+pub(crate) fn own_now(d: &mut Dom, cid: i32) -> f64 {
+    read(d, cid, true).own()
 }
 
 // __dom.wireNow() -> the time a message the calling realm posts carries, which it lands no earlier than (workers.js
