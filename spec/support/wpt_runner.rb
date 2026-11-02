@@ -5,6 +5,7 @@ require 'rack'
 require 'yaml'
 require 'set'
 require 'json'
+require 'io/wait'
 require 'open3'
 require 'tmpdir'
 require 'digest'
@@ -35,6 +36,7 @@ module WptRunner
   PY_HANDLER        = File.expand_path('../../script/wpt_py_handler.py', __dir__)
   # One .py request at a time — see `run_py_handler`.
   PY_EXEC_LOCK      = Mutex.new
+  PY_ANSWER_TIMEOUT = 60
   PY_CACHE_PREFIX   = File.join(Dir.tmpdir, 'csim-wpt-pycache')
   EXPECTED_PATH     = File.expand_path('wpt_expected_failures.yml', __dir__)
   OUT_OF_SCOPE_PATH = File.expand_path('wpt_out_of_scope.yml', __dir__)
@@ -311,6 +313,9 @@ module WptRunner
       begin
         stdin.write(request, "\n", body)
         stdin.flush
+        # (…a handler that never answers let go of after PY_ANSWER_TIMEOUT, its process with it, the next request starting
+        # another: the lock it holds would wedge every other request of the process)
+        raise EOFError unless stdout.wait_readable(PY_ANSWER_TIMEOUT)
         line  = stdout.gets or raise EOFError
         head  = JSON.parse(line)
         out   = [head, stdout.read(head['body_len'].to_i) || ''.b]
