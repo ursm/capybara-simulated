@@ -120,11 +120,17 @@ RSpec.describe 'the event loop of a page and its frames' do
       </script>
     HTML
     expect(log.map {|e| e.split('@').first }).to eq(%w[F40 W45 P50 | P40 WF45 P50 F52])
-    # (…a worker's message at the time its sender's `Date` read as it posted, its scripts' real time among it: a few ms
-    # more on a loaded machine — 48 for 45, in a full suite's run)
-    timed(log - ['|']).each do |tag, at|
+    # (…a worker's message at the time its sender's `Date` read as it posted, its scripts' real time among it — which the
+    # page's clock is held at from then: what runs at or after it a few ms more on a loaded machine, 48 for 45 and 54 for
+    # 50 in a full suite's run; what runs before it to the ms)
+    lifted = false
+    log.each do |entry|
+      next lifted = false if entry == '|'
+
+      tag, at = entry.split('@')
+      lifted ||= tag.start_with?('W')
       due = tag[/\d+/].to_i
-      expect(at).to be_between(due, due + (tag.start_with?('W') ? 10 : 2)), "#{tag} ran at #{at}"
+      expect(at.to_i).to be_between(due, due + (lifted ? 10 : 2)), "#{tag} ran at #{at}"
     end
   end
 
