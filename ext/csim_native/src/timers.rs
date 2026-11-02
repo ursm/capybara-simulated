@@ -876,16 +876,15 @@ fn agent_next_due(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 // times, the same every run: what the senders' scripts took, real time, moves no task of the realm's. Per key (a
 // worker's, a port's, a channel's, a request's) in the order they came: one is run no earlier than one of its key before
 // it.
-// (…in order of their time, then of their arrival — a storm of 40,000 messages sorted the whole queue at each arrival and
-// scanned it at each run: 8.9 s — with each key's last time and how many of it wait, which a key's next one is run no
+// (…in order of their time, then of their arrival — put at the tail, mostly, as they come in order — a storm of 40,000
+// messages sorted the whole queue at each arrival and scanned it at each run: 8.9 s — with each key's last time and how many of it wait, which a key's next one is run no
 // earlier than; and whether a turn of the queue's is queued on the event loop, which runs it on as it comes)
 // (…and, of the realm's requests a service worker answers, the time each was asked at, by its fetch id, which its answer
 // lands at the time it took from: `swAnswered`)
 #[derive(Default)]
 pub(crate) struct Crossings {
-    queue: std::collections::BTreeMap<(Due, u64), (String, v8::Global<v8::Value>)>,
-    keys: HashMap<String, (f64, u32)>,
-    seq: u64,
+    queue: std::collections::VecDeque<(f64, std::rc::Rc<str>, v8::Global<v8::Value>)>,
+    keys: HashMap<std::rc::Rc<str>, (f64, u32)>,
     turn: bool,
     asked: HashMap<u32, f64>,
 }
@@ -894,7 +893,7 @@ pub(crate) struct Crossings {
 // agent's `Date` scale, as a message's wire carries it — agent_clock.rs `agentShift` — 0 for no time), put in the
 // calling realm's crossing queue; none while a turn of it is queued, which runs it in its order.
 fn crossing_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let key = args.get(0).to_rust_string_lossy(scope);
+    let key: std::rc::Rc<str> = args.get(0).to_rust_string_lossy(scope).into();
     let mut at = args.get(1).number_value(scope).unwrap_or(0.0);
     let run = v8::Global::new(scope, args.get(2));
     let cid = realm_id(scope, &args);
@@ -903,13 +902,12 @@ fn crossing_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         at -= crate::agent_clock::agent_shift_of(d, cid);
     }
     let crossings = &mut d.arena.enter(cid).crossings;
-    let last = crossings.keys.get(&key).map_or(0.0, |&(last, _)| last);
-    let when = if at > last { at } else { last };
-    let waiting = crossings.keys.get(&key).map_or(0, |&(_, n)| n);
-    let seq = crossings.seq;
-    crossings.seq += 1;
-    crossings.queue.insert((Due(when), seq), (key.clone(), run));
-    crossings.keys.insert(key, (when, waiting + 1));
+    let (last, waiting) = crossings.keys.entry(key.clone()).or_insert((0.0, 0));
+    let when = if at > *last { at } else { *last };
+    *last = when;
+    *waiting += 1;
+    let at = crossings.queue.partition_point(|&(w, ..)| w <= when);
+    crossings.queue.insert(at, (when, key, run));
     rv.set_bool(!crossings.turn);
 }
 
@@ -928,7 +926,7 @@ fn crossing_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     if turn_ends {
         crossings.turn = false;
     }
-    let Some(&(Due(when), seq)) = crossings.queue.keys().next() else { return };
+    let Some(&(when, ..)) = crossings.queue.front() else { return };
     let ahead = if when > 0.0 { when - crate::agent_clock::own_now(d, cid) } else { 0.0 };
     if ahead > 0.0 {
         let now = d.arena.event_loop.clock;
@@ -938,7 +936,7 @@ fn crossing_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         }
     }
     let crossings = &mut d.arena.enter(cid).crossings;
-    let Some((key, run)) = crossings.queue.remove(&(Due(when), seq)) else { return };
+    let Some((_, key, run)) = crossings.queue.pop_front() else { return };
     if let Some(entry) = crossings.keys.get_mut(&key) {
         entry.1 -= 1;
         if entry.1 == 0 {
