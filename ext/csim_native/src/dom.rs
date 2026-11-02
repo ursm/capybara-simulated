@@ -1164,6 +1164,8 @@ pub(crate) struct RealmState {
     // …and its virtual clock: the time its event loop has reached, in milliseconds since its context began (timers.rs
     // `clockNow`) — which runs on while a disposed context's code still does, as its timers do not.
     pub(crate) clock: f64,
+    // …and its time origin, which its high resolution time counts from (agent_clock.rs): none until it is first read.
+    pub(crate) time_origin: Option<crate::agent_clock::TimeOrigin>,
     // Its Window's user activation (user_activation.rs): its last activation timestamp — None for positive infinity, a
     // window never activated — and how many activation notifications reached it, which its close watcher manager
     // groups by.
@@ -2669,6 +2671,8 @@ pub(crate) struct Dom {
     pub(crate) message_ports: crate::message_ports::Ports,
     pub(crate) broadcast_channels: crate::broadcast_channels::BroadcastChannels,
     pub(crate) media_query_lists: crate::media_query_lists::MediaQueryLists,
+    // The real time the agent's scripts have run for, beside the virtual clocks (agent_clock.rs).
+    pub(crate) agent_time: crate::agent_clock::AgentTime,
 }
 
 // The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
@@ -2949,6 +2953,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::intersection_observers::install(scope, ns, context_id);
     crate::scroll_events::install(scope, ns, context_id);
     crate::timers::install(scope, ns, context_id);
+    crate::agent_clock::install(scope, ns, context_id);
     crate::ce_reactions::install(scope, ns, context_id);
     crate::scroll_boxes::install(scope, ns, context_id);
     crate::form_entries::install(scope, ns, context_id);

@@ -5031,7 +5031,7 @@ module Capybara
       # (…`isolated` whether the context that creates it is cross-origin isolated, which a dedicated or shared one is too:
       # its realm's own — a window's of a browsing context group its page left keeping its group's)
       def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil,
-                       sw_body: nil, sw_imports: nil, site: nil, isolated: false, at: nil)
+                       sw_body: nil, sw_imports: nil, site: nil, isolated: false, at: nil, epoch_at: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -5144,6 +5144,10 @@ module Capybara
         # (…the window's virtual time it was made at — `new Worker()`'s, else the window's last step's — which its clock
         # starts from, and at which it is due: a booting worker runs its script before the window steps past it)
         record[:origin]        = at ? at.to_f : @runtime.clock
+        # (…and its time origin, what its `Date` reads as it is made: its creator's at that time — `new Worker()`'s, else
+        # the window's — and when, for the time its start takes: agent_clock.rs)
+        record[:epoch]         = epoch_at ? epoch_at.to_f : (@clock_epoch_ms + record[:origin] if @clock_epoch_ms)
+        record[:made]          = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         record[:next_timer_at] = record[:origin]
         # (…and its type, which the destination of the imports the Update probes is of)
         record[:module] = script_type.to_s == 'module' if service
@@ -5647,14 +5651,15 @@ module Capybara
           answered = worker[:answered].delete(fetch_id)
           moved    = took ? ((answered || worker[:now]).to_f - took).clamp(0, limit) : 0
           worker[:answering].delete(fetch_id)
+          # (…the real time the wait took, which the script that waited does not see beside the move: agent_clock.rs)
+          wall = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000
           if waiting
             # (…a worker's script waiting inside a sync XHR: its clock on by the time the answer took, as a window's is —
-            # its virtual clock by exactly that, its `Date` too, the real time the wait took left out of it: in whole
-            # milliseconds, as a time value is — ECMAScript's TimeClip — so `Date.now()` stays an integer)
-            waiting[:clock_moved_by]&.call(moved, ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000).round) if moved.positive?
+            # its virtual clock by exactly that, its `Date` too)
+            waiting[:clock_moved_by]&.call(moved, wall)
           else
             worker[:awaited] -= 1
-            window_follows_awaited_worker(worker, follower, moved)
+            window_follows_awaited_worker(worker, follower, moved, wall)
           end
         end
       end
@@ -5671,23 +5676,24 @@ module Capybara
       # (`moved`) — the worker's clock is its host window's, another window's for a pop-up, whose time is none of this one's
       # — what the worker posted delivered at its next step: after the timers overdue by then, which that step runs first,
       # HTML ordering no task sources against each other)
-      private def window_follows_awaited_worker(worker, follower = nil, moved = 0)
+      # (…`wall` the real time the window's thread waited, which a script of its that waited does not see beside the move)
+      private def window_follows_awaited_worker(worker, follower = nil, moved = 0, wall = 0)
         return unless worker[:awaited].zero? && worker[:now]
 
         if follower
-          follower.clock_moved_by(moved)
-        elsif clock_at_least(worker[:now])
+          follower.clock_moved_by(moved, wall)
+        elsif clock_at_least(worker[:now], wall)
           deliver_worker_messages
         end
       end
       # …this window's clock moved on by `ms`, no task of its run.
-      def clock_moved_by(ms) = ms.positive? && clock_at_least(@runtime.clock + ms)
-      # …this window's clock moved to `at` where it stands before it, no task of its run: whether it moved.
-      def clock_at_least(at)
-        return false unless at > @runtime.clock
-
-        @runtime.realm_direct_call(0, '__csimClockAtLeast', at)
-        true
+      def clock_moved_by(ms, wall = 0) = clock_at_least(@runtime.clock + ms, wall)
+      # …this window's clock moved to `at` where it stands before it, no task of its run: whether it moved. (…and `wall`
+      # ms of real time a script of its waited meanwhile left out of its script time: timers.js `__csimClockAtLeast`)
+      def clock_at_least(at, wall = 0)
+        moves = at > @runtime.clock
+        @runtime.realm_direct_call(0, '__csimClockAtLeast', moves ? at : @runtime.clock, wall) if moves || wall.positive?
+        moves
       end
 
       # A controlled client's fetch → the controlling SW's `fetch` event. Counted as a fetch
@@ -9332,7 +9338,13 @@ module Capybara
         # the two, the window is a few instructions wide.
         run_worker_timers = lambda do |to|
           step = worker_clock_step.call(to)
-          next if stopping.call || (rt.call('__nextTimerDelay').to_f < 0 && !(Native.agent_notices_pending(@session_partition) && rt.call('__csimAgentsPending')))
+          next if stopping.call
+          # (…a worker with nothing to run its clock moved all the same, no step of its loop: what its `Date` and
+          # `performance.now()` read next — a message's handler's — is the window's time, not the time it last ran at)
+          if rt.call('__nextTimerDelay').to_f < 0 && !(Native.agent_notices_pending(@session_partition) && rt.call('__csimAgentsPending'))
+            rt.call('__csimClockMovedBy', step) if step.positive?
+            next
+          end
 
           rt.drain_microtasks
           rt.drain_timers(step)
@@ -9452,13 +9464,16 @@ module Capybara
         record[:rt_lock].synchronize { record[:rt] = rt } if record
         # …and how its clock moves on by `ms`, nothing of its run — the time a worker's answer took, which its script
         # waited for inside a sync XHR (`await_worker_reply`): its time and its isolate's together.
-        # (…`wall_ms` the real time the wait took, which its `Date` does not show beside the move: timers.js)
+        # (…`wall_ms` the real time the wait took, which its `Date` does not show beside the move: agent_clock.rs)
         record[:clock_moved_by] = ->(ms, wall_ms) { worker_clock_step.call(worker_now + ms) && rt.call('__csimClockMovedBy', ms, wall_ms) } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`
         # is a no-op until `traceActive` is set (console.js). The main realm turns it on
         # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed
         # through it, e.g. an Emscripten `printErr` — is silently dropped during debugging.
         rt.call('__csimSetTraceActive', true) if CONSOLE_STDERR
+        # Its time origin, the time it was made at, and the real time its start has taken since — its script fetched, its
+        # isolate made — which its high resolution time begins at (agent_clock.rs).
+        rt.call('__csimSetClockEpoch', record[:epoch], (Process.clock_gettime(Process::CLOCK_MONOTONIC) - record[:made]) * 1000) if record&.dig(:epoch)
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
         rt.eval_void("globalThis.__dom.realmIdentify('workerHandle', #{handle.to_i});")
@@ -12709,6 +12724,11 @@ module Capybara
         commit_coop(about_blank ? 'unsafe-none' : opener_policy, opaque_origin, coop_switch) unless initial
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
+        # (…its time origin now, as `Date` reads it — the wall clock's, or where the last page's `Date` had gone on past
+        # that, its: a session's `Date` never goes back, however far its virtual clocks ran ahead of real time —
+        # agent_clock.rs)
+        wall = Process.clock_gettime(Process::CLOCK_REALTIME, :float_millisecond)
+        @clock_epoch_ms = @clock_epoch_ms ? [wall, @clock_epoch_ms + @runtime.clock].max : wall
         # (…a new environment, as every document is, though its realm is the last one's: V8Runtime#init_page_realm)
         @runtime.rebuild_ctx(client_id: client_id)
         # (…and what the caller's new page holds before its document loads: a blob: document's copy of its own bytes)
@@ -12736,6 +12756,7 @@ module Capybara
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
           'timeTravelOffsetMs' => ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i,
+          'clockEpochMs'       => @clock_epoch_ms,
           'url'                => page_url.to_s,
           'html'               => document_payload(html)
         }

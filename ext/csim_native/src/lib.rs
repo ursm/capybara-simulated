@@ -9,6 +9,7 @@
 // The Web Animations model: the timeline, animations and their effects' timing; and the ops a JS handle asks it with.
 mod abort_signal;
 mod adopt;
+mod agent_clock;
 mod agents;
 mod animation_ops;
 mod animations;

@@ -105,4 +105,40 @@ RSpec.describe 'Worker clock' do
     200.times { session.execute_script("w.postMessage('x')") }
     expect(waited(session)).to be >= 2500
   end
+
+  # …and its `Date` and `performance.now()` read that clock, not the real time between the window's steps beside it as
+  # well: a worker's `setTimeout(…, 3000)` on a page at rest read 6,000 ms of either.
+  it "reads its timer's time on its clock" do
+    session = visit_page(<<~JS)
+      postMessage('ready');
+      onmessage = () => {
+        const t0 = performance.now(), d0 = Date.now();
+        setTimeout(() => postMessage([performance.now() - t0, Date.now() - d0]), 3000);
+      };
+    JS
+    session.execute_script("w.postMessage('go')")
+    poll_until(timeout: 20) {
+      sleep 0.25
+      session.evaluate_script('window.log.length') >= 2
+    }
+    perf, date = session.evaluate_script('window.log[1][0]')
+    expect(perf).to be_between(3000, 3050)
+    expect(date).to be_between(2999, 3050)
+  end
+
+  # Its time origin is the time it was made at, on the window's clock: its `timeOrigin + now()` reads what the window's
+  # does, as its `Date` does (HR-Time §5: one shared monotonic clock) — to the millisecond, each agent's own script time
+  # beside it. (It read a poll step behind: an idle worker's clock moved only with a timer to run.)
+  it "reads the window's time" do
+    session = visit_page(<<~JS)
+      postMessage('ready');
+      onmessage = () => postMessage([performance.timeOrigin + performance.now(), Date.now()]);
+    JS
+    session.execute_script("window.posted = [performance.timeOrigin + performance.now(), Date.now()]; w.postMessage('go')")
+    poll_until { session.evaluate_script('window.log.length') >= 2 }
+    worker = session.evaluate_script('window.log[1][0]')
+    window = session.evaluate_script('window.posted')
+    expect(worker[0] - window[0]).to be_between(-1, 100)
+    expect(worker[1] - window[1]).to be_between(-1, 100)
+  end
 end
