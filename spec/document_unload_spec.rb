@@ -442,4 +442,20 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
 
     expect(s).to have_current_path('/b')
   end
+
+  # …and a synchronous host wait a terminated script was inside — no `finally` of its ran to end it — which kept the
+  # agent's script turn open for good: the time between the host's polls counted twice, once on the virtual clock and
+  # once as script time.
+  it 'ends a host wait a failed call left open' do
+    app = ->(env) { [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{env['PATH_INFO']}"]] }
+    s = simulated_session(app)
+    s.visit '/a'
+    expect {
+      s.execute_script("__dom.agentWait(true); throw new Error('left open')")
+    }.to raise_error(/left open/)
+    s.execute_script('window.d0 = Date.now()')
+    sleep 0.5
+
+    expect(s.evaluate_script('Date.now() - d0')).to be_between(500, 550)
+  end
 end

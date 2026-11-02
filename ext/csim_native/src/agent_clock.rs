@@ -46,6 +46,12 @@ impl AgentTime {
         self.closed = self.now(at);
         self.open = None;
     }
+    // The waits a terminated script left raised — it ran no `finally` to end them — ended, as none is under way: how
+    // many (unload_walks.rs `endLeftOpenSince`).
+    pub(crate) fn end_waits(&mut self) -> usize {
+        self.wait_began = None;
+        std::mem::take(&mut self.waits).len()
+    }
 }
 
 // A realm's time origin: what its `Date` read at its high resolution time 0 (in milliseconds since the epoch, before

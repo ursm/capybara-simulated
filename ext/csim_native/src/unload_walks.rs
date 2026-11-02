@@ -258,11 +258,13 @@ fn walk_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.endLeftOpenSince(mark) -> how many walks and builds begun after number `mark` were left open, each ended
-// (`end_left_open_since`).
+// (`end_left_open_since`) — and the synchronous host waits of the agent's scripts too (agent_clock.rs `agentWait`): the
+// host's entry was its outermost, so none of them is under way, and one left raised kept every script turn open from
+// then on, the time between the host's polls counted twice.
 fn end_left_open_since(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mark = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    let ended = crate::dom::realm(scope, cid).end_left_open_since(mark);
+    let ended = crate::dom::realm(scope, cid).end_left_open_since(mark) + crate::dom::dom(scope).agent_time.end_waits();
     rv.set_uint32(u32::try_from(ended).unwrap_or(u32::MAX));
 }
 

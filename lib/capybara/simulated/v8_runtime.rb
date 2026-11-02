@@ -372,7 +372,8 @@ module Capybara
       # An entry of the host's into V8 none of its requests is under (`outermost`'s, an event-loop step, a document's
       # load, an eval): the walks over a document's tree and the frame builds it left open as it raised ended — a
       # termination runs no `finally` of the bindings', whose unload counters would otherwise stay raised, every
-      # navigation of those documents ignored from then on, and whose build marks set, the frame never built again. Only
+      # navigation of those documents ignored from then on, and whose build marks set, the frame never built again; and the
+      # synchronous host waits it was inside, which kept the agent's script turn open for good. Only
       # those it began, numbered after the last as it was entered: not one under way below it, which another entry began
       # (unload_walks.rs `end_left_open_since`).
       # (`top`: none is, the caller's own depth count aside)
@@ -389,7 +390,7 @@ module Capybara
       end
       private def end_left_open_since(mark)
         ended = @ctx&.call('__csimEndLeftOpenSince', mark).to_i
-        @browser.log_console('warn', "#{ended} unload walk(s) / frame build(s) left open by a failed entry ended") if ended.positive?
+        @browser.log_console('warn', "#{ended} unload walk(s) / frame build(s) / host wait(s) left open by a failed entry ended") if ended.positive?
       rescue StandardError
         nil
       end
