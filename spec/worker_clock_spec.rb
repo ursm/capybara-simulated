@@ -144,6 +144,32 @@ RSpec.describe 'Worker clock' do
     expect(worker[1] - window[1]).to be_between(-50, 500)
   end
 
+  # A message reaches the window no earlier than the worker's time as it posted it: model time the worker spent that the
+  # window's clock did not follow — a synchronous request's modeled server delay — is on the window's clock as the
+  # message lands — less what the window's clock was ahead of the worker's by as it posted to it, the time the page's own
+  # scripts ran for, a few milliseconds, tens on a loaded machine. (Its page read the message before the worker's 300 ms
+  # wait was over.)
+  it 'delivers a message no earlier than the time it was posted at' do
+    html = <<~HTML
+      <!doctype html><meta charset="utf-8"><body><script>
+      window.log = [];
+      const src = "onmessage = () => { const x = new XMLHttpRequest(); x.open('GET', '" + location.origin + "/slow', false); x.send(); postMessage(Date.now()); };";
+      window.w = new Worker(URL.createObjectURL(new Blob([src], {type: 'text/javascript'})));
+      w.onmessage = (e) => log.push(Date.now() - window.sent);
+      </script></body>
+    HTML
+    session = simulated_session(lambda {|env|
+      if env['PATH_INFO'] == '/slow'
+        [200, {'content-type' => 'text/plain', 'x-csim-server-delay-ms' => '300'}, ['slow']]
+      else
+        [200, {'content-type' => 'text/html'}, [html]]
+      end
+    })
+    session.visit('/')
+    session.execute_script("window.sent = Date.now(); w.postMessage('go')")
+    expect(poll_until { session.evaluate_script('log[0]') }).to be_between(250, 400)
+  end
+
   # A worker busy on its own — spinning, crunching — while the window rests is none of the window's time: the window's
   # clock moves as the host steps it, and counting the worker's run beside that ran it at twice its pace.
   it "leaves the window's clock to its own pace while it is busy" do

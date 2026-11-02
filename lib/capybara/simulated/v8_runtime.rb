@@ -2216,7 +2216,7 @@ module Capybara
         # (…but no hijackable fetch: a held response is delivered to a window's realm alone, so a worker's XHR goes the
         # way every request did before one could be held — answered at once)
         c.eval_void('delete globalThis.__csim_rackFetchAsync;')
-        c.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
+        c.attach('__csim_workerPostMessage', ->(data, at = nil) { post_back.call(data, at); nil })
         # An exception the worker's script left unhandled, reported out to its Worker object (workers.js).
         c.attach('__csim_workerReportError', ->(message, filename, lineno, colno) { sw_hooks[:report_error]&.call(message, filename, lineno, colno); nil })
         # …its WebSockets, whose events are its own inbox's (Browser#run_worker) — `__csim_wsSend` is the window's as it is
@@ -2239,8 +2239,8 @@ module Capybara
         c.attach('__csim_swRaceNetwork', ->(fetch_id, realm_id, url, method, accept) { sw_hooks[:race_network]&.call(fetch_id, realm_id, url, method, accept); nil }) if sw_hooks[:race_network]
         c.attach('__csim_swUnregisterRequest',  ->             { sw_hooks[:unregister]&.call; nil }) if sw_hooks[:unregister]
         c.attach('__csim_swExtendedChanged',    ->(n)          { sw_hooks[:extended]&.call(n); nil }) if sw_hooks[:extended]
-        c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil }) if sw_hooks[:fetch_respond]
-        c.attach('__csim_swFetchStream',  ->(fetch_id, kind, payload, realm_id) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id); nil }) if sw_hooks[:fetch_stream]
+        c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id, took = 0) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id, took); nil }) if sw_hooks[:fetch_respond]
+        c.attach('__csim_swFetchStream',  ->(fetch_id, kind, payload, realm_id, took = 0) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id, took); nil }) if sw_hooks[:fetch_stream]
         # Cross-isolate MessagePort channels: the ends a worker's ports take and give up, and what they post.
         c.attach('__csim_workerPortPost',    ->(end_id, data) { sw_hooks[:port_post]&.call(end_id, data); nil }) if sw_hooks[:port_post]
         c.attach('__csim_workerPortEndHere', ->(end_id)       { sw_hooks[:port_here]&.call(end_id); nil }) if sw_hooks[:port_here]

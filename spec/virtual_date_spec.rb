@@ -70,7 +70,8 @@ RSpec.describe 'the virtual clock’s Date' do
   end
 
   # The time origin is the document's, not the moment the driver's script bundle was built: a page that has just loaded
-  # reads a small `performance.now()`, and a frame's is its own, its `Date` the page's.
+  # reads a small `performance.now()`, and a frame's is its own, its `Date` the page's. (…a frame's no more than a frame's
+  # interval past the page's: its event loop's clock, which its steps move after the page's, may stand that far apart)
   it 'begins performance.now() at the document, a frame at its own' do
     s = blank_session
     got = s.evaluate_async_script(<<~JS)
@@ -80,7 +81,7 @@ RSpec.describe 'the virtual clock’s Date' do
       document.body.append(f);
     JS
     expect(got[0]).to be_between(0, 1000)
-    expect(got[1]).to be_between(0, got[0])
+    expect(got[1]).to be_between(0, got[0] + 17)
     expect(got[2].abs).to be <= 1
   end
 

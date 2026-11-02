@@ -6582,7 +6582,6 @@ service-workers/service-worker/no-dynamic-import.any.js:
 - 'Module data: URL'
 service-workers/service-worker/performance-timeline.https.html:
 - Resource Timing
-- empty service worker fetch event included in performance timings
 service-workers/service-worker/postmessage-blob-url.https.html:
 - "[harness] TIMEOUT"
 - postMessage Blob URL to a ServiceWorker

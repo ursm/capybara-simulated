@@ -26,6 +26,11 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
       self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
       self.addEventListener('fetch', (e) => {
         const u = new URL(e.request.url);
+        if (u.searchParams.has('spin')) {
+          const a = Date.now();
+          while (Date.now() - a < Number(u.searchParams.get('spin')));
+          return;
+        }
         if (!u.searchParams.has('ms')) return;
         const ms = Number(u.searchParams.get('ms')), hops = Number(u.searchParams.get('hops') || 0);
         const answer = () => hops > 0 ? Response.redirect(`/d.txt?ms=${ms}&hops=${hops - 1}`, 302) : new Response('sw');
@@ -146,6 +151,22 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
     expect(r[1]).to be_between(980, 1000)
     expect(r[2]).to be_between(9, 10)
     expect(r[3]).to be_between(58, 62)
+  end
+
+  # An answer comes at the time the worker gave it — its clock's, its scripts' time among it: a fetch event that spins
+  # 2 s on `Date.now()` before it falls through is 2 s on the page's clock as the answer lands, however long the page
+  # waited for it in real time — its lockstep wait bounded at 1 s, after which the worker ran on alone. (The page read
+  # 1100.)
+  it "lands an answer at the worker's time, its scripts' time among it" do
+    s = controlled_session
+    s.execute_script(<<~JS)
+      window.got = null;
+      const t0 = performance.now();
+      fetch('/d.txt?spin=2000').then((r) => r.text()).then((t) => { got = [t, performance.now() - t0]; });
+    JS
+    got = poll_until(timeout: 20) { s.evaluate_script('got') }
+    expect(got[0]).to eq('network')
+    expect(got[1]).to be_between(2000, 2500)
   end
 
   it "resolves a dedicated worker's XHR when the service worker answers, before its timeout" do

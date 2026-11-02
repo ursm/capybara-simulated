@@ -27,6 +27,8 @@ use crate::dom::{dom, realm_id, register};
 #[derive(Default)]
 pub(crate) struct AgentTime {
     closed: f64,
+    // (…and where it stood as the agent's virtual clock last caught up with its window's: `agentCaughtUp`)
+    caught_up: f64,
     open: Option<Instant>,
     closing: bool,
     waits: u32,
@@ -44,11 +46,19 @@ impl AgentTime {
 }
 
 // A realm's time origin: what its `Date` read at its high resolution time 0 (in milliseconds since the epoch, before
-// any time-travel offset its host adds), and its virtual clock and the script time then, together.
+// any time-travel offset its host adds), and its virtual clock and the script time then (less the real time its start
+// took, which its clock begins with).
 #[derive(Clone, Copy)]
 pub(crate) struct TimeOrigin {
     epoch: f64,
-    at: f64,
+    clock: f64,
+    script: f64,
+}
+
+impl TimeOrigin {
+    fn hr(&self, clock: f64, script: f64) -> f64 {
+        clock - self.clock + script - self.script
+    }
 }
 
 fn system_now() -> f64 {
@@ -63,6 +73,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "agentWait", agent_wait, context_id);
     register(scope, ns, "agentRan", agent_ran, context_id);
     register(scope, ns, "agentIdle", agent_idle, context_id);
+    register(scope, ns, "agentCaughtUp", agent_caught_up, context_id);
+    register(scope, ns, "hrWindow", hr_window, context_id);
 }
 
 // The calling agent's turn opened where it has none, the microtask that closes it queued where none is.
@@ -107,10 +119,10 @@ fn origin_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, script: f64) -> TimeOri
     let clock = arena.realm_state(cid).map_or(0.0, |s| s.clock);
     let main = (cid != 0).then(|| arena.realm_state(0)).flatten().and_then(|s| s.time_origin.map(|o| (o, s.clock)));
     let now = match main {
-        Some((o, main_clock)) => o.epoch + main_clock + script - o.at,
+        Some((o, main_clock)) => o.epoch + o.hr(main_clock, script),
         None => system_now(),
     };
-    let origin = TimeOrigin { epoch: now, at: clock + script };
+    let origin = TimeOrigin { epoch: now, clock, script };
     arena.enter(cid).time_origin = Some(origin);
     origin
 }
@@ -122,7 +134,7 @@ fn hr_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let script = script_time(scope);
     let origin = origin_of(scope, cid, script);
     let clock = dom(scope).arena.realm_state(cid).map_or(0.0, |s| s.clock);
-    rv.set_double(clock + script - origin.at);
+    rv.set_double(origin.hr(clock, script));
 }
 
 // __dom.hrPeek() -> the same, read by the host — as a navigation leaves the page — which opens no turn: what runs next
@@ -132,7 +144,21 @@ fn hr_peek(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let script = dom(scope).agent_time.now(Instant::now());
     let origin = origin_of(scope, cid, script);
     let clock = dom(scope).arena.realm_state(cid).map_or(0.0, |s| s.clock);
-    rv.set_double(clock + script - origin.at);
+    rv.set_double(origin.hr(clock, script));
+}
+
+// __dom.hrWindow() -> the calling realm's high resolution time on the clock of the window it follows (a worker's): its
+// virtual clock's time and its scripts' since it last caught up with the window's (`agentCaughtUp`) — not the script time
+// before then, nor the real time its start took, which the window's clock went on through as well, as the host stepped
+// it. What a message it posts carries (workers.js `postToOwner`): carrying its own reading, a worker busy 3 s before a
+// timer of it posted put 3 s more on its page, on top of the 3 s the page had gone on meanwhile.
+fn hr_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let script = script_time(scope);
+    let origin = origin_of(scope, cid, script);
+    let caught_up = dom(scope).agent_time.caught_up.max(origin.script);
+    let clock = dom(scope).arena.realm_state(cid).map_or(0.0, |s| s.clock);
+    rv.set_double(clock - origin.clock + (script - caught_up).max(0.0));
 }
 
 // __dom.clockEpoch() -> the calling realm's time origin, in milliseconds since the epoch. (A read of the origin, which
@@ -153,12 +179,13 @@ fn clock_epoch_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let cid = realm_id(scope, &args);
     let script = dom(scope).agent_time.now(Instant::now());
     let state = dom(scope).arena.enter(cid);
-    state.time_origin = Some(TimeOrigin { epoch, at: state.clock + script - since });
+    state.time_origin = Some(TimeOrigin { epoch, clock: state.clock, script: script - since });
 }
 
 // __dom.agentWait(begins, moved) — a script of the calling agent's begins to wait inside a synchronous host call (true),
 // or has done (false), its realm's virtual clock `moved` ms on meanwhile — a server's sleep the host moved it by, a
-// worker's answer: as much of the wait's real time as that is none of the script time, the virtual clock showing it.
+// worker's answer: as much of the wait's real time as that is none of the script time, the virtual clock showing it (all
+// of it, a `moved` past the wait's length: a wait on a worker, whose answer brings the time it took — sw-client.js).
 fn agent_wait(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let begins = args.get(0).is_true();
     let moved = args.get(1).number_value(scope).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
@@ -176,7 +203,8 @@ fn agent_wait(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         return;
     }
     let (Some(began), Some(open)) = (time.wait_began.take(), time.open) else { return };
-    let cut = std::time::Duration::from_secs_f64(moved / 1000.0).min(at.saturating_duration_since(began.max(open)));
+    let waited = at.saturating_duration_since(began.max(open));
+    let cut = std::time::Duration::from_secs_f64((moved / 1000.0).min(waited.as_secs_f64()));
     time.open = Some(open + cut);
     // (…the turn closed at the next checkpoint still, where one inside the wait ran its microtask)
     open_turn(scope, at);
@@ -189,6 +217,15 @@ fn agent_ran(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let Some(ms) = args.get(0).number_value(scope).filter(|t| t.is_finite() && *t > 0.0) else { return };
     dom(scope).agent_time.closed += ms;
 }
+
+// __dom.agentCaughtUp() — the calling agent's virtual clock has caught up with the window's it follows (a worker's,
+// Browser#run_worker): the script time it ran before then is in the window's time too, the window's clock having gone on
+// through the same real time as the host stepped it (`hrWindow`).
+fn agent_caught_up(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let time = &mut dom(scope).agent_time;
+    time.caught_up = time.now(Instant::now());
+}
+
 
 // __dom.agentIdle() — the calling agent's event loop step is over: a turn still open closes, whether or not the
 // microtask that would have closed it ran (a realm's queue let go of undrained, a context reset) — and one that did not
