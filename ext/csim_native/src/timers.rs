@@ -54,12 +54,8 @@ pub(crate) struct Timers {
     frames: std::collections::VecDeque<(u32, v8::Global<v8::Value>)>,
     running: std::collections::VecDeque<(u32, v8::Global<v8::Value>)>,
     last_frame: u32,
-    // The nesting level of the timer task running now — none where the task running is none of a timer's (a platform
-    // task, an animation frame, a script the host runs) — which a timer it schedules nests in (`timerNext`,
-    // `timerTaskEnd`).
-    task_nesting: Option<u32>,
-    // …and the repeating timer whose task that is, with when it ran: scheduled again as its task ends (`rearm`), after
-    // whatever its handler scheduled.
+    // The repeating timer whose task is running now, with when it ran: scheduled again as its task ends (`end_task`),
+    // after whatever its handler scheduled.
     repeating: Option<(i64, f64)>,
     // Its idle request callbacks (requestIdleCallback §5.2), by the handle each was given: those requested since the last
     // idle period began (its "list of idle request callbacks"), those an idle period made runnable and has yet to run
@@ -69,13 +65,31 @@ pub(crate) struct Timers {
     last_idle: u32,
     idle_began: f64,
     // Whether a task of the realm's is running (`timerNext` to `timerTaskEnd`): one that disposes the realm's own context
-    // — a frame's script removing its own iframe — leaves its tasks to run on to the end of the step it is in, the
-    // request it sent failing as the step runs on (WPT xhr/open-url-multi-window-4), the list going as it ends
+    // — a frame's script removing its own iframe — leaves its networking tasks to run on to the end of the step it is
+    // in, the request it sent failing as the step runs on (WPT xhr/open-url-multi-window-4), the list going as it ends
     // (`EventLoop::steps`). A frame another realm's task removes runs nothing more, as in a browser.
     in_task: bool,
-    // …and whether its tasks are kept so: a crossing queue's turn (timers.js `runCrossings`), which another realm's turn
-    // does not wait behind.
-    turns: std::collections::HashSet<i64>,
+    // …and the platform tasks of a source of their own (`Source`), by key: none, most of them.
+    sources: HashMap<i64, Source>,
+}
+
+// The source of a platform task the event loop treats apart (`timerAdd`'s `source`): a crossing queue's turn (timers.js
+// `runCrossings`), which another realm's turn does not wait behind; or a request's (xhr.js), which runs on with the step
+// its own realm's task disposed its context in — a message it posted to itself does not, its document no longer fully
+// active (Chrome and Firefox: a frame posting to itself and removing itself hears nothing).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Turn,
+    Network,
+}
+impl Source {
+    fn of(code: i32) -> Option<Source> {
+        match code {
+            1 => Some(Source::Turn),
+            2 => Some(Source::Network),
+            _ => None,
+        }
+    }
 }
 
 // The agent's event loop (HTML §8.1.7): its virtual clock — the time it has reached, in milliseconds, which its steps
@@ -89,9 +103,26 @@ pub(crate) struct EventLoop {
     pub(crate) clock: f64,
     seq: u64,
     steps: Vec<Vec<i32>>,
+    // The nesting level of the timer task running now — none where the task running is none of a timer's (a platform
+    // task, an animation frame, a script the host runs) — which a timer it schedules nests in (`timerNext`,
+    // `timerTaskEnd`): the event loop's, whichever realm's timer it is and whichever realm's `setTimeout` is called
+    // (HTML timer initialization steps 5: "the surrounding agent's event loop's currently running task"; Firefox — a
+    // chain alternating the page's and a frame's `setTimeout` clamps to 4 ms; Chrome's per realm does not).
+    task_nesting: Option<u32>,
+    // The task due first of all its realms' (`agent_first`), as last found — none until asked again after its lists or its
+    // realms change (`changed`): a pick reads it twice, and with forty frames the walk over them was a fifth of a step.
+    first: std::cell::Cell<Option<Option<((Due, u8, u64, i64), i32)>>>,
+    // The settle generation of each realm as last read (`agentSettleGen`), and those of the realms since gone from it, or
+    // begun anew, summed: what a realm's leaving adds rather than takes from the event loop's.
+    settle_seen: HashMap<i32, u32>,
+    settle_retired: u64,
 }
 
 impl EventLoop {
+    // A realm's list, or the realms, changed: the task due first is to be found again.
+    pub(crate) fn changed(&self) {
+        self.first.set(None);
+    }
     fn next_seq(&mut self) -> u64 {
         self.seq += 1;
         self.seq
@@ -140,10 +171,14 @@ pub(crate) const AHEAD: u8 = 0;
 const IN_TURN: u8 = 1;
 
 impl Timers {
-    // Its page's timers (positive ids), animation frame and idle callbacks gone, the platform's tasks kept.
-    fn keep_platform_tasks(&mut self) {
-        self.order.retain(|&(.., key)| key < 0);
-        self.by_key.retain(|&key, _| key < 0);
+    // Its networking tasks kept, the rest gone: its page's timers, its other platform tasks, animation frame and idle
+    // callbacks.
+    fn keep_network_tasks(&mut self) {
+        let sources = std::mem::take(&mut self.sources);
+        self.sources = sources.into_iter().filter(|&(_, s)| s == Source::Network).collect();
+        let kept = &self.sources;
+        self.order.retain(|&(.., key)| kept.contains_key(&key));
+        self.by_key.retain(|key, _| kept.contains_key(key));
         self.frames.clear();
         self.running.clear();
         self.idle.clear();
@@ -155,7 +190,7 @@ impl Timers {
     }
     fn clear(&mut self, key: i64) -> bool {
         let Some(t) = self.by_key.remove(&key) else { return false };
-        self.turns.remove(&key);
+        self.sources.remove(&key);
         self.order.remove(&(Due(t.due), t.turn, t.seq, key));
         true
     }
@@ -164,7 +199,6 @@ impl Timers {
     // before now, its handler's own — unless the handler cleared it. Its task over, what runs next is no timer task.
     // (…`seq` the place in the event loop's sequence it is queued at again, `RealmArena::end_timer_task`)
     fn end_task(&mut self, seq: u64) {
-        self.task_nesting = None;
         self.in_task = false;
         let Some((key, run)) = self.repeating.take() else { return };
         let Some(t) = self.by_key.get_mut(&key) else { return };
@@ -261,11 +295,18 @@ impl RealmArena {
     // The realms whose tasks the event loop runs: the agent's (navigables.rs `agent_realms_unordered`), and those whose
     // contexts a task of their own disposed during the step under way, which run on to its end (`Timers::in_task`).
     fn event_loop_realms(&self) -> Vec<i32> {
-        let mut realms = self.agent_realms_unordered();
-        if let Some(step) = self.event_loop.steps.last() {
-            realms.extend(step.iter().filter(|&&r| !self.is_dropped(r)));
-        }
+        let mut realms = Vec::new();
+        self.each_event_loop_realm(|r| realms.push(r));
         realms
+    }
+    // …each in turn, none collected.
+    fn each_event_loop_realm(&self, mut visit: impl FnMut(i32)) {
+        for &realm in self.agent_realms_unordered() {
+            visit(realm);
+        }
+        if let Some(step) = self.event_loop.steps.last() {
+            step.iter().filter(|&&r| !self.is_dropped(r)).for_each(|&r| visit(r));
+        }
     }
     // …whether that is the page's alone — the common page's, whose event loop is asked of no other realm.
     fn page_alone(&self) -> bool {
@@ -277,11 +318,16 @@ impl RealmArena {
     // link in the page navigated its frame to, queued in the frame before the page's load, runs before it (WPT
     // navigating-across-documents/013, 015: the load comes after it, queued after it).
     fn agent_first(&self) -> Option<((Due, u8, u64, i64), i32)> {
-        self.agent_first_by(|t| t.order.first().copied())
+        if let Some(first) = self.event_loop.first.get() {
+            return first;
+        }
+        let first = self.agent_first_by(|t| t.order.first().copied());
+        self.event_loop.first.set(Some(first));
+        first
     }
-    // …none of a crossing queue's turns (`Timers::turns`).
+    // …none of a crossing queue's turns (`Source::Turn`).
     fn agent_first_task(&self) -> Option<((Due, u8, u64, i64), i32)> {
-        self.agent_first_by(|t| t.order.iter().find(|&&(.., key)| !t.turns.contains(&key)).copied())
+        self.agent_first_by(|t| t.order.iter().find(|&&(.., key)| t.sources.get(&key) != Some(&Source::Turn)).copied())
     }
     fn agent_first_by(&self, first_of: impl Fn(&Timers) -> Option<(Due, u8, u64, i64)>) -> Option<((Due, u8, u64, i64), i32)> {
         let head = |realm: i32| self.realm_state(realm).and_then(|s| first_of(&s.timers));
@@ -289,16 +335,18 @@ impl RealmArena {
             return head(0).map(|h| (h, 0));
         }
         let mut first: Option<((Due, u8, u64, i64), i32)> = None;
-        for realm in self.event_loop_realms() {
-            let Some(h) = head(realm) else { continue };
+        self.each_event_loop_realm(|realm| {
+            let Some(h) = head(realm) else { return };
             if first.is_none_or(|(f, _)| (h.0, h.2) < (f.0, f.2)) {
                 first = Some((h, realm));
             }
-        }
+        });
         first
     }
     // Realm `cid`'s timer task over: a repeating one queued again (`Timers::end_task`).
     fn end_timer_task(&mut self, cid: i32) {
+        self.event_loop.changed();
+        self.event_loop.task_nesting = None;
         let rearms = self.timers_of(cid).is_some_and(|t| t.repeating.is_some());
         let seq = if rearms { self.event_loop.next_seq() } else { 0 };
         if let Some(timers) = self.timers_of(cid) {
@@ -316,16 +364,17 @@ impl RealmArena {
     // Realm `cid`'s timers gone — its context begun anew or dropped — and its tasks' keys with them: their handlers held
     // its global, which nothing else does once its frame or window is gone.
     pub(crate) fn drop_timers(&mut self, cid: i32) {
+        self.event_loop.changed();
         if let Some(timers) = self.timers_of(cid) {
             *timers = Timers::default();
         }
         self.task_keys.realms.retain(|_, &mut c| c != cid);
     }
-    // …or its context disposed: gone now, or — by a task of its own — the tasks the platform queued for it as the step
-    // under way ends (`Timers::in_task`), its page's timers, animation frame and idle callbacks gone now (a frame's
-    // interval ran on to the end of the step its own script removed the frame in, where Chrome runs none of it) — and
-    // none taken after.
+    // …or its context disposed: gone now, or — by a task of its own — its requests' tasks as the step under way ends
+    // (`Timers::in_task`), the rest gone now (a frame's interval, and a message it posted itself, ran on to the end of
+    // the step its own script removed the frame in, where Chrome and Firefox run neither) — and none taken after.
     pub(crate) fn discard_timers(&mut self, cid: i32) {
+        self.event_loop.changed();
         self.task_keys.discarded.insert(cid);
         let runs_on = self.timers_of(cid).is_some_and(|t| t.in_task) && self.event_loop.steps.last_mut().is_some_and(|step| {
             if !step.contains(&cid) {
@@ -336,7 +385,7 @@ impl RealmArena {
         if !runs_on {
             self.drop_timers(cid);
         } else if let Some(timers) = self.timers_of(cid) {
-            timers.keep_platform_tasks();
+            timers.keep_network_tasks();
         }
     }
     // …or begun anew, in a new context: it takes timers again.
@@ -478,6 +527,7 @@ fn idle_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             arena.task_keys.realms.insert(key, cid);
             let due = arena.event_loop.clock + timeout;
             let seq = arena.event_loop.next_seq();
+            arena.event_loop.changed();
             arena.enter(cid).timers.add(key, seq, (timed_out, Some(list)), due, IN_TURN, None, 0);
             key
         });
@@ -488,6 +538,7 @@ fn idle_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 // An idle request callback taken from its list — run, cancelled or timed out — its timeout's task gone with it.
 fn taken_idle(arena: &mut RealmArena, cid: i32, request: IdleRequest) -> v8::Global<v8::Value> {
     if let Some(key) = request.timeout {
+        arena.event_loop.changed();
         arena.task_keys.realms.remove(&key);
         arena.enter(cid).timers.clear(key);
     }
@@ -537,6 +588,7 @@ fn idle_remaining(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // during it runs on with it to here, and takes its timers with it as it ends (`discard_timers`).
 fn agent_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let arena = &mut dom(scope).arena;
+    arena.event_loop.changed();
     if args.get(0).is_true() {
         arena.event_loop.steps.push(Vec::new());
         return;
@@ -560,13 +612,14 @@ fn clock_to(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     dom(scope).arena.event_loop.clock = time;
 }
 
-// __dom.timerAdd(handler, args, timeout, repeats, task, ahead, lead, turn) -> its key: a timer of the calling realm's,
+// __dom.timerAdd(handler, args, timeout, repeats, task, ahead, lead, source) -> its key: a timer of the calling realm's,
 // falling due `timeout` ms after now on the event loop's clock — never, for one that is no finite time — and, `repeats`,
 // again that long after each run: a page's (`task` false: a positive id), nested in the timer task running and clamped
 // by its nesting level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped —
 // and, `ahead`, runs ahead of those due with it (`AHEAD`; a page's timer never). `lead` ms later the first time: what
-// the realm's `Date` stands ahead of this clock by (timers.js `clockLead`), which its timeout is counted from. A task
-// that is a crossing queue's turn (`turn`) is kept as one (`Timers::turns`).
+// the realm's `Date` stands ahead of this clock by (timers.js `clockLead`), which its timeout is counted from. A platform
+// task of a source the event loop treats apart is kept as one (`source`: 1 a crossing queue's turn, 2 a request's —
+// `Source`).
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
     let list = args.get(1);
@@ -576,12 +629,12 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let task = args.get(4).is_true();
     let turn = if task && args.get(5).is_true() { AHEAD } else { IN_TURN };
     let lead = args.get(6).number_value(scope).filter(|l| *l > 0.0).unwrap_or(0.0);
-    let crossing_turn = task && args.get(7).is_true();
+    let source = if task { args.get(7).int32_value(scope).and_then(Source::of) } else { None };
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
     let now = arena.event_loop.clock;
     let takes = arena.takes_timers(cid);
-    let nesting = if task { 0 } else { arena.timers_of(cid).and_then(|t| t.task_nesting).unwrap_or(0) };
+    let nesting = if task { 0 } else { arena.event_loop.task_nesting.unwrap_or(0) };
     let timeout = if task { timeout } else { clamped(timeout, nesting) };
     let due = Some(now + timeout + lead).filter(|d| d.is_finite()).unwrap_or(f64::MAX);
     let period = repeats.then_some(timeout);
@@ -599,10 +652,11 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     // (…a realm that takes none answers with a key all the same, which names nothing)
     if takes {
         let seq = arena.event_loop.next_seq();
+        arena.event_loop.changed();
         let timers = &mut arena.enter(cid).timers;
         timers.add(key, seq, (handler, list), due, turn, period, if task { 0 } else { nesting + 1 });
-        if crossing_turn {
-            timers.turns.insert(key);
+        if let Some(source) = source {
+            timers.sources.insert(key, source);
         }
     }
     rv.set_double(key as f64);
@@ -615,6 +669,7 @@ fn timer_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let caller = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
     let cid = if key < 0 { arena.task_keys.realms.remove(&key) } else { Some(caller) };
+    arena.event_loop.changed();
     let cleared = cid.and_then(|cid| arena.timers_of(cid)).is_some_and(|timers| timers.clear(key));
     rv.set_bool(cleared);
 }
@@ -639,24 +694,23 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let timers = &mut arena.enter(cid).timers;
     let Some(&(Due(due), turn, seq, key)) = timers.order.first().filter(|&&(Due(due), ..)| due <= limit) else { return };
     timers.order.remove(&(Due(due), turn, seq, key));
-    timers.turns.remove(&key);
+    timers.sources.remove(&key);
     timers.in_task = true;
     let run = due.max(now);
     let repeats = timers.by_key.get(&key).and_then(|t| t.period);
-    let (handler, list) = match repeats {
+    let (handler, list, nesting) = match repeats {
         Some(_) => {
             let Some(t) = timers.by_key.get(&key) else { return };
-            timers.task_nesting = Some(t.nesting);
             timers.repeating = Some((key, run));
-            (t.handler.clone(), t.args.clone())
+            (t.handler.clone(), t.args.clone(), Some(t.nesting))
         }
         None => {
             let Some(t) = timers.by_key.remove(&key) else { return };
-            timers.task_nesting = (key > 0).then_some(t.nesting);
             arena.task_keys.realms.remove(&key);
-            (t.handler, t.args)
+            (t.handler, t.args, (key > 0).then_some(t.nesting))
         }
     };
+    arena.event_loop.task_nesting = nesting;
     let due = v8::Number::new(scope, due).into();
     let handler = v8::Local::new(scope, handler);
     let list = list.map_or_else(|| v8::undefined(scope).into(), |l| v8::Local::new(scope, l));
@@ -760,12 +814,14 @@ fn agent_next_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // frame callback requested — and, with `animations`, an animation its style engine runs waiting on a frame now.
 fn agent_frames_owed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let animations = args.get(0).is_true();
-    let realms = dom(scope).arena.event_loop_realms();
     let arena = &dom(scope).arena;
-    if realms.iter().any(|&r| arena.realm_state(r).is_some_and(|s| !s.timers.frames.is_empty())) {
-        return rv.set_bool(true);
+    let mut requested = false;
+    arena.each_event_loop_realm(|r| requested |= arena.realm_state(r).is_some_and(|s| !s.timers.frames.is_empty()));
+    if requested || !animations {
+        return rv.set_bool(requested);
     }
-    rv.set_bool(animations && realms.into_iter().any(|r| crate::animation_ops::next_frame_delay_of(scope, r) == Some(0.0)));
+    let realms = dom(scope).arena.event_loop_realms();
+    rv.set_bool(realms.into_iter().any(|r| crate::animation_ops::next_frame_delay_of(scope, r) == Some(0.0)));
 }
 
 // __dom.agentAnimDelay() -> the time to the next frame an animation the style engine runs in any of the event loop's
@@ -783,14 +839,25 @@ fn agent_realms(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArg
     rv.set(crate::navigables::realm_array(scope, &realms));
 }
 
-// __dom.agentSettleGen() -> the settle generations of the event loop's realms, summed: what moves with an observable
-// change to any of their documents — a frame's listener reaching into its parent, a parent's task into a frame.
+// __dom.agentSettleGen() -> the event loop's settle generation: what moves with an observable change to any of its
+// documents — a frame's listener reaching into its parent, a parent's task into a frame — and never back: its realms'
+// generations summed, with those of the realms gone from it since, or begun anew, as they last stood (a frame removed
+// as its parent changed took as much from a plain sum as the change added to it).
 fn agent_settle_gen(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let arena = &dom(scope).arena;
-    let sum = arena
-        .event_loop_realms()
-        .into_iter()
-        .filter_map(|r| arena.realm_state(r))
-        .fold(0u32, |sum, s| sum.wrapping_add(s.generations.get(crate::dom::GEN_SETTLE)));
-    rv.set_double(f64::from(sum));
+    let arena = &mut dom(scope).arena;
+    let mut now: HashMap<i32, u32> = HashMap::new();
+    for realm in arena.event_loop_realms() {
+        if let Some(state) = arena.realm_state(realm) {
+            now.insert(realm, state.generations.get(crate::dom::GEN_SETTLE));
+        }
+    }
+    let event_loop = &mut arena.event_loop;
+    for (realm, &was) in &event_loop.settle_seen {
+        if now.get(realm).is_none_or(|&g| g < was) {
+            event_loop.settle_retired += u64::from(was);
+        }
+    }
+    let sum = event_loop.settle_retired + now.values().map(|&g| u64::from(g)).sum::<u64>();
+    event_loop.settle_seen = now;
+    rv.set_double(sum as f64);
 }

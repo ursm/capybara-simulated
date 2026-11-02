@@ -1214,8 +1214,8 @@ impl Animations {
     }
 
     // A frame of the document timeline (§4.2 "update animations and send events", its animation part): the timeline
-    // moves to `now`, what was pending becomes ready at that time (§4.4.10 / §4.4.12, the ready time), and each
-    // animation's finished state follows — and each CSS animation not waiting on a task owes the events of where its
+    // moves to `now` — what is pending stays so, for the update's commit (`commit_pending`) — and each animation's
+    // finished state follows — and each CSS animation not waiting on a task owes the events of where its
     // phase moved since the last frame (css-animations-2 §4.2).
     pub(crate) fn tick(&mut self, now: f64) {
         self.set_timeline_time(now);
@@ -1228,15 +1228,9 @@ impl Animations {
             if pending.is_none() && a.start_time.is_none() && a.hold_time.is_none() {
                 continue;
             }
-            // (…a pending task's ready time its timeline's time; one with no timeline waits)
-            match (pending, self.timeline_time_of(a)) {
-                (Some(PendingTask::Play), Some(ready)) => self.run_pending_play(id, ready),
-                (Some(PendingTask::Pause), Some(ready)) => self.run_pending_pause(id, ready),
-                (Some(_), None) => {},
-                (None, _) => self.update_finished_state(id, false, false),
-            }
-            if pending.is_some() {
-                self.touch(id);
+            // (…a pending task left to the update's commit, after its animation frame callbacks — `commit_pending`)
+            if pending.is_none() {
+                self.update_finished_state(id, false, false);
             }
         }
         for &id in &ids {
@@ -1248,9 +1242,12 @@ impl Animations {
     }
 
     // …and the pending tasks alone run at `now`, the timeline's time — what a rendering update commits as it renders the
-    // frame the animations were made in (WPT web-animations start-time-compat: an animation started in an animation frame
-    // callback, or by the style that update made, starts at its timeline time): no events owed by it, which the next
-    // update's "update animations and send events" generates and sorts (`tick`).
+    // frame the animations were made in, after its animation frame callbacks (WPT web-animations start-time-compat: an
+    // animation started in an animation frame callback, or by the style that update made, starts at its timeline time).
+    // The only place they run: one made by a task between two updates — a class a timer set — started at the next
+    // update's "update animations and send events" before its animation frame callbacks, its `animationstart` ahead of
+    // them, where Chrome and Firefox send it the update after (`P-raf F-raf P-start F-start`). The CSS events it owes
+    // queued for that next update to send (a `cancel()` in its `ready` reaction owes an `animationcancel` from there).
     pub(crate) fn commit_pending(&mut self, now: f64) {
         self.set_timeline_time(now);
         let mut ids: Vec<(u64, AnimationId)> = self.animations.iter().filter(|(_, a)| a.pending.is_some()).map(|(&id, a)| (a.sequence, id)).collect();
@@ -1263,6 +1260,9 @@ impl Animations {
                 _ => continue,
             }
             self.touch(id);
+            if self.animations.get(&id).is_some_and(|a| a.css.is_some() && a.pending.is_none()) {
+                self.queue_css_events(id, false);
+            }
         }
     }
 
@@ -1623,6 +1623,12 @@ mod tests {
         EffectTiming { duration, ..EffectTiming::default() }
     }
 
+    // A rendering update at `now`: its "update animations and send events", then its commit of what is pending.
+    fn frame(model: &mut Animations, now: f64) {
+        model.tick(now);
+        model.commit_pending(now);
+    }
+
     fn playing(model: &mut Animations, duration: f64) -> AnimationId {
         let effect = model.new_effect(timing(duration));
         let id = model.new_animation(Some(effect), Some(0.0));
@@ -1713,10 +1719,10 @@ mod tests {
         assert_eq!(model.animations[&id].pending, Some(PendingTask::Play));
         assert_eq!(model.current_time(id), Some(0.0));
         assert_eq!(model.play_state(id), PlayState::Running);
-        model.tick(150.0);
+        frame(&mut model, 150.0);
         assert_eq!(model.animations[&id].start_time, Some(150.0));
         assert!(model.take_signals().contains(&Signal::ReadyResolved { animation: id, generation: 1 }));
-        model.tick(650.0);
+        frame(&mut model, 650.0);
         assert_eq!(model.current_time(id), Some(500.0));
     }
 
@@ -1724,8 +1730,8 @@ mod tests {
     fn a_finished_animation_holds_at_its_end_and_notifies() {
         let mut model = Animations { timeline_time: Some(0.0), ..Animations::default() };
         let id = playing(&mut model, 1000.0);
-        model.tick(0.0);
-        model.tick(1500.0);
+        frame(&mut model, 0.0);
+        frame(&mut model, 1500.0);
         assert_eq!(model.play_state(id), PlayState::Finished);
         assert_eq!(model.current_time(id), Some(1000.0));
         assert!(model.animations[&id].finish_notification_queued);
@@ -1746,13 +1752,13 @@ mod tests {
     fn pause_takes_its_time_from_the_frame() {
         let mut model = Animations { timeline_time: Some(0.0), ..Animations::default() };
         let id = playing(&mut model, 1000.0);
-        model.tick(0.0);
-        model.tick(300.0);
+        frame(&mut model, 0.0);
+        frame(&mut model, 300.0);
         model.pause(id).unwrap();
         assert_eq!(model.play_state(id), PlayState::Paused);
-        model.tick(400.0);
+        frame(&mut model, 400.0);
         assert_eq!((model.animations[&id].start_time, model.current_time(id)), (None, Some(400.0)));
-        model.tick(900.0);
+        frame(&mut model, 900.0);
         assert_eq!(model.current_time(id), Some(400.0));
     }
 
@@ -1775,17 +1781,17 @@ mod tests {
     fn seeking_and_playback_rate() {
         let mut model = Animations { timeline_time: Some(0.0), ..Animations::default() };
         let id = playing(&mut model, 1000.0);
-        model.tick(0.0);
+        frame(&mut model, 0.0);
         model.set_current_time(id, Some(250.0)).unwrap();
         assert_eq!(model.current_time(id), Some(250.0));
         model.set_playback_rate(id, 2.0);
-        model.tick(100.0);
+        frame(&mut model, 100.0);
         assert_eq!(model.current_time(id), Some(450.0));
         // (A reversal takes effect at the frame it becomes ready in — 650 by then — and runs back from there.)
         model.reverse(id).unwrap();
-        model.tick(200.0);
+        frame(&mut model, 200.0);
         assert_eq!(model.current_time(id), Some(650.0));
-        model.tick(300.0);
+        frame(&mut model, 300.0);
         assert_eq!(model.current_time(id), Some(450.0));
     }
 }

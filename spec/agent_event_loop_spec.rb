@@ -222,4 +222,105 @@ RSpec.describe 'the event loop of a page and its frames' do
     HTML
     expect(log).to eq(%w[selfremoved])
   end
+
+  # …nor a message it posted itself before it went, nor a port's: its document is no longer fully active. Its microtasks
+  # still run, at the checkpoint of the task that removed it. Chrome 156 and Firefox 159: `F-rm F-micro P20`.
+  it "delivers no message a frame posted itself before removing itself" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>selfpm</title>#{frames}<pre id="out"></pre>
+      <script>
+        const log = [];
+        onload = () => {
+          const fw = document.getElementById('f').contentWindow;
+          fw.eval("window.go = (log) => setTimeout(() => { onmessage = () => log.push('F-msg'); postMessage('x', '*'); const c = new MessageChannel(); c.port1.onmessage = () => log.push('F-mc'); c.port2.postMessage(1); Promise.resolve().then(() => log.push('F-micro')); log.push('F-rm'); frameElement.remove(); }, 10);");
+          setTimeout(() => {
+            fw.go(log);
+            setTimeout(() => log.push('P20'), 20);
+            setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 200);
+          }, 50);
+        };
+      </script>
+    HTML
+    expect(log).to eq(%w[F-rm F-micro P20])
+  end
+
+  # A timer's nesting level is the event loop's running task's (HTML timer initialization steps, step 5: "the surrounding
+  # agent's event loop's currently running task"), whichever realm's `setTimeout` is called: a 0 ms timer set in a frame
+  # from the page's timer nested eight deep is clamped to 4 ms, as the page's own is. Firefox 159 (two runs): `F +4 P +4`
+  # and `F +5 P +5`; Chrome 156 keeps a level per realm, `F +0 P +4` — the spec wins.
+  it "clamps a frame's timer set from a deeply nested timer of the page's" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>nest</title>#{frames}<pre id="out"></pre>
+      <script>
+        const log = [];
+        onload = () => {
+          const fw = document.getElementById('f').contentWindow;
+          fw.eval("window.T0 = (cb) => setTimeout(cb, 0);");
+          setTimeout(() => {
+            let depth = 0;
+            function step() {
+              depth++;
+              if (depth === 8) {
+                const a = performance.now();
+                fw.T0(() => log.push('F', '+' + Math.round(performance.now() - a)));
+                setTimeout(() => log.push('P', '+' + Math.round(performance.now() - a)), 0);
+              }
+              if (depth < 10) setTimeout(step, 0); else setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 100);
+            }
+            step();
+          }, 50);
+        };
+      </script>
+    HTML
+    expect(log).to eq(%w[F +4 P +4])
+  end
+
+  # A frame's time origin is when its document was made — an initial about:blank one's as the frame was inserted — not
+  # when a script first used its window, which makes its realm here. Chrome 156 (two runs): `1002 1001`; Firefox 159
+  # within a ms of it.
+  it "takes an about:blank frame's time origin as the frame is inserted" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>origin</title><pre id="out"></pre>
+      <script>
+        onload = () => setTimeout(() => {
+          const a = document.createElement('iframe'); document.body.append(a);
+          const b = document.createElement('iframe'); b.srcdoc = '<p>b'; document.body.append(b);
+          setTimeout(() => {
+            document.getElementById('out').textContent = [a, b].map((f) => Math.round(f.contentWindow.performance.now())).join(' ');
+            document.title = 'done';
+          }, 1000);
+        }, 1000);
+      </script>
+    HTML
+    expect(log.map(&:to_i)).to all(be_between(1000, 1010))
+  end
+
+  # A CSS animation a task started — a class set between two rendering updates — starts at the next update's commit,
+  # after its animation frame callbacks, and owes its `animationstart` to the update after: the page's as its frame's.
+  # The page's had been started, and its event sent, ahead of the callbacks. Chrome 156 and Firefox 159:
+  # `P-raf F-raf P-start F-start`.
+  it "sends a CSS animation's start after the animation frame callbacks of the update that started it" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>anim</title>
+      <style>@keyframes k { from { opacity: 0 } to { opacity: 1 } } .a { animation: k 100ms linear }</style>
+      <div id="pd">p</div>
+      <iframe id="f" srcdoc="<style>@keyframes k { from { opacity: 0 } to { opacity: 1 } } .a { animation: k 100ms linear }</style><div id=d>f</div>"></iframe>
+      <pre id="out"></pre>
+      <script>
+        const log = [];
+        onload = () => {
+          const fw = document.getElementById('f').contentWindow;
+          const fd = fw.document.getElementById('d'), pd = document.getElementById('pd');
+          setTimeout(() => {
+            for (const [n, el] of [['F', fd], ['P', pd]]) el.addEventListener('animationstart', () => log.push(n + '-start'));
+            fd.className = 'a'; pd.className = 'a';
+            fw.requestAnimationFrame(() => log.push('F-raf'));
+            requestAnimationFrame(() => log.push('P-raf'));
+            setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 400);
+          }, 50);
+        };
+      </script>
+    HTML
+    expect(log).to eq(%w[P-raf F-raf P-start F-start])
+  end
 end

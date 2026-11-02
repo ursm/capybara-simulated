@@ -74,6 +74,10 @@ struct FrameNavigation {
     // had (user_activation.rs) — its last activation, on the event loop's clock, and the activation notifications
     // that reached it — which that window takes as its realm is made (navigables.rs `set_frame_realm`).
     activation: Option<(f64, u32)>,
+    // …and when its initial about:blank document was made, on the event loop's clock — as its post-insertion step ran —
+    // which that document's time origin is (HTML "create a new browsing context and document"), however much later its
+    // realm is made: navigables.rs `set_frame_realm`.
+    created: Option<f64>,
 }
 
 // Its element's `load` fired or queued (frame-nav.js `FN_LOAD_FIRED`).
@@ -229,6 +233,10 @@ impl RealmArena {
     // …and what it had, taken as its realm is made.
     pub(crate) fn take_unbuilt_activation(&mut self, container: NodeId) -> Option<(f64, u32)> {
         self.frame_navigations.0.get_mut(&container).and_then(|nav| nav.activation.take())
+    }
+    // …and when its initial about:blank document was made (`FrameNavigation::created`), taken as its realm is.
+    pub(crate) fn take_unbuilt_creation(&mut self, container: NodeId) -> Option<f64> {
+        self.frame_navigations.0.get_mut(&container).and_then(|nav| nav.created.take())
     }
     // …and those of containers freed with their realm let go of (a realm's nodes are freed together, past `free_node`).
     pub(crate) fn forget_freed_frame_navigations(&mut self) {
@@ -971,7 +979,12 @@ impl RealmArena {
                 nav.deferred_at = at;
                 nav.flags &= !DEFERRED_LISTED;
             }
-            self.frame_navigation(container).flags |= flags;
+            let now = self.event_loop.clock;
+            let nav = self.frame_navigation(container);
+            if flags & CONTEXT_READY != 0 && nav.flags & CONTEXT_READY == 0 {
+                nav.created = Some(now);
+            }
+            nav.flags |= flags;
         } else if let Some(nav) = self.frame_navigations.0.get_mut(&container) {
             // (…a build parked no more no replay's either)
             let flags = if flags & DEFERRED_SW != 0 { flags | DEFERRED_LISTED } else { flags };
@@ -980,6 +993,7 @@ impl RealmArena {
             // of its initial about:blank document had with it: one inserted again is a new one's)
             if flags & CONTEXT_READY != 0 {
                 nav.activation = None;
+                nav.created = None;
             }
         }
     }

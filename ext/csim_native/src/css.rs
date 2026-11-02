@@ -138,14 +138,18 @@ impl Animations {
         let Some(owner) = css.owner.clone() else { return };
         let timing = a.effect.and_then(|e| self.effects.get(&e)).map(|e| e.timing.clone());
         let current = self.current_time(id);
-        let (phase, iteration) = match &timing {
-            Some(t) if !canceling => {
-                let computed = t.computed(current, a.playback_rate);
-                (computed.phase, computed.current_iteration)
-            },
-            _ => (Phase::Idle, None),
+        let (phase, iteration) = self.css_phase(id, canceling);
+        // (…a transition cancelled while still pending — made by a style change since the last rendering update, which
+        // commits it after its animation frame callbacks — was in the phase its hold time puts it in, not idle: one a frame
+        // callback takes out of `transition-property` owes its `transitioncancel` all the same — WPT
+        // css-transitions/transitioncancel-002. Not a CSS animation a script played again since it was cancelled, whose
+        // cancel is sent already: `cancel(); play(); cancel()` owes one `animationcancel` — WPT css-animations
+        // event-dispatch.tentative)
+        let pending_transition = matches!(css.kind, CssKind::Transition(_)) && a.pending.is_some();
+        let (was, was_iteration) = match css.previous {
+            (Phase::Idle, _) if canceling && pending_transition => self.css_phase(id, false),
+            previous => previous,
         };
-        let (was, was_iteration) = css.previous;
         if (was, was_iteration) == (phase, iteration) {
             return;
         }
@@ -193,6 +197,18 @@ impl Animations {
             .collect();
         self.css_events.extend(queued);
         self.animations.get_mut(&id).unwrap().css.as_mut().unwrap().previous = (phase, iteration);
+    }
+
+    // CSS animation or transition `id`'s phase and iteration now — idle, `canceling` it.
+    fn css_phase(&self, id: AnimationId, canceling: bool) -> (Phase, Option<f64>) {
+        let Some(a) = self.animations.get(&id) else { return (Phase::Idle, None) };
+        match a.effect.and_then(|e| self.effects.get(&e)).map(|e| &e.timing) {
+            Some(t) if !canceling => {
+                let computed = t.computed(self.current_time(id), a.playback_rate);
+                (computed.phase, computed.current_iteration)
+            },
+            _ => (Phase::Idle, None),
+        }
     }
 
     pub(crate) fn take_css_events(&mut self) -> Vec<CssEvent> {

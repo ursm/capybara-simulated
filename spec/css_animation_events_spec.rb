@@ -122,10 +122,10 @@ RSpec.describe 'CSS animation and transition events' do
   # …and ONE per frame, not one per boundary: a frame that spans several iterations owes a single
   # event, naming the iteration it landed on (Chrome-measured — 19 boundaries over four frames fire
   # four events). Here 40ms iterations against the driver's 100ms step cross two or three at a time.
-  # The update that starts the animation commits its start time and sends nothing; the next one, a
-  # step later, finds it gone from idle to active — css-animations-2 §4.2's table owes `animationstart`
-  # alone for that change, whatever boundaries it crossed meanwhile (at a browser's 16ms frame it
-  # crosses none) — so the first `animationiteration` is the step after that's. (KNOWN GAP: csim takes no rendering
+  # The update that starts the animation commits its start time after its animation frame callbacks and
+  # queues its `animationstart` (idle to active: css-animations-2 §4.2's table owes that alone), which the
+  # next update, a frame later, sends — with the `animationiteration` for the boundaries that frame
+  # crossed since. (KNOWN GAP: csim takes no rendering
   # opportunity while a CSS animation runs with no animation frame callback queued — it renders at the animation's next
   # end, its clock jumping 34 → 112 ms here, where Chrome 156 and Firefox 159 render each frame and fire iteration 0.04
   # at 47 ms. An active animation owing a frame as a queued rAF does — timers.rs `next_frame_delay` — would make every
@@ -136,7 +136,8 @@ RSpec.describe 'CSS animation and transition events' do
     s.execute_script("document.getElementById('a').style.animation = 'grow 40ms linear 8'")
     log = drain(s, 6)
     expect(log.first).to eq('animationstart:grow:0:a:true')
-    expect(log.grep(/animationiteration/)).to eq(['animationiteration:grow:0.2:a:true',
+    expect(log.grep(/animationiteration/)).to eq(['animationiteration:grow:0.08:a:true',
+                                                  'animationiteration:grow:0.2:a:true',
                                                   'animationiteration:grow:0.28:a:true'])
   end
 

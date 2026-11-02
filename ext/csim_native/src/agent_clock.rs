@@ -62,6 +62,13 @@ impl TimeOrigin {
     pub(crate) fn clock(&self) -> f64 {
         self.clock
     }
+    // …taken at the clock's earlier `at` instead: its `Date` as much earlier (the script time since, the realm's none).
+    pub(crate) fn backdate(&mut self, at: f64) {
+        if at < self.clock {
+            self.epoch -= self.clock - at;
+            self.clock = at;
+        }
+    }
     fn hr(&self, clock: f64, script: f64) -> f64 {
         clock - self.clock + script - self.script
     }

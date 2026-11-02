@@ -60,6 +60,14 @@ impl RealmArena {
             state.activations = count;
         }
     }
+    // …and its time origin, the time its document was made at `created` — the realm made only as a script first used the
+    // frame's window (a frame of the page's 1 s old read 1 ms of `performance.now()`, Chrome 1,002).
+    pub(crate) fn backdate_initial_origin(&mut self, realm: i32, created: f64) {
+        let initial = self.realm_state(realm).is_some_and(|s| s.location.href() == "about:blank");
+        if let Some(origin) = self.realm_state_mut(realm).filter(|_| initial).and_then(|s| s.time_origin.as_mut()) {
+            origin.backdate(created);
+        }
+    }
     fn origin_key_of(&mut self, realm: i32) -> Option<String> {
         self.realm_state_mut(realm).map(|s| s.location.origin_key(realm))
     }

@@ -115,6 +115,9 @@ pub(crate) struct Navigables {
     // is in, and those windows — read with no call by every realm's bindings (`__dom.childFrames`): none, the common
     // page's, keeps the event loop's step of its child realms and a dispatch's multi-realm path a load of a word.
     pub(crate) linked: crate::dom::SharedWord,
+    // …and those realms, the page's first: the event loop's (`agent_realms_unordered`), kept as they change, which every
+    // pick of its next task reads.
+    loop_realms: Vec<i32>,
     // The child navigables between two documents — the realm of the last one each had, the window a WindowProxy of it is
     // over still, and its container: one whose next document no build is coming for (a frame built when it is next
     // touched) is made as a WindowProxy of it is used, as its container's `contentWindow` read makes it. How many, the
@@ -157,9 +160,14 @@ impl RealmArena {
         self.navigables.discarded_count.set(u32::try_from(n).unwrap_or(u32::MAX));
     }
     fn note_linked(&mut self) {
-        let frames = self.navigables.children.iter().filter(|&(&c, child)| self.stepped_realm(c, child).is_some()).count();
-        let linked = frames + self.navigables.windows.len();
+        let frames: Vec<i32> = self.navigables.children.iter().filter_map(|(&c, child)| self.stepped_realm(c, child)).collect();
+        let linked = frames.len() + self.navigables.windows.len();
         self.navigables.linked.set(u32::try_from(linked).unwrap_or(u32::MAX));
+        let mut realms = vec![0];
+        realms.extend(&self.navigables.windows);
+        realms.extend(frames);
+        self.navigables.loop_realms = realms;
+        self.event_loop.changed();
         // (…and the navigables between two documents, their containers in a live document)
         let nav = &self.navigables;
         let parked: HashMap<i32, NodeId> = nav
@@ -361,6 +369,9 @@ impl RealmArena {
             if let (Some((at, count)), Some(_)) = (activation, parent) {
                 self.inherit_activation(realm, at, count);
             }
+            if let Some(created) = self.take_unbuilt_creation(container) {
+                self.backdate_initial_origin(realm, created);
+            }
         }
         self.note_linked();
         previous
@@ -460,16 +471,13 @@ impl RealmArena {
     }
     // The realms of the agent's event loop (HTML: one for every window realm of a similar-origin window agent): the page's
     // and the windows' `window.open` made in this isolate, and those of every child navigable's active document under
-    // them — in no order: what its steps run the tasks of (timers.rs `agent_first`). The page's alone, the common page's,
-    // a load of a word.
-    pub(crate) fn agent_realms_unordered(&self) -> Vec<i32> {
-        let mut realms = vec![0];
-        if self.agent_realms_alone() {
-            return realms;
+    // them — in no order: what its steps run the tasks of (timers.rs `agent_first`), kept as they change (`note_linked`).
+    // The page's alone, the common page's, a load of a word.
+    pub(crate) fn agent_realms_unordered(&self) -> &[i32] {
+        if self.agent_realms_alone() || self.navigables.loop_realms.is_empty() {
+            return &[0];
         }
-        realms.extend(&self.navigables.windows);
-        realms.extend(self.navigables.children.iter().filter_map(|(&c, child)| self.stepped_realm(c, child)));
-        realms
+        &self.navigables.loop_realms
     }
     // …whether those are the page's alone: no frame of it, nor window, has a realm.
     pub(crate) fn agent_realms_alone(&self) -> bool {

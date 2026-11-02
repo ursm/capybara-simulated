@@ -5153,7 +5153,7 @@ module Capybara
         # time its start takes: agent_clock.rs)
         record[:epoch]         = if epoch_at then epoch_at.to_f
                                  elsif @runtime.clock_date.positive? then [@runtime.clock_date + record[:origin] - @runtime.clock, @runtime.clock_held].max
-                                 elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin]
+                                 elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin] - @clock_epoch_at.to_f
                                  end
         record[:next_timer_at] = record[:origin]
         # (…and its type, which the destination of the imports the Update probes is of)
@@ -9393,8 +9393,9 @@ module Capybara
         # clock it stands — the time it was made at to begin with (`record[:origin]`) — moved to `to` (a tick's, which the
         # window asks for at its own time, its timers due: `run_workers_due`; else the window's clock now, never ahead of
         # the window's last step) and never back: a window fast-forwarding to its next timer moves the worker's timers with
-        # it, and the worker's are the window's to step to (`worker_due_within`), in the same order every run. A window's
-        # clock that went back (a navigation's page starts its own at 0) takes it back with it. What it moved.
+        # it, and the worker's are the window's to step to (`worker_due_within`), in the same order every run. The window's
+        # clock is its event loop's, which a navigation's page runs on, and goes back only with its isolate (a refused
+        # context reset's new one, V8Runtime#rebuild_ctx), taking the worker's back with it. What it moved.
         worker_now = record && record[:origin] ? record[:origin] : (@runtime ? @runtime.clock : 0.0)
         window_was = @runtime ? @runtime.clock : 0.0
         worker_clock_step = lambda do |to|
@@ -9426,12 +9427,21 @@ module Capybara
           # timers.js `__csimCaughtUp` — and held where the window's is, whatever time it is caught up to)
           date = @runtime && to == @runtime.clock ? @runtime.clock_date : 0
           held = @runtime ? @runtime.clock_held : 0
+          # (…a `Date` of the window's next document's, which begins at the wall clock again where the last one's had gone
+          # on — `anew`: the worker's goes back with it, as the window's did, its messages then on the scale the page they
+          # come to reads — a service worker's tick count after a 20 s page read 18.8 s ahead of the next page's clock)
+          anew = false
+          if record && date.positive?
+            document = @runtime.document_number
+            anew = !record[:document].nil? && record[:document] != document
+            record[:document] = document
+          end
           if rt.call('__nextTimerDelay').to_f < 0 && !(Native.agent_notices_pending(@session_partition) && rt.call('__csimAgentsPending'))
-            rt.call('__csimCaughtUp', step, true, date, held) if step.positive? || date.positive? || held.positive?
+            rt.call('__csimCaughtUp', step, true, date, held, anew) if step.positive? || date.positive? || held.positive?
             next
           end
 
-          rt.call('__csimCaughtUp', step, false, date, held) if step.positive? || date.positive? || held.positive?
+          rt.call('__csimCaughtUp', step, false, date, held, anew) if step.positive? || date.positive? || held.positive?
           rt.drain_microtasks
           rt.drain_timers(step)
         end
@@ -12834,6 +12844,9 @@ module Capybara
         @clock_epoch_ms = Process.clock_gettime(Process::CLOCK_REALTIME, :float_millisecond)
         # (…a new environment, as every document is, though its realm is the last one's: V8Runtime#init_page_realm)
         @runtime.rebuild_ctx(client_id: client_id)
+        # (…and the event loop's virtual time it is taken at, which runs on from the last page's: a worker made at a later
+        # one reads its `Date` that much past it — a service worker made 30 s into a session read 30 s ahead of its page)
+        @clock_epoch_at = @runtime.clock
         # (…and what the caller's new page holds before its document loads: a blob: document's copy of its own bytes)
         yield if block_given?
         # The lifecycle steps queued on the outgoing page's event loop are the new page's to run.

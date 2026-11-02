@@ -527,6 +527,9 @@ module Capybara
       # where it was held (timers.js `clockAtLeast`), which the worker's is held at with it (Browser#run_worker).
       def clock_date = @clock_date || 0.0
       def clock_held = @clock_held || 0.0
+      # …and the number of the page's document those are of, which each new one's moves on (`rebuild_ctx`): its `Date`
+      # begins again at the wall clock (Browser#run_worker's `anew`).
+      def document_number = @document_number.to_i
 
       # Whether the page's realms are cross-origin isolated (its top-level document's COOP + COEP — `init_realm`), which
       # the browser sets as a document commits, ahead of the realm it builds for it.
@@ -819,8 +822,11 @@ module Capybara
         @page_client_id = client_id
         @page_document  = document
         # (…a new page's `Date` and hold not where the last page's left them — the next document's from its first step, as its
-        # time origin is its own; the event loop's virtual clock runs on under it, which the windows it opened outlive it on)
-        @clock = @clock_date = @clock_held = nil
+        # time origin is its own; the event loop's virtual clock runs on under it, which the windows it opened and the
+        # workers following it outlive it on: `@clock` is the engine's from here, read before any step — a worker's clock,
+        # which followed a clock read as 0 until then, went back with it and jumped on by the whole session's time)
+        @clock_date = @clock_held = nil
+        @document_number = document_number + 1
         # Produce any queued bytecode-cache blobs while every queued target
         # (frame realms included) is still alive — a job queued by the last
         # activity of a test (e.g. a timer-fired dynamic import in a lazy
@@ -866,6 +872,7 @@ module Capybara
             relieve_heap_pressure
             attach_host_fns(@ctx)
             init_page_realm(@ctx)
+            @clock = @ctx.call('__virtualNow').to_f
             # (…the WindowProxies of the page's navigable the windows it kept hold — their `opener` — over its new
             # document's window, as a navigable's are over each document it goes on to; none where the page left their
             # browsing context group for another, its new document a new browsing context's, whose WindowProxy no window
@@ -898,7 +905,11 @@ module Capybara
         # cold path is only the rare reset-failure fallback, so the inline
         # teardown isn't on the steady-state path.
         dispose_ctx(old) if old
+        # (…a new isolate's clock, its event loop's, starting at 0: the one way the window's clock goes back, which its
+        # workers follow it back on — Browser#run_worker's `worker_clock_step`)
         @ctx = build_and_track_ctx
+        @clock = @ctx.call('__virtualNow').to_f
+        @ctx
       end
 
       # Capybara calls `Driver#reset!` between tests; Browser delegates
