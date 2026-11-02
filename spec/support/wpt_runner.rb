@@ -244,12 +244,12 @@ module WptRunner
   def py_handler_process
     return @py_handler if @py_handler && @py_handler_pid == Process.pid
     @py_handler_pid = Process.pid
-    stdin, stdout, _thread = Open3.popen2({'PYTHONPYCACHEPREFIX' => PY_CACHE_PREFIX}, 'python3', PY_HANDLER)
+    stdin, stdout, waiter = Open3.popen2({'PYTHONPYCACHEPREFIX' => PY_CACHE_PREFIX}, 'python3', PY_HANDLER)
     stdin.binmode
     stdout.binmode
     owner = Process.pid
     at_exit { stdin.close if Process.pid == owner && !stdin.closed? }
-    @py_handler = [stdin, stdout]
+    @py_handler = [stdin, stdout, waiter]
   rescue SystemCallError
     @py_handler = nil
   end
@@ -308,7 +308,7 @@ module WptRunner
     # answered out of the protocol — is let go of, the next request starting another.
     meta, rbody = PY_EXEC_LOCK.synchronize do
       handler = py_handler_process or return nil
-      stdin, stdout = handler
+      stdin, stdout, waiter = handler
       answered = false
       begin
         stdin.write(request, "\n", body)
@@ -318,6 +318,7 @@ module WptRunner
         raise EOFError unless stdout.wait_readable(PY_ANSWER_TIMEOUT)
         line  = stdout.gets or raise EOFError
         head  = JSON.parse(line)
+        raise EOFError if head['body_len'].to_i.positive? && !stdout.wait_readable(PY_ANSWER_TIMEOUT)
         out   = [head, stdout.read(head['body_len'].to_i) || ''.b]
         answered = true
         out
@@ -326,10 +327,17 @@ module WptRunner
       ensure
         # (…an exchange cut short however — a raise, an exception thrown into the thread, an EventSource reader's cancel
         # — leaves its answer unread, which the next request would take for its own: the process let go of)
+        # (…killed, a hung one, and reaped)
         unless answered
           @py_handler = nil
           stdin.close unless stdin.closed?
           stdout.close unless stdout.closed?
+          begin
+            Process.kill(:KILL, waiter.pid)
+          rescue SystemCallError
+            nil
+          end
+          waiter.join(1)
         end
       end
     end
