@@ -240,6 +240,36 @@ RSpec.describe 'Worker clock' do
     expect(poll_until(timeout: 20) { session.evaluate_script('window.took') }).to be_between(500, 650)
   end
 
+  # A post on a BroadcastChannel a worker listens on is taken at the time it was posted at, the window's step waiting for
+  # it — where the host knows the worker listens on the name (`Browser#broadcast_external`). A second close() of a
+  # channel is no close (HTML: it sets the closed flag again), and its host counted the name's listeners gone twice: the
+  # worker's other channel of the name counted nowhere, its posts taken a step of the window's later, as the thread got
+  # to them. (What the host counts is read here directly: which step a worker's thread wins is a race this spec cannot
+  # pin.)
+  it "counts a channel closed twice as closed once" do
+    session = visit_page(<<~JS)
+      const a = new BroadcastChannel('p'), b = new BroadcastChannel('p');
+      a.close();
+      a.close();
+      postMessage('ready');
+    JS
+    workers = session.driver.browser.instance_variable_get(:@workers).values
+    expect(workers.map {|w| w[:bc_names]&.fetch('p', 0) }).to eq([1])
+  end
+
+  # A worker's clock is its window's: one whose script set a timer reads the window's `Date` (it read 50 ms ahead for good:
+  # the drain that ran its first timers moved its clock on by a step of its own).
+  it "reads its window's Date after setting a timer as it began" do
+    session = visit_page(<<~JS)
+      setTimeout(() => {}, 0);
+      onmessage = (e) => postMessage(Date.now() - e.data);
+      postMessage('ready');
+    JS
+    session.execute_script("setTimeout(() => w.postMessage(Date.now()), 500)")
+    poll_until { session.evaluate_script('window.log.length') >= 2 }
+    expect(session.evaluate_script('window.log[1][0]')).to be_between(-1, 5)
+  end
+
   # A worker busy on its own while the window waits on nothing of it is none of the window's time, however the host
   # waits for the worker's ticks: a page's `setTimeout(…, 3000)` beside a worker spinning 20 ms of every 50 read 3605.
   it "keeps a busy worker's ticks out of the window's time" do

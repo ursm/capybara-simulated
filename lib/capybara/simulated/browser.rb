@@ -561,6 +561,9 @@ module Capybara
       # inbound message / fetch (releasing the GVL so it runs). Bounded so a genuinely stuck worker
       # can't hang settle — the outer poll loop re-drives across calls.
       WORKER_ROUND_TRIP_BUDGET = 1.0
+      # …and the time a worker's clock reads past its origin as its script begins: one step of `performance.now()`'s
+      # resolution, so its first read is past it (HR-Time: a worker's `now()` > 0), the same every run.
+      WORKER_START_MS = 0.1
       # …and how long a worker still BOOTING — its isolate built, its main script fetched — is waited for: no code of its
       # own runs yet that could keep it, so only a hang reaches this; a loaded machine's slow boot is waited out, the round
       # trip's budget counted from when its script begins to run (`record[:running_since]`, `worker_deadline`).
@@ -605,7 +608,7 @@ module Capybara
         'fr_close' => '__csim_swFetchStreamClose',
         'fr_error' => '__csim_swFetchStreamError'
       }.freeze
-      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :WORKER_QUIESCE_MAX_ROUNDS, :PORT_END_KINDS, :STREAM_FRAME_FNS
+      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_START_MS, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :WORKER_QUIESCE_MAX_ROUNDS, :PORT_END_KINDS, :STREAM_FRAME_FNS
 
       # ── Capybara DSL surface ────────────────────────────────────
 
@@ -5152,7 +5155,6 @@ module Capybara
                                  elsif @runtime.clock_date.positive? then @runtime.clock_date + record[:origin] - @runtime.clock
                                  elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin]
                                  end
-        record[:made]          = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         record[:next_timer_at] = record[:origin]
         # (…and its type, which the destination of the imports the Update probes is of)
         record[:module] = script_type.to_s == 'module' if service
@@ -9534,9 +9536,11 @@ module Capybara
         # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed
         # through it, e.g. an Emscripten `printErr` — is silently dropped during debugging.
         rt.call('__csimSetTraceActive', true) if CONSOLE_STDERR
-        # Its time origin, the time it was made at, and the real time its start has taken since — its script fetched, its
-        # isolate made — which its high resolution time begins at (agent_clock.rs).
-        rt.call('__csimSetClockEpoch', record[:epoch], (Process.clock_gettime(Process::CLOCK_MONOTONIC) - record[:made]) * 1000) if record&.dig(:epoch)
+        # Its time origin, the time it was made at — and its high resolution time beginning a step of its clock past it
+        # (WORKER_START_MS), as a browser's worker reads a time past its origin from its first statement: not the real time
+        # its start took, its script fetched and its isolate made, which its window's clock does not go on through — a
+        # worker read its window's `Date` that far ahead for good, 25 ms on a loaded machine (agent_clock.rs).
+        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS) if record&.dig(:epoch)
         # …and the host's clock's offset from the real one, as its window has it (`travel_to`): what its `Date` and time
         # origin add, as the window's do.
         rt.call('__csimSetTimeTravelOffsetMs', ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i)
@@ -9738,10 +9742,11 @@ module Capybara
           Native.sw_set_worker_flag(@sw_partition, handle, 'fetch', sw_has_fetch)
           sw_fire_phase = lambda do |phase|
             rt.eval_void("globalThis.__csim_swFireLifecycleEvent(#{JSON.generate(phase)});")
-            # Drain microtasks AND timers: a `waitUntil` promise may settle off a
-            # setTimeout (e.g. a delayed cache warm-up), so advance the worker clock too.
+            # Drain microtasks AND the timers due now: a `waitUntil` promise may settle off a
+            # setTimeout(0). (Not on past now: the worker's clock is the window's, which the window's
+            # steps move it along — a drain of its own moved its clock 50 ms ahead of the window's for good.)
             rt.drain_microtasks
-            rt.drain_timers
+            rt.drain_timers(0)
           end
           # 'install' pending → 'activation' (installed: waiting for the host's Activate step,
           # its activate handler not run while the outgoing worker still serves — Service
@@ -9777,9 +9782,11 @@ module Capybara
         # (worker-interception-redirect's last case). Draining here runs the fetch's
         # dispatch on this thread while `BOOTING` still covers it, so the
         # follow-on pending (the fetch owed / outbox) is counted before the release.
+        # (…its timers due now: not on past now, which the window's steps move it to — a drain of its own moved its clock 50 ms
+        # ahead of the window's for good, its `Date` with it, as soon as its script set a timer)
         if !stopping.call && rt.call('__nextTimerDelay').to_f >= 0
           rt.drain_microtasks
-          rt.drain_timers
+          rt.drain_timers(0)
         end
         # Initial script has run (and any immediate postMessage is in the outbox).
         release_init.call
