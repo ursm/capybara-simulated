@@ -31,9 +31,9 @@ require_relative 'raster'
 # the two kinds identically.
 module WptRunner
   ROOT              = File.expand_path('../wpt', __dir__)
-  # The generic WPT `.py` request-handler executor (a minimal wptserve shim).
+  # The generic WPT `.py` request-handler executor (a minimal wptserve shim), one process serving them in turn.
   PY_HANDLER        = File.expand_path('../../script/wpt_py_handler.py', __dir__)
-  # One .py handler subprocess at a time — see the capture2 call site.
+  # One .py request at a time — see `run_py_handler`.
   PY_EXEC_LOCK      = Mutex.new
   PY_CACHE_PREFIX   = File.join(Dir.tmpdir, 'csim-wpt-pycache')
   EXPECTED_PATH     = File.expand_path('wpt_expected_failures.yml', __dir__)
@@ -203,8 +203,8 @@ module WptRunner
   DISPATCHER_STASH = Hash.new {|h, k| h[k] = [] }
   DISPATCHER_LOCK  = Mutex.new
 
-  # File-backed request.server.stash for the .py shim (each handler runs in its own
-  # subprocess, so cross-request state must live on disk). One dir for the process,
+  # File-backed request.server.stash for the .py shim (each request runs as a process of its own would, so
+  # cross-request state must live on disk). One dir for the process,
   # cleared per file (run_one) for the same run-order independence the session reset gives.
   require 'tmpdir'
   require 'fileutils'
@@ -235,12 +235,29 @@ module WptRunner
     end
   end
 
+  # The python3 serving the `.py` requests of this process (script/wpt_py_handler.py): one, started as the first needs it —
+  # a fresh one per request cost ~28 ms of interpreter start each, which a file of 400 redirect hops (fetch/api/redirect/
+  # redirect-count) spent past its budget under load — and per PROCESS, as the stash is: a forked regen worker starts its
+  # own. Its stdin and stdout, or nil where it could not be started. (…ended with the process: stdin closed, it exits)
+  def py_handler_process
+    return @py_handler if @py_handler && @py_handler_pid == Process.pid
+    @py_handler_pid = Process.pid
+    stdin, stdout, _thread = Open3.popen2({'PYTHONPYCACHEPREFIX' => PY_CACHE_PREFIX}, 'python3', PY_HANDLER)
+    stdin.binmode
+    stdout.binmode
+    owner = Process.pid
+    at_exit { stdin.close if Process.pid == owner && !stdin.closed? }
+    @py_handler = [stdin, stdout]
+  rescue SystemCallError
+    @py_handler = nil
+  end
+
   # Run a vendored WPT `.py` request handler through script/wpt_py_handler.py (a
-  # minimal wptserve shim) via python3, returning a Rack `[status, headers, [body]]`
-  # — or nil to fall through (handler missing / python3 unavailable / malformed
-  # output) so the caller serves the source as text as before. The request body is
-  # piped on stdin; method / URL / headers go via env. Binary-safe: the child emits
-  # one JSON metadata line then the raw body bytes.
+  # minimal wptserve shim), returning a Rack `[status, headers, [body]]` — or nil to
+  # fall through (handler missing / python3 unavailable / malformed output) so the
+  # caller serves the source as text as before. The request goes as one JSON line and
+  # its body's bytes; the answer comes as one JSON metadata line then the raw body
+  # bytes — binary-safe.
   def run_py_handler(pyfile, req, env)
     input = env['rack.input']
     body  = input ? input.read.to_s : ''
@@ -272,32 +289,37 @@ module WptRunner
     # they're in the raw list with the author's casing, and re-adding would duplicate).
     headers << ['Content-Type', env['CONTENT_TYPE'].to_s] if env['CONTENT_TYPE'] && !seen.include?('content-type')
     headers << ['Content-Length', env['CONTENT_LENGTH'].to_s] if env['CONTENT_LENGTH'] && !seen.include?('content-length')
-    py_env = {
-      'WPT_METHOD'   => req.request_method.to_s,
-      'WPT_URL'      => req.url.to_s,
-      'WPT_HEADERS'  => JSON.generate(headers),
-      'WPT_DOC_ROOT' => ROOT,
-      # request.server.stash backing dir — shared across a test file's .py subprocesses
-      # (the CORS preflight-denied flow stashes state across reset/preflight/complete);
-      # cleared per file in run_one.
-      'WPT_STASH_DIR' => stash_dir,
-      # (…its bytecode cached outside the vendored WPT tree, which keeps no __pycache__ — the standard library's too: a
-      # Python installed fresh has none of it compiled, and each handler compiling `re` and `json` anew (0.07 s a call,
-      # against 0.02) ran a service worker's twenty redirects past its time budget)
-      'PYTHONPYCACHEPREFIX' => PY_CACHE_PREFIX
-    }
-    # Serialized: concurrent capture2 from multiple driver threads (a race-network
-    # leg's rack_fetch racing the page's own .py fetches) hits an MRI pipe-fd race
-    # (the child's BrokenPipeError at stdout.flush — surfaced by rusty 0.2.0's GVL
-    # scheduling, latent before). The race semantics never need two .py handlers
-    # IN PARALLEL — the leg races the worker's in-isolate busy-wait, not other IO —
-    # and .py handlers are subsecond, so a mutex is the whole fix.
-    out, status = PY_EXEC_LOCK.synchronize { Open3.capture2(py_env, 'python3', PY_HANDLER, pyfile, stdin_data: body, binmode: true) }
-    return nil unless status.success?
-    nl = out.index("\n".b)
-    return nil unless nl
-    meta  = JSON.parse(out.byteslice(0, nl))
-    rbody = out.byteslice(nl + 1, meta['body_len'].to_i) || ''.b
+    request = JSON.generate(
+      handler:   pyfile,
+      method:    req.request_method.to_s,
+      url:       req.url.to_s,
+      headers:   headers,
+      doc_root:  ROOT,
+      # request.server.stash backing dir — shared across a test file's requests (the CORS preflight-denied flow stashes
+      # state across reset/preflight/complete); cleared per file in run_one.
+      stash_dir: stash_dir,
+      body_len:  body.bytesize
+    )
+    # Serialized: the driver's threads (a race-network leg's rack_fetch racing the page's own .py fetches) share the one
+    # process, which answers a request at a time — the race semantics never need two .py handlers IN PARALLEL (the leg
+    # races the worker's in-isolate busy-wait, not other IO), and .py handlers are subsecond. A process that died — or
+    # answered out of the protocol — is let go of, the next request starting another.
+    meta, rbody = PY_EXEC_LOCK.synchronize do
+      handler = py_handler_process or return nil
+      stdin, stdout = handler
+      begin
+        stdin.write(request, "\n", body)
+        stdin.flush
+        line  = stdout.gets or raise EOFError
+        head  = JSON.parse(line)
+        [head, stdout.read(head['body_len'].to_i) || ''.b]
+      rescue StandardError
+        @py_handler = nil
+        stdin.close unless stdin.closed?
+        stdout.close unless stdout.closed?
+        return nil
+      end
+    end
     # (…the handler's header bytes, which its JSON carries Latin-1-decoded, as the bytes they are — what wptserve puts
     # on the wire — in the UTF-8-tagged string a Rack app hands over, valid or not)
     hdrs = combine_headers(Array(meta['headers']).map {|name, value| [name, value.to_s.encode(Encoding::ISO_8859_1).force_encoding(Encoding::UTF_8)] })

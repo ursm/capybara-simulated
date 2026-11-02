@@ -8,13 +8,16 @@ this provides just enough of the request/response API the vendored handlers use
 .status/headers/content/writer) to run the common "echo / set headers / return
 (headers, body)" handlers faithfully.
 
-Protocol: the handler path is argv[1]; the request comes via env (WPT_METHOD,
-WPT_URL, WPT_HEADERS as JSON) + the raw body on stdin. We print one JSON metadata
-line ({"status", "headers", "body_len"}) then the raw body bytes on stdout. A
-handler exception → status 500 with the traceback as the body (the harness logs it).
+Protocol: one long-lived process serves the runner's requests in turn, over its stdin and
+stdout. A request is one JSON line ({"handler", "method", "url", "headers", "doc_root",
+"stash_dir", "body_len"}) then its raw body bytes; the answer one JSON metadata line
+({"status", "status_text", "headers", "body_len"}) then the raw body bytes. A handler
+exception → status 500 with the traceback as the body (the harness logs it). Each request
+runs as a fresh process ran it: the handler module loaded anew, and every module of the WPT
+tree it imported let go of after it and sys.path as it was, so no handler's module-level state outlives its request
+(request.server.stash, which is meant to, is file-backed per test file).
 
-Out of scope (best-effort stubs, won't pass but won't crash): request.server.stash
-(cross-request state — each call is a fresh subprocess) and deep server config.
+Out of scope (best-effort stubs, won't pass but won't crash): deep server config.
 """
 import sys
 # Never litter __pycache__ into the vendored WPT tree: bytecode is written only under a cache prefix outside it (the
@@ -224,8 +227,8 @@ class _NullLock:
 
 
 class Stash:
-    """wptserve request.server.stash: a per-test key→value store. Each .py runs in its
-    own subprocess, so persist across them via files in WPT_STASH_DIR (the runner makes
+    """wptserve request.server.stash: a per-test key→value store. Each request runs as its
+    own process would, so persist across them via files in WPT_STASH_DIR (the runner makes
     one dir per test file and clears it between files). take() is a pop (read+remove),
     put() writes. Values are arbitrary Python objects (preflight.py stashes a dict of
     counters, other handlers a bytes flag), so they are pickled — matching wptserve,
@@ -645,14 +648,8 @@ def register_wptserve_stub():
     sys.modules['wptserve.pipes'] = pipes
 
 
-def main():
-    handler_path = sys.argv[1]
-    method = os.environ.get('WPT_METHOD', 'GET')
-    url = os.environ.get('WPT_URL', 'http://web-platform.test/')
-    doc_root = os.environ.get('WPT_DOC_ROOT', '')
-    headers = json.loads(os.environ.get('WPT_HEADERS', '[]'))
-    body = sys.stdin.buffer.read()
-
+def handle(handler_path, method, url, headers, doc_root, body):
+    """One request: its (meta, body bytes)."""
     request = Request(method, url, headers, body, doc_root)
     response = Response()
 
@@ -772,20 +769,46 @@ def main():
         'headers': [[k.decode('latin-1'), v.decode('latin-1')] for k, v in hdrs],
         'body_len': len(out_body),
     }
-    sys.stdout.write(json.dumps(meta) + '\n')
-    sys.stdout.flush()
-    sys.stdout.buffer.write(out_body)
-    sys.stdout.buffer.flush()
+    return meta, out_body
+
+
+def _of_tree(module, root):
+    """Whether a module was loaded from the WPT tree (a handler's helper, or a namespace package of it)."""
+    paths = [getattr(module, '__file__', None) or ''] + list(getattr(module, '__path__', None) or [])
+    return any(p and os.path.abspath(p).startswith(root) for p in paths)
+
+
+def serve():
+    inp, out = sys.stdin.buffer, sys.stdout.buffer
+    while True:
+        line = inp.readline()
+        if not line:
+            return
+        req = json.loads(line)
+        body = inp.read(req['body_len']) if req['body_len'] else b''
+        doc_root = req.get('doc_root', '')
+        os.environ['WPT_STASH_DIR'] = req.get('stash_dir', '')
+        before, path = set(sys.modules), list(sys.path)
+        # (…stdout the protocol's: what a handler prints goes to stderr)
+        sys.stdout = sys.stderr
+        try:
+            meta, out_body = handle(req['handler'], req.get('method', 'GET'), req.get('url', 'http://web-platform.test/'),
+                                    req.get('headers', []), doc_root, body)
+        except Exception:
+            import traceback
+            out_body = traceback.format_exc().encode('utf-8')
+            meta = {'status': 500, 'headers': [['content-type', 'text/plain']], 'body_len': len(out_body)}
+        finally:
+            sys.stdout = sys.__stdout__
+            sys.path[:] = path
+            root = os.path.abspath(doc_root) if doc_root else None
+            for name in set(sys.modules) - before:
+                if name == 'wpt_handler' or (root and _of_tree(sys.modules[name], root)):
+                    del sys.modules[name]
+        out.write(json.dumps(meta).encode('utf-8') + b'\n')
+        out.write(out_body)
+        out.flush()
 
 
 if __name__ == '__main__':
-    try:
-        main()
-    except Exception:
-        import traceback
-        tb = traceback.format_exc().encode('utf-8')
-        meta = {'status': 500, 'headers': [['content-type', 'text/plain']], 'body_len': len(tb)}
-        sys.stdout.write(json.dumps(meta) + '\n')
-        sys.stdout.flush()
-        sys.stdout.buffer.write(tb)
-        sys.stdout.buffer.flush()
+    serve()
