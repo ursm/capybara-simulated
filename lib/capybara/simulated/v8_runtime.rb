@@ -818,8 +818,8 @@ module Capybara
       def rebuild_ctx(keep_windows: true, client_id: nil, document: true)
         @page_client_id = client_id
         @page_document  = document
-        # (…a new page's clock starting where its realm's does, not where the last page's left it — its `Date` and hold too,
-        # the next document's from its first step, as its time origin is its own)
+        # (…a new page's `Date` and hold not where the last page's left them — the next document's from its first step, as its
+        # time origin is its own; the event loop's virtual clock runs on under it, which the windows it opened outlive it on)
         @clock = @clock_date = @clock_held = nil
         # Produce any queued bytecode-cache blobs while every queued target
         # (frame realms included) is still alive — a job queued by the last

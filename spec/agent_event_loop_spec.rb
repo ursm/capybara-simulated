@@ -125,4 +125,85 @@ RSpec.describe 'the event loop of a page and its frames' do
       expect(at).to be_between(due, due + 2), "#{tag} ran at #{at}"
     end
   end
+
+  # Two realms each waiting on a worker's message sent 60 ms on — each worker spinning that long first — wait behind the
+  # frame's 30 ms timer, not behind each other's turn of waiting: each took the other's for a task due now and queued its
+  # own again at once, some 75,000 times, until the messages' time came by the machine's own clock, the frame's timer
+  # 40 ms late. Chrome 156 (two runs): `P20@20 F30@30 WF60@60 W60@60 P90@90`; Firefox 159 the two messages the other
+  # way about, within a ms.
+  it "runs two realms' waiting worker messages after the timers due before them" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>xpp</title>#{frames}<pre id="out"></pre>
+      <script>
+        const log = [];
+        const src = URL.createObjectURL(new Blob(["onmessage = (e) => { const s = Date.now(); while (Date.now() - s < e.data[1]) {} postMessage(e.data); };"], {type: 'text/javascript'}));
+        onload = () => {
+          const fw = document.getElementById('f').contentWindow;
+          const at = () => Math.round(performance.now() - window.base);
+          const w = new Worker(src), wf = new fw.Worker(src);
+          w.onmessage = wf.onmessage = (e) => { if (window.base) log.push(e.data[0] + '@' + at()); };
+          w.postMessage(['warm', 0]); wf.postMessage(['warm', 0]);
+          setTimeout(() => {
+            window.base = performance.now();
+            w.postMessage(['W60', 60]);
+            wf.postMessage(['WF60', 60]);
+            setTimeout(() => log.push('P20@' + at()), 20);
+            fw.setTimeout(() => log.push('F30@' + at()), 30);
+            setTimeout(() => log.push('P90@' + at()), 90);
+            setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 300);
+          }, 300);
+        };
+      </script>
+    HTML
+    tags = log.map {|e| e.split('@').first }
+    expect([tags[0, 2], tags[2, 2].sort, tags[4..]]).to eq([%w[P20 F30], %w[W60 WF60], %w[P90]])
+    timed(log).each do |tag, at|
+      due = tag[/\d+/].to_i
+      expect(at).to be_between(due, due + 10), "#{tag} ran at #{at}"
+    end
+  end
+
+  # A frame's document timeline and its animation frame callbacks' time count from ITS time origin, as its
+  # `performance.now()` does, whatever the event loop's clock read as it was made. Chrome 156 (two runs): `102 90 90`;
+  # Firefox 159 `101 101 101`.
+  it "reads a frame's timeline and animation frame time from the frame's time origin" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>tl</title><pre id="out"></pre>
+      <script>
+        setTimeout(() => {
+          const f = document.createElement('iframe');
+          document.body.appendChild(f);
+          const fw = f.contentWindow;
+          setTimeout(() => {
+            fw.requestAnimationFrame((ts) => {
+              const at = (t) => Math.round(t);
+              document.getElementById('out').textContent = [fw.performance.now(), fw.document.timeline.currentTime, ts].map(at).join(' ');
+              document.title = 'done';
+            });
+          }, 100);
+        }, 2000);
+      </script>
+    HTML
+    now, timeline, stamp = log.map(&:to_i)
+    expect(now).to be_between(100, 120)
+    expect([timeline, stamp]).to all(be_between(now - 17, now))
+  end
+
+  # A frame the page's task removes runs none of its timers after — not to the end of the step the removal fell in.
+  # Chrome 156 and Firefox 159: `removed`.
+  it "runs no timer of a frame the page removed" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>detach</title>#{frames}<pre id="out"></pre>
+      <script>
+        const log = window.log = [];
+        onload = () => {
+          const f = document.getElementById('f');
+          f.contentWindow.eval("const L = parent.log; setTimeout(() => L.push('F100'), 100); setInterval(() => L.push('Fi'), 30);");
+          setTimeout(() => { f.remove(); log.push('removed'); }, 10);
+          setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 400);
+        };
+      </script>
+    HTML
+    expect(log).to eq(%w[removed])
+  end
 end

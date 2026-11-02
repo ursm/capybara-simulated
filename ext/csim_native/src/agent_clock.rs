@@ -58,6 +58,10 @@ pub(crate) struct TimeOrigin {
 }
 
 impl TimeOrigin {
+    // The event loop's clock as the origin was taken.
+    pub(crate) fn clock(&self) -> f64 {
+        self.clock
+    }
     fn hr(&self, clock: f64, script: f64) -> f64 {
         clock - self.clock + script - self.script
     }
@@ -172,7 +176,7 @@ fn clock_epoch_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 }
 
 // __dom.agentWait(begins, moved) — a script of the calling agent's begins to wait inside a synchronous host call (true),
-// or has done (false), its realm's virtual clock `moved` ms on meanwhile — a server's sleep the host moved it by, a
+// or has done (false), the event loop's virtual clock `moved` ms on meanwhile — a server's sleep the host moved it by, a
 // worker's answer: as much of the wait's real time as that is none of the script time, the virtual clock showing it (all
 // of it, a `moved` past the wait's length: a wait on a worker, whose answer brings the time it took — sw-client.js).
 fn agent_wait(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {

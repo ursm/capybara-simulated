@@ -700,7 +700,7 @@ fn is_inert_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let inert = crate::dom::nid_arg(scope, &args, 0).is_some_and(|id| crate::dom::realm(scope, cid).is_inert(id));
     rv.set_bool(inert);
 }
-// One painting question asked with the realm's arena and its style engine's animations at the realm's clock.
+// One painting question asked with the realm's arena and its style engine's animations at the event loop's clock.
 pub(crate) fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, ask: impl FnOnce(&mut Painting<'_>) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);
     let now = crate::dom::realm_clock(scope, args);

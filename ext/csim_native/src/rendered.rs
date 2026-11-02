@@ -918,7 +918,7 @@ fn transparent_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 
-// One question asked of the realm's arena and its style engine at the realm's clock `now`: what it answers, or nothing
+// One question asked of the realm's arena and its style engine at the event loop's clock `now`: what it answers, or nothing
 // where the realm has no engine or the engine failed a verification (thrown here).
 pub(crate) fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);

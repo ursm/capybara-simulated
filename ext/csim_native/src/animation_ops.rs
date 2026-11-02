@@ -37,11 +37,18 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animKeyframes", anim_keyframes, context_id);
     register(scope, ns, "animReconcile", anim_reconcile, context_id);
     register(scope, ns, "animCompositeOrder", anim_composite_order, context_id);
+    register(scope, ns, "timelineNow", timeline_now, context_id);
 }
 
-// The document timeline at the event loop's clock (`EventLoop::clock`), before an op reads or moves an animation.
+// __dom.timelineNow() -> the calling realm's document timeline's time (`RealmArena::timeline_time`): the one its engine
+// runs every animation on.
+fn timeline_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_double(crate::dom::realm_clock(scope, &args));
+}
+
+// The document timeline at its time (`RealmArena::timeline_time`), before an op reads or moves an animation.
 fn at_time(engine: &mut StyleEngine, arena: &RealmArena) {
-    at_clock(engine, arena.event_loop.clock);
+    at_clock(engine, arena.timeline_time(arena.cur()));
 }
 fn at_clock(engine: &mut StyleEngine, now: f64) {
     if engine.web_animations.timeline_time != Some(now) {
@@ -50,7 +57,7 @@ fn at_clock(engine: &mut StyleEngine, now: f64) {
 }
 
 // The time to the next frame an animation the style engine of realm `realm` runs is due one at — waiting on a frame (0),
-// or running to an end its events and its finished state fall at — on the event loop's clock; none for none, and for a realm
+// or running to an end its events and its finished state fall at — on its document timeline; none for none, and for a realm
 // the engine styles nothing of.
 pub(crate) fn next_frame_delay_of(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<f64> {
     let mut delay = None;
@@ -59,7 +66,7 @@ pub(crate) fn next_frame_delay_of(scope: &mut v8::PinScope<'_, '_>, realm: i32) 
         if d.arena.realm_state(realm).is_none() {
             return;
         }
-        let now = d.arena.event_loop.clock;
+        let now = d.arena.timeline_time(realm);
         let Some(engine) = d.styles.get_mut(&realm) else { return };
         at_clock(engine, now);
         delay = engine.web_animations.next_frame_delay();

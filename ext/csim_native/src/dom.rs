@@ -1302,9 +1302,6 @@ impl RealmArena {
         }
         self.enter(cid);
         self.timers_begin(cid);
-        if cid == 0 {
-            self.event_loop.page_begins();
-        }
         // (…and the adopted sheet lists its last page's sheets made: their ids are none of the next page's)
         self.adopted_sheets.retain(|_, list| list.realm != cid);
         // (…afresh, but its faces table and sheet store in place: the realm's style engine, which outlives the context,
@@ -2130,6 +2127,14 @@ impl RealmArena {
             cur = self.parent_of(n).or_else(|| self.get(n).and_then(|d| d.host));
         }
         false
+    }
+    // Realm `cid`'s document timeline's time: the event loop's clock since the realm's time origin (Web Animations §4.4.2:
+    // a document timeline's current time is zero at its document's time origin, as `performance.now()` is) — a frame's
+    // made 2 s into the page's read 2,000 ms ahead of its `performance.now()` once the clock was the agent's. (Without the
+    // script time `performance.now()` adds: the timeline moves with the rendering updates alone.)
+    pub(crate) fn timeline_time(&self, cid: i32) -> f64 {
+        let origin = self.realm_state(cid).and_then(|s| s.time_origin).map_or(0.0, |o| o.clock());
+        self.event_loop.clock - origin
     }
     // Realm `cid`'s state, whichever realm the arena is in.
     pub(crate) fn realm_state(&self, cid: i32) -> Option<&RealmState> {
@@ -5315,7 +5320,7 @@ fn sheet_drop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.styleValue(nid, property, pseudo) — at the realm's clock, where its animations are — the element's (or, with `pseudo` — `before`, `placeholder`, … — its
+// __dom.styleValue(nid, property, pseudo) — at the event loop's clock, where its animations are — the element's (or, with `pseudo` — `before`, `placeholder`, … — its
 // pseudo-element's) computed value of that longhand, or undefined (a shorthand, an unknown property, an element the
 // style engine did not style).
 fn style_value(
@@ -5635,10 +5640,11 @@ fn style_restyled(
     rv.set_uint32(arena.restyled.take());
 }
 
-// The event loop's clock (ms, `EventLoop::clock`): the time the calling realm's style engine answers an op's question at
-// — where its animations are sampled.
-pub(crate) fn realm_clock(scope: &mut v8::PinScope<'_, '_>, _args: &v8::FunctionCallbackArguments<'_>) -> f64 {
-    dom(scope).arena.event_loop.clock
+// The time the calling realm's style engine answers an op's question at — where its animations are sampled: its
+// document timeline's (`RealmArena::timeline_time`).
+pub(crate) fn realm_clock(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> f64 {
+    let cid = realm_id(scope, args);
+    dom(scope).arena.timeline_time(cid)
 }
 
 // Under CSIM_STYLE_VERIFY, what the engine's last restyles disagreed with a full one about (`failures`), thrown as the
@@ -5655,7 +5661,7 @@ pub(crate) fn threw_verify_failures(scope: &mut v8::PinScope<'_, '_>, failures: 
     true
 }
 
-// __dom.styleFlush(): a style flush at the realm's clock — what a forced `getComputedStyle` or layout read is in a
+// __dom.styleFlush(): a style flush at the event loop's clock — what a forced `getComputedStyle` or layout read is in a
 // browser: the style engine's animations move to it and the document is styled, starting the animations and
 // transitions a change since the last one owes, and the elements whose animations' properties changed marked
 // (`mark_retargeted`). The events wait for the rendering update (`styleTakeAnimationEvents`).
@@ -5681,7 +5687,7 @@ fn style_flush(
     });
 }
 
-// __dom.styleTick(): a rendering update at the realm's clock: the Web Animations' frame, then a style flush — the
+// __dom.styleTick(): a rendering update at the event loop's clock: the Web Animations' frame, then a style flush — the
 // elements whose animations' properties changed marked, as `styleFlush` marks them. The events the update owes stay
 // queued for `styleTakeAnimationEvents`.
 fn style_tick(

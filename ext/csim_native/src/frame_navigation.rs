@@ -71,7 +71,7 @@ struct FrameNavigation {
     aborted_document: bool,
     contents: [Option<Content>; CONTENT_SLOTS],
     // While its navigable has no realm made: the user activation the window of its initial about:blank document has
-    // had (user_activation.rs) — its last activation, on the container's realm's clock, and the activation notifications
+    // had (user_activation.rs) — its last activation, on the event loop's clock, and the activation notifications
     // that reached it — which that window takes as its realm is made (navigables.rs `set_frame_realm`).
     activation: Option<(f64, u32)>,
 }
