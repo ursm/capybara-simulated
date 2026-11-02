@@ -5265,6 +5265,10 @@ module Capybara
           w[:in_flight] = w[:in_flight].to_i + 1
         end
         w[:inbox] << data.to_s
+        # (…taken at the time it was posted at, the window's next step waiting on it: `worker_due_at`'s `:asked` — what its
+        # handler sets going, a request of a service worker's, a timer, starts from then, not from wherever the window had
+        # got to by the time the worker's thread got to it)
+        w[:asked] = true
       end
 
       # `ServiceWorker.postMessage` from a client window → deliver to the SW's `message` event with
@@ -5286,6 +5290,8 @@ module Capybara
         # its lock against the worker thread's release (sw_registry.rs `hold`).
         Native.sw_hold(@sw_partition, handle.to_i, 'message', true)
         w[:inbox] << {kind: 'sw_message', data: data.to_s, client: client_id, url: client_url}
+        # (…taken at the time it was posted at, as a worker's message is: `worker_post_to_worker`)
+        w[:asked] = true
       end
 
       # One main-script fetch event of a controlled worker dispatched to `sw_handle` — called on the SPAWNING worker's
@@ -5733,6 +5739,11 @@ module Capybara
         # fetch ids are per-realm (so they collide across realms) — carry the ORIGINATING realm so
         # the response is delivered back to it, not the main realm (realm 0 = main/top window).
         w[:inbox] << msg
+        # (…and the worker due now, for the window's next step to wait on before it goes on — `worker_due_at` — so the
+        # event is dispatched at the time it was fetched at, and a timer its answer waits on falls due on the window's
+        # clock from then, before the request's own timeout: not as late as the window's clock had run on, a fast-forward
+        # to that timeout among it, by the time the worker's thread got to it)
+        w[:asked] = true
         true
       end
 
@@ -6232,6 +6243,10 @@ module Capybara
         # answer let go on — run first, at the window's time now: what it runs may leave another due now, a request one
         # worker makes of another, a round of each at most WORKER_DUE_NOW_ROUNDS)
         # (…the rounds one wait, their deadlines from its start)
+        # (…and what a worker posted since — one that caught up to the window's last step on its own, its timer due then
+        # run on its idle poll — delivered first, at the window's time now: before the step goes past it to a timer of the
+        # page's that its answer would have beaten, a request's timeout)
+        deliver_worker_messages unless @worker_outbox.empty? && @worker_outbox_head.nil?
         start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         spent = 0.0
         WORKER_DUE_NOW_ROUNDS.times do
@@ -6417,8 +6432,15 @@ module Capybara
       end
       # …a realm's pending fetch answered (`fn` its response's or a stream frame's) — a worker client's (a negative
       # realm: the worker's handle) by its inbox, as `to_worker`, where it is one a worker client takes.
+      # (…a worker's on its inbox, the worker due now — `worker_due_at`'s `:asked` — so it takes the answer at the time it
+      # came, before a timer of its own the window's next step reaches: its request's timeout)
       def sw_fetch_answered(realm, fn, fetch_id, payload, to_worker)
-        return @workers.dig(-realm, :inbox)&.push(to_worker.merge(fetch_id: fetch_id)) if realm.negative? && to_worker
+        if realm.negative? && to_worker
+          w = @workers[-realm] or return
+          w[:inbox] << to_worker.merge(fetch_id: fetch_id)
+          w[:asked] = true
+          return
+        end
 
         realm_told(realm, fn, fetch_id, payload)
       end
