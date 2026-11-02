@@ -44,11 +44,11 @@ impl AgentTime {
 }
 
 // A realm's time origin: what its `Date` read at its high resolution time 0 (in milliseconds since the epoch, before
-// any time-travel offset its host adds), and the script time then.
+// any time-travel offset its host adds), and its virtual clock and the script time then, together.
 #[derive(Clone, Copy)]
 pub(crate) struct TimeOrigin {
     epoch: f64,
-    script: f64,
+    at: f64,
 }
 
 fn system_now() -> f64 {
@@ -97,7 +97,7 @@ fn close_turn(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArgum
 
 // Realm `cid`'s time origin, taken where it has none: a realm of a window the host booted has its own (`clockEpochSet`);
 // any other — a frame's, a pop-up's this isolate made — reads its `Date` on from its main realm's, as one agent's clock,
-// its high resolution time beginning at its virtual clock's 0. (Neither where the main realm has none: the time now.)
+// its high resolution time beginning now. (Neither where the main realm has none: the time now.)
 fn origin_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, script: f64) -> TimeOrigin {
     let arena = &mut dom(scope).arena;
     if let Some(origin) = arena.realm_state(cid).and_then(|s| s.time_origin) {
@@ -106,10 +106,10 @@ fn origin_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, script: f64) -> TimeOri
     let clock = arena.realm_state(cid).map_or(0.0, |s| s.clock);
     let main = (cid != 0).then(|| arena.realm_state(0)).flatten().and_then(|s| s.time_origin.map(|o| (o, s.clock)));
     let now = match main {
-        Some((o, main_clock)) => o.epoch + main_clock + script - o.script,
+        Some((o, main_clock)) => o.epoch + main_clock + script - o.at,
         None => system_now(),
     };
-    let origin = TimeOrigin { epoch: now - clock, script };
+    let origin = TimeOrigin { epoch: now, at: clock + script };
     arena.enter(cid).time_origin = Some(origin);
     origin
 }
@@ -121,7 +121,7 @@ fn hr_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let script = script_time(scope);
     let origin = origin_of(scope, cid, script);
     let clock = dom(scope).arena.realm_state(cid).map_or(0.0, |s| s.clock);
-    rv.set_double(clock + script - origin.script);
+    rv.set_double(clock + script - origin.at);
 }
 
 // __dom.clockEpoch() -> the calling realm's time origin, in milliseconds since the epoch. (A read of the origin, which
@@ -142,7 +142,7 @@ fn clock_epoch_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let cid = realm_id(scope, &args);
     let script = dom(scope).agent_time.now(Instant::now());
     let state = dom(scope).arena.enter(cid);
-    state.time_origin = Some(TimeOrigin { epoch: epoch - state.clock, script: script - since });
+    state.time_origin = Some(TimeOrigin { epoch, at: state.clock + script - since });
 }
 
 // __dom.agentWait(begins, moved) — a script of the calling agent's begins to wait inside a synchronous host call (true),
