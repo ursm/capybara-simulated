@@ -5723,12 +5723,14 @@ fn style_tick_unguarded(
     threw_verify_failures(scope, failures);
 }
 
-// __dom.styleUpdateBegins() — a rendering update of the calling realm's document has begun: what its steps' style flushes
-// make before its "update animations and send events" is its own (`Animations::in_update`).
+// __dom.styleUpdateBegins(begins) — a rendering update of the calling realm's document has begun (`begins`): what its
+// steps' style flushes make before its "update animations and send events" is its own (`Animations::in_update`) — or has
+// ended, which leaves none so whatever happened in it (a throw before its tick, its document replaced under it).
 fn style_update_begins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let begins = args.get(0).is_true();
     let cid = realm_id(scope, &args);
     if let Some(engine) = dom(scope).styles.get_mut(&cid) {
-        engine.web_animations.in_update = true;
+        engine.web_animations.in_update = begins;
     }
 }
 

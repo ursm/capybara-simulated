@@ -2068,10 +2068,10 @@ impl StyleEngine {
         // (…the CSS animations and transitions a cancel event was generated for, each with the owning element it was of:
         // sorted as owned by it still, before those of it not cancelled — css-animations-2 §2.2, "for the purpose of
         // sorting events", which a released one would otherwise sort after as an animation of no class)
-        let mut cancelled: Vec<(waapi::AnimationId, waapi::Target, bool)> = Vec::new();
+        let mut cancelled: Vec<(waapi::AnimationId, waapi::Target, bool, u64)> = Vec::new();
         for e in css.iter().filter(|e| e.kind.ends_with("cancel")) {
             if !cancelled.iter().any(|(id, ..)| *id == e.animation) {
-                cancelled.push((e.animation, e.owner.clone(), e.transition));
+                cancelled.push((e.animation, e.owner.clone(), e.transition, e.order));
             }
         }
         if css.len() > 1 {
@@ -2127,13 +2127,33 @@ impl StyleEngine {
             ids.dedup();
             let mut ordered = self.in_composite_order(arena, ids);
             let model = &self.web_animations;
-            for (id, owner, transition) in &cancelled {
+            // (…a cancelled one in the place its owner and its generation or position, as they were immediately before it
+            // was cancelled, give it among the others of its class — css-transitions-2 §6.1, css-animations-2 §2.2 — not
+            // as an animation of no class after them all: Firefox's `cancelRaf:cancel retarget:cancel retarget:run …
+            // hideRaf:cancel plain:run plain:start`, where csim sent every cancel after the started ones' events — and ahead
+            // of one at the same place, the animation that replaced it at its position (WPT css-animations
+            // event-dispatch.tentative). One whose owner left the document after them, as Firefox sorts it.)
+            let key_of = |x: &waapi::AnimationId| {
+                let css = model.animations.get(x)?.css.as_ref()?;
+                let owner = css.owner.as_ref()?;
+                let order = match &css.kind {
+                    crate::css::CssKind::Transition(t) => t.generation,
+                    crate::css::CssKind::Animation(a) => a.position as u64,
+                };
+                Some((css.transition().is_some(), tree_path(arena, owner.node), waapi::pseudo_rank(&owner.pseudo), order))
+            };
+            for (id, owner, transition, order) in &cancelled {
                 let Some(at) = ordered.iter().position(|x| x == id) else { continue };
                 ordered.remove(at);
-                let owned_by = |x: &waapi::AnimationId| {
-                    model.animations[x].css.as_ref().is_some_and(|css| css.owner.as_ref() == Some(owner) && css.transition().is_some() == *transition)
+                let before = if arena.is_connected(owner.node) {
+                    let own = (tree_path(arena, owner.node), waapi::pseudo_rank(&owner.pseudo), *order);
+                    let same_class = |x: &waapi::AnimationId| key_of(x).filter(|k| k.0 == *transition);
+                    let others: Vec<usize> = (0..ordered.len()).filter(|&i| !cancelled.iter().any(|(c, ..)| *c == ordered[i]) && same_class(&ordered[i]).is_some()).collect();
+                    let after = others.iter().copied().find(|&i| same_class(&ordered[i]).is_some_and(|k| (k.1, k.2, k.3) >= own));
+                    after.or_else(|| others.last().map(|&i| i + 1)).unwrap_or(at.min(ordered.len()))
+                } else {
+                    at.min(ordered.len())
                 };
-                let before = ordered.iter().position(|x| !cancelled.iter().any(|(c, ..)| c == x) && owned_by(x)).unwrap_or(at.min(ordered.len()));
                 ordered.insert(before, *id);
             }
             let rank: std::collections::HashMap<waapi::AnimationId, usize> = ordered.into_iter().enumerate().map(|(i, id)| (id, i)).collect();

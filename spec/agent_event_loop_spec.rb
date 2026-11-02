@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
+require 'json'
 require_relative 'support/session_teardown'
 
 # HTML gives a similar-origin window agent ONE event loop (§8.1.7): the tasks of the page, of its frames and of theirs are
@@ -371,13 +372,15 @@ RSpec.describe 'the event loop of a page and its frames' do
   # `transitionrun`, sent ahead of the animation frame callbacks, and a callback that then cancels it — taking it out of
   # `transition-property`, retargeting it, hiding or removing its element — owes its `transitioncancel` at the update
   # after, the `transitionrun` before it. It sent a lone `transitioncancel`, its `transitionrun` left to a commit that
-  # never came. A transition made and removed in one task, and a CSS animation's, owe nothing of it. Firefox 159:
-  # `cancelRaf:run retarget:run hideRaf:run removeRaf:run raf1 animateApi:ready cancelRaf:cancel retarget:cancel
-  # retarget:run retarget:start hideRaf:cancel plain:run plain:start removeRaf:cancel raf2`; Chrome 156 sends a `start`
-  # with each `run` and `removeSync:run start cancel` too. (The order of the update's events across elements is the
-  # sort's, which puts csim's cancels after the started transitions'.)
-  it "sends a pending transition's run before the callbacks, and its cancel by one after them" do
-    log = run(<<~HTML)
+  # never came. A transition made and removed in one task, and a CSS animation's, owe nothing of it. A cancel sorts at
+  # the owner and generation it had just before it was cancelled, its element's place in tree order (css-transitions-2
+  # §6.1) — one removed from the document after the rest — where it sorted after every started transition's events.
+  # Firefox 159, and csim: `cancelRaf:run retarget:run hideRaf:run removeRaf:run raf1 cancelRaf:cancel retarget:cancel
+  # retarget:run retarget:start hideRaf:cancel plain:run plain:start removeRaf:cancel raf2 retarget:end plain:end`;
+  # Chrome 156 sends a `start` with each `run`, `removeSync:run start cancel` too, and its update's events in another
+  # order.
+  def transition_cases(which)
+    run(<<~HTML)
       <!DOCTYPE html><meta charset="utf-8"><title>tc2</title>
       <style>
       .t { transition: opacity 100ms linear; opacity: 1 } .t.o { opacity: 0 } .t.o2 { opacity: 0.5 }
@@ -404,19 +407,25 @@ RSpec.describe 'the event loop of a page and its frames' do
           plain(d) { d.classList.add('o'); },
         };
         onload = () => setTimeout(() => {
-          for (const n of Object.keys(cases)) cases[n](mk(n));
+          for (const n of #{which.to_json}) cases[n](mk(n));
           requestAnimationFrame(() => { log.push('raf1'); requestAnimationFrame(() => log.push('raf2')); });
           setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 400);
         }, 50);
       </script>
     HTML
-    raf1, raf2 = log.index('raf1'), log.index('raf2')
-    expect(log[0...raf1]).to eq(%w[cancelRaf:run retarget:run hideRaf:run removeRaf:run])
-    expect(log[raf1 + 1...raf2]).to contain_exactly(
-      'cancelRaf:cancel', 'retarget:cancel', 'retarget:run', 'retarget:start', 'hideRaf:cancel', 'plain:run', 'plain:start',
-      'removeRaf:cancel'
+  end
+
+  it "sends a pending transition's run before the callbacks, and its cancel by one after them, in tree order" do
+    expect(transition_cases(%w[cancelRaf retarget hideRaf removeRaf removeSync animCancelRaf plain])).to eq(
+      %w[cancelRaf:run retarget:run hideRaf:run removeRaf:run raf1
+         cancelRaf:cancel retarget:cancel retarget:run retarget:start hideRaf:cancel plain:run plain:start removeRaf:cancel
+         raf2 retarget:end plain:end]
     )
-    expect(log.index('retarget:cancel')).to be < log.rindex('retarget:run')
-    expect(log.grep(/removeSync|animCancelRaf/)).to eq([])
+  end
+
+  # …a cancel before the started transition after it in tree order. Firefox 159 and csim:
+  # `hideRaf:run plain:run raf1 hideRaf:cancel plain:start raf2 plain:end`.
+  it "sorts a pending transition's cancel at its element's place" do
+    expect(transition_cases(%w[hideRaf plain cancelRaf])).to eq(%w[hideRaf:run plain:run raf1 hideRaf:cancel plain:start raf2 plain:end])
   end
 end
