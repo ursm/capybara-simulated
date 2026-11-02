@@ -156,6 +156,32 @@ RSpec.describe 'the virtual clock’s Date' do
     expect(got.map(&:abs).max).to be <= 2
   end
 
+  # …and the host's clock moved (`travel_to`) as its own: a frame's and a pop-up's `Date` read the travelled time as the
+  # page's does — they read the real one, a day behind the page — and the real one again once the host moves back, for
+  # a document the pop-up loads into the realm it keeps (`reuse_window_realm`), as for the page's next one.
+  it "reads the host's moved clock in a frame and a pop-up as the page does, and moves back with it" do
+    day = 86_400
+    allow(Time).to receive(:now).and_wrap_original {|now| now.call + day }
+    s = simulated_session(lambda {|env|
+      body = env['PATH_INFO'] == '/' ? '<iframe src="/f"></iframe>' : env['PATH_INFO']
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{body}"]]
+    })
+    s.visit '/'
+    poll_until { s.evaluate_script("document.querySelector('iframe').contentDocument?.body?.textContent == '/f'") }
+    s.execute_script("window.w = open('/p')")
+    poll_until { s.evaluate_script("w.document.body?.textContent == '/p'") }
+    skew = ->(win) { s.evaluate_script("#{win}.Date.now()") / 1000.0 - Process.clock_gettime(Process::CLOCK_REALTIME) }
+    ['window', 'frames[0]', 'w'].each do |win|
+      expect(skew.call(win)).to be_within(5).of(day), win
+    end
+    allow(Time).to receive(:now).and_call_original
+    s.execute_script("w.location.href = '/q'")
+    poll_until { s.evaluate_script("w.document.body?.textContent == '/q'") }
+    ['window', 'frames[0]', 'w'].each do |win|
+      expect(skew.call(win)).to be_within(5).of(0), win
+    end
+  end
+
   # …and on that one clock a frame's timer falls due: one its parent's task sets in it, at whatever offset in the
   # parent's step, runs its timeout after on the frame's `Date` and `performance.now()` alike, never before (HTML timer
   # initialization) — the frame scheduled on its own clock a step behind the parent's while reading the parent's, and a

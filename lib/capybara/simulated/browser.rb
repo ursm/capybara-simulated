@@ -7025,6 +7025,10 @@ module Capybara
         nil
       end
 
+      # How far the host's clock (`Time.now`, which a test's `travel_to` moves) stands off the real one, in milliseconds:
+      # what the agent's `Date` adds, told as a document loads (timers.rs `EventLoop::travel`).
+      def time_travel_offset_ms = ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
+
       # A document loaded, its client reported: the reserved client its navigation made of it let go of where the report
       # made it none — a document of an opaque origin (a CSP-sandboxed one) is no client — `clients.get` of it then none.
       def sw_document_loaded(realm_id) = discard_reserved_client(sw_client_id(realm_id))
@@ -9615,7 +9619,7 @@ module Capybara
         rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f) if record&.dig(:epoch)
         # …and the host's clock's offset from the real one, as its window has it (`travel_to`): what its `Date` and time
         # origin add, as the window's do.
-        rt.call('__csimSetTimeTravelOffsetMs', ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i)
+        rt.call('__csimSetTimeTravelOffsetMs', time_travel_offset_ms)
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
         rt.eval_void("globalThis.__dom.realmIdentify('workerHandle', #{handle.to_i});")
@@ -12910,7 +12914,7 @@ module Capybara
         opts = {
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
-          'timeTravelOffsetMs' => ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i,
+          'timeTravelOffsetMs' => time_travel_offset_ms,
           'clockEpochMs'       => @clock_epoch_ms,
           'url'                => page_url.to_s,
           'html'               => document_payload(html)

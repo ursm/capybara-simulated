@@ -117,6 +117,13 @@ pub(crate) struct EventLoop {
     // the clock and the script time whatever document comes after (agent_clock.rs `agentShift`): the time every message
     // that leaves the agent carries.
     pub(crate) agent_epoch: Option<f64>,
+    // The host's clock's offset from the real one: Ruby specs that `freeze_time(...)` / `travel_to(...)` shift
+    // `Time.now` server-side, and the in-process app's rendering, model factories and trend computations all observe the
+    // frozen value — so client-side date math (Discourse's `moment()` calls in admin-dashboard-tab.js → `last 30 days`
+    // window, freshly-typed `created_at`) would diverge from what the server just sent. The host tells it as it loads a
+    // document (agent_clock.rs `timeTravelSet`), and every realm of the agent's `Date` and time origin add it: a frame's
+    // and a pop-up's too, which read the real clock under a `travel_to` while the page read the travelled one.
+    pub(crate) travel: f64,
     seq: u64,
     steps: Vec<Vec<i32>>,
     // The nesting level of the timer task running now — none where the task running is none of a timer's (a platform

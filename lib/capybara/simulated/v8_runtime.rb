@@ -1581,6 +1581,8 @@ module Capybara
         sandbox: nil
       )
         realm.call('__csimUpdateLocation', url.to_s)
+        # (…the host's clock's offset as it stands now, a `travel_back` since the page loaded among it)
+        realm.call('__csimSetTimeTravelOffsetMs', @browser.time_travel_offset_ms)
         # (…a navigation's to about:blank its base URL the initiator's: HTML "navigate", the about base URL)
         realm.call('__csimSetAboutBaseURL', about_base.to_s) if !about_base.to_s.empty? && url.to_s.match?(/\Aabout:blank(?:[?#]|\z)/i)
         # (…its referrer the Referer its navigation sent, its policy its response's: HTML "create and initialize a

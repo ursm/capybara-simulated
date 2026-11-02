@@ -94,8 +94,8 @@ unsafe extern "C" {
     fn csim_watch_checkpoints(isolate: v8::UnsafeRawIsolatePtr, context: *const v8::Context);
 }
 
-// What a realm's clock reads beside its agent's (`RealmState::clock`): where it is held, its host's offset, and a
-// worker's catching up with its window.
+// What a realm's clock reads beside its agent's (`RealmState::clock`): where it is held, and a worker's catching up with
+// its window.
 #[derive(Default)]
 pub(crate) struct RealmClock {
     // The high resolution time last read, which no read goes back from — across a time origin backdated too.
@@ -103,13 +103,6 @@ pub(crate) struct RealmClock {
     // The time another agent's message, or a timer, brought the realm's clock on to (`clockAtLeast`): its high resolution
     // time reads no earlier until its own passes it.
     held_until: f64,
-    // The host's clock's offset from the real one: Ruby specs that `freeze_time(...)` / `travel_to(...)` shift
-    // `Time.now` server-side, and the in-process app's rendering, model factories and trend computations all observe the
-    // frozen value — so client-side date math (Discourse's `moment()` calls in admin-dashboard-tab.js → `last 30 days`
-    // window, freshly-typed `created_at`) would diverge from what the server just sent. Ruby pushes `Time.now -
-    // real_wall_clock_now` on each VM rebuild, which `Date` and the time origin `performance.timeOrigin` reads add
-    // (`timeTravelSet`).
-    travel: f64,
     // Whether the realm is a worker's (`clockWorkerRealm`), and the worker's catching up with its window.
     worker: bool,
     window: WorkerClock,
@@ -159,6 +152,7 @@ impl WorkerClock {
 // clock's state.
 struct Read<'a> {
     epoch: f64,
+    travel: f64,
     hr: f64,
     clock: &'a mut RealmClock,
 }
@@ -205,7 +199,7 @@ fn read(d: &mut Dom, cid: i32, open: bool) -> Read<'_> {
         time.open.get_or_insert(at);
     }
     let script = time.now(at);
-    let clock = d.arena.event_loop.clock;
+    let (clock, travel) = (d.arena.event_loop.clock, d.arena.event_loop.travel);
     let state = state_of(&mut d.arena, cid, script);
     let origin = state.time_origin.expect("state_of takes one");
     let t = origin.hr(clock, script);
@@ -214,7 +208,7 @@ fn read(d: &mut Dom, cid: i32, open: bool) -> Read<'_> {
     if open {
         realm.last_hr = hr;
     }
-    Read { epoch: origin.epoch, hr, clock: realm }
+    Read { epoch: origin.epoch, travel, hr, clock: realm }
 }
 
 // Realm `cid`'s state, its time origin taken where it has none: a realm of a window the host booted has its own
@@ -324,7 +318,7 @@ fn date_now_fast(_receiver: v8::Local<v8::Value>, options: *mut v8::fast_api::Fa
 }
 const DATE_NOW_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(date_now_fast as _, &NUMBER_FAST)];
 fn date_of(mut read: Read<'_>) -> f64 {
-    let origin = read.epoch + read.clock.travel;
+    let origin = read.epoch + read.travel;
     (origin + read.hr_now()).floor()
 }
 
@@ -383,7 +377,7 @@ fn spent_since(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn time_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let read = read(dom(scope), cid, false);
-    rv.set_double(read.epoch + read.clock.travel);
+    rv.set_double(read.epoch + read.travel);
 }
 
 // __dom.clockAtLeast(ms) — the calling realm's clock on to `ms` at least, where it stands before it — the time a message
@@ -475,8 +469,8 @@ fn clock_epoch_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         arena.enter(cid).time_origin = Some(origin);
     }
     let realm = &mut state_of(arena, cid, script).clock;
-    let RealmClock { travel, worker, .. } = *realm;
-    *realm = RealmClock { travel, worker, window: WorkerClock { anchor_shift: shift, ..WorkerClock::default() }, ..RealmClock::default() };
+    let worker = realm.worker;
+    *realm = RealmClock { worker, window: WorkerClock { anchor_shift: shift, ..WorkerClock::default() }, ..RealmClock::default() };
 }
 
 // __dom.clockWorkerRealm() — the calling realm is a worker's, its scope installed (workers.js): its clock reads its
@@ -488,13 +482,11 @@ fn clock_worker_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     state_of(&mut d.arena, cid, script).clock.worker = true;
 }
 
-// __dom.timeTravelSet(ms) — the host's clock stands `ms` off the real one (`RealmClock::travel`).
+// __dom.timeTravelSet(ms) — the host's clock stands `ms` off the real one, which every realm of the agent's `Date` and
+// time origin add (`EventLoop::travel`).
 fn time_travel_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let ms = args.get(0).number_value(scope).filter(|t| t.is_finite()).unwrap_or(0.0);
-    let cid = realm_id(scope, &args);
-    let d = dom(scope);
-    let script = d.agent_time.now(Instant::now());
-    state_of(&mut d.arena, cid, script).clock.travel = ms;
+    dom(scope).arena.event_loop.travel = ms;
 }
 
 // __dom.agentShift() -> how far the agent's `Date` scale stands ahead of the calling realm's `Date` (`agent_shift_of`).
