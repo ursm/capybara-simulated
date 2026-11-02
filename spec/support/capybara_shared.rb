@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require 'fileutils'
 require 'timeout'
 require 'tmpdir'
 require 'yaml'
@@ -33,9 +32,6 @@ require_relative 'session_teardown'
 # nest its describe under a caller-owned group. On a capybara upgrade, diff
 # run_specs against this body.
 module CapybaraShared
-  # Where each example's own save path is made (`./save_path_tmp`, the spec helper's).
-  SAVE_ROOT = Capybara.save_path
-
   # Capabilities our driver doesn't provide, skipped via the gem's own
   # `capybara_skip` metadata filter (the shard files pass this to their
   # top-level describe).
@@ -186,17 +182,21 @@ RSpec.configure do |config|
   # puts everything back to defaults; without it we see false positives
   # like text-visibility tests failing because a prior spec turned
   # `ignore_hidden_elements` off and never turned it back on.
-  # …and each example its own save path, which Capybara's spec helper shares as `./save_path_tmp`: a download lands there
+  # …and each example in a directory of its own, as its save path and its working directory, removed after it: the spec
+  # helper shares `./save_path_tmp` among every process, and the working directory too — a download lands in the first
   # under a fixed name (`#click_link can download a file` expects `download.csv` absent, then present, then deletes it),
-  # and the same example running in another process at once found the other's file there.
+  # `#save_page` and `#save_screenshot` with no save path write `capybara-*.html` into the second and remove what they
+  # find there, and the same example running in another process at once found the other's files. (The working directory
+  # is the process's own, and a process runs one example at a time; the driver reads nothing relative to it.)
   config.around(:each, :capybara_skip) do |example|
     Capybara::SpecHelper.reset!
-    FileUtils.mkdir_p(CapybaraShared::SAVE_ROOT)
-    Dir.mktmpdir('example-', CapybaraShared::SAVE_ROOT) do |dir|
+    saved = Capybara.save_path
+    Dir.mktmpdir('csim-capybara-') do |dir|
       Capybara.save_path = dir
-      example.run
+      Dir.chdir(dir) { example.run }
     end
   ensure
+    Capybara.save_path = saved
     Capybara.app = nil
     Capybara.default_selector = :css
   end
