@@ -169,6 +169,23 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
     expect(got[1]).to be_between(2000, 2500)
   end
 
+  # …once: the time the page waited for it with its clock held is that same time, which it does not add again — a 0 ms
+  # timer set after the answer read 1001 in some runs and 0 in others (Chrome: 1).
+  it 'lands a spinning answer once, the same every run' do
+    s = controlled_session
+    s.execute_script(<<~JS)
+      window.got = null;
+      const t0 = performance.now();
+      fetch('/d.txt?spin=1000').then((r) => r.text()).then(() => {
+        const t1 = performance.now();
+        setTimeout(() => { got = [t1 - t0, performance.now() - t1]; }, 0);
+      });
+    JS
+    got = poll_until(timeout: 20) { s.evaluate_script('got') }
+    expect(got[0]).to be_between(1000, 1200)
+    expect(got[1]).to be_between(0, 20)
+  end
+
   it "resolves a dedicated worker's XHR when the service worker answers, before its timeout" do
     s = controlled_session
     s.execute_script("window.log = []; window.w = new Worker('/w.js'); w.onmessage = (e) => log.push(e.data)")

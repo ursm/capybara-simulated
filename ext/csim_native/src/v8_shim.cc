@@ -1,10 +1,12 @@
 // V8 APIs rusty_v8 does not bind, for node_handle.rs, script.rs and legacy.rs (build.rs compiles this against the v8
 // crate's headers).
 
+#include "v8-context.h"
 #include "v8-embedder-heap.h"
 #include "v8-function.h"
 #include "v8-isolate.h"
 #include "v8-local-handle.h"
+#include "v8-microtask-queue.h"
 #include "v8-object.h"
 #include "v8-proxy.h"
 #include "v8-template.h"
@@ -93,4 +95,25 @@ extern "C" void csim_install_roots_handler(v8::Isolate* isolate, uint16_t tag) {
 // current scope, an indirect one as `csim_bound_target`'s.
 extern "C" const v8::Context* csim_incumbent_context(v8::Isolate* isolate) {
   return *isolate->GetIncumbentContext();
+}
+
+// What an agent's clock is told as a microtask checkpoint of its isolate completes (agent_clock.rs).
+extern "C" void csim_agent_checkpoint_done(v8::Isolate* isolate);
+
+namespace {
+void checkpoint_done(v8::Isolate* isolate, void*) { csim_agent_checkpoint_done(isolate); }
+}  // namespace
+
+// Watch the checkpoints of `context`'s microtask queue — its own, or the isolate's default one — completing: once a queue
+// (V8 keeps no duplicate of a callback and its data).
+extern "C" void csim_watch_checkpoints(v8::Isolate* isolate, const v8::Context* context) {
+  auto ctx = *reinterpret_cast<const v8::Local<v8::Context>*>(&context);
+  v8::MicrotaskQueue* queue = ctx->GetMicrotaskQueue();
+  if (queue != nullptr) {
+    queue->RemoveMicrotasksCompletedCallback(checkpoint_done, nullptr);
+    queue->AddMicrotasksCompletedCallback(checkpoint_done, nullptr);
+  } else {
+    isolate->RemoveMicrotasksCompletedCallback(checkpoint_done, nullptr);
+    isolate->AddMicrotasksCompletedCallback(checkpoint_done, nullptr);
+  }
 }

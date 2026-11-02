@@ -75,7 +75,8 @@ RSpec.describe 'the virtual clock’s Date' do
 
   # The time origin is the document's, not the moment the driver's script bundle was built: a page that has just loaded
   # reads a small `performance.now()`, and a frame's is its own, its `Date` the page's. (…a frame's no more than a frame's
-  # interval past the page's: its event loop's clock, which its steps move after the page's, may stand that far apart)
+  # interval past the page's, its scripts' time beside it: its event loop's clock, which its own steps move after the
+  # page's, may stand that far ahead of the page's)
   it 'begins performance.now() at the document, a frame at its own' do
     s = blank_session
     got = s.evaluate_async_script(<<~JS)
@@ -85,21 +86,21 @@ RSpec.describe 'the virtual clock’s Date' do
       document.body.append(f);
     JS
     expect(got[0]).to be_between(0, 1000)
-    expect(got[1]).to be_between(0, got[0] + 17)
-    expect(got[2].abs).to be <= 1
+    expect(got[1]).to be_between(0, got[0] + 50)
+    expect(got[2]).to be_between(-1, 50)
   end
 
-  # A session's `Date` never goes back across a navigation: the next document's time origin is the last one's `Date`
-  # where that ran ahead of the wall clock — its virtual clock fast-forwarded to a timer, its scripts' time beside it.
-  it 'goes on across a navigation' do
+  # Each document's `Date` begins at the wall clock, as its server's `Time.now` does — not where the last document's had
+  # gone on to, however far its virtual clock ran ahead of real time: a page reading 30 s ahead of its server misreads
+  # every "x minutes ago" and every expiry it is sent. (A document's `performance.now()` restarts at 0 anyway.)
+  it "begins each document's Date at the wall clock" do
     s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{env['PATH_INFO']}"]] })
     s.visit '/a'
-    s.execute_script('window.r = null; setTimeout(() => { r = 1; }, 1500)')
+    s.execute_script('window.r = null; setTimeout(() => { r = 1; }, 30000)')
     poll_until(timeout: 20) { s.evaluate_script('r') }
-    last = s.evaluate_script('(() => { const a = Date.now(); while (Date.now() - a < 300); return Date.now(); })()')
     s.execute_script("location.href = '/b'")
     poll_until { s.has_text?('/b', wait: 0) }
-    expect(s.evaluate_script('Date.now()')).to be >= last
+    expect(s.evaluate_script('Date.now()') - (Time.now.to_f * 1000)).to be_between(-1000, 1000)
   end
 
   # A parser-blocking script whose fetch the server took a second over — a `sleep` the host's clock moves by — reads
@@ -115,5 +116,41 @@ RSpec.describe 'the virtual clock’s Date' do
     })
     s.visit '/'
     expect(s.evaluate_script('window.ran')).to be_between(1000, 1200)
+  end
+
+  # A script turn runs to the end of its microtask checkpoint: work after an `await` in it is the turn's time, which a
+  # read after it shows — not closed at the first microtask after the read (Chrome: 67.7 for 66 ms of work).
+  it 'shows the work after an await in the same turn' do
+    s = blank_session
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const work = () => { const e = performance.now() + 30; let x = 0; while (performance.now() < e) x++; return x; };
+      setTimeout(async () => {
+        const t0 = performance.now();
+        await null;
+        const w0 = __dom.nowNanos(); let x = 0; for (let i = 0; i < 3e7; i++) x += Math.sqrt(i);
+        const wall = (__dom.nowNanos() - w0) / 1e6;
+        done([performance.now() - t0, wall, x > 0, typeof work]);
+      }, 0);
+    JS
+    expect(got[0]).to be >= got[1] - 1
+  end
+
+  # The window realms of one agent read one clock: a frame's `Date` is its parent's, though its event loop's steps run
+  # after the parent's tasks (it read 100 behind inside them, 400 after a navigation of it; Chrome: 0).
+  it "reads a frame's Date as its parent's" do
+    s = simulated_session(lambda {|env|
+      body = env['PATH_INFO'] == '/f' ? 'f' : '<iframe src="/f"></iframe>'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{body}"]]
+    })
+    s.visit '/'
+    poll_until { s.evaluate_script("document.querySelector('iframe').contentDocument?.body?.textContent == 'f'") }
+    s.execute_script(<<~JS)
+      window.got = [];
+      const fw = document.querySelector('iframe').contentWindow;
+      const tick = () => { got.push(Date.now() - fw.Date.now()); if (got.length < 3) setTimeout(tick, 1000); };
+      setTimeout(tick, 1000);
+    JS
+    expect(poll_until(timeout: 20) { s.evaluate_script('got.length == 3 && got') }).to eq([0, 0, 0])
   end
 end

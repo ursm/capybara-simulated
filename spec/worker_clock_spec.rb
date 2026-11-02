@@ -189,4 +189,82 @@ RSpec.describe 'Worker clock' do
     }
     expect(r).to be_between(1000, 1200)
   end
+
+  # Every message from another agent lands no earlier than its sender's time as it sent it, whatever carries it — a
+  # transferred MessagePort, a BroadcastChannel, a SharedWorker's port, as a worker's own postMessage: a worker spinning
+  # 500 ms before posting on a port read 0 ms on its page; a SharedWorker's 101 (Chrome: 504 each).
+  {
+    'a transferred MessagePort' => [
+      "onmessage = () => { const ch = new MessageChannel(); postMessage('port', [ch.port2]); spin(); ch.port1.postMessage('done'); };",
+      "w.onmessage = (e) => { e.ports[0].onmessage = () => { window.took = performance.now() - t0; }; };"
+    ],
+    'a BroadcastChannel' => [
+      "onmessage = () => { const bc = new BroadcastChannel('c'); spin(); bc.postMessage('done'); };",
+      "new BroadcastChannel('c').onmessage = () => { window.took = performance.now() - t0; };"
+    ],
+    "a dedicated worker's postMessage" => [
+      "onmessage = () => { spin(); postMessage('done'); };",
+      "w.onmessage = () => { window.took = performance.now() - t0; };"
+    ]
+  }.each do |route, (worker_js, listen)|
+    it "lands a message on #{route} at its sender's time" do
+      src = "const spin = () => { const a = Date.now(); while (Date.now() - a < 500); }; #{worker_js}"
+      html = <<~HTML
+        <!doctype html><meta charset="utf-8"><body><script>
+        window.took = null;
+        const w = new Worker(URL.createObjectURL(new Blob([#{src.to_json}], {type: 'text/javascript'})));
+        let t0 = 0;
+        #{listen}
+        setTimeout(() => { t0 = performance.now(); w.postMessage('go'); }, 10);
+        </script></body>
+      HTML
+      session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+      session.visit('/')
+      expect(poll_until(timeout: 20) { session.evaluate_script('window.took') }).to be_between(500, 650)
+    end
+  end
+
+  it "lands a SharedWorker's message at its time" do
+    src = "onconnect = (e) => { const p = e.ports[0]; p.onmessage = () => { const a = Date.now(); while (Date.now() - a < 500); p.postMessage('done'); }; };"
+    html = <<~HTML
+      <!doctype html><meta charset="utf-8"><body><script>
+      window.took = null;
+      const w = new SharedWorker(URL.createObjectURL(new Blob([#{src.to_json}], {type: 'text/javascript'})));
+      let t0 = 0;
+      w.port.onmessage = () => { window.took = performance.now() - t0; };
+      setTimeout(() => { t0 = performance.now(); w.port.postMessage('go'); }, 10);
+      </script></body>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    session.visit('/')
+    expect(poll_until(timeout: 20) { session.evaluate_script('window.took') }).to be_between(500, 650)
+  end
+
+  # A worker busy on its own while the window waits on nothing of it is none of the window's time, however the host
+  # waits for the worker's ticks: a page's `setTimeout(…, 3000)` beside a worker spinning 20 ms of every 50 read 3605.
+  it "keeps a busy worker's ticks out of the window's time" do
+    session = visit_page(<<~JS)
+      postMessage('ready');
+      setInterval(() => { const e = Date.now() + 20; while (Date.now() < e); }, 50);
+    JS
+    session.execute_script('window.r = null; const t0 = performance.now(); setTimeout(() => { r = performance.now() - t0; }, 3000);')
+    r = poll_until(timeout: 30) {
+      sleep 0.1
+      session.evaluate_script('r')
+    }
+    expect(r).to be_between(3000, 3100)
+  end
+
+  # A worker's `Date` is its window's host clock's: a test's `travel_to` moves it as it moves the page's, and its time
+  # origin with it.
+  it "reads the host's travelled clock" do
+    later = Time.now + 86_400 * 400
+    allow(Time).to receive(:now).and_return(later)
+    session = visit_page("postMessage([Date.now(), performance.timeOrigin, new Date().getFullYear()]);")
+    worker = session.evaluate_script('window.log[0][0]')
+    page = session.evaluate_script('[Date.now(), performance.timeOrigin]')
+    expect(worker[2]).to eq(later.year)
+    expect((worker[0] - page[0]).abs).to be < 1000
+    expect((worker[1] - page[1]).abs).to be < 1000
+  end
 end

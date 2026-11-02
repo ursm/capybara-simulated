@@ -489,14 +489,11 @@ module Capybara
           r = @browser.running_event_loop { stepping { walks_guarded { ctx.call('__runLoopStep', (cut || left), max_iter.to_i, !!yield_on_gen) } } }
           r = { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
           @clock = r['now'].to_f if r['now']
+          @clock_date = r['date'].to_f if r['date']
           out = out ? out.merge(r, 'fired' => out['fired'].to_i + r['fired'].to_i, 'dirtied' => out['dirtied'] || r['dirtied']) : r
           break unless cut || r['asked']
 
-          ran       = @browser.run_workers_due
-          waited   += ran
-          # (…the real time the window waited on them, its clock held, which its `Date` shows as its scripts' own:
-          # agent_clock.rs `agentRan`)
-          ctx.call('__csimAgentRan', ran * 1000) if ran.positive?
+          waited   += @browser.run_workers_due
           left     -= r['asked'] ? clock - began : cut
           max_iter -= r['fired'].to_i
           break if left <= 0 || max_iter <= 0 || (yield_on_gen && r['dirtied'])
@@ -525,6 +522,8 @@ module Capybara
       # The window's virtual clock as its last event-loop step left it (ms), which a worker's clock follows — read from
       # the worker's own thread (Browser#run_worker).
       def clock = @clock || 0.0
+      # …and what its `Date` read then, before any offset — which a worker catching up with it takes (Browser#run_worker).
+      def clock_date = @clock_date || 0.0
 
       # Whether the page's realms are cross-origin isolated (its top-level document's COOP + COEP — `init_realm`), which
       # the browser sets as a document commits, ahead of the realm it builds for it.
@@ -2216,7 +2215,7 @@ module Capybara
         # (…but no hijackable fetch: a held response is delivered to a window's realm alone, so a worker's XHR goes the
         # way every request did before one could be held — answered at once)
         c.eval_void('delete globalThis.__csim_rackFetchAsync;')
-        c.attach('__csim_workerPostMessage', ->(data, at = nil) { post_back.call(data, at); nil })
+        c.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
         # An exception the worker's script left unhandled, reported out to its Worker object (workers.js).
         c.attach('__csim_workerReportError', ->(message, filename, lineno, colno) { sw_hooks[:report_error]&.call(message, filename, lineno, colno); nil })
         # …its WebSockets, whose events are its own inbox's (Browser#run_worker) — `__csim_wsSend` is the window's as it is

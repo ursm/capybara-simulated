@@ -2953,7 +2953,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::intersection_observers::install(scope, ns, context_id);
     crate::scroll_events::install(scope, ns, context_id);
     crate::timers::install(scope, ns, context_id);
-    crate::agent_clock::install(scope, ns, context_id);
+    crate::agent_clock::install(scope, ns, context_id, context);
     crate::ce_reactions::install(scope, ns, context_id);
     crate::scroll_boxes::install(scope, ns, context_id);
     crate::form_entries::install(scope, ns, context_id);

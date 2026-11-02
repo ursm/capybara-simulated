@@ -3303,11 +3303,7 @@ module Capybara
       # clock) and a genuinely stuck fetch can't wedge the drain. Reports the REAL nearest timer —
       # holding the clock doesn't hide a parked timer, we simply haven't advanced to it yet.
       private def hold_for_sw_fetch(turns)
-        began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         park_worker_reply(hold_deadline(ClockHolds::FETCH))
-        # (…the real time the page waited, its clock held, on the worker's work — a fetch event spinning on `Date.now()` —
-        # which its `Date` shows as its scripts' own: agent_clock.rs `agentRan`)
-        @runtime.call('__csimAgentRan', (Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000)
         reply_ready = @worker_outbox_head || !@worker_outbox.empty?
         # A delivered reply refreshes the budget so the NEXT fetch in a sequence waits afresh instead
         # of inheriting a spent deadline (which would abandon it to a premature timeout).
@@ -5150,8 +5146,12 @@ module Capybara
         # starts from, and at which it is due: a booting worker runs its script before the window steps past it)
         record[:origin]        = at ? at.to_f : @runtime.clock
         # (…and its time origin, what its `Date` reads as it is made: its creator's at that time — `new Worker()`'s, else
-        # the window's — and when, for the time its start takes: agent_clock.rs)
-        record[:epoch]         = epoch_at ? epoch_at.to_f : (@clock_epoch_ms + record[:origin] if @clock_epoch_ms)
+        # the window's as its last step left it, its scripts' time among it — and when, for the time its start takes:
+        # agent_clock.rs)
+        record[:epoch]         = if epoch_at then epoch_at.to_f
+                                 elsif @runtime.clock_date.positive? then @runtime.clock_date + record[:origin] - @runtime.clock
+                                 elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin]
+                                 end
         record[:made]          = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         record[:next_timer_at] = record[:origin]
         # (…and its type, which the destination of the imports the Update probes is of)
@@ -5703,14 +5703,6 @@ module Capybara
 
         @runtime.realm_direct_call(0, '__csimClockAtLeast', at)
         true
-      end
-
-      # What the page's `Date` reads now, before any time-travel offset (timers.js `__csimClockNow`) — nil before the first
-      # page, or where its realm cannot answer.
-      private def last_page_clock
-        @clock_epoch_ms && @runtime.call('__csimClockNow')&.to_f
-      rescue StandardError
-        nil
       end
 
       # A controlled client's fetch → the controlling SW's `fetch` event. Counted as a fetch
@@ -9388,13 +9380,15 @@ module Capybara
           next if stopping.call
           # (…a worker with nothing to run its clock moved all the same, no step of its loop: what its `Date` and
           # `performance.now()` read next — a message's handler's — is the window's time, not the time it last ran at)
-          # (…and the script time it ran before then in the window's time too: timers.js `__csimCaughtUp`)
+          # (…to the window's time then, where it is the window's last step's — what a message it posts carries from there:
+          # timers.js `__csimCaughtUp`)
+          date = @runtime && to == @runtime.clock ? @runtime.clock_date : 0
           if rt.call('__nextTimerDelay').to_f < 0 && !(Native.agent_notices_pending(@session_partition) && rt.call('__csimAgentsPending'))
-            rt.call('__csimCaughtUp', step, true) if step.positive?
+            rt.call('__csimCaughtUp', step, true, date) if step.positive? || date.positive?
             next
           end
 
-          rt.call('__csimCaughtUp', step, false) if step.positive?
+          rt.call('__csimCaughtUp', step, false, date) if step.positive? || date.positive?
           rt.drain_microtasks
           rt.drain_timers(step)
         end
@@ -9404,8 +9398,7 @@ module Capybara
         # The worker SCRIPT is text; the Rack-fetched body arrives
         # BINARY-tagged (see `RuntimeShared.utf8_text`).
         body = RuntimeShared.utf8_text(body) if body
-        # (…`at` its clock as it posted, which the message reaches its owner no earlier than: workers.js `deliverWorkerEvent`)
-        post_back = ->(data, at = nil) { outbox << {handle: handle, kind: 'message', data: data.to_s, at: at.to_f} }
+        post_back = ->(data) { outbox << {handle: handle, kind: 'message', data: data.to_s} }
         # A worker's BroadcastChannel post rides the same thread-safe outbox; the main thread fans
         # it out to the main + frame realms + OTHER workers (see deliver_worker_messages).
         broadcast_out = ->(name, data, origin) { outbox << {handle: handle, kind: 'broadcast', name: name.to_s, data: data, origin: origin} }
@@ -9523,6 +9516,9 @@ module Capybara
         # Its time origin, the time it was made at, and the real time its start has taken since — its script fetched, its
         # isolate made — which its high resolution time begins at (agent_clock.rs).
         rt.call('__csimSetClockEpoch', record[:epoch], (Process.clock_gettime(Process::CLOCK_MONOTONIC) - record[:made]) * 1000) if record&.dig(:epoch)
+        # …and the host's clock's offset from the real one, as its window has it (`travel_to`): what its `Date` and time
+        # origin add, as the window's do.
+        rt.call('__csimSetTimeTravelOffsetMs', ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i)
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
         rt.eval_void("globalThis.__dom.realmIdentify('workerHandle', #{handle.to_i});")
@@ -12773,11 +12769,11 @@ module Capybara
         commit_coop(about_blank ? 'unsafe-none' : opener_policy, opaque_origin, coop_switch) unless initial
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
-        # (…its time origin now, as `Date` reads it — the wall clock's, or where the last page's `Date` had gone on past
-        # that, its: a session's `Date` never goes back, however far its virtual clocks ran ahead of real time —
-        # agent_clock.rs)
-        wall = Process.clock_gettime(Process::CLOCK_REALTIME, :float_millisecond)
-        @clock_epoch_ms = [wall, last_page_clock].compact.max
+        # (…its time origin now, as `Date` reads it: the wall clock's, as its server's `Time.now` is — not where the last
+        # page's `Date` had gone on to, however far its virtual clock ran ahead of real time: a page's `Date` 30 s ahead of
+        # its server's misreads every "x minutes ago", every expiry it is sent. A document's own clock is the one that
+        # never goes back, `performance.now()` its own from 0 — agent_clock.rs)
+        @clock_epoch_ms = Process.clock_gettime(Process::CLOCK_REALTIME, :float_millisecond)
         # (…a new environment, as every document is, though its realm is the last one's: V8Runtime#init_page_realm)
         @runtime.rebuild_ctx(client_id: client_id)
         # (…and what the caller's new page holds before its document loads: a blob: document's copy of its own bytes)
