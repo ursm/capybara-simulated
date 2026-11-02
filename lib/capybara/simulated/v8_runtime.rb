@@ -524,12 +524,10 @@ module Capybara
       # the worker's own thread (Browser#run_worker).
       def clock = @clock || 0.0
       # …and what its `Date` read then, before any offset — its own time, which a worker catching up with it takes, and
-      # where it was held (timers.js `clockAtLeast`), which the worker's is held at with it (Browser#run_worker).
+      # where it was held (timers.js `clockAtLeast`), which the worker's is held at with it (Browser#run_worker) — on the
+      # agent's `Date` scale, the one every message's time is on (timers.js `agentShift`).
       def clock_date = @clock_date || 0.0
       def clock_held = @clock_held || 0.0
-      # …and the number of the page's document those are of, which each new one's moves on (`rebuild_ctx`): its `Date`
-      # begins again at the wall clock (Browser#run_worker's `anew`).
-      def document_number = @document_number.to_i
 
       # Whether the page's realms are cross-origin isolated (its top-level document's COOP + COEP — `init_realm`), which
       # the browser sets as a document commits, ahead of the realm it builds for it.
@@ -826,7 +824,6 @@ module Capybara
         # workers following it outlive it on: `@clock` is the engine's from here, read before any step — a worker's clock,
         # which followed a clock read as 0 until then, went back with it and jumped on by the whole session's time)
         @clock_date = @clock_held = nil
-        @document_number = document_number + 1
         # Produce any queued bytecode-cache blobs while every queued target
         # (frame realms included) is still alive — a job queued by the last
         # activity of a test (e.g. a timer-fired dynamic import in a lazy

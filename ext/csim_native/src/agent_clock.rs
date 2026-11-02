@@ -58,6 +58,17 @@ pub(crate) struct TimeOrigin {
 }
 
 impl TimeOrigin {
+    // The agent's `Date` scale (`EventLoop::agent_epoch`), the first origin taken in the agent's: its `Date` at clock 0,
+    // no script time.
+    fn agent_epoch(&self) -> f64 {
+        self.epoch - self.clock - self.script
+    }
+    // …and how far it stands ahead of this origin's `Date` at any time: none for the first document's, and for one made
+    // after a fast-forward — a next page's, whose `Date` began again at the wall clock — the distance the virtual clock ran
+    // ahead of real time.
+    fn agent_shift(&self, agent_epoch: f64) -> f64 {
+        agent_epoch - self.agent_epoch()
+    }
     // The event loop's clock as the origin was taken.
     pub(crate) fn clock(&self) -> f64 {
         self.clock
@@ -91,6 +102,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "clockEpochSet", clock_epoch_set, context_id);
     register(scope, ns, "agentWait", agent_wait, context_id);
     register(scope, ns, "agentIdle", agent_idle, context_id);
+    register(scope, ns, "agentShift", agent_shift, context_id);
     // SAFETY: a live context's handle, which the shim reads its microtask queue from.
     unsafe { csim_watch_checkpoints(scope.as_raw_isolate_ptr(), &*context) };
     if context_id != 0 {
@@ -139,8 +151,21 @@ fn origin_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, script: f64) -> TimeOri
         None => system_now(),
     };
     let origin = TimeOrigin { epoch: now, clock, script };
+    arena.event_loop.agent_epoch.get_or_insert(origin.agent_epoch());
     arena.enter(cid).time_origin = Some(origin);
     origin
+}
+
+// __dom.agentShift() -> how far the agent's `Date` scale stands ahead of the calling realm's `Date` (`TimeOrigin::
+// agent_shift`): a window's messages leave on the agent's scale and come in from it (timers.js `atItsTime`), so a worker
+// that outlives the document it was made by — or one a pop-up made, whose opener navigates — reads them all on one
+// scale, the agent's, whatever document posted them.
+fn agent_shift(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let script = dom(scope).agent_time.now(Instant::now());
+    let origin = origin_of(scope, cid, script);
+    let agent_epoch = dom(scope).arena.event_loop.agent_epoch.unwrap_or_else(|| origin.agent_epoch());
+    rv.set_double(origin.agent_shift(agent_epoch));
 }
 
 // __dom.hrNow() -> the calling realm's high resolution time: milliseconds since its time origin, its virtual clock and
@@ -179,7 +204,10 @@ fn clock_epoch_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let cid = realm_id(scope, &args);
     let script = dom(scope).agent_time.now(Instant::now());
     let clock = dom(scope).arena.event_loop.clock;
-    dom(scope).arena.enter(cid).time_origin = Some(TimeOrigin { epoch, clock, script: script - since });
+    let origin = TimeOrigin { epoch, clock, script: script - since };
+    let arena = &mut dom(scope).arena;
+    arena.event_loop.agent_epoch.get_or_insert(origin.agent_epoch());
+    arena.enter(cid).time_origin = Some(origin);
 }
 
 // __dom.agentWait(begins, moved) — a script of the calling agent's begins to wait inside a synchronous host call (true),

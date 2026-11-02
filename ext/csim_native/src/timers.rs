@@ -101,6 +101,10 @@ impl Source {
 #[derive(Default)]
 pub(crate) struct EventLoop {
     pub(crate) clock: f64,
+    // The agent's `Date` scale — what its first document's `Date` read at clock 0 and no script time, which runs on with
+    // the clock and the script time whatever document comes after (agent_clock.rs `agentShift`): the time every message
+    // that leaves the agent carries.
+    pub(crate) agent_epoch: Option<f64>,
     seq: u64,
     steps: Vec<Vec<i32>>,
     // The nesting level of the timer task running now — none where the task running is none of a timer's (a platform

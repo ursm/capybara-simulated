@@ -328,6 +328,21 @@ RSpec.describe 'CSS animation and transition events' do
     expect(drain(s, 2)).to eq(['grow'])
   end
 
+  # A transition made and cancelled before any rendering update looked at it owes nothing: css-transitions-2 §5 sends
+  # events for where a transition's phase moved since the previous frame, and it was idle then and is idle now. Firefox
+  # 159: none; Chrome 156: `transitionrun transitionstart transitioncancel`. (One a frame callback cancels has been
+  # looked at, its `transitionrun` sent, and owes its `transitioncancel`: WPT css-transitions/transitioncancel-002.)
+  it 'fires nothing for a transition made and cancelled before a rendering update' do
+    s = page('<div id="a" style="transition: flex-grow 100ms linear"></div>')
+    watch(s)
+    s.execute_script(<<~JS)
+      const a = document.getElementById('a');
+      a.className = 'to'; getComputedStyle(a).flexGrow;
+      a.style.transition = 'none'; getComputedStyle(a).flexGrow;
+    JS
+    expect(drain(s, 4).grep(/^transition/)).to eq([])
+  end
+
   # The event interfaces themselves: readonly attributes, a required `type`, and the WebIDL
   # conversions (`null` is the string "null"; a non-finite `elapsedTime` is a TypeError).
   it 'constructs the event interfaces as WebIDL says' do

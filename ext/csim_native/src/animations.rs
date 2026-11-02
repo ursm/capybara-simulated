@@ -1233,8 +1233,16 @@ impl Animations {
                 self.update_finished_state(id, false, false);
             }
         }
+        // (…and a CSS transition still pending too, in the phase its hold time puts it: its `transitionrun` this update's,
+        // so one an animation frame callback of it then takes out of `transition-property` owes its `transitioncancel` —
+        // WPT css-transitions/transitioncancel-002 — where one made and cancelled before any update owes nothing, its
+        // phase never looked at — Firefox; css-transitions-2 §5 events by "the phase … since the previous frame". Not a
+        // CSS animation's, whose `animationstart` waits for its start at the commit, as Chrome's and Firefox's do.)
         for &id in &ids {
-            if self.animations.get(&id).is_some_and(|a| a.css.is_some() && a.pending.is_none()) {
+            let owes = self.animations.get(&id).is_some_and(|a| {
+                a.css.as_ref().is_some_and(|c| a.pending.is_none() || matches!(c.kind, crate::css::CssKind::Transition(_)))
+            });
+            if owes {
                 self.queue_css_events(id, false);
             }
         }

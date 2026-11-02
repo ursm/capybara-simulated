@@ -5035,7 +5035,7 @@ module Capybara
       # (…`isolated` whether the context that creates it is cross-origin isolated, which a dedicated or shared one is too:
       # its realm's own — a window's of a browsing context group its page left keeping its group's)
       def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil,
-                       sw_body: nil, sw_imports: nil, site: nil, isolated: false, at: nil, epoch_at: nil)
+                       sw_body: nil, sw_imports: nil, site: nil, isolated: false, at: nil, epoch_at: nil, shift: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -5151,8 +5151,12 @@ module Capybara
         # (…and its time origin, what its `Date` reads as it is made: its creator's at that time — `new Worker()`'s, else
         # the window's as its last step left it, its scripts' time among it, where it was held at least — and when, for the
         # time its start takes: agent_clock.rs)
+        # (…and how far the agent's `Date` scale, which every message's time is on, stands ahead of its maker's `Date` —
+        # its creator's document's, else the page's: what it converts the times it is told and tells by, timers.js
+        # `anchorShift`)
+        record[:shift]         = shift ? shift.to_f : @runtime.call('__csimAgentShift').to_f
         record[:epoch]         = if epoch_at then epoch_at.to_f
-                                 elsif @runtime.clock_date.positive? then [@runtime.clock_date + record[:origin] - @runtime.clock, @runtime.clock_held].max
+                                 elsif @runtime.clock_date.positive? then [@runtime.clock_date + record[:origin] - @runtime.clock, @runtime.clock_held].max - record[:shift]
                                  elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin] - @clock_epoch_at.to_f
                                  end
         record[:next_timer_at] = record[:origin]
@@ -5763,7 +5767,7 @@ module Capybara
       # …the host's dispatch of it, `follower` the window whose script waits.
       def sw_dispatch_sync_fetch(handle, req_json, realm_key, follower, timeout_ms)
         w = @workers[handle.to_i]
-        return nil if !w || sw_redundant?(handle) || !sw_live?(handle) || !sw_activated_in_place(handle, w)
+        return nil if !w || sw_redundant?(handle) || !sw_live?(handle) || !sw_activated_in_place(handle, w, follower)
 
         sw_direct_reply(handle, sw_fetch_request(req_json.to_s), realm_key.to_i, follower:, timeout_ms:)
       end
@@ -5773,25 +5777,39 @@ module Capybara
       # of a script on the stack may wait for), as long as it is at work. A client its `clients.claim()` controls is
       # controlled while it is activating, and the claim and the phase reach the window in separate drains where the
       # worker's thread is slow — a step between them, and a sync XHR of the page's went to the network, its worker
-      # bypassed. One whose `activate` waits on the window (stalled: no message, no timer of its own) is given up on, the
-      # request the network's as before: the window's thread may hold what it waits for.
-      private def sw_activated_in_place(handle, w)
+      # bypassed. The worker's time runs on for it meanwhile, to its next timer at once (`:answering`, as for an answer
+      # awaited in place), and the window's clock follows by as much (`follower`). One whose `activate` waits on the window
+      # is given up on — stalled (no message, no timer of its own), or SW_ACTIVATION_IN_PLACE_MS of its time gone (one
+      # polling the window with a timer, whose time then runs on in a few ms of real time) — the request the network's as
+      # before: the window's thread may hold what it waits for.
+      private def sw_activated_in_place(handle, w, follower = nil)
         return true if Native.sw_worker_activated(@sw_partition, handle.to_i)
 
         w[:awaited] = w[:awaited].to_i + 1
-        deadline    = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
-        stalled     = 0
-        until w[:activate_done]
-          break unless w[:thread]&.alive? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
-          stalled = worker_stalled?(w) ? stalled + 1 : 0
-          break if stalled >= 2
+        w[:answering][:activation] = true
+        began = w[:now].to_f
+        begin
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+          stalled  = 0
+          until w[:activate_done]
+            break unless w[:thread]&.alive? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+            break if w[:now].to_f - began >= SW_ACTIVATION_IN_PLACE_MS
 
-          sleep WORKER_POLL_INTERVAL
+            stalled = worker_stalled?(w) ? stalled + 1 : 0
+            break if stalled >= 2
+
+            sleep WORKER_RESUME_POLL
+          end
+          w[:activate_done] == true
+        ensure
+          w[:answering].delete(:activation)
+          w[:awaited] -= 1
+          # (…the window whose script waits, its clock on by the worker's time the wait took — not a worker's thread's — where
+          # the worker activated: one given up on ran on by itself, which the window catches up with as it steps)
+          follower.clock_moved_by(w[:now].to_f - began) if w[:activate_done] && follower && Thread.current == @main_thread
         end
-        w[:activate_done] == true
-      ensure
-        w[:awaited] -= 1 if w && w[:awaited].to_i.positive?
       end
+      SW_ACTIVATION_IN_PLACE_MS = 1000
 
       # A controlled client cancelled a streaming respondWith body (`response.body.cancel()` or an
       # AbortController abort): route the cancel to the worker that owns this [realm, fetch] stream so
@@ -9452,21 +9470,12 @@ module Capybara
           # timers.js `__csimCaughtUp` — and held where the window's is, whatever time it is caught up to)
           date = @runtime && to == @runtime.clock ? @runtime.clock_date : 0
           held = @runtime ? @runtime.clock_held : 0
-          # (…a `Date` of the window's next document's, which begins at the wall clock again where the last one's had gone
-          # on — `anew`: the worker's goes back with it, as the window's did, its messages then on the scale the page they
-          # come to reads — a service worker's tick count after a 20 s page read 18.8 s ahead of the next page's clock)
-          anew = false
-          if record && date.positive?
-            document = @runtime.document_number
-            anew = !record[:document].nil? && record[:document] != document
-            record[:document] = document
-          end
           if rt.call('__nextTimerDelay').to_f < 0 && !(Native.agent_notices_pending(@session_partition) && rt.call('__csimAgentsPending'))
-            rt.call('__csimCaughtUp', step, true, date, held, anew) if step.positive? || date.positive? || held.positive?
+            rt.call('__csimCaughtUp', step, true, date, held) if step.positive? || date.positive? || held.positive?
             next
           end
 
-          rt.call('__csimCaughtUp', step, false, date, held, anew) if step.positive? || date.positive? || held.positive?
+          rt.call('__csimCaughtUp', step, false, date, held) if step.positive? || date.positive? || held.positive?
           rt.drain_microtasks
           rt.drain_timers(step)
         end
@@ -9599,7 +9608,7 @@ module Capybara
         # through it, e.g. an Emscripten `printErr` — is silently dropped during debugging.
         rt.call('__csimSetTraceActive', true) if CONSOLE_STDERR
         # Its time origin, the time it was made at (set again as its script begins, below).
-        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS) if record&.dig(:epoch)
+        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f) if record&.dig(:epoch)
         # …and the host's clock's offset from the real one, as its window has it (`travel_to`): what its `Date` and time
         # origin add, as the window's do.
         rt.call('__csimSetTimeTravelOffsetMs', ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i)
@@ -9719,7 +9728,7 @@ module Capybara
         # its scripts' time counted from that statement: not the real time its start took, its script fetched, its isolate
         # made and its scope installed, which its window's clock does not go on through — a worker read its window's
         # `Date` that far ahead for good, 25 ms on a loaded machine (agent_clock.rs).
-        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS) if record&.dig(:epoch)
+        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f) if record&.dig(:epoch)
         if service
           # A SERVICE worker's registration is GATED on its script actually evaluating
           # ("Run Service Worker": an importScripts that 404s, a top-level throw, a
