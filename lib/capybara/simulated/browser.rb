@@ -7102,10 +7102,11 @@ module Capybara
         nil
       end
       # A message posted at end `from`, for the holder of the other.
+      # (…whether a worker of this window took it: what the poster's step waits for — timers.js `askedWorker`)
       def port_post(from, data)
         to, holder = Native.port_post(@session_partition, from.to_s, data.to_s)
         port_delivered(holder, to, data.to_s) if holder
-        nil
+        holder&.first&.to_sym == :worker && holder[1] == @window_number
       end
       # …to the holder the engine names, `[kind, window, id]`, of whichever window's — none of a window gone.
       private def port_delivered((kind, window, id), end_id, data)
@@ -8477,8 +8478,9 @@ module Capybara
       # MAIN thread — either directly from a main/frame-realm post (`source_realm_id` = the poster's
       # realm, `from_worker` nil), or from `deliver_worker_messages` for a WORKER-originated post
       # (`from_worker` = the posting worker's handle, `source_realm_id` nil).
+      # (…whether a worker listening on its name took it: `broadcast_external`)
       def broadcast_to_windows(name, data, source_realm_id = 0, origin = nil, from_worker: nil)
-        broadcast_external(name, data, origin, from_worker: from_worker)
+        asked = broadcast_external(name, data, origin, from_worker: from_worker)
         # Same-isolate main + frame realms (LEGACY single-realm / worker-inbound path — the multi-realm
         # main-thread post goes through the isolate's ordered queue instead: `broadcast_queued`). The poster already
         # delivered to itself in-VM, so this only reaches the OTHER realms — queue whenever one exists. A WORKER post
@@ -8489,6 +8491,7 @@ module Capybara
         has_frames = @runtime.frame_realm_ids.any?
         from_frame = !from_worker && !source_realm_id.nil? && source_realm_id != 0
         enqueue_broadcast(name, data, source_realm_id, origin) if has_frames || from_worker || from_frame
+        asked
       end
 
       # Fan a BroadcastChannel post out beyond this isolate's main-thread realms: OTHER top-level windows
@@ -8502,6 +8505,7 @@ module Capybara
         # Skip a worker whose thread has already exited (self-close / termination in flight): it will
         # never drain its inbox, so pushing would leak. Counted in a dedicated pending tally so `settle`
         # waits until the worker acks the delivery (a `bcack`).
+        asked = false
         @workers.each do |h, w|
           # A nil thread is a worker still SPAWNING (worker_spawn registers the record just
           # before Thread.new): its inbox exists and the thread will drain it — deliver.
@@ -8509,9 +8513,15 @@ module Capybara
           next if h == from_worker || (thread && !thread.alive?)
           @worker_host.owe(WorkerHost::BROADCAST, 1)
           w[:inbox] << {kind: 'broadcast', name: name.to_s, data: data, origin: origin}
-          # (…taken at the time it was posted at, as a message to the worker itself is: `worker_post_to_worker`)
+          # (…taken at the time it was posted at, as a message to the worker itself is, where it has a channel of that name
+          # — `__csim_workerBcListen` — not by every worker of the window: one idle worker beside a page whose frames
+          # chatter on a channel made each post a round trip to it)
+          next unless w[:bc_names]&.fetch(name.to_s, 0).to_i.positive?
+
           w[:asked] = true
+          asked = true
         end
+        asked
       end
 
       # ── BroadcastChannel isolate-wide ordered delivery (multi-realm path) ──
@@ -8544,7 +8554,7 @@ module Capybara
       # the workers.
       def broadcast_queued(name, data, key)
         @broadcast_inbox.queued = true
-        broadcast_external(name, data, key)
+        broadcast_external(name, data, key) == true
       end
 
       # ── Image loads ─────────────────────────────────────────────────
@@ -9503,7 +9513,14 @@ module Capybara
           port_gone:      ->(end_id, held) { outbox << {handle: handle, kind: 'port_gone', end: end_id.to_s, held: Array(held).map(&:to_s)} },
           port_closed:    ->(end_id)       { outbox << {handle: handle, kind: 'port_closed', end: end_id.to_s} },
           port_redeliver: ->(end_id, data) { outbox << {handle: handle, kind: 'port_redeliver', end: end_id.to_s, data: data.to_s} },
-          port_post:      ->(end_id, data) { outbox << {handle: handle, kind: 'port_msg', end: end_id.to_s, data: data.to_s} }
+          port_post:      ->(end_id, data) { outbox << {handle: handle, kind: 'port_msg', end: end_id.to_s, data: data.to_s} },
+          # The BroadcastChannel names it listens on, by count (`broadcast_external`).
+          bc_listen:      ->(name, delta) {
+            next unless record
+
+            names = (record[:bc_names] ||= Hash.new(0))
+            names[name.to_s] += delta.to_i
+          }
         }
         worker_kind = if service then 'service' elsif shared then 'shared' else 'dedicated' end
         rt          = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name, isolated: record&.dig(:isolated) == true)

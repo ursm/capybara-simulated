@@ -2252,6 +2252,8 @@ module Capybara
         # (the shared BROWSER_HOST_FNS `__csimBroadcast` above, bound to `browser`, is overridden
         # here). Same-worker-context delivery already happened in-VM via `_bcChannels`.
         c.attach('__csimBroadcast', ->(name, data, _rid, origin) { broadcast_out&.call(name, data, origin); nil }) if broadcast_out
+        # (…and the channel names it listens on, which a post of the window's asks it to take at its time: Browser#broadcast_external)
+        c.attach('__csim_workerBcListen', ->(name, delta) { sw_hooks[:bc_listen]&.call(name, delta); nil }) if sw_hooks[:bc_listen]
         # Worker's timer table is independent from main's; routing the
         # worker's `setTimersActive` through `browser.timers_active=`
         # races the main isolate's polling? gate, dropping main-thread

@@ -84,11 +84,11 @@ module Capybara
         # is). `opener` = rel=opener (target=_blank defaults to noopener); the Driver
         # forces noopener for a cross-partition blob: target.
         '__csimOpenAuxFromRealm'     => ->(b, *a) { b.open_aux_from_realm(*a[0, 6]); nil },
-        '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]); nil },
+        '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]) == true },
         # BroadcastChannel's multi-realm path: the isolate queues one ordered delivery per channel (broadcast_channels.rs
         # `bcQueue`), the host the other windows' and the workers' (`broadcast_queued`). Only taken where a sibling
         # same-isolate realm exists (`bc_siblings_exist?`); single-window pages never touch it.
-        '__csimBroadcastQueued'      => ->(b, *a) { b.broadcast_queued(a[0], a[1], a[2]); nil },
+        '__csimBroadcastQueued'      => ->(b, *a) { b.broadcast_queued(a[0], a[1], a[2]) == true },
         '__csimBcSiblingsExist'      => ->(b, *_a) { b.bc_siblings_exist? },
         # The session's partition of the storage registries — IndexedDB's, which every realm and worker of it is an agent
         # of, and Cache Storage's (idb_databases.rs, cache_storage.rs).
@@ -118,7 +118,7 @@ module Capybara
         '__csimClientPortEndGone'  => ->(b, *a) { b.port_end_gone(a[0], a[1], [:realm, a[2].to_i]); nil },
         '__csimClientPortEndClosed' => ->(b, *a) { b.port_end_closed(a[0]); nil },
         '__csimClientPortRedeliver' => ->(b, *a) { b.port_redeliver(a[0], a[1]); nil },
-        '__csimClientPortPost'     => ->(b, *a) { b.port_post(a[0], a[1]); nil },
+        '__csimClientPortPost'     => ->(b, *a) { b.port_post(a[0], a[1]) == true },
         # The focus chain moved into this realm's browsing context (a focus() commit, or an
         # <iframe> focused in its container, which hands focus to the nested context).
         '__csimFocusChanged'       => ->(b, *_) { b.focus_changed; nil },
