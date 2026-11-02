@@ -770,7 +770,7 @@ module Capybara
         return unless Native.broadcast_reaches_other_windows(key.to_s)
 
         window_browsers.each do |b|
-          b.enqueue_broadcast(name, data, nil, key) unless b.equal?(source_browser)
+          b.enqueue_broadcast(name, b.restamped(data, source_browser), nil, key) unless b.equal?(source_browser)
         end
       end
 

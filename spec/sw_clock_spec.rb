@@ -234,6 +234,32 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
     end
   end
 
+  # …and on the asking window's clock, whichever window's clock the worker runs on: each window's `Date` is its own
+  # virtual clock's, one that ran a 10 s timer chain 10 s from another's, and an answer carries the time it took, from
+  # the asking window's own ask (sw-client.js `answeredAt`). The time it was given at, carried as it was, read 9.1 s for
+  # a second window's quick answer after the first window's 10 s chain, its timers after it pushed out as far. (The
+  # answer reads 0 run alone, and 101 after this file's other examples: delivered a 100 ms step on, as before.)
+  it "lands an answer on the asking window's clock, not the worker's window's" do
+    s = controlled_session
+    s.execute_script('window.chained = false; let n = 0; const f = () => (++n < 20 ? setTimeout(f, 500) : (chained = true)); f();')
+    poll_until(timeout: 20) { s.evaluate_script('chained') }
+    expect(s.evaluate_script('Date.now()') - (Time.now.to_f * 1000)).to be > 5000
+    s.switch_to_window(s.open_new_window)
+    s.visit '/'
+    poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }
+    s.execute_script(<<~JS)
+      window.got = null;
+      const t0 = performance.now();
+      fetch('/d.txt?date').then(() => {
+        const fetched = performance.now() - t0;
+        setTimeout(() => { got = [fetched, performance.now() - t0]; }, 100);
+      });
+    JS
+    got = poll_until(timeout: 20) { s.evaluate_script('got') }
+    expect(got[0]).to be_between(0, 150), got.inspect
+    expect(got[1] - got[0]).to be_between(100, 150), got.inspect
+  end
+
   it "resolves a dedicated worker's XHR when the service worker answers, before its timeout" do
     s = controlled_session
     s.execute_script("window.log = []; window.w = new Worker('/w.js'); w.onmessage = (e) => log.push(e.data)")

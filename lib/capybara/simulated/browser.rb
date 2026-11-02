@@ -5283,7 +5283,7 @@ module Capybara
       # `swack`) so settle waits for the SW to process it and any client.postMessage reply.
       # (…the host's to deliver: `sw_host`)
       def service_worker_post_message(handle, data, client_id = nil, client_url = nil)
-        return sw_host.service_worker_post_message(handle, data, client_id, client_url) unless sw_host?
+        return sw_host.service_worker_post_message(handle, sw_host.restamped(data.to_s, self), client_id, client_url) unless sw_host?
 
         w = @workers[handle.to_i]
         # (…none to a worker whose thread is gone, which would never dispatch it nor let its count go)
@@ -5965,9 +5965,10 @@ module Capybara
 
         resp == '{}' ? %({"took":#{took}}) : %({"took":#{took},#{resp[1..]})
       end
-      # (…`at` the time the worker gave its answer at, on its clock, which the client's is on to by when the answer
-      # reaches it; `took` the time from its event's dispatch, which a client waiting in place is on by: sw-client.js)
-      private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox, realm_id = 0, at = 0.0, took = 0.0)
+      # (…`spent` the time the worker spent on it from when it was due to take it, which the client's clock is on by from
+      # its ask when the answer reaches it; `took` the time from its event's dispatch, which a client waiting in place is
+      # on by: sw-client.js)
+      private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox, realm_id = 0, spent = 0.0, took = 0.0)
         fid = fetch_id.to_i
         if fid.negative? || WorkerHost.direct?(fid)
           # (…a worker waiting on it in place let go on, which a step of the window's waits for: `await_resumed_workers`)
@@ -5985,7 +5986,7 @@ module Capybara
         end
         win  = @worker_host.race_winner(realm_id.to_i, fid, resp)
         resp = win if win
-        outbox << {handle: handle, kind: 'fetch_response', fetch_id: fetch_id, resp: resp, realm_id: realm_id, at: at, took: took}
+        outbox << {handle: handle, kind: 'fetch_response', fetch_id: fetch_id, resp: resp, realm_id: realm_id, spent: spent, took: took}
       end
 
       # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
@@ -6434,6 +6435,31 @@ module Capybara
         sw_host.sw_clients_unloaded if Native.sw_forget_window(@sw_partition, @window_number)
         Native.port_forget_window(@session_partition, @window_number)
       end
+
+      # A time `at` on window `from`'s `Date` — its own, or a worker's of it — on this window's: each window's `Date` runs on
+      # a virtual clock of its own, which may stand far from another's (one that ran a 30 s timer chain is 29 s on), so a
+      # time crosses from one window to another by the distance between the two as their last steps left them — to within
+      # the steps a worker of `from` took since, beside this window's. Carried as it was, it held this window's clock at
+      # the other's time, and pushed its timers out by the whole distance. (0 a time not given.) A service worker's
+      # answer carries no time at all, but the lengths of it (sw-client.js `answeredAt`).
+      def date_at(at, from)
+        return at if !at.positive? || from.nil? || from.equal?(self)
+
+        mine, theirs = clock_date, from.clock_date
+        mine.positive? && theirs.positive? ? at + mine - theirs : at
+      end
+      # …and a message's wire, its time (workers.js `encodeMessage`'s `a`, the last of it) so carried.
+      def restamped(data, from)
+        return data if from.nil? || from.equal?(self) || !data.is_a?(String) || !(i = data.rindex('"a":'))
+
+        j = k = i + 4
+        k += 1 while k < data.size && '-+.0123456789eE'.include?(data[k])
+        at = data[j...k].to_f
+        moved = date_at(at, from)
+        moved == at ? data : "#{data[0...j]}#{moved}#{data[k..]}"
+      end
+      # This window's `Date` as its last step left it, before any offset (V8Runtime#clock_date).
+      def clock_date = @runtime ? @runtime.clock_date : 0.0
 
       # Call a host fn in realm `realm` of this window (0: its page), where it is still alive — what the session's service
       # workers tell a client, from whichever window's step delivers it: the script it runs may change the document, which
@@ -6972,7 +6998,7 @@ module Capybara
       # A service worker's message to client `e[:client]`, to the realm the registry says it is — none for a gone one's.
       private def sw_client_message_route(e)
         browser, realm = (key = Native.sw_client_owner(@sw_partition, e[:client].to_s)) && sw_window_realm(key)
-        browser&.sw_client_message_told(realm, e[:data], e[:handle])
+        browser&.sw_client_message_told(realm, browser.restamped(e[:data], self), e[:handle])
       end
 
       private def unregister_client(client_id)
@@ -7113,7 +7139,7 @@ module Capybara
       # …to the holder the engine names, `[kind, window, id]`, of whichever window's — none of a window gone.
       private def port_delivered((kind, window, id), end_id, data)
         browser = window == @window_number ? self : (@driver.browser_of_window(window) if @driver.respond_to?(:browser_of_window))
-        browser&.deliver_port_message([kind.to_sym, id], end_id, data)
+        browser&.deliver_port_message([kind.to_sym, id], end_id, browser.restamped(data, self))
       end
       # …into its holder of this window: a realm's port (realm 0 the main one; a discarded frame's, nowhere), or a
       # worker's by its inbox — counted like an sw_message, which the worker acks once its handler ran, so a settle
@@ -7866,7 +7892,7 @@ module Capybara
         # (…a realm of another window's by the session's number for it: `sw_realm_key`)
         fetch_resps.each do |e|
           browser, realm = sw_window_realm(e[:realm_id])
-          browser&.sw_fetch_answered(realm, '__csim_swControllerFetchResponse', e[:fetch_id], [e[:resp], e[:at].to_f, e[:took].to_f], {kind: 'sw_fetch_response', resp: e[:resp], at: e[:at].to_f, took: e[:took].to_f})
+          browser&.sw_fetch_answered(realm, '__csim_swControllerFetchResponse', e[:fetch_id], [e[:resp], e[:spent].to_f, e[:took].to_f], {kind: 'sw_fetch_response', resp: e[:resp], spent: e[:spent].to_f, took: e[:took].to_f})
         end
         # Streaming respondWith frames — deliver IN EMISSION ORDER (per fetch id: start → chunk* →
         # close/error) so the client reassembles the body ReadableStream correctly. The request's
@@ -7874,7 +7900,7 @@ module Capybara
         stream_frames.each do |e|
           fn = STREAM_FRAME_FNS[e[:kind]]
           browser, realm = sw_window_realm(e[:realm_id])
-          browser&.sw_fetch_answered(realm, fn, e[:fetch_id], [e[:payload], e[:at].to_f, e[:took].to_f], nil) if fn
+          browser&.sw_fetch_answered(realm, fn, e[:fetch_id], [e[:payload], e[:spent].to_f, e[:took].to_f], nil) if fn
           # Track a stream's open span (head → terminal) per emitting worker, so worker_terminate
           # can release + error a body its worker died mid-stream.
           # (…open from its head to its terminal frame, the chunks between keeping it open)
@@ -9480,7 +9506,7 @@ module Capybara
             Native.sw_hold(@sw_partition, handle, 'extended', n.to_i.positive?)
             outbox << {handle: handle, kind: 'sw_try_activate'} unless n.to_i.positive?
           },
-          fetch_respond:  ->(fetch_id, resp, realm_id, at = 0, took = 0) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i, at.to_f, took.to_f) },
+          fetch_respond:  ->(fetch_id, resp, realm_id, spent = 0, took = 0) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i, spent.to_f, took.to_f) },
           # A streaming respondWith frame (start / chunk / close / error) for a controlled client's
           # fetch — rides the outbox in emission order so the client realm reassembles the body
           # stream incrementally (deliver_worker_messages). The request's fetch owed stays up
@@ -9493,7 +9519,7 @@ module Capybara
           # pending this stream never owned. `sw_race_dropped_streams` is
           # touched only on THIS worker's thread (the hook's caller), so it
           # needs no lock.
-          fetch_stream:   ->(fetch_id, kind, payload, realm_id, at = 0, took = 0) {
+          fetch_stream:   ->(fetch_id, kind, payload, realm_id, spent = 0, took = 0) {
             fid = fetch_id.to_i
             key = [realm_id.to_i, fid]
             if fid.positive?
@@ -9508,7 +9534,7 @@ module Capybara
                 next
               end
             end
-            outbox << {handle: handle, kind: "fr_#{kind}", fetch_id: fid, payload: payload.to_s, realm_id: realm_id.to_i, at: at.to_f, took: took.to_f}
+            outbox << {handle: handle, kind: "fr_#{kind}", fetch_id: fid, payload: payload.to_s, realm_id: realm_id.to_i, spent: spent.to_f, took: took.to_f}
           },
           # Cross-isolate MessagePort channels: the ends this worker takes and gives up, and what its ports post, ride
           # the outbox (deliver_worker_messages relays them).
@@ -9963,7 +9989,7 @@ module Capybara
               # here — without the hold a drain can bail mid-chain.
               @worker_host.owe(WorkerHost::BUSY, 1)
               busy_held = true
-              rt.call('__csim_swControllerFetchResponse', msg[:fetch_id], msg[:resp], msg[:at].to_f, msg[:took].to_f)
+              rt.call('__csim_swControllerFetchResponse', msg[:fetch_id], msg[:resp], msg[:spent].to_f, msg[:took].to_f)
               drive_worker_to_quiescence(rt, stopping)
             elsif msg.is_a?(Hash) && msg[:kind] == 'nested_worker_msgs'
               # Postbacks from a NESTED worker this isolate created — dispatch on its
