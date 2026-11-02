@@ -178,8 +178,8 @@ impl Read<'_> {
         (if own > self.clock.held_until { own } else { self.clock.held_until }) - self.epoch
     }
     // How far the time another agent's message brought the realm to stands ahead of its own (a worker's, where it brought
-    // its window's: `WorkerClock::held`) — which a timer set now falls due that much later on the virtual clock (timers.js
-    // `scheduleTimer`), its timeout counted from the time its `Date` reads. Due on the virtual clock alone, it ran with its
+    // its window's: `WorkerClock::held`) — which a timer set now falls due that much later on the virtual clock (timers.rs
+    // `timerAdd`), its timeout counted from the time its `Date` reads. Due on the virtual clock alone, it ran with its
     // clock lifted to that time, and so did every timer set from it: a page that took a service worker's 1 s answer read
     // its `Date` 1 s ahead of its own time for good, and of its workers'. In whole milliseconds, the virtual clock's
     // steps. Not a worker's own scripts' lead over its window, nor a window's message's lift of a worker: the script time
@@ -261,7 +261,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "spentSince", spent_since, context_id);
     register(scope, ns, "timeOrigin", time_origin, context_id);
     register(scope, ns, "clockAtLeast", clock_at_least, context_id);
-    register(scope, ns, "clockLead", clock_lead, context_id);
     register(scope, ns, "caughtUp", caught_up, context_id);
     register(scope, ns, "stepDate", step_date, context_id);
     register(scope, ns, "clockEpochSet", clock_epoch_set, context_id);
@@ -407,7 +406,7 @@ fn clock_at_least(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let cid = realm_id(scope, &args);
     hold(dom(scope), cid, ms);
 }
-fn hold(d: &mut Dom, cid: i32, ms: f64) {
+pub(crate) fn hold(d: &mut Dom, cid: i32, ms: f64) {
     let script = d.agent_time.now(Instant::now());
     let clock = &mut state_of(&mut d.arena, cid, script).clock;
     if ms > clock.held_until {
@@ -415,10 +414,12 @@ fn hold(d: &mut Dom, cid: i32, ms: f64) {
     }
 }
 
-// __dom.clockLead() -> how far the calling realm's clock is held ahead of its own time (`Read::lead`).
-fn clock_lead(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_double(read(dom(scope), cid, true).lead());
+// A timer of `timeout` ms set now in realm `cid` (timers.rs `timerAdd`): the time on the realm's clock it runs no earlier
+// than — its `Date` now and its timeout — and how much later on the virtual clock it falls due (`Read::lead`).
+pub(crate) fn timer_times(d: &mut Dom, cid: i32, timeout: f64) -> (f64, f64) {
+    let mut read = read(d, cid, true);
+    let at = read.epoch + read.hr_now() + timeout;
+    (at, read.lead())
 }
 
 // __dom.caughtUp(date, ahead, held) — a worker caught up with its window's own time `date`, `ahead` the virtual time its

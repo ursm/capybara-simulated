@@ -31,6 +31,18 @@ struct Timer {
     period: Option<f64>,
     // Its task's timer nesting level (HTML §8.6): one more than that of the timer task it was scheduled in, 0 outside one.
     nesting: u32,
+    // The time on its realm's clock it runs no earlier than — the time it was set at and its timeout, its realm's `Date`
+    // then — and that timeout, a repeating one's next run counted from the time it runs (`timerNext`). Due on the virtual
+    // clock, which the realm's clock may stand ahead of while it is held (agent_clock.rs `clockAtLeast`) — a worker's
+    // whose scripts ran longer than its window's step, a page a busy worker's answer brought on — a `setTimeout(…, 50)` set
+    // then fell due as the virtual clock reached it, 50 ms behind: it runs with its realm's clock held on to that time,
+    // its virtual clock and its due times as they stand (HTML timer initialization). Where another agent's time held the
+    // clock, it falls due that much later on the virtual clock instead (agent_clock.rs `clockLead`); where a worker's own
+    // scripts did, not: a service worker's `setTimeout(…, 2000)` set as its 1 s computation ended falls due 2 s later on
+    // the virtual clock and runs with its `Date` 3 s on — its answer, which carries that time, landing on the page 3 s on
+    // all the same (sw-client.js). None for no timeout, nor a crossing queue's turn: due with a timer, not on to its delay
+    // past a clock held ahead as it runs, which moved the realm's time on by the wait.
+    not_early: Option<(f64, f64)>,
 }
 
 // HTML §8.6 timer initialization steps 5-7: a timer scheduled in a timer task whose nesting level is past 5, with a
@@ -188,9 +200,10 @@ impl Timers {
         self.idle.clear();
         self.runnable.clear();
     }
-    fn add(&mut self, key: i64, seq: u64, timer: (v8::Global<v8::Value>, Option<v8::Global<v8::Value>>), due: f64, turn: u8, period: Option<f64>, nesting: u32) {
+    #[allow(clippy::too_many_arguments)]
+    fn add(&mut self, key: i64, seq: u64, timer: (v8::Global<v8::Value>, Option<v8::Global<v8::Value>>), due: f64, turn: u8, period: Option<f64>, nesting: u32, not_early: Option<(f64, f64)>) {
         self.order.insert((Due(due), turn, seq, key));
-        self.by_key.insert(key, Timer { due, turn, seq, handler: timer.0, args: timer.1, period, nesting });
+        self.by_key.insert(key, Timer { due, turn, seq, handler: timer.0, args: timer.1, period, nesting, not_early });
     }
     fn clear(&mut self, key: i64) -> bool {
         let Some(t) = self.by_key.remove(&key) else { return false };
@@ -532,7 +545,7 @@ fn idle_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             let due = arena.event_loop.clock + timeout;
             let seq = arena.event_loop.next_seq();
             arena.event_loop.changed();
-            arena.enter(cid).timers.add(key, seq, (timed_out, Some(list)), due, IN_TURN, None, 0);
+            arena.enter(cid).timers.add(key, seq, (timed_out, Some(list)), due, IN_TURN, None, 0, None);
             key
         });
         arena.enter(cid).timers.idle.push_back(IdleRequest { handle, callback, timeout });
@@ -616,14 +629,15 @@ fn clock_to(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     dom(scope).arena.event_loop.clock = time;
 }
 
-// __dom.timerAdd(handler, args, timeout, repeats, task, ahead, lead, source) -> its key: a timer of the calling realm's,
+// __dom.timerAdd(handler, args, timeout, repeats, task, ahead, source) -> its key: a timer of the calling realm's,
 // falling due `timeout` ms after now on the event loop's clock — never, for one that is no finite time — and, `repeats`,
 // again that long after each run: a page's (`task` false: a positive id), nested in the timer task running and clamped
 // by its nesting level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped —
-// and, `ahead`, runs ahead of those due with it (`AHEAD`; a page's timer never). `lead` ms later the first time: what
-// the realm's `Date` stands ahead of this clock by (timers.js `clockLead`), which its timeout is counted from. A platform
-// task of a source the event loop treats apart is kept as one (`source`: 1 a crossing queue's turn, 2 a request's —
-// `Source`).
+// and, `ahead`, runs ahead of those due with it (`AHEAD`; a page's timer never). A page's, or a platform task of a
+// timeout — an XHR's `timeout`, an AbortSignal's — falls due later the first time by what the realm's `Date` stands ahead
+// of this clock by (agent_clock.rs `clockLead`), which its timeout is counted from, and runs no earlier on its realm's
+// clock than its timeout after it was set (`Timer::not_early`). A platform task of a source the event loop treats apart
+// is kept as one (`source`: 1 a crossing queue's turn, which neither, 2 a request's — `Source`).
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
     let list = args.get(1);
@@ -632,10 +646,16 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let repeats = args.get(3).is_true();
     let task = args.get(4).is_true();
     let turn = if task && args.get(5).is_true() { AHEAD } else { IN_TURN };
-    let lead = args.get(6).number_value(scope).filter(|l| *l > 0.0).unwrap_or(0.0);
-    let source = if task { args.get(7).int32_value(scope).and_then(Source::of) } else { None };
+    let source = if task { args.get(6).int32_value(scope).and_then(Source::of) } else { None };
     let cid = realm_id(scope, &args);
-    let arena = &mut dom(scope).arena;
+    let d = dom(scope);
+    let (not_early, lead) = if (timeout > 0.0 && source != Some(Source::Turn)) || !task {
+        let (at, lead) = crate::agent_clock::timer_times(d, cid, timeout);
+        ((timeout > 0.0).then_some((at, timeout)), lead)
+    } else {
+        (None, 0.0)
+    };
+    let arena = &mut d.arena;
     let now = arena.event_loop.clock;
     let takes = arena.takes_timers(cid);
     let nesting = if task { 0 } else { arena.event_loop.task_nesting.unwrap_or(0) };
@@ -658,7 +678,7 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         let seq = arena.event_loop.next_seq();
         arena.event_loop.changed();
         let timers = &mut arena.enter(cid).timers;
-        timers.add(key, seq, (handler, list), due, turn, period, if task { 0 } else { nesting + 1 });
+        timers.add(key, seq, (handler, list), due, turn, period, if task { 0 } else { nesting + 1 }, not_early);
         if let Some(source) = source {
             timers.sources.insert(key, source);
         }
@@ -685,14 +705,16 @@ fn timer_task_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     dom(scope).arena.end_timer_task(cid);
 }
 
-// __dom.timerNext(limit) -> `[due, handler, args, page]`: the calling realm's next timer, where it falls due by `limit`
+// __dom.timerNext(limit) -> `[moved, handler, args, page]`: the calling realm's next timer, where it falls due by `limit`
 // — taken from the list, one that repeats to be scheduled again as its task ends (`timerTaskEnd`); undefined for none.
-// A page's (`page`) is the timer task running from here, a platform task none. (A task a terminated handler never ended
-// is ended here first.)
+// The clock is moved to when it falls due (`moved`, where that is later), and its realm's clock held on to the time it
+// runs no earlier than (`Timer::not_early`) — a repeating one's next counted from now. A page's (`page`) is the timer task
+// running from here, a platform task none. (A task a terminated handler never ended is ended here first.)
 fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let limit = args.get(0).number_value(scope).unwrap_or(f64::INFINITY);
     let cid = realm_id(scope, &args);
-    let arena = &mut dom(scope).arena;
+    let d = dom(scope);
+    let arena = &mut d.arena;
     let now = arena.event_loop.clock;
     arena.end_timer_task(cid);
     let timers = &mut arena.enter(cid).timers;
@@ -702,24 +724,37 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     timers.in_task = true;
     let run = due.max(now);
     let repeats = timers.by_key.get(&key).and_then(|t| t.period);
-    let (handler, list, nesting) = match repeats {
+    let (handler, list, nesting, not_early) = match repeats {
         Some(_) => {
             let Some(t) = timers.by_key.get(&key) else { return };
             timers.repeating = Some((key, run));
-            (t.handler.clone(), t.args.clone(), Some(t.nesting))
+            (t.handler.clone(), t.args.clone(), Some(t.nesting), t.not_early)
         }
         None => {
             let Some(t) = timers.by_key.remove(&key) else { return };
             arena.task_keys.realms.remove(&key);
-            (t.handler, t.args, (key > 0).then_some(t.nesting))
+            (t.handler, t.args, (key > 0).then_some(t.nesting), t.not_early)
         }
     };
     arena.event_loop.task_nesting = nesting;
-    let due = v8::Number::new(scope, due).into();
+    let moved = due > now;
+    if moved {
+        arena.event_loop.clock = due;
+    }
+    if let Some((at, timeout)) = not_early {
+        crate::agent_clock::hold(d, cid, at);
+        if repeats.is_some() {
+            let next = crate::agent_clock::timer_times(d, cid, timeout).0;
+            if let Some(t) = d.arena.timers_of(cid).and_then(|timers| timers.by_key.get_mut(&key)) {
+                t.not_early = Some((next, timeout));
+            }
+        }
+    }
+    let moved = v8::Boolean::new(scope, moved).into();
     let handler = v8::Local::new(scope, handler);
     let list = list.map_or_else(|| v8::undefined(scope).into(), |l| v8::Local::new(scope, l));
     let page = v8::Boolean::new(scope, key > 0).into();
-    rv.set(v8::Array::new_with_elements(scope, &[due, handler, list, page]).into());
+    rv.set(v8::Array::new_with_elements(scope, &[moved, handler, list, page]).into());
 }
 
 // __dom.realmPending(realm, subtree) -> whether realm `realm` (the calling one, for null) has work its event loop is to
