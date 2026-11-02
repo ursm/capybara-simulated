@@ -56,12 +56,24 @@ impl AgentTime {
 
 // A realm's time origin: what its `Date` read at its high resolution time 0 (in milliseconds since the epoch, before
 // any time-travel offset its host adds), and its virtual clock and the script time then (less the real time its start
-// took, which its clock begins with).
+// took, which its clock begins with) — and that offset, its `Date` and `performance.timeOrigin` add.
+//
+// The offset is the host's clock's off the real one: Ruby specs that `freeze_time(...)` / `travel_to(...)` shift
+// `Time.now` server-side, and the in-process app's rendering, model factories and trend computations all observe the
+// moved value — so client-side date math (Discourse's `moment()` calls in admin-dashboard-tab.js → `last 30 days`
+// window, freshly-typed `created_at`) would diverge from what the server just sent. Fixed with the origin, as HR-Time
+// fixes a global's time origin as the global is made: read as the host boots a window's document (`clockEpochSet`), a
+// frame's and a pop-up's this isolate made their main realm's (`state_of`), a worker's its maker's. Never read again for
+// a live realm — under a frozen `Time.now` the offset shrinks with real time, and a pop-up's load that read it again
+// moved its opener's `performance.timeOrigin` back a second mid-life; a `travel_back` reaches the next document the host
+// boots. (Frames and pop-ups read the real clock, a day behind the page under `travel_to(1.day.from_now)`, when only the
+// page's own realm had the offset.)
 #[derive(Clone, Copy)]
 pub(crate) struct TimeOrigin {
     epoch: f64,
     clock: f64,
     script: f64,
+    travel: f64,
 }
 
 impl TimeOrigin {
@@ -205,7 +217,7 @@ fn read(d: &mut Dom, cid: i32, open: bool) -> Read<'_> {
         time.open.get_or_insert(at);
     }
     let script = time.now(at);
-    let (clock, travel) = (d.arena.event_loop.clock, d.arena.event_loop.travel);
+    let clock = d.arena.event_loop.clock;
     let state = state_of(&mut d.arena, cid, script);
     let origin = state.time_origin.expect("state_of takes one");
     let t = origin.hr(clock, script);
@@ -214,21 +226,22 @@ fn read(d: &mut Dom, cid: i32, open: bool) -> Read<'_> {
     if open {
         realm.last_hr = hr;
     }
-    Read { epoch: origin.epoch, travel, hr, clock: realm }
+    Read { epoch: origin.epoch, travel: origin.travel, hr, clock: realm }
 }
 
 // Realm `cid`'s state, its time origin taken where it has none: a realm of a window the host booted has its own
 // (`clockEpochSet`); any other — a frame's, a pop-up's this isolate made — reads its `Date` on from its main realm's, as
-// one agent's clock, its high resolution time beginning now. (Neither where the main realm has none: the time now.)
+// one agent's clock, with its host's offset, its high resolution time beginning now. (Neither where the main realm has
+// none: the time now, no offset.)
 fn state_of(arena: &mut RealmArena, cid: i32, script: f64) -> &mut RealmState {
     if arena.realm_state(cid).and_then(|s| s.time_origin).is_none() {
         let clock = arena.event_loop.clock;
         let main = (cid != 0).then(|| arena.realm_state(0)).flatten().and_then(|s| s.time_origin);
-        let now = match main {
-            Some(o) => o.epoch + o.hr(clock, script),
-            None => system_now(),
+        let (now, travel) = match main {
+            Some(o) => (o.epoch + o.hr(clock, script), o.travel),
+            None => (system_now(), 0.0),
         };
-        let origin = TimeOrigin { epoch: now, clock, script };
+        let origin = TimeOrigin { epoch: now, clock, script, travel };
         arena.event_loop.agent_epoch.get_or_insert(origin.agent_epoch());
         arena.enter(cid).time_origin = Some(origin);
     }
@@ -265,7 +278,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "stepDate", step_date, context_id);
     register(scope, ns, "clockEpochSet", clock_epoch_set, context_id);
     register(scope, ns, "clockWorkerRealm", clock_worker_realm, context_id);
-    register(scope, ns, "timeTravelSet", time_travel_set, context_id);
+    register(scope, ns, "timeTravel", time_travel, context_id);
     register(scope, ns, "agentWait", agent_wait, context_id);
     register(scope, ns, "agentIdle", agent_idle, context_id);
     register(scope, ns, "agentShift", agent_shift, context_id);
@@ -459,22 +472,24 @@ fn step_date(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set(v8::Array::new_with_elements(scope, &[date, held]).into());
 }
 
-// __dom.clockEpochSet(ms, since, shift) — the calling realm's time origin, which its `Date` reads as `ms`, was `since` ms
-// of real time ago: a window's as the host boots its document (now), a worker's at the time it was made, its start since
-// then — the script fetched, the isolate made — the first of its high resolution time, as a browser's worker reads a time
-// past its origin from its first statement. Its clock begins again there, held nowhere; `shift`, a worker's, how far the
-// agent's `Date` scale stood ahead of its maker's `Date` (`WorkerClock::anchor_shift`).
+// __dom.clockEpochSet(ms, since, shift, travel) — the calling realm's time origin, which its `Date` reads as `ms`, was
+// `since` ms of real time ago: a window's as the host boots its document (now), a worker's at the time it was made, its
+// start since then — the script fetched, the isolate made — the first of its high resolution time, as a browser's worker
+// reads a time past its origin from its first statement — with its host's offset `travel` (`TimeOrigin`). Its clock
+// begins again there, held nowhere; `shift`, a worker's, how far the agent's `Date` scale stood ahead of its maker's
+// `Date` (`WorkerClock::anchor_shift`).
 fn clock_epoch_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let epoch = args.get(0).number_value(scope).filter(|t| t.is_finite());
     let since = args.get(1).number_value(scope).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
     let shift = args.get(2).number_value(scope).filter(|t| t.is_finite()).unwrap_or(0.0);
+    let travel = args.get(3).number_value(scope).filter(|t| t.is_finite()).unwrap_or(0.0);
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let script = d.agent_time.now(Instant::now());
     let clock = d.arena.event_loop.clock;
     let arena = &mut d.arena;
     if let Some(epoch) = epoch {
-        let origin = TimeOrigin { epoch, clock, script: script - since };
+        let origin = TimeOrigin { epoch, clock, script: script - since, travel };
         arena.event_loop.agent_epoch.get_or_insert(origin.agent_epoch());
         arena.enter(cid).time_origin = Some(origin);
     }
@@ -492,11 +507,11 @@ fn clock_worker_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     state_of(&mut d.arena, cid, script).clock.worker = true;
 }
 
-// __dom.timeTravelSet(ms) — the host's clock stands `ms` off the real one, which every realm of the agent's `Date` and
-// time origin add (`EventLoop::travel`).
-fn time_travel_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let ms = args.get(0).number_value(scope).filter(|t| t.is_finite()).unwrap_or(0.0);
-    dom(scope).arena.event_loop.travel = ms;
+// __dom.timeTravel() -> the host's offset the calling realm's time origin holds (`TimeOrigin::travel`): what a worker it
+// makes takes for its own.
+fn time_travel(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_double(read(dom(scope), cid, false).travel);
 }
 
 // __dom.agentShift() -> how far the agent's `Date` scale stands ahead of the calling realm's `Date` (`agent_shift_of`).

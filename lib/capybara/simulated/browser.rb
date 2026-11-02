@@ -5035,7 +5035,7 @@ module Capybara
       # (…`isolated` whether the context that creates it is cross-origin isolated, which a dedicated or shared one is too:
       # its realm's own — a window's of a browsing context group its page left keeping its group's)
       def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil,
-                       sw_body: nil, sw_imports: nil, site: nil, isolated: false, at: nil, epoch_at: nil, shift: nil)
+                       sw_body: nil, sw_imports: nil, site: nil, isolated: false, at: nil, epoch_at: nil, shift: nil, travel: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -5155,6 +5155,9 @@ module Capybara
         # its creator's document's, else the page's: what it converts the times it is told and tells by, agent_clock.rs
         # `WorkerClock::anchor_shift`)
         record[:shift]         = shift ? shift.to_f : @runtime.call('__csimAgentShift').to_f
+        # (…and the host's clock's offset its maker's time origin holds — `travel_to`'s, as its creator's document was
+        # made, else the page's — which its own takes: agent_clock.rs `TimeOrigin`)
+        record[:travel]        = travel ? travel.to_f : @runtime.call('__csimTimeTravel').to_f
         record[:epoch]         = if epoch_at then epoch_at.to_f
                                  elsif @runtime.clock_date.positive? then [@runtime.clock_date + record[:origin] - @runtime.clock, @runtime.clock_held].max - record[:shift]
                                  elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin] - @clock_epoch_at.to_f
@@ -7026,7 +7029,7 @@ module Capybara
       end
 
       # How far the host's clock (`Time.now`, which a test's `travel_to` moves) stands off the real one, in milliseconds:
-      # what the agent's `Date` adds, told as a document loads (timers.rs `EventLoop::travel`).
+      # what a window's document's time origin holds as the host boots it (agent_clock.rs `TimeOrigin`).
       def time_travel_offset_ms = ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
 
       # A document loaded, its client reported: the reserved client its navigation made of it let go of where the report
@@ -9615,11 +9618,8 @@ module Capybara
         # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed
         # through it, e.g. an Emscripten `printErr` — is silently dropped during debugging.
         rt.call('__csimSetTraceActive', true) if CONSOLE_STDERR
-        # Its time origin, the time it was made at (set again as its script begins, below).
-        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f) if record&.dig(:epoch)
-        # …and the host's clock's offset from the real one, as its window has it (`travel_to`): what its `Date` and time
-        # origin add, as the window's do.
-        rt.call('__csimSetTimeTravelOffsetMs', time_travel_offset_ms)
+        # Its time origin, the time it was made at, with its maker's host offset (set again as its script begins, below).
+        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f, record[:travel].to_f) if record&.dig(:epoch)
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
         rt.eval_void("globalThis.__dom.realmIdentify('workerHandle', #{handle.to_i});")
@@ -9736,7 +9736,7 @@ module Capybara
         # its scripts' time counted from that statement: not the real time its start took, its script fetched, its isolate
         # made and its scope installed, which its window's clock does not go on through — a worker read its window's
         # `Date` that far ahead for good, 25 ms on a loaded machine (agent_clock.rs).
-        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f) if record&.dig(:epoch)
+        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f, record[:travel].to_f) if record&.dig(:epoch)
         if service
           # A SERVICE worker's registration is GATED on its script actually evaluating
           # ("Run Service Worker": an importScripts that 404s, a top-level throw, a
