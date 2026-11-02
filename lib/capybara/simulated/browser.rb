@@ -7122,6 +7122,8 @@ module Capybara
 
           @worker_host.owe(WorkerHost::MESSAGE, 1)
           w[:inbox] << {kind: 'port_msg', end: end_id, data: data}
+          # (…taken at the time it was posted at, as a message to the worker itself is: `worker_post_to_worker`)
+          w[:asked] = true
         elsif id.zero?
           @runtime.call('__csimPortEndDeliver', end_id, data)
         elsif @runtime.frame_realm_alive?(id)
@@ -8507,6 +8509,8 @@ module Capybara
           next if h == from_worker || (thread && !thread.alive?)
           @worker_host.owe(WorkerHost::BROADCAST, 1)
           w[:inbox] << {kind: 'broadcast', name: name.to_s, data: data, origin: origin}
+          # (…taken at the time it was posted at, as a message to the worker itself is: `worker_post_to_worker`)
+          w[:asked] = true
         end
       end
 

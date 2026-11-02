@@ -209,6 +209,27 @@ impl RealmArena {
     fn next_queued_by(&mut self, cid: i32, (mark, clock): (u64, f64)) -> bool {
         self.timers_of(cid).and_then(|t| t.order.first().copied()).is_some_and(|(Due(due), _, seq, _)| due <= clock && seq <= mark)
     }
+    // Realm `cid`'s clock as its scripts read and schedule on it — a window realm other than the main one (a frame's, a
+    // pop-up's this isolate made) raised to the main realm's first, where that has gone further, outside the realm's own
+    // steps: one event loop, whose steps run a frame's tasks after its parent's, the parent's tasks reaching into the
+    // frame at the parent's time. A frame read its parent's time a step behind it inside the parent's tasks; and a frame
+    // whose `Date` read the parent's while its timers fell due on its own clock ran a `setTimeout(…, 50)` set from the
+    // parent's task at once. Inside its own steps it is the time its own tasks fall due at, which its steps move on to its
+    // parent's (timers.js `drainChildRealms`). (agent_clock.rs reads it for `Date` and `performance.now()`.)
+    pub(crate) fn script_clock(&mut self, cid: i32) -> f64 {
+        let own = self.realm_state(cid).map_or(0.0, |s| s.clock);
+        if cid == 0 || self.timers_of(cid).is_some_and(|t| t.stepping > 0) {
+            return own;
+        }
+        let main = self.realm_state(0).map_or(0.0, |s| s.clock);
+        if main <= own {
+            return own;
+        }
+        if let Some(state) = self.realm_state_mut(cid) {
+            state.clock = main;
+        }
+        main
+    }
     fn timers_of(&mut self, cid: i32) -> Option<&mut Timers> {
         if cid == self.cur() {
             Some(&mut self.timers)
@@ -468,7 +489,7 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let turn = if task && args.get(5).is_true() { AHEAD } else { IN_TURN };
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
-    let now = arena.enter(cid).clock;
+    let now = arena.script_clock(cid);
     let takes = arena.takes_timers(cid);
     let nesting = if task { 0 } else { arena.timers_of(cid).and_then(|t| t.task_nesting).unwrap_or(0) };
     let timeout = if task { timeout } else { clamped(timeout, nesting) };

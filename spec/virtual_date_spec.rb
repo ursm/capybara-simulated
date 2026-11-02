@@ -151,6 +151,42 @@ RSpec.describe 'the virtual clock’s Date' do
       const tick = () => { got.push(Date.now() - fw.Date.now()); if (got.length < 3) setTimeout(tick, 1000); };
       setTimeout(tick, 1000);
     JS
-    expect(poll_until(timeout: 20) { s.evaluate_script('got.length == 3 && got') }).to eq([0, 0, 0])
+    # (…to the millisecond each `Date` is whole in, read a few microseconds apart)
+    got = poll_until(timeout: 20) { s.evaluate_script('got.length == 3 && got') }
+    expect(got.map(&:abs).max).to be <= 2
+  end
+
+  # …and on that one clock a frame's timer falls due: one its parent's task sets in it, at whatever offset in the
+  # parent's step, runs its timeout after on the frame's `Date` and `performance.now()` alike, never before (HTML timer
+  # initialization) — the frame scheduled on its own clock a step behind the parent's while reading the parent's, and a
+  # `setTimeout(…, 50)` ran at once (Chrome: 50.2, 100.2, 250.4).
+  it "runs a timer a parent's task sets in its frame after its timeout" do
+    s = simulated_session(lambda {|env|
+      if env['PATH_INFO'] == '/f'
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><script>window.go = (ms, cb) => { const p0 = performance.now(), d0 = Date.now(); setTimeout(() => cb([ms, performance.now() - p0, Date.now() - d0]), ms); };</script>']]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><iframe src="/f"></iframe>']]
+      end
+    })
+    s.visit '/'
+    poll_until { s.evaluate_script("typeof document.querySelector('iframe').contentWindow.go == 'function'") }
+    s.execute_script(<<~JS)
+      window.got = [];
+      const fw = document.querySelector('iframe').contentWindow;
+      const cases = [1, 4, 10, 16, 50, 100, 250];
+      let i = 0;
+      const next = () => {
+        if (i >= cases.length) return;
+        const ms = cases[i++];
+        setTimeout(() => fw.go(ms, (r) => { got.push(r); next(); }), (37 * i) % 90);
+      };
+      next();
+    JS
+    got = poll_until(timeout: 30) { s.evaluate_script('got.length == 7 && got') }
+    got.each do |ms, perf, date|
+      expect(perf).to be >= ms - 0.1
+      expect(date).to be >= ms - 1
+      expect(perf).to be < ms + 20
+    end
   end
 end

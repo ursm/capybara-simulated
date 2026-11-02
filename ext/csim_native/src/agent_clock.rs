@@ -16,8 +16,14 @@
 // it: what crosses from one agent to another — a message, a worker's answer — carries its sender's time, and lands no
 // earlier (timers.js `clockAtLeast`, the gap `agentRan`): a service worker spinning 2 s in its fetch event answers 2 s on,
 // on the page's clock. Each realm's clock reads the script time from where it stood as the realm's time origin was
-// taken, beside the virtual clock — its agent's: the window realms of one agent, one event loop, read the furthest of
-// their main realm's clock and their own (`clock_of`), as a frame's own steps follow its parent's.
+// taken, beside the virtual clock — its agent's: the window realms of one agent, one event loop, read and schedule on one
+// clock, a frame's raised to its main realm's as the main realm's tasks reach into it (timers.rs `script_clock`), its own
+// steps following its parent's to the parent's time (timers.js `drainChildRealms`).
+//
+// A document's `Date` begins at the wall clock (the host's `clockEpochMs`), as its server's `Time.now` does — so after a
+// long fast-forward the next document's `Date` falls back to the wall clock, behind where the last one's had gone: a
+// page's `Date` minutes ahead of its server misreads every "x minutes ago" and every expiry. Its `performance.now()`
+// begins at 0, and neither goes back within it.
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::dom::{dom, realm_id, register};
@@ -108,15 +114,9 @@ fn script_time(scope: &mut v8::PinScope<'_, '_>) -> f64 {
     time.now(at)
 }
 
-// Realm `cid`'s virtual clock as its time reads it: its own, or, a realm of a window's agent other than its main one, the
-// main realm's where that has gone further — one event loop, whose steps run a frame's tasks after its parent's: a frame
-// read its parent's time a step behind it inside the parent's tasks.
-fn clock_of(arena: &crate::dom::RealmArena, cid: i32) -> f64 {
-    let own = arena.realm_state(cid).map_or(0.0, |s| s.clock);
-    if cid == 0 {
-        return own;
-    }
-    own.max(arena.realm_state(0).map_or(0.0, |s| s.clock))
+// Realm `cid`'s virtual clock as its time reads it: the one its scripts schedule on (timers.rs `script_clock`).
+fn clock_of(arena: &mut crate::dom::RealmArena, cid: i32) -> f64 {
+    arena.script_clock(cid)
 }
 
 // Realm `cid`'s time origin, taken where it has none: a realm of a window the host booted has its own (`clockEpochSet`);
@@ -144,7 +144,7 @@ fn hr_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let cid = realm_id(scope, &args);
     let script = script_time(scope);
     let origin = origin_of(scope, cid, script);
-    let clock = clock_of(&dom(scope).arena, cid);
+    let clock = clock_of(&mut dom(scope).arena, cid);
     rv.set_double(origin.hr(clock, script));
 }
 
@@ -154,7 +154,7 @@ fn hr_peek(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let cid = realm_id(scope, &args);
     let script = dom(scope).agent_time.now(Instant::now());
     let origin = origin_of(scope, cid, script);
-    let clock = clock_of(&dom(scope).arena, cid);
+    let clock = clock_of(&mut dom(scope).arena, cid);
     rv.set_double(origin.hr(clock, script));
 }
 
@@ -175,7 +175,7 @@ fn clock_epoch_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let since = args.get(1).number_value(scope).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
     let cid = realm_id(scope, &args);
     let script = dom(scope).agent_time.now(Instant::now());
-    let clock = clock_of(&dom(scope).arena, cid);
+    let clock = clock_of(&mut dom(scope).arena, cid);
     dom(scope).arena.enter(cid).time_origin = Some(TimeOrigin { epoch, clock, script: script - since });
 }
 
