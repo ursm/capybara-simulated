@@ -5785,9 +5785,11 @@ module Capybara
       private def sw_activated_in_place(handle, w, follower = nil)
         return true if Native.sw_worker_activated(@sw_partition, handle.to_i)
 
+        began = w[:now].to_f
+        # (…its time run on no further than the wait goes: what the window is charged for, below)
+        w[:answer_until] = began + SW_ACTIVATION_IN_PLACE_MS
         w[:awaited] = w[:awaited].to_i + 1
         w[:answering][:activation] = true
-        began = w[:now].to_f
         begin
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
           stalled  = 0
@@ -5803,10 +5805,12 @@ module Capybara
           w[:activate_done] == true
         ensure
           w[:answering].delete(:activation)
+          w.delete(:answer_until)
           w[:awaited] -= 1
-          # (…the window whose script waits, its clock on by the worker's time the wait took — not a worker's thread's — where
-          # the worker activated: one given up on ran on by itself, which the window catches up with as it steps)
-          follower.clock_moved_by(w[:now].to_f - began) if w[:activate_done] && follower && Thread.current == @main_thread
+          # (…the window whose script waits, its clock on by the worker's time the wait took — not a worker's thread's — given
+          # up on or not, as a browser's page would have been held that long: left behind, the worker's next answer lifted
+          # the page's clock by it, 1,315 ms after a request the network answered in 2)
+          follower.clock_moved_by(w[:now].to_f - began) if follower && Thread.current == @main_thread
         end
       end
       SW_ACTIVATION_IN_PLACE_MS = 1000
@@ -9895,7 +9899,7 @@ module Capybara
             # (…the window's now otherwise: a message's handler runs at the time the window has reached as the worker takes
             # it — by design, its sender's step over — and an idle poll catches the worker up to it, never ahead)
             to = if msg.is_a?(Hash) && msg[:kind] == 'tick' then msg[:to].to_f
-                 elsif msg.nil? && answering then worker_now + [record[:next_timer].to_f, 0].max
+                 elsif msg.nil? && answering then [worker_now + [record[:next_timer].to_f, 0].max, record[:answer_until] || Float::INFINITY].min
                  elsif msg.nil? && record && record[:awaited].to_i.positive? then worker_now + WORKER_POLL_INTERVAL * 1000
                  else @runtime.clock
                  end

@@ -13,6 +13,12 @@ pub(crate) struct Css {
     pub(crate) owner: Option<Target>,
     pub(crate) kind: CssKind,
     previous: (Phase, Option<f64>),
+    // Whether a rendering update has seen it pending — a transition, its play task not yet run (css-transitions-2:
+    // pending) — which it owes no event for, its `transitionrun` the commit's (`Animations::commit_pending`), but which a
+    // cancel then is from: a transition an animation frame callback takes out of `transition-property` owes its
+    // `transitioncancel` (WPT css-transitions/transitioncancel-002), where one made and cancelled before any update owes
+    // nothing (Firefox).
+    seen_pending: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -23,7 +29,7 @@ pub(crate) enum CssKind {
 
 impl Css {
     pub(crate) fn new(owner: &Target, kind: CssKind) -> Css {
-        Css { owner: Some(owner.clone()), kind, previous: (Phase::Idle, None) }
+        Css { owner: Some(owner.clone()), kind, previous: (Phase::Idle, None), seen_pending: false }
     }
 
     pub(crate) fn animation(&self) -> Option<&CssAnimation> {
@@ -139,7 +145,10 @@ impl Animations {
         let timing = a.effect.and_then(|e| self.effects.get(&e)).map(|e| e.timing.clone());
         let current = self.current_time(id);
         let (phase, iteration) = self.css_phase(id, canceling);
-        let (was, was_iteration) = css.previous;
+        let (was, was_iteration) = match css.previous {
+            (Phase::Idle, _) if canceling && css.seen_pending => (Phase::Before, None),
+            previous => previous,
+        };
         if (was, was_iteration) == (phase, iteration) {
             return;
         }
@@ -198,6 +207,13 @@ impl Animations {
                 (computed.phase, computed.current_iteration)
             },
             _ => (Phase::Idle, None),
+        }
+    }
+
+    // A rendering update saw CSS transition `id` still pending (`Css::seen_pending`).
+    pub(crate) fn note_pending_transition(&mut self, id: AnimationId) {
+        if let Some(css) = self.animations.get_mut(&id).and_then(|a| a.css.as_mut()) {
+            css.seen_pending = true;
         }
     }
 

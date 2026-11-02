@@ -331,4 +331,38 @@ RSpec.describe 'the event loop of a page and its frames' do
     HTML
     expect(log).to eq(%w[P-raf F-raf P-start F-start])
   end
+
+  # A transition a task's style change made is pending until the update's commit, after that update's animation frame
+  # callbacks — owing no event at that update's "update animations and send events", where a pending one was read as
+  # running from its hold time and sent `transitionrun` and `transitionstart` ahead of the first callback. Its events
+  # come at the next update, with the script animations' `ready` settled at the commit before them. Chrome 156:
+  # `raf1 F-ready P-ready st=true run start raf2 raf3 P-finished end`; Firefox 159 sends `F-ready` after `start`, which
+  # the order of two documents' promises leaves open.
+  it "sends a pending transition's events after the first animation frame callbacks" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>ready</title>
+      <style>#t { transition: opacity 100ms linear; opacity: 1 } #t.o { opacity: 0 }</style>
+      <div id="e">e</div><div id="t">t</div>
+      <iframe id="f" srcdoc="<div id=d>d</div>"></iframe>
+      <pre id="out"></pre>
+      <script>
+        const log = [];
+        onload = () => setTimeout(() => {
+          const e = document.getElementById('e'), t = document.getElementById('t');
+          const fd = document.getElementById('f').contentDocument.getElementById('d');
+          for (const ev of ['transitionrun', 'transitionstart', 'transitionend', 'transitioncancel']) t.addEventListener(ev, () => log.push(ev.slice(10)));
+          const a = e.animate([{ opacity: 0 }, { opacity: 1 }], 100);
+          const b = fd.animate([{ opacity: 0 }, { opacity: 1 }], 100);
+          a.ready.then(() => log.push('P-ready'));
+          b.ready.then(() => log.push('F-ready'));
+          t.className = 'o';
+          requestAnimationFrame(() => { log.push('raf1'); requestAnimationFrame(() => log.push('raf2')); });
+          setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 400);
+        }, 50);
+      </script>
+    HTML
+    expect(log.first).to eq('raf1')
+    expect(log - %w[F-ready]).to eq(%w[raf1 P-ready run start raf2 end])
+    expect(log.index('F-ready')).to be < log.index('raf2')
+  end
 end
