@@ -625,7 +625,7 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
         if own.location.is_none() && own.reload.is_some() {
             let arena = realm(scope, w);
             arena.navigation_plan.own = own;
-            if let Some(queued) = reload_queued(arena, w) {
+            if let Some(queued) = reload_queued(arena) {
                 waiting.push((w, queued));
                 continue;
             }
@@ -690,20 +690,20 @@ fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, text: Option<String>) -> v
 }
 // __dom.takeReload() -> whether the document had transient activation as the reload planned began, which it plans no
 // more — undefined for none.
-// The mark of the tasks queued on realm `cid`'s document's event loop the reload its plan holds waits on, where some are
-// still to run: those queued by the time the host first comes to take it, its mark taken then (`Reload::mark`) — none
-// for none, or no reload.
-fn reload_queued(arena: &mut crate::dom::RealmArena, cid: i32) -> Option<u64> {
-    let now = arena.task_mark(cid);
+// The mark of the tasks queued on the document's event loop the reload its plan holds waits on, where some are still to
+// run: those queued by the time the host first comes to take it, its mark taken then (`Reload::mark`) — none for none,
+// or no reload.
+fn reload_queued(arena: &mut crate::dom::RealmArena) -> Option<u64> {
+    let now = arena.task_mark();
     let reload = arena.navigation_plan.own.reload.as_mut()?;
     let mark = *reload.mark.get_or_insert(now);
-    arena.queued_by(cid, mark)
+    arena.queued_by(mark)
 }
 // (…`[mark]` instead while tasks queued on its document's event loop before it are still to run: `reload_queued`, which
 // the host runs first)
 fn take_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    if let Some(queued) = reload_queued(realm(scope, cid), cid) {
+    if let Some(queued) = reload_queued(realm(scope, cid)) {
         let mark = v8::Number::new(scope, queued as f64).into();
         return rv.set(v8::Array::new_with_elements(scope, &[mark]).into());
     }

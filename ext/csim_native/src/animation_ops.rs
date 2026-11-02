@@ -39,9 +39,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animCompositeOrder", anim_composite_order, context_id);
 }
 
-// The document timeline at the realm's clock (`RealmState::clock`), before an op reads or moves an animation.
+// The document timeline at the event loop's clock (`EventLoop::clock`), before an op reads or moves an animation.
 fn at_time(engine: &mut StyleEngine, arena: &RealmArena) {
-    at_clock(engine, arena.clock);
+    at_clock(engine, arena.event_loop.clock);
 }
 fn at_clock(engine: &mut StyleEngine, now: f64) {
     if engine.web_animations.timeline_time != Some(now) {
@@ -50,13 +50,16 @@ fn at_clock(engine: &mut StyleEngine, now: f64) {
 }
 
 // The time to the next frame an animation the style engine of realm `realm` runs is due one at — waiting on a frame (0),
-// or running to an end its events and its finished state fall at — on that realm's clock; none for none, and for a realm
+// or running to an end its events and its finished state fall at — on the event loop's clock; none for none, and for a realm
 // the engine styles nothing of.
 pub(crate) fn next_frame_delay_of(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<f64> {
     let mut delay = None;
     style_op(scope, realm, |scope| {
         let d = dom(scope);
-        let Some(now) = d.arena.realm_state(realm).map(|s| s.clock) else { return };
+        if d.arena.realm_state(realm).is_none() {
+            return;
+        }
+        let now = d.arena.event_loop.clock;
         let Some(engine) = d.styles.get_mut(&realm) else { return };
         at_clock(engine, now);
         delay = engine.web_animations.next_frame_delay();

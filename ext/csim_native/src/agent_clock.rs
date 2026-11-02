@@ -14,10 +14,10 @@
 //
 // The script time is the agent's — its isolate's, one event loop for every realm of it. Another agent's work is none of
 // it: what crosses from one agent to another — a message, a worker's answer — carries its sender's time, and lands no
-// earlier (timers.js `atItsTime`): a service worker spinning 2 s in its fetch event answers 2 s on, on the page's clock. Each realm's clock reads the script time from where it stood as the realm's time origin was
-// taken, beside the virtual clock — its agent's: the window realms of one agent, one event loop, read and schedule on one
-// clock, a frame's raised to its main realm's as the main realm's tasks reach into it (timers.rs `script_clock`), its own
-// steps following its parent's to the parent's time (timers.js `drainChildRealms`).
+// earlier (timers.js `atItsTime`): a service worker spinning 2 s in its fetch event answers 2 s on, on the page's clock.
+// Each realm's clock reads the script time from where it stood as the realm's time origin was taken, beside the virtual
+// clock — its agent's: the window realms of one agent, one event loop, read and schedule on one clock (timers.rs
+// `EventLoop`).
 //
 // A document's `Date` begins at the wall clock (the host's `clockEpochMs`), as its server's `Time.now` does — so after a
 // long fast-forward the next document's `Date` falls back to the wall clock, behind where the last one's had gone: a
@@ -112,10 +112,6 @@ fn script_time(scope: &mut v8::PinScope<'_, '_>) -> f64 {
     time.now(at)
 }
 
-// Realm `cid`'s virtual clock as its time reads it: the one its scripts schedule on (timers.rs `script_clock`).
-fn clock_of(arena: &mut crate::dom::RealmArena, cid: i32) -> f64 {
-    arena.script_clock(cid)
-}
 
 // Realm `cid`'s time origin, taken where it has none: a realm of a window the host booted has its own (`clockEpochSet`);
 // any other — a frame's, a pop-up's this isolate made — reads its `Date` on from its main realm's, as one agent's clock,
@@ -125,10 +121,10 @@ fn origin_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, script: f64) -> TimeOri
     if let Some(origin) = arena.realm_state(cid).and_then(|s| s.time_origin) {
         return origin;
     }
-    let clock = clock_of(arena, cid);
-    let main = (cid != 0).then(|| arena.realm_state(0)).flatten().and_then(|s| s.time_origin.map(|o| (o, s.clock)));
+    let clock = arena.event_loop.clock;
+    let main = (cid != 0).then(|| arena.realm_state(0)).flatten().and_then(|s| s.time_origin);
     let now = match main {
-        Some((o, main_clock)) => o.epoch + o.hr(main_clock, script),
+        Some(o) => o.epoch + o.hr(clock, script),
         None => system_now(),
     };
     let origin = TimeOrigin { epoch: now, clock, script };
@@ -142,8 +138,7 @@ fn hr_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let cid = realm_id(scope, &args);
     let script = script_time(scope);
     let origin = origin_of(scope, cid, script);
-    let clock = clock_of(&mut dom(scope).arena, cid);
-    rv.set_double(origin.hr(clock, script));
+    rv.set_double(origin.hr(dom(scope).arena.event_loop.clock, script));
 }
 
 // __dom.hrPeek() -> the same, read by the host — as a navigation leaves the page — which opens no turn: what runs next
@@ -152,8 +147,7 @@ fn hr_peek(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let cid = realm_id(scope, &args);
     let script = dom(scope).agent_time.now(Instant::now());
     let origin = origin_of(scope, cid, script);
-    let clock = clock_of(&mut dom(scope).arena, cid);
-    rv.set_double(origin.hr(clock, script));
+    rv.set_double(origin.hr(dom(scope).arena.event_loop.clock, script));
 }
 
 // __dom.clockEpoch() -> the calling realm's time origin, in milliseconds since the epoch. (A read of the origin, which
@@ -173,7 +167,7 @@ fn clock_epoch_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let since = args.get(1).number_value(scope).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
     let cid = realm_id(scope, &args);
     let script = dom(scope).agent_time.now(Instant::now());
-    let clock = clock_of(&mut dom(scope).arena, cid);
+    let clock = dom(scope).arena.event_loop.clock;
     dom(scope).arena.enter(cid).time_origin = Some(TimeOrigin { epoch, clock, script: script - since });
 }
 

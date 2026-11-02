@@ -358,8 +358,8 @@ impl RealmArena {
             if let Some(parent) = parent {
                 self.navigables.parents.insert(realm, parent);
             }
-            if let (Some((at, count)), Some(parent)) = (activation, parent) {
-                self.inherit_activation(realm, parent, at, count);
+            if let (Some((at, count)), Some(_)) = (activation, parent) {
+                self.inherit_activation(realm, at, count);
             }
         }
         self.note_linked();
@@ -455,6 +455,36 @@ impl RealmArena {
         if cid == 0 {
             realms.extend(&self.navigables.windows);
             realms.sort_unstable();
+        }
+        realms
+    }
+    // The realms of the agent's event loop (HTML: one for every window realm of a similar-origin window agent): the page's
+    // and the windows' `window.open` made in this isolate, and those of every child navigable's active document under
+    // them — in no order: what its steps run the tasks of (timers.rs `agent_first`). The page's alone, the common page's,
+    // a load of a word.
+    pub(crate) fn agent_realms_unordered(&self) -> Vec<i32> {
+        let mut realms = vec![0];
+        if self.agent_realms_alone() {
+            return realms;
+        }
+        realms.extend(&self.navigables.windows);
+        realms.extend(self.navigables.children.iter().filter_map(|(&c, child)| self.stepped_realm(c, child)));
+        realms
+    }
+    // …whether those are the page's alone: no frame of it, nor window, has a realm.
+    pub(crate) fn agent_realms_alone(&self) -> bool {
+        self.navigables.linked.get() == 0
+    }
+    // …and in the order the rendering update takes their documents ("update the rendering" step: each document after its
+    // container's document, those of one document in the tree order of their containers): the page's tree, then each
+    // window's, in the order they were opened.
+    pub(crate) fn agent_realms(&self) -> Vec<i32> {
+        let mut realms = self.inclusive_descendant_realms(0);
+        if self.agent_realms_alone() {
+            return realms;
+        }
+        for &window in &self.navigables.windows {
+            realms.extend(self.inclusive_descendant_realms(window));
         }
         realms
     }
@@ -1523,7 +1553,7 @@ fn realms_made_under(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let realms = crate::dom::realm(scope, cid).realms_made_under(realm);
     rv.set(realm_array(scope, &realms));
 }
-fn realm_array<'s>(scope: &mut v8::PinScope<'s, '_>, realms: &[i32]) -> v8::Local<'s, v8::Value> {
+pub(crate) fn realm_array<'s>(scope: &mut v8::PinScope<'s, '_>, realms: &[i32]) -> v8::Local<'s, v8::Value> {
     let items: Vec<v8::Local<'_, v8::Value>> = realms.iter().map(|&r| v8::Integer::new(scope, r).into()).collect();
     v8::Array::new_with_elements(scope, &items).into()
 }

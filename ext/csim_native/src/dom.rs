@@ -1034,6 +1034,8 @@ pub(crate) struct RealmArena {
     pub(crate) running_cancel: std::collections::HashSet<u64>,
     // The keys of the tasks the platform queues on the realms' timer lists, the isolate's (timers.rs).
     pub(crate) task_keys: crate::timers::TaskKeys,
+    // …and the agent's event loop, which runs them — its clock, the order its tasks were queued in (timers.rs).
+    pub(crate) event_loop: crate::timers::EventLoop,
     // The custom element reactions: each element's reaction queue, and the agent's reactions stack (ce_reactions.rs).
     pub(crate) ce_reactions: crate::ce_reactions::Reactions,
     // Moves with every write to the arena (a node made or freed, any `get_mut`): what a memo of it keys on.
@@ -1161,9 +1163,6 @@ pub(crate) struct RealmState {
     // Its timers and the tasks the platform queues on their list (timers.rs) — a page's, which a new one's realm state
     // starts without.
     pub(crate) timers: crate::timers::Timers,
-    // …and its virtual clock: the time its event loop has reached, in milliseconds since its context began (timers.rs
-    // `clockNow`) — which runs on while a disposed context's code still does, as its timers do not.
-    pub(crate) clock: f64,
     // …and its time origin, which its high resolution time counts from (agent_clock.rs): none until it is first read.
     pub(crate) time_origin: Option<crate::agent_clock::TimeOrigin>,
     // Its Window's user activation (user_activation.rs): its last activation timestamp — None for positive infinity, a
@@ -1303,6 +1302,9 @@ impl RealmArena {
         }
         self.enter(cid);
         self.timers_begin(cid);
+        if cid == 0 {
+            self.event_loop.page_begins();
+        }
         // (…and the adopted sheet lists its last page's sheets made: their ids are none of the next page's)
         self.adopted_sheets.retain(|_, list| list.realm != cid);
         // (…afresh, but its faces table and sheet store in place: the realm's style engine, which outlives the context,
@@ -5633,11 +5635,10 @@ fn style_restyled(
     rv.set_uint32(arena.restyled.take());
 }
 
-// The calling realm's clock (ms, `RealmState::clock`): the time its style engine answers an op's question at — where
-// its animations are sampled.
-pub(crate) fn realm_clock(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> f64 {
-    let cid = realm_id(scope, args);
-    dom(scope).arena.realm_state(cid).map_or(0.0, |s| s.clock)
+// The event loop's clock (ms, `EventLoop::clock`): the time the calling realm's style engine answers an op's question at
+// — where its animations are sampled.
+pub(crate) fn realm_clock(scope: &mut v8::PinScope<'_, '_>, _args: &v8::FunctionCallbackArguments<'_>) -> f64 {
+    dom(scope).arena.event_loop.clock
 }
 
 // Under CSIM_STYLE_VERIFY, what the engine's last restyles disagreed with a full one about (`failures`), thrown as the

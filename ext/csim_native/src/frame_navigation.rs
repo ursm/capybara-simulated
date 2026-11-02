@@ -215,8 +215,7 @@ impl RealmArena {
         let in_parents = |c: NodeId| self.get(c).is_some_and(|n| parents.contains(&n.realm));
         self.frame_navigations.0.iter().filter(|&(&c, nav)| ready(nav) && in_parents(c) && self.frame_realm(c).is_none() && self.is_connected(c)).map(|(&c, _)| c).collect()
     }
-    // …one more activation notification reaching such a frame's window, its last at `at` on its container's realm's
-    // clock…
+    // …one more activation notification reaching such a frame's window, its last at `at` on the event loop's clock…
     pub(crate) fn note_unbuilt_activation(&mut self, container: NodeId, at: f64) {
         let nav = self.frame_navigation(container);
         nav.activation = Some((at, nav.activation.map_or(0, |(_, n)| n) + 1));
@@ -719,7 +718,7 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         // (…a reload left planned while a task queued on the frame's document's event loop before it is still to run,
         // which the host runs first: `[realm, mark]` in its place)
         if let Some(r) = realm {
-            if let Some(queued) = frame_reload_queued(arena, c, r) {
+            if let Some(queued) = frame_reload_queued(arena, c) {
                 waiting.push((r, queued));
                 continue;
             }
@@ -781,16 +780,16 @@ fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     }
 }
 
-// The mark of the tasks queued on frame realm `realm`'s event loop the reload its container `c` plans waits on, where some
-// are still to run: those queued by the time the host first came to take it, its mark taken then (navigation_plan.rs
-// `Reload::mark`) — none for none, or no reload.
-fn frame_reload_queued(arena: &mut crate::dom::RealmArena, c: NodeId, realm: i32) -> Option<u64> {
-    let now = arena.task_mark(realm);
+// The mark of the tasks queued on the event loop the reload frame container `c` plans waits on, where some are still to
+// run: those queued by the time the host first came to take it, its mark taken then (navigation_plan.rs `Reload::mark`)
+// — none for none, or no reload.
+fn frame_reload_queued(arena: &mut crate::dom::RealmArena, c: NodeId) -> Option<u64> {
+    let now = arena.task_mark();
     let mark = arena.frame_navigations.0.get_mut(&c).and_then(|n| match &mut n.host {
         Some((_, HostNavigation::Reload { mark })) => Some(*mark.get_or_insert(now)),
         _ => None,
     });
-    mark.and_then(|m| arena.queued_by(realm, m))
+    mark.and_then(|m| arena.queued_by(m))
 }
 // __dom.cancelFrameLocation(containerNid) — the navigation the host plans to make of the container's navigable let go, a
 // `javascript:` URL's begun in it the ongoing one now (url-parse.js `runJavascriptURL`) — but not the form submission it

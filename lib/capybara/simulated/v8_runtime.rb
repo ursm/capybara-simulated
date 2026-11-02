@@ -454,10 +454,10 @@ module Capybara
       # (function reference) rather than `eval` (string compile) — the
       # polling loop hits these every retry tick.
       def drain_timers(max_ms = nil)
-        # The bridge's `__drainTimers`/`__runLoopStep` step iframe realms' event
-        # loops themselves (timers.js `drainChildRealms`), so this one call covers
-        # child frames too — no separate Ruby-side fan-out (which would
-        # double-advance their clocks and fire intervals twice).
+        # The bridge's `__drainTimers`/`__runLoopStep` is a step of the agent's ONE
+        # event loop, which runs the tasks of iframe realms and the windows this
+        # isolate opened too (timers.js `runTaskIn`), so this one call covers them —
+        # no separate Ruby-side fan-out (which would run their tasks twice).
         @browser.apply_controller_changes
         @browser.running_event_loop { walks_guarded { max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i) } }
       end
@@ -484,8 +484,8 @@ module Capybara
           cut, spent = @browser.worker_due_within(left, waited)
           waited    += spent
           began      = clock
-          # `__runLoopStep` steps child iframe realms itself (timers.js
-          # `drainChildRealms`), folding their fired/dirtied into the result.
+          # `__runLoopStep` runs the tasks of child iframe realms itself, the
+          # event loop's (timers.js `runTaskIn`): their fired/dirtied are in the result.
           r = @browser.running_event_loop { stepping { walks_guarded { ctx.call('__runLoopStep', (cut || left), max_iter.to_i, !!yield_on_gen) } } }
           r = { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
           @clock = r['now'].to_f if r['now']
@@ -749,8 +749,8 @@ module Capybara
         @module_fetch_options&.delete(id)
         @browser.forget_importmap(id)
         window_realms_changed if @window_realm_meta&.delete(id)
-        # Evict from the main realm's stepped windows so `drainChildRealms` stops
-        # stepping a disposed context. A FRAME realm is also evicted via the DOM
+        # Evict from the main realm's stepped windows so the event loop stops
+        # running a disposed context's tasks. A FRAME realm is also evicted via the DOM
         # unregister path (its iframe element going away), but a WINDOW realm has no
         # element — this is its only eviction, and it covers the reload (dispose +
         # recreate) path too, where the old id would otherwise leak in the set.
@@ -1630,7 +1630,7 @@ module Capybara
       # === `top` === the window itself (the bridge default, so unlike
       # create_frame_realm we don't wire them to a container), and `window.opener`
       # points at the opener realm's WindowProxy. Tracked in `frame_realms` so
-      # realm_call / drainChildRealms / dispose_frame_realms cover it for free.
+      # realm_call / the event loop's step / dispose_frame_realms cover it for free.
       # Returns the new realm's context id; the opener-side `window.open` wraps it in
       # a native `__csimFrameWindowProxyFor`, so `popup.document` is a real
       # same-isolate Document (cross-window adoptNode works). The single isolate also
@@ -1696,8 +1696,8 @@ module Capybara
         # own load-time post is dropped. Mirrors create_frame_realm seeding its depth /
         # parent maps before the load for the same reason.
         frame_realms[realm.id] = realm
-        # Register with the page's (main) realm's stepped windows so `drainChildRealms`
-        # steps THIS realm's event loop too — otherwise its queued tasks (e.g. a
+        # Register with the page's (main) realm's stepped windows so the event loop
+        # runs THIS realm's tasks too — otherwise its queued tasks (e.g. a
         # BroadcastChannel delivery from a blob document) never fire.
         ctx.eval_void("__dom.setSteppedWindow(#{realm.id}, true, #{opener_id.nil? ? 'undefined' : opener_id.to_i}, #{window_key.to_i});")
         # Remember the window's opener / name so a self-navigation (reload_window_realm
@@ -1726,7 +1726,7 @@ module Capybara
         if realm
           # The realm is registered (frame_realms / parents / the stepped windows)
           # BEFORE the document loads, so a load-time throw must roll all of that back
-          # — otherwise frame_realm_alive? and drainChildRealms keep treating a
+          # — otherwise frame_realm_alive? and the event loop keep treating a
           # disposed context as live. dispose_frame_realm unwinds the registries (and
           # disposes if registered); the explicit dispose is the backstop for a throw
           # that happened before registration.
