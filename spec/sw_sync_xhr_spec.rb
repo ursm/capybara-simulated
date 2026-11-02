@@ -167,8 +167,9 @@ RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
   end
 
   # A worker's sync XHR keeps its `timeout`, one from send() for the whole fetch — every hop of a redirect chain the worker
-  # answers — of the answering worker's time: a TimeoutError where the answer comes later. And the waiting worker's
-  # clock moves on by the time the answer took, as a waiting window's does.
+  # answers — of the answering worker's time: a TimeoutError where the answer comes later. And the clock the waiting
+  # worker's script reads (`performance.now()`) moves on by the time the answer took, as a waiting window's does —
+  # neither less nor, the wall's share counted twice, more.
   it "times a worker's sync XHR out by its timeout, its clock moved by the wait" do
     session = controlled_session
     session.execute_script(<<~JS)
@@ -178,14 +179,17 @@ RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
           const x = new XMLHttpRequest();
           x.open('GET', '${location.origin}/data.txt?tag=' + q, false);
           x.timeout = timeout;
-          const v0 = __virtualNow();
+          const p0 = performance.now();
           try { x.send(); out.push(x.responseText); } catch (e) { out.push(e.name); }
-          out.push(Math.round(__virtualNow() - v0));
+          out.push(Math.round(performance.now() - p0));
         }
         postMessage(out);`;
       new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))).onmessage = (e) => { window.got = e.data; };
     JS
-    expect(poll_until { session.evaluate_script('window.got') }).to eq(['TimeoutError', 100, 'sw-slow', 300, 'TimeoutError', 100, 'hopped', 240])
+    got = poll_until { session.evaluate_script('window.got') }
+    expect(got.each_slice(2).map(&:first)).to eq(%w[TimeoutError sw-slow TimeoutError hopped])
+    # (…about: the wall clock's share of the wait is real time, as long as the machine takes)
+    got.each_slice(2).map(&:last).zip([100, 300, 100, 240]) {|ms, want| expect(ms).to be_within(40).of(want) }
   end
 
   it 'is answered by the service worker from a dedicated worker, as its other requests are' do

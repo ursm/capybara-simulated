@@ -5612,7 +5612,8 @@ module Capybara
         end
         limit    = WORKER_ANSWER_VIRTUAL_MS
         stalled  = 0
-        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + budget
+        began    = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        deadline = began + budget
         while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
           reply = @worker_host.await_reply(fetch_id, [left, WORKER_POLL_INTERVAL].min)
           # (…none from a worker whose thread is gone — a request it never took answered as it was reaped, so this one it
@@ -5647,8 +5648,11 @@ module Capybara
           moved    = took ? ((answered || worker[:now]).to_f - took).clamp(0, limit) : 0
           worker[:answering].delete(fetch_id)
           if waiting
-            # (…a worker's script waiting inside a sync XHR: its clock on by the time the answer took, as a window's is)
-            waiting[:clock_moved_by]&.call(moved) if moved.positive?
+            # (…a worker's script waiting inside a sync XHR: its clock where the wait began plus the time the answer took,
+            # as a window's is — its `Date` the wall clock's time plus its virtual time, the wall's share of the wait passed
+            # already, the virtual clock moved by the rest)
+            rest = moved - (Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000
+            waiting[:clock_moved_by]&.call(rest) if rest.positive?
           else
             worker[:awaited] -= 1
             window_follows_awaited_worker(worker, follower, moved)
