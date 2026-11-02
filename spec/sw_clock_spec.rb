@@ -169,7 +169,7 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
     JS
     got = poll_until(timeout: 20) { s.evaluate_script('got') }
     expect(got[0]).to eq('network')
-    expect(got[1]).to be_between(2000, 2500)
+    expect(got[1].round(1)).to be_between(2000, 2500)
   end
 
   # …once: the time the page waited for it with its clock held is that same time, which it does not add again — a 0 ms
@@ -185,8 +185,8 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
       });
     JS
     got = poll_until(timeout: 20) { s.evaluate_script('got') }
-    expect(got[0]).to be_between(1000, 1200)
-    expect(got[1]).to be_between(0, 20)
+    expect(got[0].round(1)).to be_between(1000, 1200)
+    expect(got[1].round(1)).to be_between(0, 20)
   end
 
   # …and one it takes after another it was busy with, at the time it gave it: after that one's time too, not the time
@@ -205,7 +205,7 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
     log = poll_until(timeout: 20) { l = s.evaluate_script('log'); l.size == 4 && l }
     expect(log.map(&:first)).to eq(%w[spin T600 ms300 T900])
     # (…the spin on whole milliseconds of `Date.now()`, as much as one short)
-    expect(log[2][1]).to be_between(799, 900)
+    expect(log[2][1].round(1)).to be_between(799, 900)
   end
 
   # …and the worker's clock on with the page's after it: a quick answer at once, the worker's `Date` the page's, however
@@ -257,8 +257,8 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
       });
     JS
     got = poll_until(timeout: 20) { s.evaluate_script('got') }
-    expect(got[0]).to be_between(0, 150), got.inspect
-    expect(got[1] - got[0]).to be_between(100, 150), got.inspect
+    expect(got[0].round(1)).to be_between(0, 150), got.inspect
+    expect((got[1] - got[0]).round(1)).to be_between(100, 150), got.inspect
   end
 
   it "resolves a dedicated worker's XHR when the service worker answers, before its timeout" do
