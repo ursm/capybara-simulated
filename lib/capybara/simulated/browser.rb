@@ -5648,11 +5648,9 @@ module Capybara
           moved    = took ? ((answered || worker[:now]).to_f - took).clamp(0, limit) : 0
           worker[:answering].delete(fetch_id)
           if waiting
-            # (…a worker's script waiting inside a sync XHR: its clock where the wait began plus the time the answer took,
-            # as a window's is — its `Date` the wall clock's time plus its virtual time, the wall's share of the wait passed
-            # already, the virtual clock moved by the rest)
-            rest = moved - (Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000
-            waiting[:clock_moved_by]&.call(rest) if rest.positive?
+            # (…a worker's script waiting inside a sync XHR: its clock on by the time the answer took, as a window's is —
+            # its virtual clock by exactly that, its `Date` too, the real time the wait took left out of it)
+            waiting[:clock_moved_by]&.call(moved, (Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000) if moved.positive?
           else
             worker[:awaited] -= 1
             window_follows_awaited_worker(worker, follower, moved)
@@ -9453,7 +9451,8 @@ module Capybara
         record[:rt_lock].synchronize { record[:rt] = rt } if record
         # …and how its clock moves on by `ms`, nothing of its run — the time a worker's answer took, which its script
         # waited for inside a sync XHR (`await_worker_reply`): its time and its isolate's together.
-        record[:clock_moved_by] = ->(ms) { worker_clock_step.call(worker_now + ms) && rt.call('__csimClockMovedBy', ms) } if record
+        # (…`wall_ms` the real time the wait took, which its `Date` does not show beside the move: timers.js)
+        record[:clock_moved_by] = ->(ms, wall_ms) { worker_clock_step.call(worker_now + ms) && rt.call('__csimClockMovedBy', ms, wall_ms) } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`
         # is a no-op until `traceActive` is set (console.js). The main realm turns it on
         # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed

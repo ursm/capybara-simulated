@@ -73,6 +73,10 @@ RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
       when '/worker.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
       when '/imp.js'    then [200, {'content-type' => 'text/javascript'}, ['self.imp = "network"']]
       when '/data.txt'  then [200, {'content-type' => 'text/plain'}, ['network']]
+      when '/delayed.txt'
+        # (…a server that takes real time, and a modeled delay of its own: X-Csim-Server-Delay-Ms, a time.sleep's)
+        sleep 0.03
+        [200, {'content-type' => 'text/plain', 'x-csim-server-delay-ms' => '95'}, ['delayed']]
       else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>page']]
       end
     }
@@ -190,6 +194,26 @@ RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
     expect(got.each_slice(2).map(&:first)).to eq(%w[TimeoutError sw-slow TimeoutError hopped])
     # (…about: the wall clock's share of the wait is real time, as long as the machine takes)
     got.each_slice(2).map(&:last).zip([100, 300, 100, 240]) {|ms, want| expect(ms).to be_within(40).of(want) }
+  end
+
+  # …judged on the model's time alone — the server's modeled delay, which the waiting script's clock moves by — never the
+  # real time the app took to answer, which would time a request out by how fast this machine runs its server.
+  it "times a worker's sync XHR out by the server's modeled delay, not the app's real time" do
+    session = controlled_session
+    session.execute_script(<<~JS)
+      window.got = null;
+      const src = `const out = [];
+        for (const timeout of [100, 90]) {
+          const x = new XMLHttpRequest();
+          x.open('GET', '${location.origin}/delayed.txt', false);
+          x.timeout = timeout;
+          const v0 = __virtualNow();
+          try { x.send(); out.push(x.responseText, Math.round(__virtualNow() - v0)); } catch (e) { out.push(e.name); }
+        }
+        postMessage(out);`;
+      new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))).onmessage = (e) => { window.got = e.data; };
+    JS
+    expect(poll_until { session.evaluate_script('window.got') }).to eq(['delayed', 95, 'TimeoutError'])
   end
 
   it 'is answered by the service worker from a dedicated worker, as its other requests are' do
