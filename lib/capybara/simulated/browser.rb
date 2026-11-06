@@ -10940,7 +10940,7 @@ module Capybara
       def consume_pending_location
         url, replace, initiator_realm, source, policy, activated, blob, ongoing, document = @runtime.call('__csimTakeLocation')
         return unless url
-        return commit_javascript_document(url, document, ongoing.to_i) if document
+        return in_top_context { commit_javascript_document(url, document, ongoing.to_i) } if document
 
         # The page's `location` navigates the page, whichever realm's script set it — a frame's own is its container's to
         # navigate (location.js `dispatchNav`), an entered one's too — each judged against the document it navigates, by

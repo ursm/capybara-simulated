@@ -130,6 +130,25 @@ RSpec.describe 'a top-level javascript: URL' do
     end
   end
 
+  # …by whichever realm's script navigates it, a frame's too (HTML: the task runs in the navigable's active document).
+  it "makes the page's document of a URL its frame's script navigated the page to" do
+    session.visit('/target')
+    session.execute_script("const f = document.createElement('iframe'); f.src = '/framed'; document.body.append(f); window.f = f")
+    expect(poll_until { session.evaluate_script("f.contentDocument?.title === 'target' && f.contentDocument.readyState === 'complete'") }).to be(true)
+    session.execute_script("f.contentWindow.eval(#{"top.location.href = #{markup.inspect}".inspect})")
+    expect(poll_until { session.evaluate_script('document.title') == 'J' }).to be(true)
+    expect(session.evaluate_script('location.pathname')).to eq('/target')
+  end
+
+  # …and a reload begun beside it, whichever first, makes the document in the end: the reload's.
+  it 'gives way to a reload begun beside it' do
+    session.visit('/target')
+    session.execute_script("location.reload(); location.href = #{markup.inspect}")
+    session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
+    expect(poll_until { requests.count {|_, path, _| path == '/target' } == 2 }).to be(true)
+    expect(poll_until { session.evaluate_script('document.title') == 'target' }).to be(true)
+  end
+
   context 'in a pop-up of its opener’s isolate' do
     def go(path)
       session.visit('/opener')
