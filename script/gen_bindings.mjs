@@ -38,7 +38,12 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // name, an operation `'method'`, an attribute what of it is exposed (`'get'`, `'set'`, `'get set'`, the table's
 // [[NeedsGet]] / [[NeedsSet]]) — emitted as `CROSS_ORIGIN_<NAME>_PROPERTIES`, a Set of the names, and
 // `CROSS_ORIGIN_<NAME>_KINDS`, each one's kind (platform-globals.js, the WindowProxy and the Location of another origin).
-// `slots`: the attributes whose getter reads a slot of the object's and no more, needing no implementation — a slot of the
+// `shell`: with `install`, an interface whose class the binding makes too — flat, as an event interface's: chained to the
+// class of the interface it inherits by its [[Prototype]]s alone (`define<Name>(Parent, impl)`), no `extends`, no `super`, so
+// nothing of a page's put in that chain is ever called, with PLATFORM or at all. Its object's slots one record, with the
+// brand of each interface of the chain that is a shell's; `impl.init(slots, …)` fills it for the platform's own construction
+// (`new X(PLATFORM, …)`, by position), and `impl.construct(slots, …)` for a script's, with its IDL constructor's arguments
+// converted: `shellClass`. `slots`: the attributes whose getter reads a slot of the object's and no more, needing no implementation — a slot of the
 // attribute's name, or, in an object among them, of the name it gives it: a setter, where it has one, stays the
 // implementation's. `event`: an event interface, whose class the binding makes too (`eventInterface`:
 // `define<Name>(Parent, impl)`), its attributes slots of its state that its init fills — but what `event` says otherwise.
@@ -329,6 +334,7 @@ const INTERFACES = [
   ['pointerevents', 'PointerEvent', { event: { init: ['tiltX', 'tiltY', 'altitudeAngle', 'azimuthAngle'] } }],
   ['touch-events', 'Touch', {
     install: true,
+    shell: true,
     slots: ['identifier', 'target', 'screenX', 'screenY', 'clientX', 'clientY', 'pageX', 'pageY', 'radiusX', 'radiusY', 'rotationAngle', 'force', 'altitudeAngle', 'azimuthAngle', 'touchType']
   }],
   ['touch-events', 'TouchList'],
@@ -430,17 +436,17 @@ const INTERFACES = [
   ['clipboard-apis', 'ClipboardEvent', { event: {} }],
   ['cssom-view', 'MediaQueryListEvent', { event: {} }],
   ['IndexedDB', 'IDBVersionChangeEvent', { event: {} }],
-  ['IndexedDB', 'IDBRequest', { install: true, slots: ['source', 'transaction'] }],
-  ['IndexedDB', 'IDBOpenDBRequest', { install: true }],
-  ['IndexedDB', 'IDBFactory', { install: true }],
-  ['IndexedDB', 'IDBDatabase', { install: true }],
-  ['IndexedDB', 'IDBTransaction', { install: true, slots: ['mode', 'durability', 'error', { db: 'connection' }] }],
-  ['IndexedDB', 'IDBObjectStore', { install: true, slots: ['name', 'keyPath', 'transaction'] }],
-  ['IndexedDB', 'IDBIndex', { install: true, slots: ['name', 'keyPath', { objectStore: 'storeHandle' }] }],
-  ['IndexedDB', 'IDBKeyRange', { install: true, slots: ['lowerOpen', 'upperOpen'] }],
-  ['IndexedDB', 'IDBRecord', { install: true, slots: ['key', 'primaryKey', 'value'] }],
-  ['IndexedDB', 'IDBCursor', { install: true, slots: ['source', 'direction', 'request', { key: 'keyValue', primaryKey: 'primaryKeyValue' }] }],
-  ['IndexedDB', 'IDBCursorWithValue', { install: true }],
+  ['IndexedDB', 'IDBRequest', { install: true, shell: true, slots: ['source', 'transaction'] }],
+  ['IndexedDB', 'IDBOpenDBRequest', { install: true, shell: true }],
+  ['IndexedDB', 'IDBFactory', { install: true, shell: true }],
+  ['IndexedDB', 'IDBDatabase', { install: true, shell: true }],
+  ['IndexedDB', 'IDBTransaction', { install: true, shell: true, slots: ['mode', 'durability', 'error', { db: 'connection' }] }],
+  ['IndexedDB', 'IDBObjectStore', { install: true, shell: true, slots: ['name', 'keyPath', 'transaction'] }],
+  ['IndexedDB', 'IDBIndex', { install: true, shell: true, slots: ['name', 'keyPath', { objectStore: 'storeHandle' }] }],
+  ['IndexedDB', 'IDBKeyRange', { install: true, shell: true, slots: ['lowerOpen', 'upperOpen'] }],
+  ['IndexedDB', 'IDBRecord', { install: true, shell: true, slots: ['key', 'primaryKey', 'value'] }],
+  ['IndexedDB', 'IDBCursor', { install: true, shell: true, slots: ['source', 'direction', 'request', { key: 'keyValue', primaryKey: 'primaryKeyValue' }] }],
+  ['IndexedDB', 'IDBCursorWithValue', { install: true, shell: true }],
   ['html', 'DOMStringList'],
   ['html', 'Location', { install: true, crossOrigin: { href: 'set', replace: 'method' } }],
   ['html', 'History', { install: true }],
@@ -495,20 +501,22 @@ const INTERFACES = [
   ['service-workers', 'NavigationPreloadManager', { install: true }],
   ['html', 'Worker', { install: true }],
   ['html', 'SharedWorker', { install: true, slots: ['port'] }],
-  ['credential-management', 'Credential', { install: true, slots: ['id', 'type'] }],
+  ['credential-management', 'Credential', { install: true, shell: true, slots: ['id', 'type'] }],
   ['credential-management', 'CredentialsContainer', { install: true }],
-  ['webauthn', 'PublicKeyCredential', { install: true, slots: ['rawId', 'response', 'authenticatorAttachment'] }],
-  ['webauthn', 'AuthenticatorResponse', { install: true }],
-  ['webauthn', 'AuthenticatorAttestationResponse', { install: true, slots: ['attestationObject'] }],
-  ['webauthn', 'AuthenticatorAssertionResponse', { install: true, slots: ['authenticatorData', 'signature', 'userHandle'] }],
+  ['webauthn', 'PublicKeyCredential', { install: true, shell: true, slots: ['rawId', 'response', 'authenticatorAttachment'] }],
+  ['webauthn', 'AuthenticatorResponse', { install: true, shell: true, slots: ['clientDataJSON'] }],
+  ['webauthn', 'AuthenticatorAttestationResponse', { install: true, shell: true, slots: ['attestationObject'] }],
+  ['webauthn', 'AuthenticatorAssertionResponse', { install: true, shell: true, slots: ['authenticatorData', 'signature', 'userHandle'] }],
   ['service-workers', 'Client', {
     slots: ['url', 'frameType', 'id', 'type'],
     install: true,
+    shell: true,
     omit: { 'page-lifecycle': 'lifecycleState: the Page Lifecycle API is not implemented (a WICG proposal)' }
   }],
   ['service-workers', 'WindowClient', {
     slots: ['focused'],
     install: true,
+    shell: true,
     omitMembers: {
       ancestorOrigins: "the ancestor origins of a client: Location's ancestorOrigins, which it mirrors, is not implemented (Firefox has neither)"
     }
@@ -519,10 +527,10 @@ const INTERFACES = [
   ['service-workers', 'FetchEvent', { event: { steps: ['handled'], init: ['preloadResponse'] } }],
   ['service-workers', 'InstallEvent', { event: {} }],
   ['web-animations', 'AnimationTimeline', {
-    install: true,
+    install: true, shell: true,
     omitMembers: { play: 'AnimationTimeline.play(): a level-2 shorthand no engine ships (Chrome and Firefox have none)' }
   }],
-  ['web-animations', 'DocumentTimeline', { install: true }],
+  ['web-animations', 'DocumentTimeline', { install: true, shell: true }],
   ['web-animations', 'AnimationEffect', {
     install: true,
     omit: {
@@ -550,19 +558,19 @@ const INTERFACES = [
       'performance-measure-memory': 'measureUserAgentSpecificMemory: memory measurement is not implemented'
     }
   }],
-  ['performance-timeline', 'PerformanceEntry', { install: true, slots: ['id', 'name', 'entryType', 'startTime', 'duration', 'navigationId'] }],
-  ['user-timing', 'PerformanceMark', { install: true }],
-  ['user-timing', 'PerformanceMeasure', { install: true }],
-  ['server-timing', 'PerformanceServerTiming', { install: true, slots: ['name', 'duration', 'description'] }],
-  ['resource-timing', 'PerformanceResourceTiming', { install: true }],
+  ['performance-timeline', 'PerformanceEntry', { install: true, shell: true, slots: ['id', 'name', 'entryType', 'startTime', 'duration', 'navigationId'] }],
+  ['user-timing', 'PerformanceMark', { install: true, shell: true, slots: ['detail'] }],
+  ['user-timing', 'PerformanceMeasure', { install: true, shell: true, slots: ['detail'] }],
+  ['server-timing', 'PerformanceServerTiming', { install: true, shell: true, slots: ['name', 'duration', 'description'] }],
+  ['resource-timing', 'PerformanceResourceTiming', { install: true, shell: true }],
   ['performance-timeline', 'PerformanceObserver', { install: true }],
   ['performance-timeline', 'PerformanceObserverEntryList', { install: true }],
   ['resize-observer', 'ResizeObserver', { install: true }],
   ['resize-observer', 'ResizeObserverEntry', { install: true, slots: ['target', 'contentRect', 'borderBoxSize', 'contentBoxSize', 'devicePixelContentBoxSize'] }],
   ['resize-observer', 'ResizeObserverSize', { install: true, slots: ['inlineSize', 'blockSize'] }],
-  ['xhr', 'XMLHttpRequestEventTarget', { install: true }],
-  ['xhr', 'XMLHttpRequestUpload', { install: true }],
-  ['xhr', 'XMLHttpRequest', { slots: ['upload'], install: true, omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
+  ['xhr', 'XMLHttpRequestEventTarget', { install: true, shell: true }],
+  ['xhr', 'XMLHttpRequestUpload', { install: true, shell: true }],
+  ['xhr', 'XMLHttpRequest', { install: true, shell: true, slots: ['upload'], omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
   ['fetch', 'Request', {
     slots: ['method', 'url', 'headers', 'destination', 'referrer', 'referrerPolicy', 'mode', 'credentials', 'cache', 'redirect', 'integrity', 'keepalive', 'isReloadNavigation', 'isHistoryNavigation', 'signal'],
     install: true,
@@ -596,31 +604,31 @@ const INTERFACES = [
   ['cssom', 'CSSRuleList'],
   ['cssom', 'StyleSheet', { install: true, slots: ['href', 'parentStyleSheet', 'title', 'media'] }],
   ['cssom', 'CSSStyleSheet', { install: true, slots: ['ownerRule'] }],
-  ['cssom', 'CSSRule', { install: true }],
-  ['cssom', 'CSSGroupingRule', { install: true }],
-  ['cssom', 'CSSStyleRule', { install: true }],
-  ['cssom', 'CSSImportRule', { install: true }],
-  ['cssom', 'CSSPageRule', { install: true }],
-  ['cssom', 'CSSMarginRule', { install: true }],
-  ['cssom', 'CSSNamespaceRule', { install: true }],
-  ['css-conditional', 'CSSConditionRule', { install: true }],
-  ['css-conditional', 'CSSMediaRule', { install: true }],
-  ['css-conditional', 'CSSSupportsRule', { install: true }],
-  ['css-conditional-5', 'CSSContainerRule', { install: true }],
-  ['css-cascade', 'CSSLayerBlockRule', { install: true }],
-  ['css-cascade', 'CSSLayerStatementRule', { install: true }],
-  ['css-cascade-6', 'CSSScopeRule', { install: true }],
-  ['css-transitions-2', 'CSSStartingStyleRule', { install: true }],
-  ['css-fonts-5', 'CSSFontFaceRule', { install: true }],
-  ['css-fonts', 'CSSFontFeatureValuesRule', { install: true }],
+  ['cssom', 'CSSRule', { install: true, shell: true }],
+  ['cssom', 'CSSGroupingRule', { install: true, shell: true }],
+  ['cssom', 'CSSStyleRule', { install: true, shell: true }],
+  ['cssom', 'CSSImportRule', { install: true, shell: true }],
+  ['cssom', 'CSSPageRule', { install: true, shell: true }],
+  ['cssom', 'CSSMarginRule', { install: true, shell: true }],
+  ['cssom', 'CSSNamespaceRule', { install: true, shell: true }],
+  ['css-conditional', 'CSSConditionRule', { install: true, shell: true }],
+  ['css-conditional', 'CSSMediaRule', { install: true, shell: true }],
+  ['css-conditional', 'CSSSupportsRule', { install: true, shell: true }],
+  ['css-conditional-5', 'CSSContainerRule', { install: true, shell: true }],
+  ['css-cascade', 'CSSLayerBlockRule', { install: true, shell: true }],
+  ['css-cascade', 'CSSLayerStatementRule', { install: true, shell: true }],
+  ['css-cascade-6', 'CSSScopeRule', { install: true, shell: true }],
+  ['css-transitions-2', 'CSSStartingStyleRule', { install: true, shell: true }],
+  ['css-fonts-5', 'CSSFontFaceRule', { install: true, shell: true }],
+  ['css-fonts', 'CSSFontFeatureValuesRule', { install: true, shell: true }],
   ['css-fonts', 'CSSFontFeatureValuesMap', { install: true }],
-  ['css-fonts', 'CSSFontPaletteValuesRule', { install: true }],
-  ['css-animations', 'CSSKeyframeRule', { install: true }],
-  ['css-animations', 'CSSKeyframesRule', { install: true, indexedProperties: 'the Proxy each @keyframes rule is (cssom.js `withIndexedGetter`)' }],
-  ['css-counter-styles', 'CSSCounterStyleRule', { install: true }],
-  ['css-properties-values-api', 'CSSPropertyRule', { install: true }],
-  ['css-nesting', 'CSSNestedDeclarations', { install: true }],
-  ['css-anchor-position', 'CSSPositionTryRule', { install: true }],
+  ['css-fonts', 'CSSFontPaletteValuesRule', { install: true, shell: true }],
+  ['css-animations', 'CSSKeyframeRule', { install: true, shell: true }],
+  ['css-animations', 'CSSKeyframesRule', { install: true, shell: true, indexedProperties: 'the Proxy each @keyframes rule is (cssom.js `withIndexedGetter`)' }],
+  ['css-counter-styles', 'CSSCounterStyleRule', { install: true, shell: true }],
+  ['css-properties-values-api', 'CSSPropertyRule', { install: true, shell: true }],
+  ['css-nesting', 'CSSNestedDeclarations', { install: true, shell: true }],
+  ['css-anchor-position', 'CSSPositionTryRule', { install: true, shell: true }],
   ['dom', 'MutationObserver', { install: true }],
   ['cssom-view', 'MediaQueryList', { install: true, slots: ['media'] }],
   ['geolocation', 'Geolocation'],
@@ -1702,7 +1710,8 @@ function generateInterface(def, options = {}) {
     }
     if (setlike) setlike.declared = memberList.filter((o) => o.type === 'operation' && ['add', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
     if (maplike) maplike.declared = memberList.filter((o) => o.type === 'operation' && ['set', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
-    return installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed, valueIterator });
+    const installed = installInterface(def, { shell: options.shell, body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed, valueIterator });
+    return options.shell ? `${installed}\n${shellClass(def, constructors)}` : installed;
   }
   if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
@@ -1765,7 +1774,7 @@ function generateInterface(def, options = {}) {
 // The event handler IDL attributes each installed interface has, by its name — the elements' the engine's table of
 // event handler content attributes is made from (`rustSource`).
 const EVENT_HANDLERS_OF = new Map();
-function installInterface(def, { body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed, valueIterator }) {
+function installInterface(def, { shell, body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed, valueIterator }) {
   const name = def.name;
   EVENT_HANDLERS_OF.set(name, handlers);
   const global = (def.extAttrs || []).some((e) => e.name === 'Global');
@@ -1806,8 +1815,9 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   lines.push(`  defineClassString(iface.prototype, '${name}');`);
   if (unscopables.length) lines.push(`  defineUnscopables(iface.prototype, ${JSON.stringify(unscopables)});`);
   if (unforgeables.length) lines.push(`  class Unforgeables {`, ...unforgeables, `  }`);
-  if (constructors.length > 1) lines.unshift(overloadedConstructorArguments(name, constructors), '');
-  else if (constructors.length && constructors[0].arguments.length) lines.unshift(constructorArguments(name, constructors[0]), '');
+  // (…its constructor's arguments, a shell's own class's to convert)
+  if (!shell && constructors.length > 1) lines.unshift(overloadedConstructorArguments(name, constructors), '');
+  else if (!shell && constructors.length && constructors[0].arguments.length) lines.unshift(constructorArguments(name, constructors[0]), '');
   if (global) {
     lines.push(`  const descriptors = Object.getOwnPropertyDescriptors(members);`);
     lines.push(`  return {`);
@@ -1818,6 +1828,49 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   } else if (unforgeables.length) {
     lines.push(`  return unforgeableMembers(Unforgeables.prototype);`);
   }
+  lines.push(`}`);
+  return lines.join('\n');
+}
+
+// An interface's class, of a `shell`: what `install<Name>` puts its members on (see `shell` above).
+function shellClass(def, constructors) {
+  const name = def.name;
+  if (constructors.length > 1) throw new Error(`${name}: an overloaded constructor of a shell is not generated yet`);
+  const [ctor] = constructors;
+  const checks = new Set();
+  const converted = ctor ? convertArguments(name, ctor, checks, () => null) : [];
+  const required = ctor ? ctor.arguments.filter((a) => !a.optional && !a.variadic).length : 0;
+  // (…the interfaces it inherits that are shells too, the topmost first: the record stamped by that one's brand)
+  const chain = [];
+  for (let d = def; d && interfaceOptions(d.name).shell; d = definitions.get(d.inheritance)) chain.unshift(d.name);
+  const platformArguments = 'arguments[1], arguments[2], arguments[3], arguments[4], arguments[5], arguments[6]';
+  const lines = [`export function define${name}(${def.inheritance ? 'Parent, ' : ''}impl) {`];
+  lines.push(`  registerInterface('${name}', (o) => slotsOf(o, '${name}') !== undefined);`);
+  for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
+  lines.push(`  const ${name} = ({ ${name}: class {`);
+  lines.push(`    constructor() {`);
+  if (!ctor) lines.push(`      constructedBy(PLATFORM, arguments[0], '${name}');`);
+  lines.push(`      const slots = makeSlots(this, '${chain[0]}');`);
+  for (const n of chain.slice(1)) lines.push(`      slots.${n} = true;`);
+  if (ctor) {
+    const message = `Failed to construct '${name}': ${required} argument${required === 1 ? '' : 's'} required, but only `;
+    lines.push(`      if (arguments[0] === PLATFORM) {`);
+    lines.push(`        return impl.init(slots, ${platformArguments});`);
+    lines.push(`      } else {`);
+    if (required) lines.push(`        if (arguments.length < ${required}) throw new TypeError(${JSON.stringify(message)} + arguments.length + ' present.');`);
+    lines.push(`        impl.construct(${['slots', ...converted].join(', ')});`);
+    lines.push(`      }`);
+  } else {
+    lines.push(`      return impl.init(slots, ${platformArguments});`);
+  }
+  lines.push(`    }`);
+  lines.push(`  } }).${name};`);
+  if (def.inheritance) {
+    lines.push(`  Object.setPrototypeOf(${name}, Parent);`);
+    lines.push(`  Object.setPrototypeOf(${name}.prototype, Parent.prototype);`);
+  }
+  lines.push(`  install${name}(${name}, impl);`);
+  lines.push(`  return ${name};`);
   lines.push(`}`);
   return lines.join('\n');
 }

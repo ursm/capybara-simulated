@@ -185,6 +185,12 @@ RSpec.describe 'a secure context' do
     end
   end
 
+  # (…a secure context's to register, as a real 127.0.0.1's: no "universal server" asked for)
+  it 'registers a service worker on the default host' do
+    session.visit('/')
+    expect(session.evaluate_async_script("navigator.serviceWorker.register('/shared.js', {scope: '/'}).then((r) => arguments[0](r.scope), (e) => arguments[0](e.name))")).to eq('http://www.example.com/')
+  end
+
   # HTML "SharedWorker constructor": "If workerIsSecureContext is not callerIsSecureContext", `error` at the worker, no
   # connection. A pop-up's initial about:blank of a frame on a.test under a secure top is one of a.test's site and a secure
   # context; a page of a.test is none.
