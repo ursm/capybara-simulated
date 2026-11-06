@@ -1279,9 +1279,10 @@ impl SessionHistory {
         let top_level = rb_self.lock().opener_policy;
         Ok(crate::coop::inherited(top_level, || ruby.yield_value(ruby.qnil()))?.name())
     }
-    // #entry_at_step(step) -> the id of the top-level entry at `step`, what a traversal to it reads before it is applied.
+    // #entry_at_step(step) -> the id of the top-level entry current at `step` (a frame's entries have steps of their own), what a
+    // traversal to it reads before it is applied.
     fn entry_at_step(&self, step: i64) -> Option<u64> {
-        self.lock().state.entries.iter().rfind(|e| e.step == step).map(|e| e.id)
+        self.lock().state.entries.iter().filter(|e| e.step <= step).max_by_key(|e| e.step).map(|e| e.id)
     }
     // #opener_policy_isolates? { [origin, top-level origin] } -> whether a window a document of it opens is opened without
     // its opener (coop.rs `isolates_opener`), the block giving that document's facts.

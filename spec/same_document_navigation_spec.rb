@@ -2,7 +2,6 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # Same-document navigation: a fragment change (`location.hash = …`, an in-page anchor) and
 # `history.pushState` / `replaceState`. Two contracts that only show up once you look past the
@@ -293,7 +292,7 @@ RSpec.describe 'same-document navigation' do
     end
 
     # (…for storage: no SharedArrayBuffer, even in a cross-origin isolated document, which may post one)
-    it 'refuses to keep a SharedArrayBuffer', :every_host_local do
+    it 'refuses to keep a SharedArrayBuffer' do
       app = lambda do |_env|
         headers = {
           'content-type'                 => 'text/html',
@@ -303,7 +302,7 @@ RSpec.describe 'same-document navigation' do
         [200, headers, ['<p>isolated</p>']]
       end
       s = simulated_session(app)
-      s.visit 'https://www.example.com/'
+      s.visit '/'
 
       expect(s.evaluate_script('crossOriginIsolated')).to be(true)
       expect(s.evaluate_script(<<~JS)).to eq(['DataCloneError', nil])

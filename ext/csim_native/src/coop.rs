@@ -69,41 +69,86 @@ fn parameter(input: &str) -> Option<&str> {
     }
 }
 
-// …a bare item off `input`, what is left of it: a string, a byte sequence, a boolean, a number or a token.
+// …a bare item off `input`, what is left of it: a string, a byte sequence, a boolean, a number, a date, a display string or
+// a token (RFC 9651 §4.2.3.1).
 fn bare_item(input: &str) -> Option<&str> {
     let first = input.chars().next()?;
     match first {
-        '"' => {
-            let mut chars = input.char_indices().skip(1);
-            while let Some((at, c)) = chars.next() {
-                match c {
-                    '"' => return Some(&input[at + 1..]),
-                    '\\' => {
-                        chars.next().filter(|(_, c)| matches!(c, '"' | '\\'))?;
-                    }
-                    ' '..='~' => {}
-                    _ => return None,
-                }
-            }
-            None
-        }
-        ':' => {
-            let body = &input[1..];
-            let end = body.find(':')?;
-            body[..end].chars().all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c)).then(|| &body[end + 1..])
-        }
+        '"' => string(&input[1..]),
+        ':' => byte_sequence(&input[1..]),
         '?' => input[1..].strip_prefix(['0', '1']),
-        '-' | '0'..='9' => {
-            let body = input.strip_prefix('-').unwrap_or(input);
-            let end = body.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(body.len());
-            (end > 0 && body[..end].matches('.').count() <= 1 && !body[..end].ends_with('.')).then(|| &body[end..])
-        }
+        '-' | '0'..='9' => number(input, true),
+        '@' => number(&input[1..], false),
+        '%' => display_string(input[1..].strip_prefix('"')?),
         c if c.is_ascii_alphabetic() || c == '*' => {
             let end = input.find(|c: char| !(c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~:/".contains(c))).unwrap_or(input.len());
             Some(&input[end..])
         }
         _ => None,
     }
+}
+
+// A string's body, after its opening quote.
+fn string(input: &str) -> Option<&str> {
+    let mut chars = input.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match c {
+            '"' => return Some(&input[at + 1..]),
+            '\\' => {
+                chars.next().filter(|(_, c)| matches!(c, '"' | '\\'))?;
+            }
+            ' '..='~' => {}
+            _ => return None,
+        }
+    }
+    None
+}
+
+// A byte sequence's body, after its opening colon: base64, its length a multiple of four, padded only at its end.
+fn byte_sequence(input: &str) -> Option<&str> {
+    let end = input.find(':')?;
+    let body = &input[..end];
+    let data = body.trim_end_matches('=');
+    let valid = body.len() % 4 == 0 && body.len() - data.len() <= 2 && data.chars().all(|c| c.is_ascii_alphanumeric() || "+/".contains(c));
+    valid.then(|| &input[end + 1..])
+}
+
+// An integer of at most 15 digits, or, where `decimal` allows, a decimal of at most 12 before its point and 1 to 3 after.
+fn number(input: &str, decimal: bool) -> Option<&str> {
+    let body = input.strip_prefix('-').unwrap_or(input);
+    let digits = |s: &str| s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let whole = digits(body);
+    if whole == 0 {
+        return None;
+    }
+    match body[whole..].strip_prefix('.') {
+        Some(rest) if decimal => {
+            let fraction = digits(rest);
+            (whole <= 12 && (1..=3).contains(&fraction)).then(|| &rest[fraction..])
+        }
+        Some(_) => None,
+        None => (whole <= 15).then(|| &body[whole..]),
+    }
+}
+
+// A display string's body, after its opening `%"`: printable ASCII, a `%` and two lowercase hex digits for a byte of UTF-8.
+fn display_string(input: &str) -> Option<&str> {
+    let mut bytes = Vec::new();
+    let mut chars = input.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match c {
+            '"' => return std::str::from_utf8(&bytes).is_ok().then(|| &input[at + 1..]),
+            '%' => {
+                let hex = |c: char| c.to_digit(16).filter(|_| !c.is_ascii_uppercase());
+                let high = hex(chars.next()?.1)?;
+                let low = hex(chars.next()?.1)?;
+                bytes.push((high * 16 + low) as u8);
+            }
+            ' '..='~' => bytes.push(c as u8),
+            _ => return None,
+        }
+    }
+    None
 }
 
 // HTML "obtain an opener policy" given a response's `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` and
@@ -210,6 +255,8 @@ mod tests {
         assert_eq!(of(None, Some("require-corp")), Value::UnsafeNone);
         assert_eq!(of(Some(" same-origin "), None), Value::SameOrigin);
         assert_eq!(of(Some("same-origin;foo=bar;baz;n=1.5;b=?1;t=tok;y=:AA==:"), None), Value::SameOrigin);
+        // (…RFC 9651's Date and Display String, its limits on a number at their edges)
+        assert_eq!(of(Some("same-origin; a=@1; b=%\"x%c3%a9\"; c=123456789012.123; d=-123456789012345"), None), Value::SameOrigin);
     }
 
     #[test]
@@ -230,6 +277,15 @@ mod tests {
             "same-origin; Foo=bar",
             "same-origin; foo=",
             "same-origin; foo=\"bar",
+            "same-origin; a=1.2345",
+            "same-origin; a=1234567890123456",
+            "same-origin; a=1234567890123.1",
+            "same-origin; a=1.",
+            "same-origin; a=:A:",
+            "same-origin; a=:A===:",
+            "same-origin; a=@1.5",
+            "same-origin; a=%\"%FF\"",
+            "same-origin; a=%\"%c3\"",
         ] {
             assert_eq!(obtain(Some(bad), None, true), Value::UnsafeNone, "{bad:?}");
         }

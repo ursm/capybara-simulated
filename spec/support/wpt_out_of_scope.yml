@@ -41943,6 +41943,19 @@ html/canvas/element/wide-gamut-canvas/2d.color.space.p3.strokeText.html:
 - name: Test if strokeText can be used with a solid display-p3 color
   reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
     subsystem we don't model (rule 1); the sRGB path is fully covered.
+html/cross-origin-opener-policy/coop-navigate-same-origin-csp-sandbox.html:
+- name: "[harness] TIMEOUT"
+  reason: The same subtest's, its popup never loading as above.
+- name: coop-navigate-same-origin-csp-sandbox
+  reason: 'Explicit HTML over the test and both browsers. HTML "create navigation
+    params by fetching": "If finalSandboxFlags is not empty and responseCOOP''s value
+    is not "unsafe-none", then set response to an appropriate network error and break."
+    This test holds a same-origin COOP + CSP sandbox response loading ("Because of
+    CSP:sandbox, the popup is not considered same-origin with its openee"), as Chrome
+    and Firefox do (sbxload_plain, sbxload_so, sbxload_aso, measured 2026-11-06).
+    The text stands: whatwg/html#8481 raises it and annevk defends it ("COOP gives
+    some kind of ''fresh start guarantee''"), and coop-csp-sandbox.https.html is titled
+    "should result in a network error". Re-check if #8481 changes it.'
 html/cross-origin-opener-policy/navigate-top-to-aboutblank.https.html:
 - name: 'Navigate top to about:blank from iframe with opener COOP: |header(Cross-Origin-Opener-Policy,same-origin-allow-popups),
     iframe origin: https://www1.web-platform.test:8443'

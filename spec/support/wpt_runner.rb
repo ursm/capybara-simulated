@@ -1413,6 +1413,9 @@ module WptRunner
   #     so the process takes MINUTES to exit after the last example.
   # The visit that follows rebuilds the page either way.
   def prepare_session!
+    # (…none of its origins a stand-in for loopback: its `no-https` is at http://www.example.com, of another test's Browser
+    # in this process or not)
+    Capybara::Simulated::Native.loopback_stand_in = false
     session.driver.reset!
     # The dispatcher message bus is the one cross-file channel; clear it per file so a
     # message left queued by a prior file's contexts can't leak into this one (uuids

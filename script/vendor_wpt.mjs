@@ -166,7 +166,7 @@ const TREES = [
                                        // Location expose, and the SecurityError for the rest
   'html/cross-origin-opener-policy',   // COOP: browsing context group switches, the policy a document of no headers
                                        // inherits, cross-origin isolation (coop.rs). Its reporting/ subtree is the
-                                       // Reporting API's, which `EXCLUDED_PREFIXES` leaves out.
+                                       // Reporting API's, not built yet: `EXCLUDED_PREFIXES`.
   'html/browsers/browsing-the-web/navigating-across-documents', // navigation: the initial about:blank, replace,
                                        // javascript: URLs, the source / target of a navigation
   'eventsource',                       // EventSource (HTML §9.2) — the server-sent events Mastodon and Turbo-ish
@@ -429,7 +429,8 @@ async function resolveSha(ref) {
   return (await res.text()).trim();
 }
 
-// Parts of a vendored tree that test a subsystem with no surface here at all, its whole subtree left out.
+// Parts of a vendored tree left out for now, with what brings them back. html/cross-origin-opener-policy/reporting/ is
+// backlog: HTML's "Queue a violation report" is normative, and the Reporting API it reports through is not built.
 const EXCLUDED_PREFIXES = ['html/cross-origin-opener-policy/reporting/'];
 
 async function listBlobs(sha, tree) {

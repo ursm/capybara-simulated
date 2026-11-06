@@ -43,6 +43,8 @@ module Capybara
       # `www.example.com` and capybara's own shared specs hard-code
       # that literal — fall back to it when no suite-side configuration
       # is in play.
+      # (…the stand-in for the app's own server on 127.0.0.1, a secure context as that is: url_ops.rs `LOOPBACK_STAND_IN`)
+      def self.default_host_stands_in? = !::Capybara.app_host && ::Capybara.server_host == '127.0.0.1'
       def self.default_host
         return ::Capybara.app_host if ::Capybara.app_host
         host = ::Capybara.server_host
@@ -295,6 +297,8 @@ module Capybara
         # window opened LATER — after the runner restored the env — still inherits it.
         # nil override (a stand-alone Browser) falls back to the live env check.
         @all_hosts_local              = @all_hosts_local_override.nil? ? (ENV['CSIM_LOCAL_ALL_HOSTS'] == '1') : @all_hosts_local_override
+        # (…a session that serves every host at the URL it asks for has no stand-in)
+        Native.loopback_stand_in = self.class.default_host_stands_in? && !@all_hosts_local
         # Handle IDs are per-Context integer sequences: a handle from
         # a pre-rebuild context could collide with a fresh node's id
         # in the new context. Node captures this on construction;
@@ -5038,8 +5042,10 @@ module Capybara
       # (…`isolated` whether the context that creates it is cross-origin isolated, which a dedicated or shared one is too:
       # its realm's own — a window's of a browsing context group its page left keeping its group's)
       # (…`credentials` a shared one's credentials mode, which another connecting to it must be of)
+      # (…`secure` whether the context that creates it is a secure context, which a dedicated or shared one is as its owner is
+      # — HTML "is a secure context", of its owner set[0] — and a service worker always)
       def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil, credentials: nil,
-                       sw_body: nil, sw_imports: nil, site: nil, isolated: false, at: nil, epoch_at: nil, shift: nil, travel: nil)
+                       sw_body: nil, sw_imports: nil, site: nil, isolated: false, secure: true, at: nil, epoch_at: nil, shift: nil, travel: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -5141,7 +5147,7 @@ module Capybara
         # contend for it are that stop and the worker's own dispose, and holding it across a native
         # call must not block anything else in the browser.
         # `url`: the worker's own URL — its script's, after redirects — which a nested worker's script fetch is judged against.
-        record = {thread: nil, inbox: inbox, took: {}, answered: {}, answering: {}, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, cluster_key: cluster_key, isolated: !service && isolated == true, rt: nil, rt_lock: Mutex.new, ticked: Thread::Queue.new}
+        record = {thread: nil, inbox: inbox, took: {}, answered: {}, answering: {}, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, cluster_key: cluster_key, isolated: !service && isolated == true, secure: service || secure == true, rt: nil, rt_lock: Mutex.new, ticked: Thread::Queue.new}
         # (…the window's virtual time it was made at — `new Worker()`'s, else the window's last step's — which its clock
         # starts from, and at which it is due: a booting worker runs its script before the window steps past it)
         record[:origin]        = at ? at.to_f : @runtime.clock
@@ -9561,7 +9567,7 @@ module Capybara
           }
         }
         worker_kind = if service then 'service' elsif shared then 'shared' else 'dedicated' end
-        rt          = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name, isolated: record&.dig(:isolated) == true)
+        rt          = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name, isolated: record&.dig(:isolated) == true, secure: record&.dig(:secure) != false)
         # Hand the runtime to the session boundary (`stop_worker_js`) the moment it exists.
         record[:rt_lock].synchronize { record[:rt] = rt } if record
         # …and how its clock moves on by `ms`, nothing of its run — the time a worker's answer took, which its script
@@ -11167,7 +11173,7 @@ module Capybara
         # (…an about:blank document's or a blob's opener policy the one it inherits: coop.rs `inherited`)
         local = blob || start == 'about_blank'
         if local
-          opener_policy = kind == 'traverse' ? history&.text(history.entry_at_step(step), :opener_policy) || 'unsafe-none' : inherited_opener_policy(initiator)
+          opener_policy = kind == 'traverse' ? history&.text(history.entry_at_step(step), :opener_policy) || 'unsafe-none' : inherited_opener_policy(initiator, navigated: history, navigated_realm: realm_id, source: source)
         end
         # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
         # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
@@ -12603,7 +12609,7 @@ module Capybara
             commits.(initiator && url_origin(initiator))
             self.page_url = url.to_s
             record_response(*ABOUT_BLANK_RESPONSE)
-            return boot_response_into_ctx('', inherited_coop: page_local_scheme_policy(from_history))
+            return boot_response_into_ctx('', inherited_coop: page_local_scheme_policy(from_history, referer))
           # A `blob:` URL's GET, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
           # the one above, which a traversal or a reload replays here. (A redirect to one is followed to none:
@@ -12616,7 +12622,7 @@ module Capybara
             given = blob[:type].to_s
             load, type = Native.navigation_load(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
             return download_in_place(url, {'content-type' => given}, [blob[:bytes].to_s]) if load == 'download'
-            inherited = page_local_scheme_policy(from_history)
+            inherited = page_local_scheme_policy(from_history, referer)
             return boot_inline_document(url, 200, {'content-type' => given}, commits, inherited_coop: inherited) if load == 'inline'
 
             commits.(url_origin(url.to_s.sub(/\Ablob:/i, '')))
@@ -12788,17 +12794,25 @@ module Capybara
       # …the origin of that document and of its top-level one: what the opener policy of the second is read by.
       private def top_level_origins(realm) = [document_origin(realm).to_s, document_origin(@runtime.top_level_realm(realm)).to_s]
       # …the opener policy a document of no headers that document makes takes (coop.rs `inherited`), none of no such document.
-      private def inherited_opener_policy(realm)
-        creator = realm && document_traversable(realm)
-        creator ? creator.inherited_opener_policy { top_level_origins(realm) } : 'unsafe-none'
+      # (…`source` the URL it navigated from as the navigation began, HTML's source snapshot: `navigated` the traversable it
+      # navigated, whose document is what its origin is read against where its realm has gone since — a frame that navigated
+      # top and removed itself, Chrome and Firefox keeping the group)
+      private def inherited_opener_policy(realm, navigated: nil, navigated_realm: 0, source: nil)
+        return 'unsafe-none' unless realm
+
+        creator = document_traversable(realm)
+        return creator.inherited_opener_policy { top_level_origins(realm) } if creator
+        return 'unsafe-none' unless navigated && source
+
+        navigated.inherited_opener_policy { [url_origin(source).to_s, document_origin(navigated_realm).to_s] }
       end
       # …the one the page's own takes: a replay's the one its entry kept; else that of the document that made the navigation,
       # which its entry keeps for one (`from_document`, none of the user's).
-      private def page_local_scheme_policy(from_history)
+      private def page_local_scheme_policy(from_history, referer)
         id = @session_history.active(0)
         return @session_history.text(id, :opener_policy) || 'unsafe-none' if from_history
 
-        inherited_opener_policy(@download_source).tap {|policy| @session_history.update(id, {opener_policy: policy}) if id }
+        inherited_opener_policy(@download_source, navigated: @session_history, source: referer).tap {|policy| @session_history.update(id, {opener_policy: policy}) if id }
       end
       # The facts of the document of realm `realm` a navigation of its top-level traversable leaves that its responses'
       # opener policies are enforced against, asked only where a policy but "unsafe-none" is in play: its origin and whether it
@@ -12811,8 +12825,7 @@ module Capybara
       # (a response's, an about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context
       # group is left for a new one where needed (session_history.rs `commit_opener_policy`), `carried` what its navigation's
       # enforcement result needed (navigation_fetch.rs `CoopEnforcement`), and the next document as cross-origin isolated as
-      # that makes it. (…a response in a context not secure of no policy: coop.rs `obtain`, though `isSecureContext` answers true
-      # everywhere here) Not modelled: a cross-origin frame's own `allow="cross-origin-isolated"` permission (it shares the
+      # that makes it. (…a response in a context not secure of no policy: coop.rs `obtain`) Not modelled: a cross-origin frame's own `allow="cross-origin-isolated"` permission (it shares the
       # top-level document's here), nor a service worker's own COEP (it is never isolated here).
       private def commit_coop(coop, origin, carried)
         switch, isolated = @session_history.commit_opener_policy(coop, origin.to_s, carried == true) { coop_leaving_facts(0) }

@@ -13,7 +13,8 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
       '/popups' => {'cross-origin-opener-policy' => 'same-origin-allow-popups'},
       '/framed' => {'cross-origin-opener-policy' => 'same-origin'},
       '/hop'    => {'cross-origin-opener-policy' => 'same-origin', 'cross-origin-embedder-policy' => 'require-corp'},
-      '/sbx'    => {'cross-origin-opener-policy' => 'same-origin', 'content-security-policy' => 'sandbox allow-scripts'}
+      '/sbx'    => {'cross-origin-opener-policy' => 'same-origin', 'content-security-policy' => 'sandbox allow-scripts'},
+      '/same'   => {'cross-origin-opener-policy' => 'same-origin'}
     }
   }
   let(:session) {
@@ -26,6 +27,7 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
       return [200, {'content-type' => 'application/pdf'}, ['%PDF-1.7']] if env['PATH_INFO'] == '/doc.pdf'
 
       frame = '<iframe name="fr" src="https://b.test/plain"></iframe>' if env['PATH_INFO'] == '/framed'
+      frame = '<iframe name="fr" src="/plain"></iframe>' if env['PATH_INFO'] == '/same'
       [200, headers, ["<!doctype html><meta charset=utf-8><title>#{env['PATH_INFO']}</title><p id=p>#{env['PATH_INFO']}</p>#{frame}"]]
     })
   }
@@ -184,6 +186,15 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(false) }
   end
 
+  # (…a frame that navigated top and removed itself still its source snapshot's: Chrome and Firefox keep the group)
+  it 'inherits for about:blank from a frame gone since it navigated top' do
+    session.visit('https://a.test/same')
+    window = popup('https://a.test/same')
+    session.within_frame('fr') { session.execute_script("open('about:blank', '_top'); frameElement.remove()") }
+    await_window("location.href === 'about:blank'")
+    session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(false) }
+  end
+
   # (…a document in a context not secure has none: HTML "obtain an opener policy", WPT no-https)
   it 'takes no policy from a response to a context not secure' do
     session.visit('http://a.test/framed')
@@ -223,6 +234,24 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
       session.execute_script("w.location = #{blob_url('w', '<p id=blob>blob</p>')}")
       await_window(window_at('blob:'))
       expect(session.evaluate_script('[w.closed, w.opener === window, w.document.getElementById("blob").textContent]')).to eq([false, true, 'blob'])
+    end
+
+    # (…back to a step a frame of it made, its entry the one current there)
+    it 'finds it in the entry current at a step a frame of it made' do
+      session.visit('https://a.test/same')
+      window = popup('https://a.test/same')
+      session.execute_script("w.location = 'about:blank'")
+      await_window(window_at('about:blank'))
+      session.execute_script("window.f = w.document.createElement('iframe'); f.src = 'https://a.test/plain'; w.document.body.append(f)")
+      await_window("f.contentDocument && f.contentDocument.getElementById('p')")
+      session.execute_script("f.contentWindow.location = 'https://a.test/plain2'")
+      await_window("f.contentDocument && f.contentDocument.location.pathname === '/plain2'")
+      session.execute_script("w.location = 'https://a.test/same?2'")
+      await_window(window_at('https://a.test/same?2'))
+      session.execute_script('w.history.back()')
+      await_window("w.closed || w.location.href === 'about:blank'")
+      expect(session.evaluate_script('[w.closed, w.opener === window, w.history.length]')).to eq([false, true, 4])
+      session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(false) }
     end
 
     # (…a pop-up's initial about:blank its creator's policy, its blob: or about:blank the same, as WPT blob-popup holds)

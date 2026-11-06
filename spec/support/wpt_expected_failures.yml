@@ -4025,9 +4025,6 @@ html/cross-origin-opener-policy/coep-blob-popup.https.html:
 - 'COOP+COEP blob URL popup: <a rel=noopener>'
 - 'COOP+COEP blob URL popup: <a>'
 - 'COOP+COEP blob URL popup: window.open()'
-html/cross-origin-opener-policy/coop-navigate-same-origin-csp-sandbox.html:
-- "[harness] TIMEOUT"
-- coop-navigate-same-origin-csp-sandbox
 html/cross-origin-opener-policy/javascript-url.https.html:
 - "[harness] TIMEOUT"
 - "[harness] TIMEOUT"

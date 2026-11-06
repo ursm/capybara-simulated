@@ -1277,6 +1277,11 @@ impl RealmArena {
         }
         None
     }
+    // Whether realm `realm`'s environment is a secure context (HTML "is a secure context"), by its top-level traversable's
+    // document's URL (`url_ops::secure_top_level`).
+    pub(crate) fn secure_context(&self, realm: i32) -> bool {
+        self.realm_state(self.top_level_realm(realm)).is_some_and(|s| crate::url_ops::secure_top_level(s.location.href()))
+    }
     // Whether a service worker may control a navigation of the navigable `container` frames — realm `realm`'s own where
     // none: where the environment it makes is a secure context (HTML §8.1.3.5, its top-level creation URL's — the top-
     // level traversable's document's: `url_ops::secure_top_level`) and its document's origin is no opaque one a sandbox
@@ -1289,8 +1294,7 @@ impl RealmArena {
         let frame = container.or_else(|| self.live_container(realm)).and_then(|c| self.get(c));
         let around = frame.map(|n| n.realm);
         let own = container.or_else(|| self.live_container(realm)).filter(|_| frame.is_some_and(|n| n.is_html_named("iframe"))).and_then(|c| self.frame_sandbox(c));
-        let top = self.top_level_realm(around.unwrap_or(realm));
-        if !self.realm_state(top).is_some_and(|s| crate::url_ops::secure_top_level(s.location.href())) {
+        if !self.secure_context(around.unwrap_or(realm)) {
             return false;
         }
         let inherited = around.and_then(|r| self.realm_state(r)).map_or(0, |s| s.location.sandbox);
@@ -1298,6 +1302,11 @@ impl RealmArena {
     }
 }
 
+// __dom.secureContext() -> `secure_context` of the calling realm.
+fn secure_context_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_bool(crate::dom::dom(scope).arena.secure_context(cid));
+}
 // __dom.swMayControlNavigation(container) -> `sw_may_control_navigation` of the frame `container`, or (null) of the
 // calling realm's own navigable.
 fn sw_may_control_navigation_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -1411,6 +1420,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "linkRoute", link_route, context_id);
     crate::dom::register(scope, ns, "navigationVerdict", navigation_verdict, context_id);
     crate::dom::register(scope, ns, "downloadAllowed", download_allowed, context_id);
+    crate::dom::register(scope, ns, "secureContext", secure_context_op, context_id);
     crate::dom::register(scope, ns, "swMayControlNavigation", sw_may_control_navigation_op, context_id);
     crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
     crate::dom::register(scope, ns, "childRealms", child_realms, context_id);

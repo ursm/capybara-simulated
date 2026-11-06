@@ -2252,7 +2252,7 @@ module Capybara
       # snapshot, host fns attached, `__csim_isWorker` flag set, +
       # the per-worker postMessage host fn closed over `post_back`.
       # Returns the `WorkerRuntime` that `Browser#run_worker` drives.
-      def self.build_worker(browser, post_back, broadcast_out = nil, sw_hooks = {}, kind:, name: '', isolated: false)
+      def self.build_worker(browser, post_back, broadcast_out = nil, sw_hooks = {}, kind:, name: '', isolated: false, secure: true)
         c = Ctx.new(snapshot: snapshot)
         attach_host_fns(c, browser)
         # (…but no hijackable fetch: a held response is delivered to a window's realm alone, so a worker's XHR goes the
@@ -2305,7 +2305,7 @@ module Capybara
         c.attach('__setTimersActive', ->(_flag) { nil })
         # The worker's scope, of its KIND — 'dedicated', 'shared' or 'service' — and name (worker-globals.js).
         # (…cross-origin isolated as the context that made it is — a service worker by no document's headers: not)
-        c.call('__csim_installWorkerScope', kind, name.to_s, isolated)
+        c.call('__csim_installWorkerScope', kind, name.to_s, isolated, secure)
         # …and the user agent a test set, which its navigator answers as its requests send it.
         c.call('__csimSetUserAgent', browser.default_user_agent) if browser.default_user_agent
         WorkerRuntime.new(c)
