@@ -21,6 +21,9 @@ pub(crate) const SCRIPT_RUN: u8 = 1 << 3;
 // …and that the parser reached its end tag — or the XML parser's after-parse pass, which stands in for it — and decided
 // it then: run it, put it on the list of scripts to execute after parsing (`list_parser_script`), or neither.
 pub(crate) const SCRIPT_END_TAG: u8 = 1 << 4;
+// …and HTML's "from an external file": whether it had a `src` as it was prepared, whatever became of that since, which says
+// whether it fires `load` once it has run ("execute the script element").
+pub(crate) const SCRIPT_FROM_EXTERNAL_FILE: u8 = 1 << 5;
 
 // The JavaScript MIME type essences (MIME Sniffing §4.6), each matched ASCII case-insensitively.
 const JAVASCRIPT_MIME_TYPES: [&str; 16] = [
@@ -132,7 +135,7 @@ impl RealmArena {
         let src = n.plain_attr("src").map(str::is_empty);
         let scripting = scripting && !self.scripts_sandboxed(n.realm);
         if let Some(n) = self.get_mut_quietly(id) {
-            n.script_flags |= SCRIPT_ALREADY_STARTED | SCRIPT_RUN;
+            n.script_flags |= SCRIPT_ALREADY_STARTED | SCRIPT_RUN | if src.is_some() { SCRIPT_FROM_EXTERNAL_FILE } else { 0 };
         }
         match (nomodule || !scripting, src, ty) {
             (true, _, _) => PREPARE_NONE,
