@@ -43,12 +43,13 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // nothing of a page's put in that chain is ever called, with PLATFORM or at all. Its object's slots one record, with the
 // brand of each interface of the chain that is a shell's; `impl.init(slots, …)` fills it for the platform's own construction
 // (`new X(PLATFORM, …)`, by position), and `impl.construct(slots, …)` for a script's, with its IDL constructor's arguments
-// converted: `shellClass`. `slots`: the attributes whose getter reads a slot of the object's and no more, needing no implementation — a slot of the
-// attribute's name, or, in an object among them, of the name it gives it: a setter, where it has one, stays the
-// implementation's. `event`: an event interface, whose class the binding makes too (`eventInterface`:
+// converted: `shellClass`. `slots`: the attributes whose getter reads a slot of the object's and no more, needing no
+// implementation — a slot of the attribute's name, or, in an object among them, of the name it gives it: a setter, where it
+// has one, stays the implementation's. `event`: an event interface, whose class the binding makes too (`eventInterface`:
 // `define<Name>(Parent, impl)`), its attributes slots of its state that its init fills — but what `event` says otherwise.
 // `steps`: attributes whose getter and setter steps the implementation's (`impl.get_x(state)`), no slot of theirs filled.
-// `slots`: attributes that read another's slot, by the slot. `init`: attributes `impl.init(state, init)` fills instead, as the object is made — and it may fill
+// `slots`: attributes that read another's slot, by the slot. `init`: attributes `impl.init(state, init)` fills instead, as
+// the object is made — and it may fill
 // any other state of the event's: [] for that alone. `initialized`: its legacy `init…` operation goes on with
 // `impl.initialized(state)`, for what it resets that no argument names.
 // GlobalEventHandlers' touch handlers, which a desktop with no touch screen — headless Chrome's and Firefox's, measured —
@@ -743,7 +744,7 @@ const REFLECTION = [
 ];
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -1366,7 +1367,7 @@ function constantValue(m, where) {
 // The members, of an interface a worker has too, exposed in a Window alone — which a worker's realm takes off its
 // prototype (worker-globals.js): DOMMatrixReadOnly's stringifier, which parses CSS.
 const windowOnlyMembers = {};
-// What is [SecureContext] of what the interfaces generated have (Web IDL §3.3.16 "exposed"): an interface's object where
+// What is [SecureContext] of what the interfaces generated have (Web IDL "exposed"): an interface's object where
 // the interface itself is — its members go with it — else its members, each marked itself or by the partial or mixin that
 // adds it.
 const secureContextInterfaces = [], secureContextMembers = {};
@@ -1946,7 +1947,7 @@ function eventInterface(def, { init, slots = {}, steps = [] }, { memberList, bod
     lines.push(`      init = platformInit;`);
   }
   lines.push(`      const state = new EventState(type, init);`);
-  lines.push(`      makeSlots(this, 'Event', state);`);
+  lines.push(`      stampSlots(this, 'Event', state);`);
   for (const n of chain) lines.push(`      fill${n}(state, init);`);
   lines.push(`      defineEventUnforgeables(this);`);
   lines.push(`    }`);

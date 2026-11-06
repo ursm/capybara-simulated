@@ -83,26 +83,28 @@ RSpec.describe 'a secure context' do
   describe '[SecureContext] constructs' do
     let(:members) {
       [
-        ["'serviceWorker' in navigator", 'Navigator.prototype'],
-        ["'clipboard' in navigator", 'Navigator.prototype'],
-        ["'credentials' in navigator", 'Navigator.prototype'],
-        ["'locks' in navigator", 'Navigator.prototype'],
-        ["'mediaDevices' in navigator", 'Navigator.prototype'],
-        ["'registerProtocolHandler' in navigator", 'Navigator.prototype'],
-        ["'subtle' in crypto", 'Crypto.prototype'],
-        ["'randomUUID' in crypto", 'Crypto.prototype'],
-        ["'caches' in self", 'the global'],
-        ["'ServiceWorker' in self", 'the global'],
-        ["'ServiceWorkerContainer' in self", 'the global'],
-        ["'Cache' in self", 'the global'],
-        ["'CacheStorage' in self", 'the global'],
-        ["'SubtleCrypto' in self", 'the global'],
-        ["'CryptoKey' in self", 'the global'],
-        ["'Clipboard' in self", 'the global'],
-        ["'LockManager' in self", 'the global'],
-        ["'PublicKeyCredential' in self", 'the global'],
-        ["'DeviceMotionEvent' in self", 'the global']
-      ].map(&:first)
+        "'serviceWorker' in navigator",
+        "'clipboard' in navigator",
+        "'credentials' in navigator",
+        "'locks' in navigator",
+        "'mediaDevices' in navigator",
+        "'registerProtocolHandler' in navigator",
+        "'subtle' in crypto",
+        "'randomUUID' in crypto",
+        "'caches' in self",
+        "'ServiceWorker' in self",
+        "'ServiceWorkerContainer' in self",
+        "'Cache' in self",
+        "'CacheStorage' in self",
+        "'SubtleCrypto' in self",
+        "'CryptoKey' in self",
+        "'Clipboard' in self",
+        "'LockManager' in self",
+        "'PublicKeyCredential' in self",
+        "'DeviceMotionEvent' in self",
+        "'onpointerrawupdate' in HTMLElement.prototype",
+        "'getCoalescedEvents' in PointerEvent.prototype"
+      ]
     }
     let(:reads) { "[#{members.join(', ')}]" }
 
@@ -142,7 +144,7 @@ RSpec.describe 'a secure context' do
     end
 
     # (…a kept Window: its first document's environment of its own top-level creation URL, no longer its creator's; so the
-    # same realm has them after where it had none before, and the other way. Measured of Chrome 156 and Firefox 159, for a
+    # same realm has them after where it had none before, and the other way. Measured of Chrome 157 and Firefox 159, for a
     # frame on `localhost` under a LAN IP's page: their initial about:blank reads as its document will, so what a realm is
     # decided as never changes there. This engine's `isSecureContext` of it is the text's; what is exposed goes with that.)
     it 'follows the document a kept Window goes on to, none before and one after', :every_host_local do
