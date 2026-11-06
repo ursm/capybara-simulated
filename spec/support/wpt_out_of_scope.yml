@@ -41943,6 +41943,17 @@ html/canvas/element/wide-gamut-canvas/2d.color.space.p3.strokeText.html:
 - name: Test if strokeText can be used with a solid display-p3 color
   reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
     subsystem we don't model (rule 1); the sRGB path is fully covered.
+html/cross-origin-opener-policy/navigate-top-to-aboutblank.https.html:
+- name: 'Navigate top to about:blank from iframe with opener COOP: |header(Cross-Origin-Opener-Policy,same-origin-allow-popups),
+    iframe origin: https://www1.web-platform.test:8443'
+  reason: 'Rule 3, the test at our pin holds what upstream has since withdrawn. Pinned
+    (2026-06-27): "Same origin allow popups allows the navigation of top to the cross-origin
+    about:blank (origin inherited from the iframe) page, which does not have COOP",
+    expecting no switch. Upstream (edited 2026-10-10): "Navigating the top-level document
+    itself to a cross-origin about:blank page (COOP: unsafe-none) still leads to a
+    browsing context group switch", expecting one, as HTML "check if COOP values require
+    a browsing context group switch" says of a non-popup navigation and Chrome measures
+    (Firefox keeps the group). It passes at upstream; drop this at the next pin bump.'
 html/dom/aria-attribute-reflection-enumerated.tentative.html:
 - name: 'div.ariaAtomic (<div aria-atomic>): IDL set to " \0\x01\x02\x03\x04\x05\x06\x07
     \b\t\n\v\f\r\x0e\x0f \x10\x11\x12\x13\x14\x15\x16\x17 \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f  foo

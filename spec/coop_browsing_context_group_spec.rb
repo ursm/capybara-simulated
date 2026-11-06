@@ -23,6 +23,7 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
       return [302, headers.merge('location' => 'https://a.test/plain'), []] if env['PATH_INFO'] == '/hop'
       return [302, policies['/framed'].merge('location' => 'https://a.test/sbx'), []] if env['PATH_INFO'] == '/hopsbx'
       return [204, policies['/coi'], []] if env['PATH_INFO'] == '/nocontent'
+      return [200, {'content-type' => 'application/pdf'}, ['%PDF-1.7']] if env['PATH_INFO'] == '/doc.pdf'
 
       frame = '<iframe name="fr" src="https://b.test/plain"></iframe>' if env['PATH_INFO'] == '/framed'
       [200, headers, ["<!doctype html><meta charset=utf-8><title>#{env['PATH_INFO']}</title><p id=p>#{env['PATH_INFO']}</p>#{frame}"]]
@@ -404,6 +405,42 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
         session.go_forward
         expect(session.evaluate_script('location.search')).to eq('?2')
       end
+    end
+  end
+
+  # (…an error or PDF document leaves a group of a policy, or as its hops needed, on the page's path as on a window's: Chrome,
+  # and both browsers where a hop needed it; no document of no COEP header left in an isolated group)
+  context 'an inline content document of the page' do
+    ['/sbx', '/doc.pdf'].each do |path|
+      it "leaves an isolated group for #{path}, isolated no more after it" do
+        session.visit('https://a.test/coi')
+        window = popup('https://a.test/coi')
+        session.visit("https://a.test#{path}")
+        session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(true) }
+        session.visit('https://b.test/plain')
+        expect(session.evaluate_script('[location.href, crossOriginIsolated, typeof SharedArrayBuffer]')).to eq(['https://b.test/plain', false, 'undefined'])
+      end
+    end
+
+    it 'leaves the group a hop of a policy needed, the error document of none after it' do
+      session.visit('https://a.test/plain')
+      window = popup('https://a.test/plain')
+      session.visit('https://a.test/hopsbx')
+      expect(session.evaluate_script('origin')).to eq('null')
+      session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(true) }
+    end
+
+    # (…the response refused all the same: HTML enforces its policy, then errors)
+    it 'leaves a group of no policy for a response of one that its own policy sandboxes' do
+      session.visit('https://a.test/plain')
+      window = popup('https://a.test/plain')
+      session.visit('https://a.test/sbx')
+      session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(true) }
+    end
+
+    it 'keeps its document for a PDF, of an opaque origin' do
+      session.visit('https://a.test/doc.pdf')
+      expect(session.evaluate_script('[origin, document.contentType, document.body.textContent]')).to eq(['null', 'text/html', ''])
     end
   end
 

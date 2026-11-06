@@ -164,6 +164,9 @@ const TREES = [
   'html/browsers/history/the-history-interface',  // History: length / state / go / pushState across documents
   'html/browsers/origin/cross-origin-objects',    // CrossOriginProperties: what another origin's Window and
                                        // Location expose, and the SecurityError for the rest
+  'html/cross-origin-opener-policy',   // COOP: browsing context group switches, the policy a document of no headers
+                                       // inherits, cross-origin isolation (coop.rs). Its reporting/ subtree is the
+                                       // Reporting API's, which `EXCLUDED_PREFIXES` leaves out.
   'html/browsers/browsing-the-web/navigating-across-documents', // navigation: the initial about:blank, replace,
                                        // javascript: URLs, the source / target of a navigation
   'eventsource',                       // EventSource (HTML §9.2) — the server-sent events Mastodon and Turbo-ish
@@ -327,6 +330,7 @@ const SUPPORT_FILES = [
   'html/interaction/focus/the-autofocus-attribute/resources/utils.js',
   'pointerevents/pointerevent_support.js',
   'html/cross-origin-embedder-policy/credentialless/resources/common.js',
+  'html/cross-origin-embedder-policy/resources/script-factory.js',
   'html/anonymous-iframe/resources/common.js',
   // input-events editing tests pull EditorTestUtils (send copy/cut/paste shortcut
   // keys, set selection from markup) by absolute path from the editing/ tree,
@@ -425,13 +429,19 @@ async function resolveSha(ref) {
   return (await res.text()).trim();
 }
 
+// Parts of a vendored tree that test a subsystem with no surface here at all, its whole subtree left out.
+const EXCLUDED_PREFIXES = ['html/cross-origin-opener-policy/reporting/'];
+
 async function listBlobs(sha, tree) {
   const res = await gh(`git/trees/${sha}:${tree}?recursive=1`);
   const json = await res.json();
   if (json.truncated) {
     throw new Error(`tree ${tree} truncated — vendor it in smaller pieces`);
   }
-  return json.tree.filter((e) => e.type === 'blob').map((e) => `${tree}/${e.path}`);
+  return json.tree
+    .filter((e) => e.type === 'blob')
+    .map((e) => `${tree}/${e.path}`)
+    .filter((path) => !EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix)));
 }
 
 async function fetchRaw(sha, path) {

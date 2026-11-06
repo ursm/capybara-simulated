@@ -86,6 +86,7 @@ module WptRunner
   # Frame cap: FRAME_MS × DRAIN_MAX_STEPS (≈ 10.2 s) lands just past testharness's
   # 10 s harness timeout, which self-completes a still-running normal file first.
   DRAIN_MAX_STEPS    = 640
+  LONG_TIMEOUT       = %r{<meta\s+name=["']?timeout["']?\s+content=["']?long|^//\s*META:\s*timeout=long}i
   # Consecutive no-progress frames → idle → force-timeout. Only ever reached while the harness is
   # still PENDING (the loop breaks the instant `__wptResults` is set), so this bounds "how long a
   # pending-but-apparently-idle page waits before we force testharness's timeout". It must clear the
@@ -344,13 +345,32 @@ module WptRunner
     # (…the handler's header bytes, which its JSON carries Latin-1-decoded, as the bytes they are — what wptserve puts
     # on the wire — in the UTF-8-tagged string a Rack app hands over, valid or not)
     hdrs = combine_headers(Array(meta['headers']).map {|name, value| [name, value.to_s.encode(Encoding::ISO_8859_1).force_encoding(Encoding::UTF_8)] })
-    hdrs['content-type'] ||= 'text/plain'
+    # (…`?pipe=header(…)` on it too, as wptserve runs a response's pipes whatever made it)
+    req.GET['pipe'].to_s.scan(/header\(([^)]*)\)/) {|(args)| pipe_header(hdrs, args) }
     # A custom HTTP reason phrase (status.py's `status = (code, "text")`) rides an
     # internal header; rack_fetch lifts it into the response's statusText and strips it.
     hdrs['x-csim-status-text'] = meta['status_text'].to_s if meta['status_text']
     [meta['status'].to_i, hdrs, [rbody]]
   rescue StandardError, JSON::ParserError
     nil
+  end
+
+  # wptserve's `header(name,value[,append])` pipe: a response header set. (…a `\,` in its value a comma, as wptserve's pipe
+  # parser unescapes it; a trailing `,True`/`,False` on Set-Cookie, the only corpus header that appends, the APPEND flag,
+  # accumulated as an Array store_set_cookies handles: cors-cookies / credentials/cookies)
+  def pipe_header(headers, args)
+    name, _, rest = args.partition(',')
+    name = name.strip.downcase
+    return if name.empty?
+
+    rest = rest.gsub(/\\(.)/, '\\1')
+    if name == 'set-cookie'
+      rest = rest[0...rest.rindex(',')] if rest =~ /,\s*(?:True|False)\s*\z/
+      headers[name] = Array(headers[name]) + [rest.strip]
+    else
+      # (…of HTTP whitespace alone: a vertical tab or a form feed reaches the header's parser, header-parsing-failures)
+      headers[name] = rest.gsub(/\A[ \t]+|[ \t]+\z/, '')
+    end
   end
 
   # Collapse an ordered list of [name, value] response-header pairs into Rack's
@@ -947,10 +967,13 @@ module WptRunner
         # (e.g. Last-Modified for document.lastModified). Merge any it declares.
         hdr_file = "#{file}.headers"
         if File.file?(hdr_file)
+          declared = Hash.new {|fields, name| fields[name] = [] }
           File.read(hdr_file).each_line do |line|
             name, val = line.split(':', 2)
-            resp_headers[name.strip.downcase] = val.strip if name && val
+            declared[name.strip.downcase] << val.strip if name && val
           end
+          # (…one declared more than once sent more than once)
+          declared.each {|name, values| resp_headers[name] = values.size == 1 ? values.first : values }
         end
         # wptserve `?pipe=` response transforms: support the ones the corpus uses on a static
         # file — `header(name,value[,append])` (set a response header; the CORS tests inject
@@ -966,22 +989,7 @@ module WptRunner
             delay = args.split(':').sum {|c| c =~ /\Ad([\d.]+)\z/ ? $1.to_f : 0.0 }
             resp_headers['X-Csim-Server-Delay-Ms'] = (delay * 1000).round.to_s if delay > 0
           when 'header'
-            name, _, rest = args.partition(',')
-            name = name.strip.downcase
-            next if name.empty?
-            # (…a `\,` in its value a comma, as wptserve's pipe parser unescapes it)
-            rest = rest.gsub(/\\(.)/, '\\1')
-            if name == 'set-cookie'
-              # wptserve `header(name, value, append)`: a trailing `,True`/`,False` is the
-              # APPEND flag, NOT part of the value. Set-Cookie is the only corpus header
-              # that appends (a response carries several cookies) — accumulate them as an
-              # Array (store_set_cookies already handles a multi-value Set-Cookie) so a
-              # second cookie doesn't clobber the first (cors-cookies / credentials/cookies).
-              rest = rest[0...rest.rindex(',')] if rest =~ /,\s*(?:True|False)\s*\z/
-              resp_headers[name] = Array(resp_headers[name]) + [rest.strip]
-            else
-              resp_headers[name] = rest.strip
-            end
+            WptRunner.pipe_header(resp_headers, args)
           when 'status' then status_code = args.to_i if args.to_i.positive?
           end
         end
@@ -1037,7 +1045,7 @@ module WptRunner
   # interception against the real SW runtime) plus committed local `csim-*` fixtures
   # (vendor_wpt.mjs's cleanTree preserves the prefix). Keep this list in sync with the
   # vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,domxpath,hr-time,resource-timing,css/css-font-loading,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,html/semantics/document-metadata/the-meta-element,cookies,urlpattern,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,css/css-animations,css/css-transitions,css/css-transforms,css/geometry,web-animations,service-workers,websockets,eventsource,webstorage,WebCryptoAPI,selection,IndexedDB,web-locks,requestidlecallback,css/css-sizing/aspect-ratio,wasm/serialization,html/browsers/windows,html/browsers/the-window-object,html/browsers/the-windowproxy-exotic-object,html/browsers/history/the-location-interface,html/browsers/history/the-history-interface,html/browsers/origin/cross-origin-objects,html/browsers/browsing-the-web/navigating-across-documents}'
+  TREES = '{dom,domparsing,domxpath,hr-time,resource-timing,css/css-font-loading,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,html/semantics/document-metadata/the-meta-element,cookies,urlpattern,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,css/css-animations,css/css-transitions,css/css-transforms,css/geometry,web-animations,service-workers,websockets,eventsource,webstorage,WebCryptoAPI,selection,IndexedDB,web-locks,requestidlecallback,css/css-sizing/aspect-ratio,wasm/serialization,html/browsers/windows,html/browsers/the-window-object,html/browsers/the-windowproxy-exotic-object,html/browsers/history/the-location-interface,html/browsers/history/the-history-interface,html/browsers/origin/cross-origin-objects,html/browsers/browsing-the-web/navigating-across-documents,html/cross-origin-opener-policy}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
@@ -1050,7 +1058,7 @@ module WptRunner
   # under a hard `timeout -s KILL` and found crasher-free — the earlier
   # infinite-loop concern was in dom/ HTML files, not this JS slice. (.tentative
   # files auto-route to out-of-scope, so a tentative window.js here self-excludes.)
-  JS_TREES = '{dom,hr-time,resource-timing,css/css-font-loading,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,xhr,html/dom,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,html/semantics/document-metadata/the-meta-element,cookies,urlpattern,service-workers,webstorage,websockets,eventsource,web-animations,WebCryptoAPI,css/geometry,selection,IndexedDB,web-locks,requestidlecallback,wasm/serialization,html/browsers/windows,html/browsers/the-window-object,html/browsers/the-windowproxy-exotic-object,html/browsers/history/the-location-interface,html/browsers/history/the-history-interface,html/browsers/origin/cross-origin-objects,html/browsers/browsing-the-web/navigating-across-documents}'
+  JS_TREES = '{dom,hr-time,resource-timing,css/css-font-loading,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,xhr,html/dom,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,html/semantics/document-metadata/the-meta-element,cookies,urlpattern,service-workers,webstorage,websockets,eventsource,web-animations,WebCryptoAPI,css/geometry,selection,IndexedDB,web-locks,requestidlecallback,wasm/serialization,html/browsers/windows,html/browsers/the-window-object,html/browsers/the-windowproxy-exotic-object,html/browsers/history/the-location-interface,html/browsers/history/the-history-interface,html/browsers/origin/cross-origin-objects,html/browsers/browsing-the-web/navigating-across-documents,html/cross-origin-opener-policy}'
 
   def test_files
     @test_files ||= (harness_files + js_files + reftest_files).sort
@@ -1442,7 +1450,10 @@ module WptRunner
     hold_last    = nil   # previous held frame's timestamp (per-frame charge)
     hold_spent   = 0.0   # cumulative real seconds this file has held the clock
     hold_warned  = false
-    while steps < DRAIN_MAX_STEPS
+    # (…six times that for a test that asks for testharness's long timeout, 60 s to its 10: coep-navigate-popup's popups
+    # each wait 2 s to be fully loaded, and a cap at 10 s made them timeouts of the runner's)
+    max_steps = source_of(rel).match?(LONG_TIMEOUT) ? DRAIN_MAX_STEPS * 6 : DRAIN_MAX_STEPS
+    while steps < max_steps
       # Advance the page one real-cadence event-loop frame (quiescence at the
       # current instant, then one frame interval). Advancing the clock by one frame
       # — not the ~100 ms-per-evaluate_script poll tick the old loop incurred three

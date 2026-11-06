@@ -3394,7 +3394,6 @@ html/browsers/the-window-object/open-close/open-features-is-popup-condition.html
 - '"top=500" should set BarProp visibility to false'
 - '"width=500" should set BarProp visibility to false'
 html/browsers/the-window-object/open-close/open-features-non-integer-height.html:
-- "[harness] TIMEOUT"
 - features "height=405  " should set "height=405"
 - features "height=405*3" should set "height=405"
 - features "height=405.32" should set "height=405"
@@ -4022,6 +4021,41 @@ html/canvas/element/text/2d.text.measure.lang.html:
 - Testing the lang attribute
 html/canvas/element/text/2d.text.measure.lang.inherit.html:
 - Testing the lang attribute
+html/cross-origin-opener-policy/coep-blob-popup.https.html:
+- 'COOP+COEP blob URL popup: <a rel=noopener>'
+- 'COOP+COEP blob URL popup: <a>'
+- 'COOP+COEP blob URL popup: window.open()'
+html/cross-origin-opener-policy/coop-navigate-same-origin-csp-sandbox.html:
+- "[harness] TIMEOUT"
+- coop-navigate-same-origin-csp-sandbox
+html/cross-origin-opener-policy/javascript-url.https.html:
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
+- 'navigation: SAME_ORIGIN; parentCOOP: same-origin-allow-popups; childCOOP: same-origin'
+- 'navigation: SAME_ORIGIN; parentCOOP: same-origin-allow-popups; childCOOP: same-origin-allow-popups'
+- 'navigation: SAME_ORIGIN; parentCOOP: same-origin-allow-popups; childCOOP: unsafe-none'
+- 'navigation: SAME_ORIGIN; parentCOOP: same-origin; childCOOP: same-origin'
+- 'navigation: SAME_ORIGIN; parentCOOP: same-origin; childCOOP: same-origin-allow-popups'
+- 'navigation: SAME_ORIGIN; parentCOOP: same-origin; childCOOP: unsafe-none'
+- 'navigation: SAME_ORIGIN; parentCOOP: unsafe-none; childCOOP: same-origin'
+- 'navigation: SAME_ORIGIN; parentCOOP: unsafe-none; childCOOP: same-origin-allow-popups'
+- 'navigation: SAME_ORIGIN; parentCOOP: unsafe-none; childCOOP: unsafe-none'
+- 'navigation: SAME_SITE; parentCOOP: same-origin-allow-popups; childCOOP: same-origin'
+- 'navigation: SAME_SITE; parentCOOP: same-origin-allow-popups; childCOOP: same-origin-allow-popups'
+- 'navigation: SAME_SITE; parentCOOP: same-origin-allow-popups; childCOOP: unsafe-none'
+- 'navigation: SAME_SITE; parentCOOP: same-origin; childCOOP: same-origin'
+- 'navigation: SAME_SITE; parentCOOP: same-origin; childCOOP: same-origin-allow-popups'
+- 'navigation: SAME_SITE; parentCOOP: same-origin; childCOOP: unsafe-none'
+- 'navigation: SAME_SITE; parentCOOP: unsafe-none; childCOOP: same-origin'
+- 'navigation: SAME_SITE; parentCOOP: unsafe-none; childCOOP: same-origin-allow-popups'
+- 'navigation: SAME_SITE; parentCOOP: unsafe-none; childCOOP: unsafe-none'
 html/dom/elements/global-attributes/dir-auto-dynamic-simple-dataChange.html:
 - "== html/dom/elements/global-attributes/dir-auto-dynamic-simple-ref.html (never
   ready to capture)"
