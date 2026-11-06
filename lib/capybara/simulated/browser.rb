@@ -7044,10 +7044,9 @@ module Capybara
       def window_travel_offset_ms
         now    = Time.now.to_f
         offset = ((now - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
-        return @travel_offset if @travel_sample && (now == @travel_sample || (offset - @travel_offset).abs <= TRAVEL_JITTER_MS)
-
+        kept = @travel_sample && (now == @travel_sample || (offset - @travel_offset).abs <= TRAVEL_JITTER_MS)
         @travel_sample = now
-        @travel_offset = offset
+        kept ? @travel_offset : (@travel_offset = offset)
       end
 
       # A document loaded, its client reported: the reserved client its navigation made of it let go of where the report

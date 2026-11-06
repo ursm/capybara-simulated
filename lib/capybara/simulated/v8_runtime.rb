@@ -1676,6 +1676,8 @@ module Capybara
         group: page_group
       )
         realm = seed_realm_bridge(ctx.create_context, group)
+        # (…the host's clock's offset its opener's time origin holds, for its initial about:blank: agent_clock.rs `TimeOrigin`)
+        realm.call('__csimTimeTravelFrom', opener_id.to_i) if opener_id
         # (…its viewport the window's — the one it was made with, a navigation's the document's before it had — which its
         # document loads at: viewport.rs)
         realm.eval_void("globalThis.__dom.viewportSet(#{viewport[0].to_i}, #{viewport[1].to_i}, true);") if viewport

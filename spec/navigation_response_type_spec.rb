@@ -34,10 +34,11 @@ RSpec.describe 'a navigation response by its type' do
   around do |example|
     Dir.mktmpdir do |dir|
       @downloads = dir
+      prev = ENV['CSIM_DOWNLOADS_DIR']
       ENV['CSIM_DOWNLOADS_DIR'] = dir
       example.run
     ensure
-      ENV.delete('CSIM_DOWNLOADS_DIR')
+      ENV['CSIM_DOWNLOADS_DIR'] = prev
     end
   end
 

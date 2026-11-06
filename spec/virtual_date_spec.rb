@@ -256,6 +256,44 @@ RSpec.describe 'the virtual clock’s Date' do
     expect(skew.call('frames[0]')).to be_within(5).of(day)
   end
 
+  # …as a window's initial about:blank reads its opener's: one a real pop-up opens, of a travelled page, reads real. And a
+  # clock frozen as soon as the page has loaded leaves each pop-up on the last's, however long after it comes.
+  it "reads an about:blank pop-up's clock as its opener does" do
+    day = 86_400
+    s = simulated_session(lambda {|env|
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{env['PATH_INFO']}"]]
+    })
+    skew = ->(win) { s.evaluate_script("#{win}.Date.now()") / 1000.0 - Process.clock_gettime(Process::CLOCK_REALTIME) }
+    frozen = Time.now + day
+    allow(Time).to receive(:now).and_return(frozen)
+    s.visit '/opener'
+    allow(Time).to receive(:now).and_call_original
+    s.execute_script("window.w = open('/popup')")
+    poll_until { s.evaluate_script("w.document.body?.textContent == '/popup'") }
+    s.execute_script("window.blank = w.open('')")
+
+    expect(skew.call('blank')).to be_within(5).of(0)
+    expect(skew.call('w')).to be_within(5).of(0)
+    expect(skew.call('window')).to be_within(5).of(day)
+  end
+
+  it 'keeps pop-ups on one offset under a clock frozen after the page loaded' do
+    s = simulated_session(lambda {|env|
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{env['PATH_INFO']}"]]
+    })
+    s.visit '/opener'
+    frozen = Time.now
+    allow(Time).to receive(:now).and_return(frozen)
+    %w[a b c].each do |name|
+      s.execute_script("window.#{name} = open('/#{name}')")
+      poll_until { s.evaluate_script("#{name}.document.body?.textContent == '/#{name}'") }
+      sleep 0.3
+    end
+
+    expect(s.evaluate_script('b.Date.now() - a.Date.now()').abs).to be <= 2
+    expect(s.evaluate_script('c.Date.now() - a.Date.now()').abs).to be <= 2
+  end
+
   # …and on that one clock a frame's timer falls due: one its parent's task sets in it, at whatever offset in the
   # parent's step, runs its timeout after on the frame's `Date` and `performance.now()` alike, never before (HTML timer
   # initialization) — the frame scheduled on its own clock a step behind the parent's while reading the parent's, and a
