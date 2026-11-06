@@ -7030,7 +7030,25 @@ module Capybara
 
       # How far the host's clock (`Time.now`, which a test's `travel_to` moves) stands off the real one, in milliseconds:
       # what a window's document's time origin holds as the host boots it (agent_clock.rs `TimeOrigin`).
-      def time_travel_offset_ms = ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
+      def time_travel_offset_ms
+        @travel_sample = Time.now.to_f
+        @travel_offset = ((@travel_sample - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
+      end
+
+      # …and what a document this isolate loads into a window the page opened holds, beside a live opener whose `Date` the
+      # offset was taken for: that same offset, for as long as the host's clock has not moved — a frozen `Time.now` reads
+      # the same, and the offset only shrinks with real time, which read afresh put a pop-up a second behind its opener;
+      # a clock travelling at real time reads the same offset, but for the jitter of the two reads — and a new one where it
+      # has (a `travel_back`, another `travel_to`): the document's `Date` what its server just rendered it with.
+      TRAVEL_JITTER_MS = 100
+      def window_travel_offset_ms
+        now    = Time.now.to_f
+        offset = ((now - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
+        return @travel_offset if @travel_sample && (now == @travel_sample || (offset - @travel_offset).abs <= TRAVEL_JITTER_MS)
+
+        @travel_sample = now
+        @travel_offset = offset
+      end
 
       # A document loaded, its client reported: the reserved client its navigation made of it let go of where the report
       # made it none — a document of an opaque origin (a CSP-sandboxed one) is no client — `clients.get` of it then none.

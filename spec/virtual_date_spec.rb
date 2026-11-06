@@ -189,6 +189,44 @@ RSpec.describe 'the virtual clock’s Date' do
     expect(worker - page).to be_between(-50, 50)
   end
 
+  # …and a `travel_back` reaches the next document loaded, its `Date` what its server just rendered it with: a pop-up's, a
+  # document that pop-up navigates to, and the next one the page's window boots — where the live opener's stays where it
+  # was. And a `travel_to` a pop-up of a real page's (its opener's `Date` staying real). (A clock that has not moved leaves
+  # a pop-up's on its opener's: the example above.)
+  it "reads the host's moved clock in the next document loaded, the live ones as they were" do
+    day = 86_400
+    s = simulated_session(lambda {|env|
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{env['PATH_INFO']}"]]
+    })
+    loaded = lambda {|win, path|
+      poll_until { s.evaluate_script("#{win}.document.body?.textContent == '#{path}'") }
+    }
+    skew = ->(win) { s.evaluate_script("#{win}.Date.now()") / 1000.0 - Process.clock_gettime(Process::CLOCK_REALTIME) }
+    frozen = Time.now + day
+    allow(Time).to receive(:now).and_return(frozen)
+    s.visit '/opener'
+    allow(Time).to receive(:now).and_call_original
+
+    s.execute_script("window.w = open('/after-back')")
+    loaded.call('w', '/after-back')
+    expect(skew.call('w')).to be_within(5).of(0)
+    expect(skew.call('window')).to be_within(5).of(day)
+
+    s.execute_script("w.location.href = '/navigated'")
+    loaded.call('w', '/navigated')
+    expect(skew.call('w')).to be_within(5).of(0)
+
+    s.visit '/next'
+    expect(skew.call('window')).to be_within(5).of(0)
+
+    frozen = Time.now + day
+    allow(Time).to receive(:now).and_return(frozen)
+    s.execute_script("window.w2 = open('/under-travel')")
+    loaded.call('w2', '/under-travel')
+    expect(skew.call('w2')).to be_within(5).of(day)
+    expect(skew.call('window')).to be_within(5).of(0)
+  end
+
   # …and on that one clock a frame's timer falls due: one its parent's task sets in it, at whatever offset in the
   # parent's step, runs its timeout after on the frame's `Date` and `performance.now()` alike, never before (HTML timer
   # initialization) — the frame scheduled on its own clock a step behind the parent's while reading the parent's, and a
