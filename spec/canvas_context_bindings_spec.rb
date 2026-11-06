@@ -121,4 +121,94 @@ RSpec.describe 'Canvas context bindings' do
     attributes = '{"alpha":false,"colorSpace":"display-p3","colorType":"unorm8","desynchronized":true,"willReadFrequently":true}'
     expect(got).to eq([attributes, [attributes, '#000000', 'display-p3'], attributes, attributes, 'display-p3', 'display-p3'])
   end
+
+  # The context keeps its bitmap's size as HTML's "set bitmap dimensions" sets it: whichever way a `width` or a `height`
+  # attribute changed, a draw covers the new size and no more, a canvas of no area draws nothing, and a resize leaves the
+  # bitmap transparent black and the drawing state its default.
+  it 'draws into the size its canvas was last given' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const covered = (c, w, h) => {
+          c.fillRect(0, 0, 1000, 1000);
+          const data = c.getImageData(0, 0, w + 1, h + 1).data;
+          return [data[(w - 1) * 4 + 3], data[w * 4 + 3], data[((w + 1) * (h - 1)) * 4 + 3], data[((w + 1) * h) * 4 + 3]];
+        };
+        const blank = (c) => c.getImageData(0, 0, 1, 1).data[3];
+        const out = [covered(ctx, 300, 150)];
+        canvas.width = 4;
+        out.push(blank(ctx), covered(ctx, 4, 150));
+        canvas.setAttribute('height', '3');
+        out.push(blank(ctx), covered(ctx, 4, 3));
+        canvas.removeAttribute('width');
+        out.push(blank(ctx), covered(ctx, 300, 3));
+        canvas.setAttributeNS(null, 'width', '2');
+        out.push(covered(ctx, 2, 3));
+        const attr = canvas.getAttributeNode('width');
+        attr.value = '5';
+        out.push(covered(ctx, 5, 3));
+        canvas.width = 0;
+        ctx.fillRect(0, 0, 10, 10);
+        ctx.fillStyle = 'red';
+        out.push(ctx.getImageData(0, 0, 1, 1).data[3]);
+        canvas.width = 2;
+        out.push(ctx.fillStyle, blank(ctx));
+
+        const off = new OffscreenCanvas(2, 2), g = off.getContext('2d');
+        out.push(covered(g, 2, 2));
+        off.width = 3;
+        out.push(blank(g), covered(g, 3, 2));
+        const before = off.transferToImageBitmap();
+        out.push(blank(g), covered(g, 3, 2));
+        const copy = new OffscreenCanvas(3, 2), h = copy.getContext('2d');
+        h.drawImage(before, 0, 0);
+        out.push(h.getImageData(2, 1, 1, 1).data[3]);
+        return out;
+      })()
+    JS
+    expect(got).to eq([
+      [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
+      [255, 0, 255, 0],
+      [255, 0, 255, 0],
+      0, '#000000', 0,
+      [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
+      255
+    ])
+  end
+
+  # fillRect, clearRect and strokeRect return early on an argument that is not finite, the first two on no area and
+  # strokeRect on neither a width nor a height (which, with just one, strokes the line it is) — and, returning, do not
+  # disturb a whole-canvas operator's destination, which a draw of no coverage would clear.
+  it 'keeps the early returns of its rectangle operations' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const ctx = document.createElement('canvas').getContext('2d');
+        const painted = (draw) => {
+          ctx.reset();
+          ctx.fillRect(0, 0, 10, 10);
+          ctx.globalCompositeOperation = 'copy';
+          ctx.fillStyle = ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+          draw();
+          return ctx.getImageData(5, 5, 1, 1).data[3];
+        };
+        return [
+          painted(() => ctx.fillRect(0, 0, 0, 5)),
+          painted(() => ctx.fillRect(NaN, 0, 5, 5)),
+          painted(() => ctx.clearRect(0, 0, 5, 0)),
+          painted(() => ctx.clearRect(0, Infinity, 5, 5)),
+          painted(() => ctx.strokeRect(0, 0, 0, 0)),
+          painted(() => ctx.strokeRect(0, 0, -Infinity, 5)),
+          painted(() => ctx.fillRect(20, 20, 1, 1)),
+          painted(() => ctx.strokeRect(20, 20, 0, 5))
+        ];
+      })()
+    JS
+    expect(got).to eq([255, 255, 255, 255, 255, 255, 0, 0])
+  end
 end

@@ -645,26 +645,14 @@ enum Refusal {
     IndexSize(&'static str),
 }
 
-// The shape the rasterizer takes (`Path::parse`, after what `head` says the shape is): the CTM, whether the path
-// array's points are baked through it, and its subpaths.
-fn shape(head: &[f64], path: &[f64], ctm: Matrix, baked: bool) -> Vec<f64> {
-    let subs = path.get(HEAD..used(path)).unwrap_or(&[]);
-    let mut out = Vec::with_capacity(head.len() + 7 + subs.len());
-    out.extend_from_slice(head);
-    out.extend_from_slice(&ctm);
-    out.push(f64::from(u8::from(baked)));
-    out.extend_from_slice(subs);
-    out
-}
 // The length of a path array in use.
 fn used(path: &[f64]) -> usize {
     path.first().map_or(0, |&l| l as usize).min(path.len())
 }
 
-// ── a path, as the page side hands it over ──
-// `[a, b, c, d, e, f, baked, …subpaths]`, each subpath `[closed, count, x, y, …]`: the CTM, and the path's points —
-// in device space already where `baked` (the context's own path, transformed as each point was added), else in user
-// space (a Path2D, or a rectangle), which the CTM maps.
+// ── a path, to rasterize ──
+// The CTM, and the path's points — in device space already where `baked` (the context's own path, transformed as each
+// point was added), else in user space (a Path2D, or a rectangle), which the CTM maps.
 pub(crate) struct Path {
     ctm: Matrix,
     baked: bool,
@@ -672,18 +660,34 @@ pub(crate) struct Path {
 }
 
 impl Path {
-    pub(crate) fn parse(flat: &[f64]) -> Option<(Path, &[f64])> {
-        let ctm: Matrix = flat.get(..6)?.try_into().ok()?;
-        let baked = *flat.get(6)? != 0.0;
+    // A path array's (`Builder`), each subpath `[closed, count, x, y, …]` — the array the page's own, so nothing in it is
+    // trusted to index by.
+    pub(crate) fn of(path: &[f64], ctm: Matrix, baked: bool) -> Option<Path> {
+        let flat = path.get(HEAD..used(path)).unwrap_or(&[]);
         let mut subs = Vec::new();
-        let mut k = 7;
+        let mut k = 0;
         while k + 1 < flat.len() {
             let (closed, n) = (flat[k] != 0.0, flat[k + 1] as usize);
             let pts = flat.get(k + 2..k + 2 + 2 * n)?;
             subs.push((closed, pts.chunks_exact(2).map(|p| (p[0], p[1])).collect()));
             k += 2 + 2 * n;
         }
-        Some((Path { ctm, baked, subs }, &flat[k.min(flat.len())..]))
+        Some(Path { ctm, baked, subs })
+    }
+    // …a user-space rectangle's: its closed corners.
+    pub(crate) fn rect(ctm: Matrix, [x, y, w, h]: [f64; 4]) -> Path {
+        Path { ctm, baked: false, subs: vec![(true, vec![(x, y), (x + w, y), (x + w, y + h), (x, y + h)])] }
+    }
+
+    // The rings its fill or its stroke covers, as `how` says (`FILL_NONZERO` …) under the state `s`'s pen, and whether
+    // they fill even-odd.
+    pub(crate) fn rings(&self, how: u32, s: &crate::canvas_state::State) -> (Vec<Ring>, bool) {
+        match how {
+            FILL_EVEN_ODD => (self.fill_rings(), true),
+            STROKE => (self.stroke_rings(&Pen::of(s)), false),
+            FOCUS_RING => (self.stroke_rings(&Pen::focus_ring()), false),
+            _ => (self.fill_rings(), false),
+        }
     }
 
     // The rings a fill covers: every subpath of two points or more (implicitly closed), in device space.
@@ -749,8 +753,7 @@ pub(crate) enum Join {
     Round,
     Bevel,
 }
-// A stroke's pen: `[width, cap, join, miterLimit, dashOffset, count, …dashes]` — cap 0 butt / 1 round / 2 square,
-// join 0 miter / 1 round / 2 bevel.
+// A stroke's pen.
 pub(crate) struct Pen {
     width: f64,
     cap: Cap,
@@ -761,27 +764,28 @@ pub(crate) struct Pen {
 }
 
 impl Pen {
-    pub(crate) fn parse(flat: &[f64]) -> Option<(Pen, &[f64])> {
-        let head = flat.get(..6)?;
-        let n = head[5] as usize;
-        let dash = flat.get(6..6 + n)?.to_vec();
-        let pen = Pen {
-            width: head[0],
-            cap: match head[1] as i32 {
+    // The drawing state's: its line width, caps, joins, miter limit and dash pattern (canvas_state.rs `CAPS`, `JOINS`).
+    fn of(s: &crate::canvas_state::State) -> Pen {
+        Pen {
+            width: s.line_width,
+            cap: match s.cap {
                 1 => Cap::Round,
                 2 => Cap::Square,
                 _ => Cap::Butt,
             },
-            join: match head[2] as i32 {
+            join: match s.join {
                 1 => Join::Round,
                 2 => Join::Bevel,
                 _ => Join::Miter,
             },
-            miter_limit: head[3],
-            dash_offset: head[4],
-            dash,
-        };
-        Some((pen, &flat[6 + n..]))
+            miter_limit: s.miter,
+            dash_offset: s.dash_offset,
+            dash: s.dash.clone(),
+        }
+    }
+    // A focus ring's: a plain 2px line, whatever the state's.
+    fn focus_ring() -> Pen {
+        Pen { width: 2.0, cap: Cap::Butt, join: Join::Miter, miter_limit: 10.0, dash: Vec::new(), dash_offset: 0.0 }
     }
 }
 
@@ -1020,7 +1024,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasPath", canvas_path, context_id);
     crate::dom::register(scope, ns, "canvasPathAdd", canvas_path_add, context_id);
     crate::dom::register(scope, ns, "canvasPathSvg", canvas_path_svg, context_id);
-    crate::dom::register(scope, ns, "canvasPathShape", canvas_path_shape, context_id);
     crate::dom::register(scope, ns, "canvasPathEmpty", canvas_path_empty, context_id);
     crate::dom::register(scope, ns, "canvasHit", canvas_hit, context_id);
 }
@@ -1113,59 +1116,37 @@ fn canvas_path_svg(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     finish(scope, b, &mut rv);
 }
 
-// What `canvasPathShape` makes of a path: its fill, by the nonzero or the even-odd rule; its stroke, with the context's
-// pen — its line width, caps, joins, miter limit and dash pattern; or a focus ring's, a 2px plain line.
-const FILL_NONZERO: u32 = 0;
-const FILL_EVEN_ODD: u32 = 1;
-const STROKE: u32 = 2;
-const FOCUS_RING: u32 = 3;
+// What a drawing op makes of a path (`Path::rings`): its fill, by the nonzero or the even-odd rule; its stroke, with the
+// context's pen; or a focus ring's.
+pub(crate) const FILL_NONZERO: u32 = 0;
+pub(crate) const FILL_EVEN_ODD: u32 = 1;
+pub(crate) const STROKE: u32 = 2;
+pub(crate) const FOCUS_RING: u32 = 3;
 
-// __dom.canvasPathShape(state, how, path, baked) -> the shape a path array makes under the CTM of the context's `state`
-// (`shape`), as `how` says — `baked` where its points are device space already (the context's current default path).
-fn canvas_path_shape(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(h) = crate::canvas_state::handle_of(scope, args.get(0)) else { return };
-    // SAFETY: the handle lives while its object, the argument, does — through this op.
-    let s = unsafe { h.as_ref() }.state().clone();
-    let head: Vec<f64> = match args.get(1).uint32_value(scope).unwrap_or(FILL_NONZERO) {
-        FILL_EVEN_ODD => vec![1.0, 1.0],
-        STROKE => [vec![3.0, s.line_width, f64::from(s.cap), f64::from(s.join), s.miter, s.dash_offset, s.dash.len() as f64], s.dash.clone()].concat(),
-        FOCUS_RING => vec![3.0, 2.0, 0.0, 0.0, 10.0, 0.0, 0.0],
-        _ => vec![1.0, 0.0],
-    };
-    let baked = args.get(3).boolean_value(scope);
-    let flat = shape(&head, &crate::dom::f64_arg(args.get(2)), s.m, baked);
-    rv.set(crate::dom::f64_array(scope, &flat).into());
+// Whether a path array has no subpaths.
+pub(crate) fn path_empty(path: &[f64]) -> bool {
+    used(path) <= HEAD
 }
-
 // __dom.canvasPathEmpty(path) -> whether a path array has no subpaths.
 fn canvas_path_empty(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(used(&crate::dom::f64_arg(args.get(0))) <= HEAD);
+    rv.set_bool(path_empty(&crate::dom::f64_arg(args.get(0))));
 }
 
-// __dom.canvasHit(shape, x, y) -> whether the point (canvas coordinates) is in the shape: `[1, evenOdd, …path]` a
-// fill (isPointInPath), `[3, …pen, …path]` a stroke (isPointInStroke). Nothing is under a singular CTM, which
+// __dom.canvasHit(state, how, path, baked, x, y) -> whether the point (canvas coordinates) is in what a path array makes
+// under the CTM of the context's `state`, as `how` says: its fill (isPointInPath), its stroke (isPointInStroke) — `baked`
+// where its points are device space already (the context's current default path). Nothing is under a singular CTM, which
 // collapses every shape to a line.
 fn canvas_hit(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let shape = crate::dom::f64_arg(args.get(0)).to_vec();
-    let [x, y] = numbers(scope, &args, 1);
-    let hit = || -> Option<bool> {
-        if !x.is_finite() || !y.is_finite() {
-            return Some(false);
-        }
-        match *shape.first()? as i32 {
-            1 => {
-                let (path, _) = Path::parse(shape.get(2..)?)?;
-                Some(!path.singular() && contains(&path.fill_rings(), x, y, shape[1] != 0.0))
-            }
-            3 => {
-                let (pen, rest) = Pen::parse(&shape[1..])?;
-                let (path, _) = Path::parse(rest)?;
-                Some(!path.singular() && contains(&path.stroke_rings(&pen), x, y, false))
-            }
-            _ => None,
-        }
-    };
-    rv.set_bool(hit().unwrap_or(false));
+    let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return rv.set_bool(false) };
+    let how = args.get(1).uint32_value(scope).unwrap_or(FILL_NONZERO);
+    let baked = args.get(3).boolean_value(scope);
+    let [x, y] = numbers(scope, &args, 4);
+    let s = h.state();
+    let hit = x.is_finite() && y.is_finite() && Path::of(&crate::dom::f64_arg(args.get(2)), s.m, baked).is_some_and(|path| {
+        let (rings, even_odd) = path.rings(how, &s);
+        !path.singular() && contains(&rings, x, y, even_odd)
+    });
+    rv.set_bool(hit);
 }
 
 #[cfg(test)]
@@ -1271,12 +1252,25 @@ mod tests {
 
     #[test]
     fn finds_a_point_on_a_stroke() {
-        let flat = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 5.0, 10.0, 5.0];
-        let (path, _) = Path::parse(&flat).unwrap();
+        let flat = [10.0, 0.0, 0.0, -1.0, 0.0, 2.0, 0.0, 5.0, 10.0, 5.0];
+        let path = Path::of(&flat, [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], false).unwrap();
         let pen = Pen { width: 2.0, cap: Cap::Butt, join: Join::Miter, miter_limit: 10.0, dash: Vec::new(), dash_offset: 0.0 };
         let rings = path.stroke_rings(&pen);
         assert!(contains(&rings, 5.0, 5.5, false));
         assert!(!contains(&rings, 5.0, 6.5, false));
         assert!(!contains(&rings, -0.5, 5.0, false));
+    }
+
+    // A rectangle's ring is its corners through the CTM, as `rect()` on a user-space path makes them, and a path array
+    // holding no subpath is one of none.
+    #[test]
+    fn a_rectangle_is_its_corners_through_the_ctm() {
+        let m = [0.0, 1.0, -1.0, 0.0, 10.0, 0.0];
+        let rect = Path::rect(m, [1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(rect.fill_rings(), vec![vec![(8.0, 1.0), (8.0, 4.0), (4.0, 4.0), (4.0, 1.0)]]);
+        let made = built(None, &[(OP_RECT, &[1.0, 2.0, 3.0, 4.0])]);
+        assert_eq!(Path::of(&made, m, false).unwrap().fill_rings(), rect.fill_rings());
+        assert!(path_empty(&built(None, &[])));
+        assert!(!path_empty(&made));
     }
 }

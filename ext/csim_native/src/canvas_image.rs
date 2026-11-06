@@ -25,7 +25,7 @@ const NO_AREA_OFFSCREEN: u32 = 4;
 const BROKEN: u32 = 5;
 
 // The most bytes a bitmap may hold (a typed array's, as the bindings make one).
-const MAX_IMAGE_BYTES: u64 = 0xFFFF_FFFF;
+pub(crate) const MAX_IMAGE_BYTES: u64 = 0xFFFF_FFFF;
 
 // A source's verdict, its size (its pixels', a blank one's), whether drawing it taints a canvas, and whether it is blank.
 #[derive(Debug, PartialEq)]

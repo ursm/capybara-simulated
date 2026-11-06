@@ -6,7 +6,8 @@
 //
 use std::borrow::Cow;
 
-use crate::canvas_path::{invert, Path, Pen, Ring};
+use crate::canvas_path::{invert, Path, Ring, FOCUS_RING, STROKE};
+use crate::canvas_state::CanvasStateHandle;
 
 // The bitmap is the page's own `Uint8ClampedArray`, written in place; every value lands in it as that array stores one
 // (clamped, rounded half to even), and the coverage planes are `f32`, as the arrays that used to hold them were.
@@ -261,9 +262,25 @@ fn zeroed<T: Copy>(n: usize, v: T) -> Result<Vec<T>, Oom> {
     out.resize(n, v);
     Ok(out)
 }
+// …`n` zero bytes, as a typed array gets them: from the allocator's zeroed pages, untouched until they are drawn on.
+pub(crate) fn zeroed_bytes(n: usize) -> Result<Vec<u8>, Oom> {
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let layout = std::alloc::Layout::array::<u8>(n).map_err(|_| Oom)?;
+    // SAFETY: a layout of `n` > 0 bytes; on success the allocation is `n` initialized bytes, which the Vec takes over
+    // with that same layout.
+    unsafe {
+        let ptr = std::alloc::alloc_zeroed(layout);
+        if ptr.is_null() {
+            return Err(Oom);
+        }
+        Ok(Vec::from_raw_parts(ptr, n, n))
+    }
+}
 
 // ── the shape: each covered pixel and its coverage ──
-enum Shape<'a> {
+pub(crate) enum Shape<'a> {
     // A device box, its edges anti-aliased by area.
     Box([f64; 4]),
     // Polygon rings, under nonzero or (`even_odd`) the even-odd rule.
@@ -841,7 +858,9 @@ fn box_blur(src: &[f32], dst: &mut [f32], w: usize, h: usize, radius: usize, hor
 
 // ── the ops ──
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "canvasDraw", canvas_draw, context_id);
+    crate::dom::register(scope, ns, "canvasRect", canvas_rect, context_id);
+    crate::dom::register(scope, ns, "canvasDrawPath", canvas_draw_path, context_id);
+    crate::dom::register(scope, ns, "canvasDrawRectImage", canvas_draw_rect_image, context_id);
     crate::dom::register(scope, ns, "canvasClip", canvas_clip, context_id);
     crate::dom::register(scope, ns, "canvasConvert", canvas_convert, context_id);
     crate::dom::register(scope, ns, "pixelsUnorm8", pixels_unorm8, context_id);
@@ -874,23 +893,10 @@ pub(crate) fn bytes_read<'a>(val: v8::Local<'a, v8::Value>, written: Option<(*mu
     Some(if overlaps { Cow::Owned(bytes.to_vec()) } else { Cow::Borrowed(bytes) })
 }
 // Throw a RangeError for a buffer an op could not have (`Oom`).
-fn throw_oom(scope: &mut v8::PinScope<'_, '_>) {
+pub(crate) fn throw_oom(scope: &mut v8::PinScope<'_, '_>) {
     if let Some(msg) = v8::String::new(scope, "the canvas is too large to draw on") {
         let e = v8::Exception::range_error(scope, msg);
         scope.throw_exception(e);
-    }
-}
-
-// The rings of a path shape, and whether they fill even-odd: `[1, evenOdd, …path]` the path filled, `[3, …pen,
-// …path]` its stroke (canvas_path.rs `Path`, `Pen`).
-fn rings_of(shape: &[f64]) -> Option<(Vec<Ring>, bool)> {
-    match *shape.first()? as i32 {
-        1 => Some((Path::parse(shape.get(2..)?)?.0.fill_rings(), shape[1] != 0.0)),
-        3 => {
-            let (pen, rest) = Pen::parse(&shape[1..])?;
-            Some((Path::parse(rest)?.0.stroke_rings(&pen), false))
-        }
-        _ => None,
     }
 }
 
@@ -900,89 +906,128 @@ fn stops_of(flat: &[f64]) -> Vec<Stop> {
     flat.get(1..1 + 5 * n).unwrap_or(&[]).chunks_exact(5).map(|s| Stop { offset: s[0], r: s[1], g: s[2], b: s[3], a: s[4] }).collect()
 }
 
-// What `canvasDraw` takes for its paint where it is no array: the context's fill style's solid colour, or its stroke
-// style's.
-const FILL_COLOR: u32 = 0;
-const STROKE_COLOR: u32 = 1;
+// The paint of a drawing op, flat: `[0, r, g, b, a]` a solid sRGB colour; `[1]` clearRect; `[2, x0, y0, x1, y1, …stops]`
+// linear, `[3, x0, y0, r0, x1, y1, r1, …stops]` radial, `[4, angle, x, y, …stops]` conic, stops `[count, offset, r, g, b,
+// a, …]` sRGB; `[5, w, h, repeatX, repeatY, p3, …matrix]` the pattern tile `pixels` in its colour space and under its own
+// transform; `[6, w, h, p3, sx, sy, sw, sh, dx, dy, dw, dh, smoothing]` drawImage of `pixels`.
+const CLEAR: [f64; 1] = [1.0];
+const FOCUS_RING_PAINT: [f64; 5] = [0.0, 0.0, 0.0, 0.0, 1.0];
 
-// __dom.canvasDraw(state, w, h, plain, shape, mask, paint, pixels): one drawing operation on the context's `w` × `h`
-// bitmap (`Draw::run`; `canvasBitmap`), in its colour space, under the context's `state` (canvas_state.rs) — its clip,
-// CTM, `globalAlpha`, compositing operator and shadow — or, `plain`, opaque and source-over with no shadow, as a focus
-// ring is drawn, the clip still applying.
-//   shape: `[0, x0, y0, x1, y1]` a device box; `[1, evenOdd, …path]` a path filled, `[3, …pen, …path]` a path
-//          stroked (`rings_of`); `[2, w, h, x, y]` the glyph mask `mask`.
-//   paint: `FILL_COLOR` / `STROKE_COLOR`, the state's; `[0, r, g, b, a]` a solid sRGB colour; `[1]` clearRect;
-//          `[2, x0, y0, x1, y1, …stops]` linear, `[3, x0, y0, r0, x1, y1, r1, …stops]` radial, `[4, angle, x, y,
-//          …stops]` conic, stops `[count, offset, r, g, b, a, …]` sRGB; `[5, w, h, repeatX, repeatY, p3, …matrix]` the
-//          pattern tile `pixels` in its colour space and under its own transform; `[6, w, h, p3, sx, sy, sw, sh, dx,
-//          dy, dw, dh, smoothing]` drawImage of `pixels`.
-fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(h) = crate::canvas_state::handle_of(scope, args.get(0)) else { return };
-    // SAFETY: the handle lives while its object, the argument, does — through this op.
-    let h = unsafe { &*(h.as_ref() as *const crate::canvas_state::CanvasStateHandle) };
-    let bitmap = h.bitmap(scope);
-    let size = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
-    let plain = args.get(3).is_true();
-    let shape = crate::dom::f64_arg(args.get(4)).to_vec();
-    let mask = bytes_read(args.get(5), bytes_span(bitmap)).unwrap_or_default();
-    let given = v8::Local::new(scope, args.get(7));
-    let (paint, pixels) = paint_arg(scope, h, args.get(6), given);
-    draw(scope, h, bitmap, size, plain, &shape, &mask, &paint, pixels);
+// What `canvasRect` draws, and whether it draws at all: no rectangle with an argument that is not finite, nor a fill or a
+// clear of one with no area — a stroke's is the line it is, as long as it has a width or a height.
+const FILL_RECT: u32 = 0;
+const CLEAR_RECT: u32 = 1;
+const STROKE_RECT: u32 = 2;
+fn rect_draws(how: u32, [x, y, w, h]: [f64; 4]) -> bool {
+    [x, y, w, h].iter().all(|v| v.is_finite()) && if how == STROKE_RECT { w != 0.0 || h != 0.0 } else { w != 0.0 && h != 0.0 }
 }
-
-// A draw's paint as `canvasDraw` takes it: the state's fill or stroke style (`FILL_COLOR`, `STROKE_COLOR`) — its
-// gradient's or its pattern's (canvas_paint.rs `paint_data`), a pattern's pixels with it, else its solid colour — or
-// the array given, with the pixels `pixels` given.
-pub(crate) fn paint_arg<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    h: &crate::canvas_state::CanvasStateHandle,
-    value: v8::Local<'_, v8::Value>,
-    pixels: v8::Local<'s, v8::Value>,
-) -> (Vec<f64>, v8::Local<'s, v8::Value>) {
-    let slot = match value.uint32_value(scope).filter(|_| value.is_number()) {
-        Some(FILL_COLOR) => crate::canvas_state::FILL,
-        Some(STROKE_COLOR) => crate::canvas_state::STROKE,
-        _ => return (crate::dom::f64_arg(value).to_vec(), pixels),
-    };
-    if let Some((data, own)) = h.object(scope, slot).and_then(|p| crate::canvas_paint::paint_data(scope, p)) {
-        let own: v8::Local<'s, v8::Value> = own.map_or_else(|| v8::null(scope).into(), Into::into);
-        return (data, own);
+// …the shape a user-space rectangle fills: its device box where the CTM keeps it axis-aligned (no rotation or shear), its
+// corners' ring otherwise.
+fn rect_shape(m: Matrix, rect @ [x, y, w, h]: [f64; 4]) -> Shape<'static> {
+    if m[1] == 0.0 && m[2] == 0.0 {
+        return Shape::Box([m[0] * x + m[4], m[3] * y + m[5], m[0] * (x + w) + m[4], m[3] * (y + h) + m[5]]);
     }
-    let s = h.state();
-    let c = if slot == crate::canvas_state::FILL { &s.fill } else { &s.stroke };
-    (vec![0.0, f64::from(c.rgb[0]), f64::from(c.rgb[1]), f64::from(c.rgb[2]), c.a], pixels)
+    Shape::Rings { rings: Path::rect(m, rect).fill_rings(), even_odd: false }
 }
 
-// One drawing operation on the `size` bitmap `bitmap` (`Draw::run`), as `canvasDraw` describes it — `mask` the glyph
-// mask a `[2, …]` shape draws, `pixels` a pattern's or an image's.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn draw(
-    scope: &mut v8::PinScope<'_, '_>,
-    h: &crate::canvas_state::CanvasStateHandle,
-    bitmap: v8::Local<'_, v8::Value>,
-    size: [f64; 2],
-    plain: bool,
-    shape: &[f64],
-    mask: &[u8],
-    paint: &[f64],
-    pixels: v8::Local<'_, v8::Value>,
-) {
-    let p3 = h.display_p3();
-    let s = h.state().clone();
-    let shadow_a = if plain { 0.0 } else { s.shadow.a };
-    let [sr, sg, sb] = s.shadow.rgb.map(f64::from);
-    let m = s.m;
-    let state = [
-        size[0], size[1], if plain { 1.0 } else { s.alpha }, m[0], m[1], m[2], m[3], m[4], m[5], f64::from(u8::from(p3)), sr, sg, sb, shadow_a,
-        s.shadow_blur, s.shadow_x, s.shadow_y,
-    ];
-    let op = Op::parse(if plain { "source-over" } else { crate::canvas_state::COMPOSITE_OPS[s.composite as usize] });
-    let clip_object = h.object(scope, crate::canvas_state::CLIP);
-    if shape.is_empty() || paint.is_empty() {
+// __dom.canvasRect(state, how, x, y, w, h): `fillRect` (`FILL_RECT`), `clearRect` (`CLEAR_RECT`: the covered pixels cleared,
+// a partly covered edge in proportion, inside the clip — whatever the fill style, `globalAlpha` or the shadow) or
+// `strokeRect` (`STROKE_RECT`: the rectangle's closed path stroked as `stroke()` would, its corners honouring `lineJoin`
+// and `miterLimit`, the stroke scaling and rotating with the CTM) — every number one already, as the binding converted it.
+fn canvas_rect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
+    let how = args.get(1).uint32_value(scope).unwrap_or(FILL_RECT);
+    let rect: [f64; 4] = std::array::from_fn(|i| v8::Local::<v8::Number>::try_from(args.get(i as i32 + 2)).map_or(f64::NAN, |n| n.value()));
+    if !rect_draws(how, rect) {
         return;
     }
-    let (cw, ch) = (state[0] as usize, state[1] as usize);
-    let ctm: Matrix = state[3..9].try_into().unwrap();
+    if how == STROKE_RECT {
+        let (rings, _) = { let s = h.state(); Path::rect(s.m, rect).rings(STROKE, &s) };
+        return draw_style(scope, h, crate::canvas_state::STROKE, &Shape::Rings { rings, even_odd: false });
+    }
+    let m = h.state().m;
+    let shape = rect_shape(m, rect);
+    if how == CLEAR_RECT {
+        let none = v8::null(scope).into();
+        draw(scope, h, false, &shape, &CLEAR, none);
+    } else {
+        draw_style(scope, h, crate::canvas_state::FILL, &shape);
+    }
+}
+
+// __dom.canvasDrawPath(state, how, path, baked): a path array — a Path2D's, or the context's current default path, whose
+// points are device space already (`baked`) — filled by the nonzero or the even-odd rule with the fill style, stroked with
+// the stroke style, or its focus ring drawn (`FOCUS_RING`: a UA decoration, not an author stroke: a plain line, opaque and
+// source-over, the clip alone applying). Nothing for a path of no subpaths.
+fn canvas_draw_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
+    let how = args.get(1).uint32_value(scope).unwrap_or(crate::canvas_path::FILL_NONZERO);
+    let baked = args.get(3).boolean_value(scope);
+    let (rings, even_odd) = {
+        let path = crate::dom::f64_arg(args.get(2));
+        if crate::canvas_path::path_empty(&path) {
+            return;
+        }
+        let s = h.state();
+        let Some(path) = Path::of(&path, s.m, baked) else { return };
+        path.rings(how, &s)
+    };
+    let shape = Shape::Rings { rings, even_odd };
+    match how {
+        FOCUS_RING => {
+            let none = v8::null(scope).into();
+            draw(scope, h, true, &shape, &FOCUS_RING_PAINT, none);
+        }
+        STROKE => draw_style(scope, h, crate::canvas_state::STROKE, &shape),
+        _ => draw_style(scope, h, crate::canvas_state::FILL, &shape),
+    }
+}
+
+// __dom.canvasDrawRectImage(state, x, y, w, h, paint, pixels): a user-space rectangle filled with the paint given.
+fn canvas_draw_rect_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
+    let rect: [f64; 4] = std::array::from_fn(|i| args.get(i as i32 + 1).number_value(scope).unwrap_or(f64::NAN));
+    let rings = Path::rect(h.state().m, rect).fill_rings();
+    let paint = crate::dom::f64_arg(args.get(5)).to_vec();
+    let pixels = v8::Local::new(scope, args.get(6));
+    draw(scope, h, false, &Shape::Rings { rings, even_odd: false }, &paint, pixels);
+}
+
+// A shape drawn with the state's fill or stroke style (`slot`): its gradient's or its pattern's paint (canvas_paint.rs
+// `paint_data`), else its solid colour.
+pub(crate) fn draw_style(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, slot: usize, shape: &Shape<'_>) {
+    if let Some((data, own)) = h.object(scope, slot).and_then(|p| crate::canvas_paint::paint_data(scope, p)) {
+        let own: v8::Local<'_, v8::Value> = own.map_or_else(|| v8::null(scope).into(), Into::into);
+        return draw(scope, h, false, shape, &data, own);
+    }
+    let paint = {
+        let s = h.state();
+        let c = if slot == crate::canvas_state::FILL { &s.fill } else { &s.stroke };
+        [0.0, f64::from(c.rgb[0]), f64::from(c.rgb[1]), f64::from(c.rgb[2]), c.a]
+    };
+    let none = v8::null(scope).into();
+    draw(scope, h, false, shape, &paint, none);
+}
+
+// One drawing operation on the context's bitmap, in its colour space, made now where it has none (`Draw::run`): under
+// its state (canvas_state.rs) — its clip, CTM, `globalAlpha`, compositing operator and shadow — or, `plain`, opaque and
+// source-over with no shadow, the clip still applying. `pixels` a pattern's or an image's.
+pub(crate) fn draw(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, plain: bool, shape: &Shape<'_>, paint: &[f64], pixels: v8::Local<'_, v8::Value>) {
+    let bitmap = match h.drawable_bitmap(scope) {
+        Ok(Some(bitmap)) => bitmap,
+        Ok(None) => return,
+        Err(Oom) => return throw_oom(scope),
+    };
+    let [cw, ch] = h.size();
+    let p3 = h.display_p3();
+    // (…copied out of the state: none of its strings or its dash list, on an op a draw loop makes by the thousand)
+    let (ctm, alpha, composite, shadow_color, shadow_a, shadow_blur, shadow_offset) = {
+        let s = h.state();
+        (s.m, s.alpha, s.composite, s.shadow.rgb, s.shadow.a, s.shadow_blur, (s.shadow_x, s.shadow_y))
+    };
+    let (alpha, shadow_a) = if plain { (1.0, 0.0) } else { (alpha, shadow_a) };
+    let op = Op::parse(if plain { "source-over" } else { crate::canvas_state::COMPOSITE_OPS[composite as usize] });
+    let clip_object = h.object(scope, crate::canvas_state::CLIP);
     // (…a transform past what a double holds — `scale(1e200)` twice — maps everything off any canvas: nothing is drawn)
     if !ctm.iter().all(|v| v.is_finite()) {
         return;
@@ -990,20 +1035,6 @@ pub(crate) fn draw(
     let to = matrix(false, p3);
     let written = bytes_span(bitmap);
     let clip = clip_object.and_then(|c| bytes_read(c.into(), written));
-    let shape = match shape[0] as i32 {
-        0 if shape.len() >= 5 => Shape::Box([shape[1], shape[2], shape[3], shape[4]]),
-        2 if shape.len() >= 5 => {
-            let (w, h) = (shape[1] as usize, shape[2] as usize);
-            if w == 0 || h == 0 || mask.len() < w * h || !shape[3..5].iter().all(|v| v.is_finite()) {
-                return;
-            }
-            Shape::Mask { mask, w, h, x: shape[3] as i64, y: shape[4] as i64 }
-        }
-        _ => match rings_of(&shape) {
-            Some((rings, even_odd)) => Shape::Rings { rings, even_odd },
-            None => return,
-        },
-    };
     // (…a pattern's or an image's pixels, copied where they share the bitmap's bytes or need converting)
     let pixels = |convert: Option<&[f64; 9]>| {
         let mut px = bytes_read(pixels, written).unwrap_or_default();
@@ -1012,12 +1043,12 @@ pub(crate) fn draw(
         }
         px
     };
-    let p = &paint[1..];
-    let paint = match paint[0] as i32 {
+    let Some((&kind, p)) = paint.split_first() else { return };
+    let paint = match kind as i32 {
         0 if p.len() >= 4 => {
             let col = convert_rgb(to, Rgb { r: p[0], g: p[1], b: p[2] });
             // (…a transparent one paints nothing, but under a whole-canvas operator, where it clears)
-            if clamp01(p[3] * state[2]) <= 0.0 && !op.whole_canvas() {
+            if clamp01(p[3] * alpha) <= 0.0 && !op.whole_canvas() {
                 return;
             }
             Paint::Solid { col, a: p[3] }
@@ -1087,37 +1118,38 @@ pub(crate) fn draw(
     if paint.sampled() && inv.is_none() {
         return;
     }
-    let shadow = (state[13] > 0.0 && (state[14] > 0.0 || state[15] != 0.0 || state[16] != 0.0)).then(|| Shadow {
-        col: convert_rgb(to, Rgb { r: state[10], g: state[11], b: state[12] }),
-        a: state[13],
-        offset: (js_round(state[15]), js_round(state[16])),
-        radius: blur_radius(state[14]),
+    let shadow = (shadow_a > 0.0 && (shadow_blur > 0.0 || shadow_offset.0 != 0.0 || shadow_offset.1 != 0.0)).then(|| Shadow {
+        col: convert_rgb(to, Rgb { r: f64::from(shadow_color[0]), g: f64::from(shadow_color[1]), b: f64::from(shadow_color[2]) }),
+        a: shadow_a,
+        offset: (js_round(shadow_offset.0), js_round(shadow_offset.1)),
+        radius: blur_radius(shadow_blur),
     });
     let Some(buf) = bytes_mut(bitmap) else { return };
     if buf.len() < cw * ch * 4 {
         return;
     }
-    let draw = Draw { cw, ch, clip: clip.as_deref(), alpha: state[2], op, inv };
-    if draw.run(buf, &shape, &paint, shadow.as_ref()).is_err() {
+    let draw = Draw { cw, ch, clip: clip.as_deref(), alpha, op, inv };
+    if draw.run(buf, shape, &paint, shadow.as_ref()).is_err() {
         throw_oom(scope);
     }
 }
 
-// __dom.canvasClip(state, mask, w, h, shape): the clip mask (1 inside) a path shape (`rings_of`) makes of a `w` × `h`
-// bitmap, intersected with the context's `state`'s clip, written into `mask` — the page side allocates it, a size too
-// large for it a RangeError there — and made the state's clip: a pixel is inside where it is at least half covered.
+// __dom.canvasClip(state, how, path, baked): the clip mask (1 inside) a path array's fill (`Path::rings`, `how` the rule,
+// `baked` as `canvasDrawPath`) makes of the context's bitmap, intersected with its clip and made its clip from then on: a
+// pixel is inside where it is at least half covered. Nothing on a bitmap of no area.
 fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(h) = crate::canvas_state::handle_of(scope, args.get(0)) else { return };
-    // SAFETY: the handle lives while its object, the argument, does — through this op.
-    let h = unsafe { &*(h.as_ref() as *const crate::canvas_state::CanvasStateHandle) };
-    let cw = args.get(2).uint32_value(scope).unwrap_or(0) as usize;
-    let ch = args.get(3).uint32_value(scope).unwrap_or(0) as usize;
-    let (rings, even_odd) = rings_of(&crate::dom::f64_arg(args.get(4))).unwrap_or_default();
-    let written = bytes_span(args.get(1));
-    let old_object = h.object(scope, crate::canvas_state::CLIP);
-    let old = old_object.and_then(|o| bytes_read(o.into(), written));
-    let Some(mask) = bytes_mut(args.get(1)).filter(|m| m.len() >= cw * ch) else { return };
-    mask.fill(0);
+    let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
+    let [cw, ch] = h.size();
+    if cw == 0 || ch == 0 {
+        return;
+    }
+    let how = args.get(1).uint32_value(scope).unwrap_or(crate::canvas_path::FILL_NONZERO);
+    let baked = args.get(3).boolean_value(scope);
+    let (rings, even_odd) = {
+        let s = h.state();
+        Path::of(&crate::dom::f64_arg(args.get(2)), s.m, baked).map_or_else(Default::default, |path| path.rings(how, &s))
+    };
+    let Ok(mut mask) = zeroed_bytes(cw * ch) else { return throw_oom(scope) };
     let covered = Shape::Rings { rings, even_odd }.cover(cw, ch, (0.0, 0.0), &mut |px, py, cov| {
         if cov >= 0.5 {
             mask[py * cw + px] = 1;
@@ -1126,13 +1158,14 @@ fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     if covered.is_err() {
         return throw_oom(scope);
     }
-    if let Some(old) = old {
+    let old_object = h.object(scope, crate::canvas_state::CLIP);
+    if let Some(old) = old_object.and_then(|o| bytes_read(o.into(), None)) {
         for (m, o) in mask.iter_mut().zip(old.iter()) {
             *m &= o;
         }
     }
-    let made = v8::Local::<v8::Object>::try_from(args.get(1)).ok();
-    h.set_object(scope, crate::canvas_state::CLIP, made);
+    let made = crate::dom::u8_clamped_array(scope, mask);
+    h.set_object(scope, crate::canvas_state::CLIP, v8::Local::<v8::Object>::try_from(made).ok());
 }
 
 // __dom.canvasConvert(pixels, from, to): an RGBA buffer converted in place from one PredefinedColorSpace to another —
@@ -1316,6 +1349,49 @@ fn bitmap_pixels_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // HTML's early returns of fillRect, clearRect and strokeRect: non-finite first, no area for the two that fill, no
+    // width AND no height for the one that strokes.
+    #[test]
+    fn a_rect_op_draws_what_html_says() {
+        for how in [FILL_RECT, CLEAR_RECT, STROKE_RECT] {
+            assert!(rect_draws(how, [0.0, 0.0, 1.0, 1.0]));
+            assert!(rect_draws(how, [0.0, 0.0, -1.0, -1.0]));
+            for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert!(!rect_draws(how, [bad, 0.0, 1.0, 1.0]));
+                assert!(!rect_draws(how, [0.0, 0.0, 1.0, bad]));
+            }
+            assert!(!rect_draws(how, [0.0, 0.0, 0.0, 0.0]));
+            assert!(!rect_draws(how, [0.0, 0.0, -0.0, 0.0]));
+        }
+        assert!(!rect_draws(FILL_RECT, [0.0, 0.0, 0.0, 1.0]));
+        assert!(!rect_draws(CLEAR_RECT, [0.0, 0.0, 1.0, 0.0]));
+        assert!(rect_draws(STROKE_RECT, [0.0, 0.0, 0.0, 1.0]));
+        assert!(rect_draws(STROKE_RECT, [0.0, 0.0, 1.0, 0.0]));
+    }
+
+    // Under a CTM with no rotation or shear a rectangle is a device box, whatever its scale (a -0 entry no rotation at
+    // all); under any other, its corners' ring.
+    #[test]
+    fn a_rect_is_a_box_while_the_ctm_keeps_it_axis_aligned() {
+        let rect = [1.0, 2.0, 3.0, 4.0];
+        assert!(matches!(rect_shape([2.0, 0.0, 0.0, 3.0, 10.0, 20.0], rect), Shape::Box([12.0, 26.0, 18.0, 38.0])));
+        assert!(matches!(rect_shape([2.0, -0.0, -0.0, 3.0, 0.0, 0.0], rect), Shape::Box(_)));
+        match rect_shape([0.0, 1.0, -1.0, 0.0, 0.0, 0.0], rect) {
+            Shape::Rings { rings, even_odd } => {
+                assert_eq!(rings, vec![vec![(-2.0, 1.0), (-2.0, 4.0), (-6.0, 4.0), (-6.0, 1.0)]]);
+                assert!(!even_odd);
+            }
+            _ => panic!("a rotated rectangle is a ring"),
+        }
+    }
+
+    #[test]
+    fn zeroed_bytes_are_zero() {
+        assert_eq!(zeroed_bytes(0).unwrap(), Vec::<u8>::new());
+        assert_eq!(zeroed_bytes(5).unwrap(), vec![0; 5]);
+        assert!(zeroed_bytes(usize::MAX).is_err());
+    }
 
     // A half: 1, a half, the largest, past it infinity, the least subnormal; ties to even; every byte over 255 back to
     // itself through a half, as a float16 ImageData keeps an 8-bit canvas's pixels.

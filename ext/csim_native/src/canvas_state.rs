@@ -253,6 +253,10 @@ pub(crate) struct CanvasStateHandle {
     // own — none until something is drawn, and none again once the canvas is reset or resized — which every draw writes
     // and every read of the canvas as a source reads (`canvasBitmap`). On V8's heap, so the collector counts it.
     bitmap: UnsafeCell<v8::TracedReference<v8::Object>>,
+    // Its size, which HTML's "set bitmap dimensions" sets as the canvas is resized (`canvasResize`): no area where no
+    // bitmap of the canvas's size can be allocated (as a browser, which draws nothing into one) — a size an
+    // [EnforceRange] unsigned long long admits, past any typed array.
+    size: Cell<[usize; 2]>,
     // The bitmap's origin-clean flag: false once a source that is not origin-clean — a cross-origin image whose bytes
     // are not CORS-approved, a tainted canvas or bitmap, a pattern made of one — was drawn or set as a paint, which
     // getImageData / toDataURL / toBlob then refuse with a SecurityError. Not drawing state, and nothing sets it true
@@ -277,6 +281,9 @@ impl CanvasStateHandle {
     pub(crate) fn state(&self) -> std::cell::Ref<'_, State> {
         self.state.borrow()
     }
+    pub(crate) fn size(&self) -> [usize; 2] {
+        self.size.get()
+    }
     // Whether its bitmap holds Display P3 values.
     pub(crate) fn display_p3(&self) -> bool {
         self.settings.color_space == DISPLAY_P3
@@ -285,6 +292,21 @@ impl CanvasStateHandle {
     pub(crate) fn bitmap<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
         // SAFETY: the main thread reads the reference; nothing else writes it meanwhile.
         unsafe { (*self.bitmap.get()).get(scope) }.map_or_else(|| v8::undefined(scope).into(), Into::into)
+    }
+    // …what an operation draws into: made now, of transparent black, where it has none — none for a bitmap of no area.
+    pub(crate) fn drawable_bitmap<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Result<Option<v8::Local<'s, v8::Value>>, crate::canvas::Oom> {
+        let [w, h] = self.size.get();
+        if w == 0 || h == 0 {
+            return Ok(None);
+        }
+        let kept = self.bitmap(scope);
+        if !kept.is_undefined() {
+            return Ok(Some(kept));
+        }
+        let made = crate::dom::u8_clamped_array(scope, crate::canvas::zeroed_bytes(w * h * 4)?);
+        // SAFETY: the main thread writes the reference.
+        unsafe { (*self.bitmap.get()).reset(scope, v8::Local::<v8::Object>::try_from(made).ok()) };
+        Ok(Some(made))
     }
     // The object the current state traces in `slot` (`FILL`, `STROKE`, `CLIP`).
     pub(crate) fn object<'s>(&self, scope: &mut v8::PinScope<'s, '_>, slot: usize) -> Option<v8::Local<'s, v8::Object>> {
@@ -342,20 +364,29 @@ impl CanvasStateHandle {
         let shorter = v8::Integer::new_from_unsigned(scope, base);
         saved.set(scope, length.into(), shorter.into());
     }
-    // "Reset the rendering context to its default state": the stack emptied, every attribute its default, no clip.
+    // "Reset the rendering context to its default state": the bitmap transparent black, the stack emptied, every
+    // attribute its default, no clip — not the settings, and not the origin-clean flag.
     fn reset(&self, scope: &mut v8::PinScope<'_, '_>) {
+        // SAFETY: the main thread writes the references.
+        unsafe { (*self.bitmap.get()).reset(scope, None) };
         self.stack.borrow_mut().clear();
         *self.state.borrow_mut() = State::default();
         for slot in 0..3 {
             self.set_object(scope, slot, None);
         }
-        // SAFETY: the main thread writes the reference.
+        // SAFETY: as above.
         unsafe { (*self.saved.get()).reset(scope, None) };
     }
 }
 
-// The constructor a context's state object is made with (`new __dom.CanvasStateBase(settings)`, a converted
-// CanvasRenderingContext2DSettings): branded, a wrapper of a fresh handle in the default state.
+// The size a bitmap of a canvas's `size` has: no area where its bytes are past any array's.
+fn bitmap_size([w, h]: [f64; 2]) -> [usize; 2] {
+    if w * h * 4.0 > crate::canvas_image::MAX_IMAGE_BYTES as f64 { [0, 0] } else { [w as usize, h as usize] }
+}
+
+// The constructor a context's state object is made with (`new __dom.CanvasStateBase(settings, width, height)`, a
+// converted CanvasRenderingContext2DSettings and its canvas's size): branded, a wrapper of a fresh handle in the default
+// state.
 fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if args.new_target().is_undefined() {
         return;
@@ -363,8 +394,10 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
+    let size = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
     let handle = CanvasStateHandle {
         settings: Settings::of(scope, args.get(0)),
+        size: Cell::new(bitmap_size(size)),
         state: RefCell::new(State::default()),
         refs: [(); 3].map(|_| UnsafeCell::new(v8::TracedReference::empty())),
         stack: RefCell::new(Vec::new()),
@@ -435,7 +468,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasOriginClean", canvas_origin_clean, context_id);
     crate::dom::register(scope, ns, "canvasTaint", canvas_taint, context_id);
     crate::dom::register(scope, ns, "canvasBitmap", canvas_bitmap, context_id);
-    crate::dom::register(scope, ns, "canvasSetBitmap", canvas_set_bitmap, context_id);
+    crate::dom::register(scope, ns, "canvasDrawableBitmap", canvas_drawable_bitmap, context_id);
+    crate::dom::register(scope, ns, "canvasTakeBitmap", canvas_take_bitmap, context_id);
+    crate::dom::register(scope, ns, "canvasResize", canvas_resize, context_id);
 }
 
 // __dom.canvasBitmap(state) -> the context's bitmap, or null where it has none (nothing drawn since it was made, reset or
@@ -446,17 +481,38 @@ fn canvas_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let bitmap = unsafe { &*(h.as_ref() as *const CanvasStateHandle) }.bitmap(scope);
     if bitmap.is_undefined() { rv.set_null() } else { rv.set(bitmap) }
 }
-// __dom.canvasSetBitmap(state, bitmap | null) — the context's bitmap becomes `bitmap` (one the bindings made of its size),
-// or none: the canvas reset, resized, or its bitmap transferred away.
-fn canvas_set_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(h) = handle_of(scope, args.get(0)) else { return };
-    let bitmap = v8::Local::<v8::Uint8ClampedArray>::try_from(args.get(1)).ok().map(Into::into);
-    // SAFETY: as `canvas_bitmap`.
-    unsafe { (*h.as_ref().bitmap.get()).reset(scope, bitmap) };
+// __dom.canvasDrawableBitmap(state) -> the context's bitmap, made now where it has none — null for one of no area.
+fn canvas_drawable_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = handle(scope, args.get(0)) else { return rv.set_null() };
+    match h.drawable_bitmap(scope) {
+        Ok(Some(bitmap)) => rv.set(bitmap),
+        Ok(None) => rv.set_null(),
+        Err(crate::canvas::Oom) => crate::canvas::throw_oom(scope),
+    }
+}
+// __dom.canvasTakeBitmap(state) -> the context's bitmap, which it has none of from now on (`transferToImageBitmap`), or
+// null where it had none.
+fn canvas_take_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = handle(scope, args.get(0)) else { return rv.set_null() };
+    let bitmap = h.bitmap(scope);
+    if bitmap.is_undefined() {
+        return rv.set_null();
+    }
+    // SAFETY: the main thread writes the reference.
+    unsafe { (*h.bitmap.get()).reset(scope, None) };
+    rv.set(bitmap);
+}
+// __dom.canvasResize(state, width, height): HTML's "set bitmap dimensions": the context reset to its default state, its
+// bitmap of the canvas's new size.
+fn canvas_resize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = handle(scope, args.get(0)) else { return };
+    let size = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+    h.size.set(bitmap_size(size));
+    h.reset(scope);
 }
 
 // The handle of a state argument.
-fn handle<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'h CanvasStateHandle> {
+pub(crate) fn handle<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'h CanvasStateHandle> {
     // SAFETY: the handle lives while its object, the argument, does — through this op.
     handle_of(scope, value).map(|p| unsafe { &*(p.as_ref() as *const CanvasStateHandle) })
 }
@@ -662,7 +718,7 @@ const RESTORE: u32 = 1;
 const RESET: u32 = 2;
 
 // __dom.canvasStack(state, how) — `save()` (`SAVE`), `restore()` (`RESTORE`), or the state reset to its default
-// (`RESET`: `reset()`, a canvas resized).
+// (`RESET`: `reset()`).
 fn canvas_stack(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
     match args.get(1).uint32_value(scope) {
@@ -771,4 +827,18 @@ fn canvas_font_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         v8::Boolean::new(scope, rem).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_size_past_any_array_has_a_bitmap_of_no_area() {
+        assert_eq!(bitmap_size([300.0, 150.0]), [300, 150]);
+        assert_eq!(bitmap_size([0.0, 150.0]), [0, 150]);
+        assert_eq!(bitmap_size([32767.0, 32767.0]), [32767, 32767]);
+        assert_eq!(bitmap_size([100_000.0, 100_000.0]), [0, 0]);
+        assert_eq!(bitmap_size([4_294_967_296.0, 1.0]), [0, 0]);
+    }
 }
