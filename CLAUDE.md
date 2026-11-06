@@ -250,13 +250,13 @@ own, which a worker of every window's has to follow one of — and a timer any
 worker, dedicated, shared or service, sets as its own scripts have run its
 `Date` past the clock it follows falls due on that clock all the same, running
 with its `Date` lifted to the timer's time
-(`notEarly`, timers.js), where HTML would run it that much later: falling due
+(`Timer::not_early`, timers.rs), where HTML would run it that much later: falling due
 later would move it by the driver's own script time too; and a worker's
 `Date` stays its maker's document's, where a next page's begins again at the
 wall clock, so a service worker that outlives a page reads as far ahead of the
 next one as the last page's virtual time ran ahead of real time — every
 message's time is on the agent's `Date` scale, converted at each end
-(`agentShift`, timers.js); one going back with the page's ran its
+(`agentShift`, agent_clock.rs); one going back with the page's ran its
 `performance.now()` back too. A navigation
 into the scope of a worker still activating waits for it as Handle Fetch
 says — in place, as long as the worker is at work, the host's event loop

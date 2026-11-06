@@ -533,7 +533,7 @@ module Capybara
       # Whether the page's realms are cross-origin isolated (its top-level document's COOP + COEP — `init_realm`), which
       # the browser sets as a document commits, ahead of the realm it builds for it.
       attr_accessor :cross_origin_isolated
-      # …or as the step has moved it since, where the tab has a worker to follow it (timers.js `moveClock`): a worker
+      # …or as the step has moved it since, where the tab has a worker to follow it (timers.rs `move_clock`): a worker
       # reads the time a message posted in the middle of a step was sent at, and not the time before it. Its `Date` on
       # with it, which a worker catches up to at that time: a window's moved on 3 s by a sync XHR's wait read 3 s back.
       def clock_at_least(ms)

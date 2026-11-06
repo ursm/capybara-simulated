@@ -105,7 +105,7 @@ impl Source {
 }
 
 // The agent's event loop (HTML §8.1.7): its virtual clock — the time it has reached, in milliseconds, which its steps
-// move (timers.js `moveClock`) and every window realm of the agent reads and schedules on (agent_clock.rs reads it for
+// move (`move_clock`) and every window realm of the agent reads and schedules on (agent_clock.rs reads it for
 // `Date` and `performance.now()`), one clock where each realm had one of its own: a frame's ran a step behind its
 // parent's and its timers fell due a step late, in a batch after the parent's — and the sequence its tasks were queued
 // in, across the realms' lists, which orders those due at once. And, for each step under way (`agentStep`), the realms
