@@ -1092,14 +1092,15 @@ fn answer(scope: &mut v8::PinScope<'_, '_>, b: Builder<'_>, built: Result<(), Re
     }
 }
 
-// __dom.canvasPathRoundRect(path, state, x, y, w, h, radii, count) -> `roundRect()`, returning as `canvasPath`: `radii` a
-// Float64Array whose first `count` are its x and y pairs.
+// __dom.canvasPathRoundRect(path, state, x, y, w, h, count, rx0, ry0, … rx3, ry3) -> `roundRect()`, returning as `canvasPath`:
+// how many radii were given, the first four of them, each its x and y (more than four are refused for their number alone).
 fn canvas_path_round_rect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let ctm = crate::canvas_state::handle_of(scope, args.get(1)).map(|h| unsafe { h.as_ref() }.state().m);
     let rect: [f64; 4] = std::array::from_fn(|k| v8::Local::<v8::Number>::try_from(args.get(k as i32 + 2)).map_or(f64::NAN, |n| n.value()));
-    let count = args.get(7).uint32_value(scope).unwrap_or(0) as usize;
-    let radii = crate::dom::f64_arg(args.get(6));
-    let a: Vec<f64> = rect.iter().chain(radii.iter().take(count)).copied().collect();
+    let count = args.get(6).uint32_value(scope).unwrap_or(0) as usize;
+    let mut a: Vec<f64> = rect.to_vec();
+    a.extend((0..count.min(4) * 2).map(|k| v8::Local::<v8::Number>::try_from(args.get(k as i32 + 7)).map_or(f64::NAN, |n| n.value())));
+    a.resize(4 + count * 2, 0.0);
     let mut b = Builder::new(path_mut(args.get(0)), ctm);
     let built = b.op(OP_ROUND_RECT, &a);
     answer(scope, b, built, &mut rv);
