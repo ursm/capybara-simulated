@@ -106,6 +106,9 @@ pub(crate) struct Reload {
 }
 
 static PLANNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) fn planned_so_far() -> u64 {
+    PLANNED.load(std::sync::atomic::Ordering::Relaxed)
+}
 pub(crate) fn next_planned() -> u64 {
     PLANNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
@@ -149,8 +152,10 @@ struct RoutedSubmission {
     taken: Option<(v8::Global<v8::Value>, Route, (String, String))>,
 }
 impl RoutedSubmissions {
-    pub(crate) fn any(&self) -> bool {
-        !self.entries.is_empty()
+    // The order the first of them was planned in, none for none: the host takes them as the event loop's navigation turn
+    // makes them due (frame_navigation.rs `Plans::through`).
+    pub(crate) fn first_planned(&self) -> Option<u64> {
+        self.entries.iter().map(|e| e.planned).min()
     }
 }
 
@@ -808,6 +813,9 @@ fn take_routed_submission(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionC
     rv.set_null();
     loop {
         let arena = &mut crate::dom::dom(scope).arena;
+        if !arena.routed_submissions.first_planned().is_some_and(|at| arena.frame_navigations.due(at)) {
+            return;
+        }
         let entries = &mut arena.routed_submissions.entries;
         let Some(first) = entries.iter().enumerate().min_by_key(|(_, e)| e.planned).map(|(i, _)| i) else { return };
         let e = entries.remove(first);
@@ -858,7 +866,8 @@ fn take_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 // frame's submission (16: `RoutedSubmissions`).
 fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let arena = &crate::dom::dom(scope).arena;
-    let frames = (u32::from(arena.frame_navigations.hosted()) << 3) | (u32::from(arena.routed_submissions.any()) << 4);
+    let routed = arena.routed_submissions.first_planned().is_some_and(|at| arena.frame_navigations.due(at));
+    let frames = (u32::from(arena.frame_navigations.hosted()) << 3) | (u32::from(routed) << 4);
     let own = &plan(scope, &args).own;
     let bits = u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1) | (u32::from(own.submission.is_some()) << 2);
     rv.set_uint32(bits | frames);

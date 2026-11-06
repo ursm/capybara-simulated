@@ -493,14 +493,29 @@ module Capybara
           @clock_date = r['date'].to_f if r['date']
           @clock_held = r['held'].to_f if r['held']
           out = out ? out.merge(r, 'fired' => out['fired'].to_i + r['fired'].to_i, 'dirtied' => out['dirtied'] || r['dirtied']) : r
-          break unless cut || r['asked']
+          # (…and a step over at the navigation turn, what it made due taken — off the stack, none from inside a call of the
+          # host's into the window, whose caller's drain takes it — before what is due after it runs)
+          navigated = r['navigation'] && @call_depth.to_i.zero? && !@stepping
+          if navigated
+            @browser.take_frame_navigations_due
+            out['gen'] = settle_gen
+          end
+          break unless cut || r['asked'] || navigated
 
-          waited   += @browser.run_workers_due
-          left     -= r['asked'] ? clock - began : cut
+          waited   += @browser.run_workers_due if cut || r['asked']
+          left     -= r['asked'] || navigated ? clock - began : cut
           max_iter -= r['fired'].to_i
-          break if left <= 0 || max_iter <= 0 || (yield_on_gen && r['dirtied'])
+          break if max_iter <= 0 || (left <= 0 && !navigated) || left < 0 || (yield_on_gen && r['dirtied'])
         end
         out
+      end
+
+      # …the event loop's navigation turn run, where one is queued (timers.js `queueNavigationTurn`), with what is due before
+      # it, no clock advance: none from inside a call of the host's into the window, which a step must not nest in.
+      def run_navigation_turn(max_iter)
+        return if @call_depth.to_i.positive? || @stepping
+
+        run_loop_step(0, max_iter) if ctx.call('__csimNavigationTurnQueued') == true
       end
 
       # …the window's tasks due by `at`, a time its clock has passed — a page's timers a window that waited on a worker in

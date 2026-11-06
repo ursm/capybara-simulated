@@ -304,6 +304,142 @@ RSpec.describe 'a frame navigation as tasks' do
     expect(log.grep(/\Ah/)).to eq(%w[h0=1 h1=1])
   end
 
+  # A frame's own `location`, its reload, a link or a form targeting it: what the host takes, at the event loop's
+  # navigation turn. Chrome and Firefox: `set [old:bu] ret:…old M P0 [P1] old:ph old:un new:script … P-load:…new new:t0 P5 P40`
+  # — the commit well before P40, which ran ahead of it when the host took it only as a whole step ended.
+  {
+    'its location set'  => ["f.contentWindow.location.href = '/child?new';", 'new'],
+    'a link to it'      => ["document.getElementById('ln').click();", 'viaL'],
+    'a link in it'      => ["f.contentDocument.getElementById('a').click();", 'viaA'],
+    'its reload'        => ['f.contentWindow.location.reload();', 'old'],
+    'a form to it'      => ["document.getElementById('fm').submit();", 'viaF=1'],
+  }.each do |what, (run, tag)|
+    it "commits #{what} behind the zero timers and before the later ones" do
+      log = log_of(<<~JS)
+        f.onload = () => L.push('P-load:' + U(f));
+        L.push('set');
+        #{run}
+        L.push('ret:' + U(f));
+        timers();
+      JS
+      expect(log).to eq([
+        'set', 'ret:child?old', 'M', 'P0',
+        'old:beforeunload', 'old:pagehide', 'old:unload',
+        "#{tag}:script", "#{tag}:load", "P-load:child?#{tag}", "#{tag}:t0", 'P5', 'P40'
+      ])
+    end
+  end
+
+  # …a form in it, the host's to route. Chrome and Firefox: `M old:bu P0 P1 old:ph old:un viaIF=1:script … P5 P40`.
+  it 'commits a form in the frame behind the zero timers and before the later ones' do
+    log = log_of(<<~JS)
+      const d = f.contentDocument, form = d.createElement('form');
+      form.action = '/child';
+      form.innerHTML = '<input type="hidden" name="viaIF" value="1">';
+      d.body.appendChild(form);
+      form.submit();
+      timers();
+    JS
+    expect(log).to eq(%w[M P0 old:beforeunload old:pagehide old:unload viaIF=1:script viaIF=1:load viaIF=1:t0 P5 P40])
+  end
+
+  # Two of them, or one and a `src`, in either order: one navigation, the later's. Chrome and Firefox: `… b:script …`.
+  {
+    'two locations'      => "w.location.href = '/child?a'; w.location.href = '/child?b';",
+    'a location, a src'  => "w.location.href = '/child?a'; f.src = '/child?b';",
+    'a src, a location'  => "f.src = '/child?a'; w.location.href = '/child?b';"
+  }.each do |what, run|
+    it "goes to the later of #{what}" do
+      log = log_of(<<~JS)
+        const w = f.contentWindow;
+        #{run}
+        setTimeout(() => L.push('P0'), 0);
+      JS
+      expect(log).not_to include('a:script')
+      expect(log.first).to eq('P0')
+      expect(log).to include('b:script')
+    end
+  end
+
+  # A frame removed with its location set: nothing of it runs. Chrome and Firefox: `… ret … removed M P0 P5 P40`, its
+  # pagehide and unload apart (above).
+  it 'drops the navigation the host plans with its frame removed' do
+    log = log_of(<<~JS)
+      f.onload = () => L.push('P-load');
+      f.contentWindow.location.href = '/child?a';
+      L.push('ret');
+      f.remove();
+      L.push('removed');
+      timers();
+    JS
+    expect(log).to eq(%w[ret removed M P0 P5 P40])
+  end
+
+  # A document opened cancels the navigation of its frame: HTML document open steps, "stop loading". Chrome and Firefox:
+  # `opened:… P0 … final:…` at the document written, none of the next, its `src`'s or its `location`'s.
+  {
+    'src'      => "f.src = '/child?new';",
+    'location' => "f.contentWindow.location.href = '/child?new';"
+  }.each do |what, run|
+    it "cancels a queued navigation by its #{what} with the document opened" do
+      log = log_of(<<~JS)
+        const d = f.contentDocument;
+        #{run}
+        d.open();
+        d.write('written');
+        d.close();
+        setTimeout(() => L.push('final:' + d.body.textContent + ':' + (f.contentDocument === d)), 200);
+      JS
+      expect(log).not_to include('new:script')
+      expect(log.last).to eq('final:written:true')
+    end
+  end
+
+  # The session history of a location: an entry as it commits, replaced by a `replace`. Chrome and Firefox: `h` up by one at
+  # the end, flat for a `replace`.
+  it "adds a session history entry as a location's navigation commits, none for a replace" do
+    log = log_of(<<~JS)
+      L.push('h0=' + history.length);
+      f.contentWindow.location.href = '/child?a';
+      L.push('ret=' + history.length);
+      setTimeout(() => { L.push('h1=' + history.length); f.contentWindow.location.replace('/child?b'); }, 100);
+      setTimeout(() => L.push('h2=' + history.length), 200);
+    JS
+    expect(log.grep(/\Ah|ret/)).to eq(%w[h0=1 ret=1 h1=2 h2=2])
+  end
+
+  # The driver's own wait: a frame entered right after a navigation of it begins is at the next document, its `src` set
+  # or a link followed, by a script or by the user.
+  it 'enters the document a queued location navigation goes to' do
+    s = session('/' => '<iframe id="f" src="/a"></iframe>', '/a' => '<p id="at">a</p>', '/b' => '<p id="at">b</p>')
+    s.visit '/'
+    s.within_frame('f') { expect(s.find('#at').text).to eq('a') }
+    s.execute_script("frames[0].location.href = '/b'")
+    s.within_frame('f') { expect(s.find('#at').text).to eq('b') }
+  end
+
+  it 'enters the document a clicked link targeting the frame goes to' do
+    s = session(
+      '/'  => '<a id="go" href="/b" target="fr">go</a><a id="sd" href="#" onclick="document.getElementById(\'f\').srcdoc = \'<p id=at>sd</p>\'; return false">sd</a><iframe id="f" name="fr" src="/a"></iframe>',
+      '/a' => '<p id="at">a</p>',
+      '/b' => '<p id="at">b</p>'
+    )
+    s.visit '/'
+    s.click_link 'go'
+    s.within_frame('f') { expect(s.find('#at').text).to eq('b') }
+    s.click_link 'sd'
+    s.within_frame('f') { expect(s.find('#at').text).to eq('sd') }
+  end
+
+  it 'navigates an entered frame through a link in it, the scope following it' do
+    s = session('/' => '<iframe id="f" src="/a"></iframe>', '/a' => '<a href="/b">go</a>', '/b' => '<p id="at">b</p>')
+    s.visit '/'
+    s.within_frame('f') do
+      s.click_link 'go'
+      expect(s.find('#at').text).to eq('b')
+    end
+  end
+
   # The driver's own wait: a frame entered right after its `src` is set is at the next document.
   it 'enters the document a queued src navigation goes to' do
     s = session('/' => '<iframe id="f" src="/a"></iframe>', '/a' => '<p id="at">a</p>', '/b' => '<p id="at">b</p>')

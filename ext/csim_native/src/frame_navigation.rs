@@ -114,12 +114,11 @@ const PROMPT_OWED: u32 = 1 << 12;
 // (HTML "plan to navigate": the navigable's one, a later one replacing it — a form's of its parent's document as well):
 // to a URL — whether it replaces the frame's session history entry, the realm of the document that began it and the
 // Referer that one sends, the container's `sandbox` attribute as it began (what the document it makes is sandboxed by),
-// whether that document had transient activation — or a reload of the document it is at.
+// whether that document had transient activation — or a reload of the document it is at. Taken once the event loop's
+// navigation turn has run (`Plans::through`), HTML's parallel steps as what is due before them has run.
 pub(crate) enum HostNavigation {
     Navigate { url: String, replace: bool, initiator: i32, referrer: (String, String), sandbox: Option<String>, activated: bool },
-    // (…by the mark of the frame's document's tasks queued by the time the host first came to take it:
-    // navigation_plan.rs `Reload::mark`)
-    Reload { mark: Option<(u64, f64)> },
+    Reload,
 }
 
 // What `planFrameLocation` made of a navigation: none (the frame has no navigable), one planned, or one to a fragment of
@@ -145,6 +144,11 @@ struct Plans {
     // (navigation_plan.rs `flushBegin`).
     saved: Option<Hosted>,
     flushed: Option<Hosted>,
+    // The event loop's navigation turn (timers.js `queueNavigationTurn`): one task behind what is due — its key while it
+    // is queued — as it runs the navigations planned so far due for the host, by the order they were planned in
+    // (navigation_plan.rs `next_planned`).
+    turn: Option<i64>,
+    through: u64,
 }
 
 impl FrameNavigations {
@@ -166,9 +170,13 @@ impl FrameNavigations {
         let sandbox = arena.get(c).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
         arena.frame_navigation(c).sandbox = Some(sandbox);
     }
-    // Whether the host plans a navigation of any frame.
+    // Whether the host plans a navigation of any frame that is due now.
     pub(crate) fn hosted(&self) -> bool {
-        self.0.values().any(|n| n.host.is_some())
+        self.0.values().any(|n| n.host.as_ref().is_some_and(|&(at, _)| at <= self.1.through))
+    }
+    // Whether a navigation planned in order `at` is due: the navigation turn has run since.
+    pub(crate) fn due(&self, at: u64) -> bool {
+        at <= self.1.through
     }
     fn take_hosted(&mut self) -> Hosted {
         self.0.iter_mut().filter_map(|(&c, n)| n.host.take().map(|h| (c, h))).collect()
@@ -280,6 +288,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "cancelFrameLocation", cancel_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameLocation", plan_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameReload", plan_frame_reload, context_id);
+    crate::dom::register(scope, ns, "navigationTurnQueued", navigation_turn_queued, context_id);
+    crate::dom::register(scope, ns, "navigationTurnKey", navigation_turn_key, context_id);
+    crate::dom::register(scope, ns, "navigationTurnRan", navigation_turn_ran, context_id);
     crate::dom::register(scope, ns, "dropFrameNavigation", drop_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameNavigationFinalized", frame_navigation_finalized, context_id);
     crate::dom::register(scope, ns, "takeFrameNavigations", take_frame_navigations, context_id);
@@ -699,7 +710,7 @@ fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let aborted = abort_document(arena, cid);
     let nav = arena.frame_navigation(container);
     nav.aborted_document = aborted;
-    nav.host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload { mark: None }));
+    nav.host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload));
     crate::navigation_plan::supersede_routed(scope, cid);
 }
 // __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of, and the
@@ -712,28 +723,35 @@ fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
     crate::navigation_plan::supersede_routed(scope, realm);
 }
+// __dom.navigationTurnQueued() -> whether the event loop's navigation turn is queued and not run yet (`Plans::turn`) — its
+// task gone with the realm that queued it is none. __dom.navigationTurnKey(key): the one queued now. __dom.navigationTurnRan():
+// it runs, what is planned so far due for the host.
+fn navigation_turn_queued(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let arena = &crate::dom::dom(scope).arena;
+    rv.set_bool(arena.frame_navigations.1.turn.is_some_and(|key| arena.realm_state(0).is_some_and(|s| s.timers.holds(key))));
+}
+fn navigation_turn_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = args.get(0).integer_value(scope);
+    crate::dom::dom(scope).arena.frame_navigations.1.turn = key;
+}
+fn navigation_turn_ran(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let plans = &mut crate::dom::dom(scope).arena.frame_navigations.1;
+    plans.turn = None;
+    plans.through = crate::navigation_plan::planned_so_far();
+}
 // __dom.takeFrameNavigations(kind) -> the navigations of the kind `kind` ("navigate", "reload") the host planned of
-// frames, in the order they were planned, which none plans any more: `[realm, url, replace, initiatorRealm,
-// referrerSource, referrerPolicy, [sandbox], activated]` each, a reload's its realm alone — realm the frame's now, sandbox
-// null where the container had no attribute — and, last, `[realm, count]` of each reload still waiting on the tasks queued
-// on its frame's event loop before it, which the host runs before it takes it (`frame_reload_queued`).
+// frames and the navigation turn has made due, in the order they were planned, which none plans any more: `[realm, url,
+// replace, initiatorRealm, referrerSource, referrerPolicy, [sandbox], activated]` each, a reload's its realm alone — realm
+// the frame's now, sandbox null where the container had no attribute.
 fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let reloads = args.get(0).to_rust_string_lossy(scope) == "reload";
     let arena = &mut crate::dom::dom(scope).arena;
-    let wanted = |h: &HostNavigation| matches!(h, HostNavigation::Reload { .. }) == reloads;
+    let through = arena.frame_navigations.1.through;
+    let wanted = |(at, h): &(u64, HostNavigation)| *at <= through && matches!(h, HostNavigation::Reload) == reloads;
     let mut taken: Vec<(u64, i32, HostNavigation)> = Vec::new();
-    let mut waiting: Vec<(i32, u64)> = Vec::new();
-    let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(|(_, h)| wanted(h))).map(|(&c, _)| c).collect();
+    let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(wanted)).map(|(&c, _)| c).collect();
     for c in containers {
         let realm = arena.frame_realm(c);
-        // (…a reload left planned while a task queued on the frame's document's event loop before it is still to run,
-        // which the host runs first: `[realm, mark]` in its place)
-        if let Some(r) = realm {
-            if let Some(queued) = frame_reload_queued(arena, c) {
-                waiting.push((r, queued));
-                continue;
-            }
-        }
         let Some(nav) = arena.frame_navigations.0.get_mut(&c) else { continue };
         let Some((at, host)) = nav.host.take() else { continue };
         // (…none of a container whose navigable has no document now, nothing to navigate)
@@ -769,12 +787,9 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
                 ];
                 v8::Array::new_with_elements(scope, &item).into()
             }
-            HostNavigation::Reload { .. } => realm,
+            HostNavigation::Reload => realm,
         };
         items.push(item);
-    }
-    for (r, queued) in waiting {
-        items.push(v8::Array::new_with_elements(scope, &[v8::Integer::new(scope, r).into(), v8::Number::new(scope, queued as f64).into()]).into());
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
@@ -791,17 +806,6 @@ fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     }
 }
 
-// The mark of the tasks queued on the event loop the reload frame container `c` plans waits on, where some are still to
-// run: those queued by the time the host first came to take it, its mark taken then (navigation_plan.rs `Reload::mark`)
-// — none for none, or no reload.
-fn frame_reload_queued(arena: &mut crate::dom::RealmArena, c: NodeId) -> Option<u64> {
-    let now = arena.task_mark();
-    let mark = arena.frame_navigations.0.get_mut(&c).and_then(|n| match &mut n.host {
-        Some((_, HostNavigation::Reload { mark })) => Some(*mark.get_or_insert(now)),
-        _ => None,
-    });
-    mark.and_then(|m| arena.queued_by(m))
-}
 // __dom.cancelFrameLocation(containerNid) — the navigation the host plans to make of the container's navigable let go, a
 // `javascript:` URL's begun in it the ongoing one now (url-parse.js `runJavascriptURL`) — but not the form submission it
 // plans to navigate to (`planned`), whose navigation HTML "plan to navigate" begins in a task after, ending that one, nor
@@ -1087,11 +1091,19 @@ fn frame_window_read(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(true);
 }
 // __dom.stopFrameLoading(containerNid) -> whether HTML "stop loading" the container's navigable — its document opened again
-// (dom-nodes.js `_open`) — cancelled the navigation its attributes began (`stop_attribute_navigation`).
+// (dom-nodes.js `_open`) — cancelled a navigation of it: the one its attributes began (`stop_attribute_navigation`), the
+// one the host plans and the one a form plans, still waiting on their turn or their task.
 fn stop_frame_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).stop_attribute_navigation(container));
+    let arena = crate::dom::realm(scope, cid);
+    let mut stopped = arena.stop_attribute_navigation(container);
+    if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
+        stopped |= nav.delaying_load_events();
+        nav.host = None;
+        nav.planned = 0;
+    }
+    rv.set_bool(stopped);
 }
 impl RealmArena {
     // The navigation the container's attributes began, its build still to commit — queued (`BUILD_QUEUED`), or the frame

@@ -673,6 +673,7 @@ module Capybara
           break unless @load_navigations_due
 
           @load_navigations_due = false
+          @runtime.run_navigation_turn(SETTLE_MAX_ITER_TASKS)
           consume_pending_frame_nav
           consume_pending_frame_submit
           consume_pending_location
@@ -913,6 +914,8 @@ module Capybara
         else
           parent_realm = @current_realm_id
           tick_real_time
+          # (…and a navigation of it the host is to make made first: the document the user switching to the frame waits for)
+          @runtime.run_navigation_turn(SETTLE_MAX_ITER_TASKS)
           rid = dom_call('__csimEnsureFrameRealm', target.to_i).to_i
           if rid.zero?
             raise Capybara::Simulated::StaleElement,
@@ -11005,8 +11008,8 @@ module Capybara
           navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i)
         end
       end
-      # The navigations of frames planned for the host — a frame's own `location`'s, a link's targeting one — taken as the
-      # task ends, in the order they were planned (frame_navigation.rs `takeFrameNavigations`): each its URL, whether it
+      # The navigations of frames planned for the host — a frame's own `location`'s, a link's targeting one — taken at the
+      # event loop's navigation turn, in the order they were planned (frame_navigation.rs `takeFrameNavigations`): each its URL, whether it
       # replaces the frame's entry, the document that began it and the Referer it sends, the container's `sandbox` as it
       # began — begun with it, what its document's seed and a download its response is take: frame_navigation.rs
       # `frame_sandbox` — its source's activation. (Applying one re-navigates the owning iframe, which disposes the frame's
@@ -11305,6 +11308,16 @@ module Capybara
         end
         from_document(0) { refresh(user_activated: activated, through_ui: false) } unless activated.nil? || activated.is_a?(Array)
       end
+      # …what the navigation turn made due (timers.js `queueNavigationTurn`) taken as the step it ended is left, what is
+      # due after it to run after it — none for the flush of a page being left, whose plans go with it unless it stays
+      # (`flush_outgoing_page_init`).
+      def take_frame_navigations_due
+        return if @flushing_outgoing_page
+
+        consume_pending_frame_nav
+        consume_pending_frame_submit
+        consume_pending_frame_reload
+      end
       # A reload's history step unloads the document by a task HTML "apply the history step" queues (step 12) on its event
       # loop after those queued on it by then — a `javascript:` URL's begun in the same task among them, before the reload or
       # after it: those run first, in the realm `realm` whose document it reloads, until none queued by the mark the take
@@ -11314,15 +11327,10 @@ module Capybara
       private def run_queued_before_reload(realm, mark)
         @runtime.realm_call(realm, '__csimRunQueued', mark.to_i)
       end
-      # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken as the task ends — the
-      # tasks queued on each frame's event loop before it run first, `[realm, mark]` in its place (`run_queued_before_reload`).
+      # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken at the event loop's
+      # navigation turn, behind the tasks queued before it.
       def consume_pending_frame_reload
         reloads = @runtime.call('__csimTakeFrameNavigations', 'reload')
-        waiting, reloads = reloads.partition {|r| r.is_a?(Array) }
-        unless waiting.empty?
-          waiting.each {|realm, queued| run_queued_before_reload(realm, queued) }
-          reloads += @runtime.call('__csimTakeFrameNavigations', 'reload').reject {|r| r.is_a?(Array) }
-        end
         reloads.each do |realm_id|
           parent    = @runtime.frame_realm_parent(realm_id)
           container = frame_container_handle(realm_id, parent)
@@ -12075,6 +12083,9 @@ module Capybara
         end
       end
       def drain_pending_navigation
+        # (…a navigation of a frame the task planned, its turn on the event loop queued, due with what is due before it: a
+        # script the driver ran on an idle page has no step following to run it)
+        @runtime.run_navigation_turn(SETTLE_MAX_ITER_TASKS)
         take_window_tasks
         apply_planned_traversals_before_navigations
         consume_pending_sw_client_nav

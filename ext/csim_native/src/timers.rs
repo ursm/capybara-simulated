@@ -201,6 +201,10 @@ const IN_TURN: u8 = 1;
 const BEHIND: u8 = 2;
 
 impl Timers {
+    // Whether the task of key `key` is queued still.
+    pub(crate) fn holds(&self, key: i64) -> bool {
+        self.by_key.contains_key(&key)
+    }
     // Its networking tasks kept, the rest gone: its page's timers, its other platform tasks, animation frame and idle
     // callbacks.
     fn keep_network_tasks(&mut self) {
