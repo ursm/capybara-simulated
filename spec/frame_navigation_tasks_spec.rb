@@ -111,6 +111,52 @@ RSpec.describe 'a frame navigation as tasks' do
     expect(log.index('c5')).to be > log.index('new:load')
   end
 
+  # …nor a loop polling for the next document with zero timers awaited, which nests in no timer: the clock stays, and the
+  # navigation goes on all the same (WPT replace-before-load/iframe-src).
+  it 'waits for a loop of awaited zero timers no further than a bounded number of tasks' do
+    log = log_of(<<~JS)
+      f.src = '/child?new';
+      (async () => {
+        let polls = 0;
+        while (U(f) !== 'child?new' && polls++ < 2000) await new Promise((r) => setTimeout(r, 0));
+        L.push(polls < 2000 ? 'reached' : 'starved');
+      })();
+    JS
+    expect(log).to include('reached')
+  end
+
+  # A document's `beforeunload` handlers' message to the page comes with that document still the frame's: asking it is a
+  # task of its own (WPT compile-event-handler-settings-objects). `event.source` the frame's window.
+  it "delivers a beforeunload handler's message with the document still the frame's" do
+    log = log_of(<<~JS, attrs: 'src="/uh"', pages: {'/uh' => %(<script>window.name = "n"; addEventListener("beforeunload", () => parent.postMessage("bye", "*"))</script>)})
+      addEventListener('message', (e) => L.push(e.data + ':' + e.source.name + ':' + (e.source === f.contentWindow) + ':' + U(f)));
+      f.src = '/child?new';
+    JS
+    expect(log.first).to eq('bye:n:true:uh')
+  end
+
+  # A frame's `load` comes before the message its document's `load` handler queues, whoever built it: the parent's own
+  # load flushing the build ahead of the navigation's task (WPT redirect-keepalive, localstorage-about-blank-3P).
+  it "fires the frame's load before the message its document posted as it loaded, its build flushed by the page's load" do
+    s = session(
+      '/'  => <<~HTML,
+        <title>p</title><pre id="out"></pre><script>
+          const L = [];
+          addEventListener('message', () => L.push('message'));
+          const f = document.createElement('iframe');
+          f.src = '/k';
+          f.addEventListener('load', () => L.push('load'));
+          document.documentElement.appendChild(f);
+          setTimeout(() => { document.getElementById('out').textContent = L.join(' '); document.title = 'done'; }, 100);
+        </script>
+      HTML
+      '/k' => '<script>addEventListener("load", () => parent.postMessage("t", "*"))</script>'
+    )
+    s.visit '/'
+    expect(s).to have_title('done', wait: 10)
+    expect(s.find('#out', visible: :all).text(:all)).to eq('load message')
+  end
+
   # A second `src` before the first commits cancels it: its response fetched by nothing, its document never made, one
   # `load`. The document asked for each, as each navigation asks before it looks whether it is still the ongoing one.
   # Chrome and Firefox: set old:bu old:bu ret M P0 old:ph old:un b:script b:load P-load:…b.

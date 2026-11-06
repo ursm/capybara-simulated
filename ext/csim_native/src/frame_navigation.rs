@@ -876,10 +876,14 @@ fn frame_attributes_navigate(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
         None => "about:blank".to_owned(),
     };
     let here = arena.enter_known(realm).map(|a| a.location.href().to_owned()).unwrap_or_default();
-    if !srcdoc && crate::url_ops::is_fragment_navigation(&here, &url) {
+    let served = arena.served_origin(cid);
+    // (…a document of the container's document's origin: another origin's, whose URL no script of this one may read, loads
+    // again and fires its `load`, as Chrome and Firefox — WPT navigate-cross-origin-iframe-to-same-url-with-fragment — an
+    // about: one's opaque URL origin none of its own)
+    let inherits = here.starts_with("about:") || origin.as_ref().is_some_and(|o| *o == served);
+    if !srcdoc && inherits && crate::url_ops::is_fragment_navigation(&here, &url) {
         return answer(scope, rv, ATTR_NAV_FRAGMENT, &url);
     }
-    let served = arena.served_origin(cid);
     let loaded = arena.realm_document(realm).is_none_or(|d| arena.document_states.lifecycle(d).is_completely_loaded());
     let replace = !loaded || (here == url && origin.is_none_or(|o| o == served));
     answer(scope, rv, if replace { ATTR_NAV_REPLACE } else { ATTR_NAV_PUSH }, &url);
@@ -1123,7 +1127,7 @@ impl RealmArena {
     pub(crate) fn supersede_frame_nav(&mut self, container: NodeId) {
         let nav = self.frame_navigation(container);
         nav.generation = nav.generation.wrapping_add(1);
-        nav.flags &= !LOAD_OWED;
+        nav.flags &= !(LOAD_OWED | BUILD_QUEUED);
     }
     // The history entry the navigation pushes as it commits, let go of: one that makes no document pushes none.
     pub(crate) fn take_frame_history_url(&mut self, container: NodeId) {

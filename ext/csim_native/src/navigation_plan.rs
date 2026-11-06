@@ -132,7 +132,7 @@ pub(crate) struct NavigationPlan {
     flushed: Option<Own>,
 }
 
-// A form's submission a frame's document made that the host routes, as the task ends, to the navigable its target
+// A form's submission a frame's document made that the host routes, at the event loop's navigation turn, to the navigable its target
 // chooses (`Route`) — its own, another frame (the page's its own plan holds instead: `routeFrameSubmission`) — in the
 // order they were made: by the frame's realm, its request held in that realm's plan until the frame's navigable is navigated
 // otherwise — its own `location`, a reload, a form of its parent's document — where it is taken out with its route then

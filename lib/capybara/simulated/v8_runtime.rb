@@ -495,11 +495,8 @@ module Capybara
           out = out ? out.merge(r, 'fired' => out['fired'].to_i + r['fired'].to_i, 'dirtied' => out['dirtied'] || r['dirtied']) : r
           # (…and a step over at the navigation turn, what it made due taken — off the stack, none from inside a call of the
           # host's into the window, whose caller's drain takes it — before what is due after it runs)
-          navigated = r['navigation'] && @call_depth.to_i.zero? && !@stepping
-          if navigated
-            @browser.take_frame_navigations_due
-            out['gen'] = settle_gen
-          end
+          navigated = r['navigation'] && @call_depth.to_i.zero? && !@stepping && @browser.take_frame_navigations_due
+          out['gen'] = settle_gen if navigated
           break unless cut || r['asked'] || navigated
 
           waited   += @browser.run_workers_due if cut || r['asked']

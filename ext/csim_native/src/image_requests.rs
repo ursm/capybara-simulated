@@ -116,8 +116,16 @@ impl RealmArena {
     }
 }
 
+// __dom.imageFetchesStop() — the calling realm's document's image fetches aborted (HTML "abort a document", as "stop loading"
+// it does): their responses, when they come, load into nothing, and delay its load no more.
+fn fetches_stop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    crate::dom::dom(scope).arena.forget_image_fetches_of(cid);
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "imageLoadBegin", load_begin, context_id);
+    crate::dom::register(scope, ns, "imageFetchesStop", fetches_stop, context_id);
     crate::dom::register(scope, ns, "imageLoadClear", load_clear, context_id);
     crate::dom::register(scope, ns, "imageInfo", info, context_id);
     crate::dom::register(scope, ns, "imageUrl", url, context_id);

@@ -11310,13 +11310,20 @@ module Capybara
       end
       # …what the navigation turn made due (timers.js `queueNavigationTurn`) taken as the step it ended is left, what is
       # due after it to run after it — none for the flush of a page being left, whose plans go with it unless it stays
-      # (`flush_outgoing_page_init`).
+      # (`flush_outgoing_page_init`), nor of the settle a navigation being taken commits with, whose document's next
+      # navigation the drain after it takes: a frame reloading itself as it loads nests no deeper. Whether it took any.
       def take_frame_navigations_due
-        return if @flushing_outgoing_page
+        return false if @flushing_outgoing_page || @taking_frame_navigations
 
-        consume_pending_frame_nav
-        consume_pending_frame_submit
-        consume_pending_frame_reload
+        @taking_frame_navigations = true
+        begin
+          consume_pending_frame_nav
+          consume_pending_frame_submit
+          consume_pending_frame_reload
+        ensure
+          @taking_frame_navigations = false
+        end
+        true
       end
       # A reload's history step unloads the document by a task HTML "apply the history step" queues (step 12) on its event
       # loop after those queued on it by then — a `javascript:` URL's begun in the same task among them, before the reload or
@@ -11377,7 +11384,7 @@ module Capybara
       rescue StandardError => e
         log_console('warn', "nested-context form submission failed: #{e.message}")
       end
-      # The submissions frames' documents made that the host routes, taken as the task ends one at a time in the order
+      # The submissions frames' documents made that the host routes, taken at the navigation turn one at a time in the order
       # they were made (navigation_plan.rs `takeRoutedSubmission`: the frame one chose may have a new document by the next):
       # each its realm, its request, the navigable its target chose (`submission_route`'s) and its Referer.
       # (Never while the form's `submit()` is still on the V8 stack.)
