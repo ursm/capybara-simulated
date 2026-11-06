@@ -12,19 +12,33 @@ struct Gate {
     id: u32,
     el: Option<NodeId>,
     delayed: bool,
+    // Whether its work is a frame's build, none of its document's own fetches.
+    frame: bool,
 }
+// (…taken, its work is under way until it ends: a server's `sleep` in a script's fetch runs the event loop inside it, whose
+// `load` must not come before it, HTML "the end" spinning until the set of scripts that will execute as soon as possible
+// is empty)
 
 // A realm's gates (`RealmState::load_gates`).
 #[derive(Default)]
 pub(crate) struct LoadGates {
     gates: Vec<Gate>,
     next: u32,
+    running: Vec<(u32, bool)>,
 }
 
 impl LoadGates {
     // Whether a gate's work is still to run.
     pub(crate) fn pending(&self) -> bool {
         !self.gates.is_empty()
+    }
+    // Whether a gate's work is under way (`loadGateEnd`).
+    pub(crate) fn running(&self) -> bool {
+        !self.running.is_empty()
+    }
+    // Whether a fetch of the document's own is waiting on a gate, or one's work is under way: not a frame's.
+    pub(crate) fn own_fetches(&self) -> bool {
+        self.gates.iter().any(|g| !g.frame) || self.running.iter().any(|&(_, frame)| !frame)
     }
 }
 
@@ -35,6 +49,7 @@ const FLUSH_ROUNDS: usize = 8;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "loadGate", load_gate_op, context_id);
     crate::dom::register(scope, ns, "loadGateTake", load_gate_take_op, context_id);
+    crate::dom::register(scope, ns, "loadGateEnd", load_gate_end_op, context_id);
     crate::dom::register(scope, ns, "flushLoadGates", flush_load_gates_op, context_id);
     crate::dom::register(scope, ns, "loadGatesForget", load_gates_forget_op, context_id);
 }
@@ -49,10 +64,11 @@ fn load_gate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let el = crate::node_handle::nid_of(scope, args.get(0));
     let delayed = args.get(1).is_true();
     let cid = realm_id(scope, &args);
+    let frame = el.and_then(|el| realm(scope, cid).get(el)).is_some_and(|n| n.is_html_named("iframe") || n.is_html_named("frame"));
     let Some(gates) = gates_of(scope, cid) else { return rv.set_uint32(0) };
     gates.next += 1;
     let id = gates.next;
-    gates.gates.push(Gate { id, el, delayed });
+    gates.gates.push(Gate { id, el, delayed, frame });
     rv.set_uint32(id);
 }
 
@@ -64,8 +80,17 @@ fn load_gate_take_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 }
 fn take(gates: &mut LoadGates, id: u32) -> bool {
     let Some(at) = gates.gates.iter().position(|g| g.id == id) else { return false };
-    gates.gates.remove(at);
+    let gate = gates.gates.remove(at);
+    gates.running.push((id, gate.frame));
     true
+}
+// __dom.loadGateEnd(id) — the work of the gate `id` over: its document's load asked about again by the bindings.
+fn load_gate_end_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    if let Some(gates) = gates_of(scope, cid) {
+        gates.running.retain(|&(running, _)| running != id);
+    }
 }
 
 // __dom.flushLoadGates(run) — the gates of the calling realm's document run, `run(id)` each, as its load is about to
@@ -121,5 +146,6 @@ fn load_gates_forget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let cid = realm_id(scope, &args);
     if let Some(g) = gates_of(scope, cid) {
         g.gates.clear();
+        g.running.clear();
     }
 }

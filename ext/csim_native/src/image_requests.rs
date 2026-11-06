@@ -119,23 +119,25 @@ impl RealmArena {
 }
 
 // __dom.imageFetchesStop() -> the images of the calling realm's document whose fetches its abort cancelled (HTML "abort a
-// document") — `[element, load, error]` each, their responses, when they come, loading into nothing, delaying its load no
-// more — each complete and broken on the task that says so (`imageFetchAborted`), as Chrome and Firefox agree. `error`
-// whether its `error` fires with that: HTML cancels the fetch "discarding any tasks queued for them", no event, which is
-// what is left wherever the engines differ — Chrome fires it wherever, Firefox not for an image whose fetch has begun —
-// but for one whose stable state has not come yet ("update the image data" awaits it before it fetches, so no fetch of it
-// is there to cancel): the same task as an `src` a script set, a node it inserted, a `document.write` of it. That one
-// fails as it goes on to fetch, and both fire it.
+// document") — `[element, load]` each, their responses, when they come, loading into nothing, delaying its load no more —
+// each complete and broken on the task that says so (`imageFetchAborted`), with no event: HTML cancels the fetch
+// "discarding any tasks queued for them", as Firefox has it, where Chrome fires `error`. Not one whose stable state has
+// not come ("update the image data" awaits it before it fetches, which here is begun ahead of it): there is no fetch of
+// it to cancel, it goes on to its `load` or its `error` as it would — Chrome and Firefox, with a real image, for an
+// `src` set, a node inserted or a `document.write` in the same task as the `stop()` (rvfn x_real_*, 2026-11-06).
 fn fetches_stop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let arena = &mut crate::dom::dom(scope).arena;
     let mut stopped: Vec<(NodeId, u32)> = arena.image_fetches.values().filter(|f| f.realm == cid).map(|f| (f.node, f.load)).collect();
     stopped.extend(arena.image_arrivals.iter().filter(|a| a.0 == cid).map(|a| (a.1, a.2)));
-    arena.forget_image_fetches_of(cid);
-    let stopped: Vec<(NodeId, u32, bool)> = stopped.into_iter().map(|(node, load)| (node, load, arena.image(node).is_some_and(|r| r.stable_load != load))).collect();
-    let items: Vec<v8::Local<v8::Value>> = stopped.iter().map(|&(node, load, error)| {
-        let entry = [v8::Number::new(scope, node.to_f64()).into(), v8::Integer::new_from_unsigned(scope, load).into(), v8::Boolean::new(scope, error).into()];
-        v8::Array::new_with_elements(scope, &entry).into()
+    stopped.retain(|&(node, load)| arena.image(node).is_none_or(|r| r.stable_load == load));
+    let cancelled = |node: NodeId, load: u32| stopped.contains(&(node, load));
+    let fetches = std::mem::take(&mut arena.image_fetches);
+    arena.image_fetches = fetches.into_iter().filter(|(_, f)| f.realm != cid || !cancelled(f.node, f.load)).collect();
+    arena.image_arrivals.retain(|a| a.0 != cid || !cancelled(a.1, a.2));
+    let items: Vec<v8::Local<v8::Value>> = stopped.iter().map(|&(node, load)| {
+        let pair = [v8::Number::new(scope, node.to_f64()).into(), v8::Integer::new_from_unsigned(scope, load).into()];
+        v8::Array::new_with_elements(scope, &pair).into()
     }).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

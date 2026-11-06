@@ -843,9 +843,9 @@ RSpec.describe 'a frame navigation as tasks' do
     expect(log).to eq(%w[stopped])
   end
 
-  # A `stop()` in a DOMContentLoaded handler aborts what "the end" has left: Chrome and Firefox `stopped:complete ierr
-  # rs:complete:true`, no `load`.
-  it 'stops the load of a document from its DOMContentLoaded handler, and fails the image it was waiting for' do
+  # A `stop()` in a DOMContentLoaded handler aborts what "the end" has left: Chrome and Firefox `stopped:complete ierr`, no
+  # `load`. The image's fetch, begun in that task, goes on (`imageFetchesStop`), to its `error`: its response is no image.
+  it 'stops the load of a document from its DOMContentLoaded handler, an image of that task going on' do
     log = page_log(<<~HTML)
       <script>
         addEventListener('load', () => L.push('load'));
@@ -857,24 +857,23 @@ RSpec.describe 'a frame navigation as tasks' do
           document.body.append(i);
           stop();
           L.push('stopped:' + document.readyState);
-          setTimeout(() => L.push('rs:' + document.readyState + ':' + i.complete), 100);
         });
       </script>
     HTML
-    expect(log).to eq(%w[stopped:complete ierr rs:complete:true])
+    expect(log).to eq(%w[stopped:complete ierr])
   end
 
-  # An image's fetch aborted is complete, its `error` on a task. Chrome and Firefox: `c:false ie c2:true`.
-  it "makes an image complete with the frame's stop()" do
+  # An image of the task of the frame's `stop()` goes on, to its `error`: its response is no image. Chrome and Firefox: `c:false
+  # ie c2:true`.
+  it "leaves an image of the task of the frame's stop() to go on" do
     log = log_of(<<~JS)
       const d = f.contentDocument, i = d.createElement('img');
       i.onload = () => L.push('il');
-      i.onerror = () => L.push('ie');
+      i.onerror = () => { L.push('ie'); L.push('c2:' + i.complete); };
       i.src = '/child?img';
       d.body.append(i);
       f.contentWindow.stop();
       L.push('c:' + i.complete);
-      setTimeout(() => L.push('c2:' + i.complete), 100);
     JS
     expect(log).to eq(%w[c:false ie c2:true])
   end
@@ -1112,6 +1111,7 @@ RSpec.describe 'a frame navigation as tasks' do
   # the explicit text the ruling, so `Pload` comes after the `stop()` here, and a page not aborted reads `interactive` in it.
   describe 'stop() as a server takes its time' do
     SLOW_TYPES = {'js' => 'text/javascript', 'css' => 'text/css', 'png' => 'image/png', 'html' => 'text/html'}.freeze
+    REAL_PNG   = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='.unpack1('m').freeze
 
     def slow_session(pages)
       simulated_session(->(env) {
@@ -1122,7 +1122,8 @@ RSpec.describe 'a frame navigation as tasks' do
           body = {
             'js'   => "(window.L || top.L).push('#{m[2]}-ran')",
             'html' => "<!DOCTYPE html><title>sf</title><script>top.L.push('sf-script'); onload = () => top.L.push('sf-load')</script>",
-            'css'  => 'p { color: red }'
+            'css'  => 'p { color: red }',
+            'png'  => m[2].start_with?('real') ? REAL_PNG : 'x'
           }.fetch(type, 'x')
           next [200, {'content-type' => SLOW_TYPES.fetch(type, 'text/plain')}, [body]]
         end
@@ -1254,10 +1255,60 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(log).to eq('rs:complete')
     end
 
-    # DOMContentLoaded waits for the list of scripts to execute after parsing, which an `async` one is not on: Chrome and
-    # Firefox `dcl s.js-ran load` with a server that answers at once.
-    it 'runs an `async` script after DOMContentLoaded, ahead of the load' do
-      expect(page_log('<script async src="/slow/0/s.js"></script><p>x</p>')).to eq('dcl s.js-ran load rs:complete')
+    # DOMContentLoaded waits for the list of scripts to execute after parsing, which an `async` one is not on. Its fetch takes
+    # no time here, so it has landed where its parser has had to wait on a fetch, and not otherwise (`landAsyncScripts`): each
+    # as Chrome and Firefox agree where they do (rvfn `d_*`, `l_*`, `e_mix*`), at Firefox's place where they part.
+    {
+      'alone'                                 => ['<script async src="/slow/0/s.js"></script><p>x</p>', 'dcl s.js-ran load rs:complete'],
+      'two of them'                           => ['<script async src="/slow/0/a.js"></script><script async src="/slow/0/b.js"></script>', 'dcl a.js-ran b.js-ran load rs:complete'],
+      'an inline script after it'             => ["<script async src=\"/slow/0/s.js\"></script><script>L.push('inl')</script>", 'inl dcl s.js-ran load rs:complete'],
+      'a parser-blocking script after it'     => ['<script async src="/slow/0/a.js"></script><script src="/slow/0/b.js"></script>', 'b.js-ran a.js-ran dcl load rs:complete'],
+      'a parser-blocking script, a slow one'  => ['<script async src="/slow/0/a.js"></script><script src="/slow/50/b.js"></script>', 'b.js-ran a.js-ran dcl load rs:complete'],
+      'a deferred script after it'            => ['<script async src="/slow/0/a.js"></script><script defer src="/slow/50/d.js"></script>', 'a.js-ran d.js-ran dcl load rs:complete'],
+      'a sheet that blocks a script'          => [
+        "<script async src=\"/slow/0/a.js\"></script><link rel=\"stylesheet\" href=\"/slow/0/s.css\"><script>L.push('inl')</script><script async src=\"/slow/0/b.js\"></script>",
+        'inl a.js-ran b.js-ran dcl load rs:complete'
+      ],
+      'a mix of everything'                   => [
+        %(<script async src="/slow/0/a1.js"></script><script defer src="/slow/0/d1.js"></script><script src="/slow/0/b1.js"></script><script async src="/slow/0/a2.js"></script><script defer src="/slow/0/d2.js"></script>),
+        'b1.js-ran a1.js-ran a2.js-ran d1.js-ran d2.js-ran dcl load rs:complete'
+      ]
+    }.each do |what, (markup, logged)|
+      it "runs an `async` script as Chrome and Firefox do, #{what}" do
+        expect(page_log(markup)).to eq(logged)
+      end
+    end
+
+    it 'hears DOMContentLoaded from a listener an `async` script adds, a parser-blocking script after it' do
+      log = page_log(<<~HTML)
+        <script async src="data:text/javascript,document.addEventListener('DOMContentLoaded',()=>L.push('late'));L.push('reg')"></script><script src="/slow/0/b.js"></script>
+      HTML
+      expect(log).to eq('b.js-ran reg late dcl load rs:complete')
+    end
+
+    # HTML "the end": "Spin the event loop until the set of scripts that will execute as soon as possible and the list of
+    # scripts that will execute in order as soon as possible are empty", then the load's task. Its server's `sleep` runs the
+    # event loop inside the fetch.
+    it 'fires no load before an `async` script a server takes its time over' do
+      log = page_log(%(<script async src="/slow/100/s.js"></script><script>L.push('inl')</script>))
+      expect(log).to eq('inl dcl s.js-ran load rs:complete')
+    end
+
+    it 'fires no load before the slower of two `async` scripts' do
+      log = page_log('<script async src="/slow/100/a.js"></script><script async src="/slow/10/b.js"></script>', at: 600)
+      expect(log).to eq('dcl b.js-ran a.js-ran load rs:complete')
+    end
+
+    it 'fires no load of a page with a frame before an `async` script stopped as its server took its time' do
+      log = page_log('<script async src="/slow/200/s.js"></script><iframe src="/g"></iframe><script>setTimeout(() => { stop(); L.push("stopped"); }, 60)</script>', pages: {'/g' => '<title>g</title>'})
+      expect(log).to eq('dcl stopped rs:complete')
+    end
+
+    it 'runs a script against the sheets before it, whatever connected them' do
+      log = page_log(<<~HTML, pages: {'/g' => '<title>g</title>'})
+        <link rel="stylesheet" href="/slow/100/s.css"><iframe src="/g"></iframe><script>setTimeout(() => { stop(); L.push('stopped'); }, 30)</script>
+      HTML
+      expect(log).to eq('dcl load stopped rs:complete')
     end
 
     it "cancels an `async` script's fetch with a stop() in a DOMContentLoaded handler" do
@@ -1329,32 +1380,58 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(log).to eq('set rs:complete')
     end
 
-    # HTML cancels the fetch "discarding any tasks queued for them": no event wherever the engines differ. Both fire `error`
-    # for an image whose stable state had not come as the `stop()` ran, whose fetch "update the image data" had not begun.
-    # `complete` true in every one.
-    IMAGE_ONE = "i.onerror = () => L.push('E'); i.onload = () => L.push('I'); setTimeout(() => L.push('c' + i.complete), 100);"
+    # HTML cancels the fetch "discarding any tasks queued for them": no event, as Firefox has it, where Chrome fires `error`.
+    # But an image whose stable state had not come as the `stop()` ran has no fetch yet to cancel ("update the image data"
+    # awaits it): it goes on, its `load` or, an image that is none, its `error`, which Chrome and Firefox agree on (rvfn
+    # `x_real_*`, `m_*_sync`).
+    IMAGE_ENDS = "i.onerror = () => { L.push('E'); logged(); }; i.onload = () => { L.push('I:' + i.naturalWidth); logged(); };"
     {
-      'its `src` set in that task'                  => ["const i = new Image(); i.src = '/slow/200/i.png'; #{IMAGE_ONE} stop();", 'E ctrue'],
-      'it inserted in that task'                    => ["document.body.insertAdjacentHTML('beforeend', '<img id=i src=/slow/200/i.png>'); const i = document.getElementById('i'); #{IMAGE_ONE} stop();", 'E ctrue'],
-      'its `src` set a task before'                 => ["const i = new Image(); i.src = '/slow/200/i.png'; #{IMAGE_ONE} setTimeout(() => stop(), 0);", 'ctrue'],
-      'its `src` set before a microtask checkpoint' => ["(async () => { const i = new Image(); i.src = '/slow/200/i.png'; #{IMAGE_ONE} await 0; stop(); })();", 'ctrue']
-    }.each do |what, (script, logged)|
-      it "cancels an image's fetch with `stop()`, #{what}" do
-        log = page_log("<body><script>onload = () => setTimeout(() => { #{script} }, 10)</script>")
-        expect(log).to eq("dcl load #{logged} rs:complete")
+      'its `src` set in that task'      => "const i = new Image(); i.src = '/slow/50/%s'; #{IMAGE_ENDS} stop();",
+      'it inserted in that task'        => "document.body.insertAdjacentHTML('beforeend', '<img id=i src=/slow/50/%s>'); const i = document.getElementById('i'); #{IMAGE_ENDS} stop();"
+    }.each do |what, script|
+      {'real.png' => 'I:1', 'x.png' => 'E'}.each do |image, logged|
+        it "leaves #{image}'s fetch to go on with `stop()`, #{what}" do
+          log = page_log("<body><script>onload = () => setTimeout(() => { #{format(script, image)} }, 10)</script>", at: 60_000)
+          expect(log).to eq("dcl load #{logged}")
+        end
       end
     end
 
-    it "cancels the fetch of an image a parser-run script's `document.write` wrote, with its `stop()`" do
-      log = page_log(<<~HTML)
-        <script>document.write('<img id="i" src="/slow/200/i.png">'); const i = document.getElementById('i'); #{IMAGE_ONE} stop();</script>
+    it "leaves the fetch of an image a parser-run script's `document.write` wrote to go on, with its `stop()`" do
+      log = page_log(<<~HTML, at: 60_000)
+        <script>document.write('<img id="i" src="/slow/50/real.png">'); const i = document.getElementById('i'); #{IMAGE_ENDS} stop();</script>
       HTML
-      expect(log).to eq('E ctrue rs:complete')
+      expect(log).to eq('I:1')
+    end
+
+    {
+      'its `src` set a task before'                 => "const i = new Image(); i.src = '/slow/200/real.png'; #{IMAGE_ENDS} setTimeout(() => stop(), 0);",
+      'its `src` set before a microtask checkpoint' => "(async () => { const i = new Image(); i.src = '/slow/200/real.png'; #{IMAGE_ENDS} await 0; stop(); })();"
+    }.each do |what, script|
+      it "cancels an image's fetch with `stop()`, no event, #{what}" do
+        log = page_log(<<~HTML)
+          <body><script>onload = () => setTimeout(() => { #{script} }, 10)</script>
+        HTML
+        expect(log).to eq('dcl load rs:complete')
+      end
+    end
+
+    it 'makes an image complete whose fetch `stop()` cancelled, with no event' do
+      log = page_log(<<~HTML)
+        <body><script>onload = () => setTimeout(() => {
+          const i = new Image();
+          i.src = '/slow/200/real.png';
+          #{IMAGE_ENDS}
+          setTimeout(() => stop(), 0);
+          setTimeout(() => L.push('c' + i.complete), 100);
+        }, 10)</script>
+      HTML
+      expect(log).to eq('dcl load ctrue rs:complete')
     end
 
     it "fires no `error` at a parsed image for the stop() of a later script" do
       log = page_log(<<~HTML)
-        <img id="i" src="/slow/200/i.png"><script>const i = document.getElementById('i'); #{IMAGE_ONE} stop();</script>
+        <img id="i" src="/slow/200/real.png"><script>const i = document.getElementById('i'); #{IMAGE_ENDS} setTimeout(() => L.push('c' + i.complete), 100); stop();</script>
       HTML
       expect(log).to eq('ctrue rs:complete')
     end

@@ -1112,6 +1112,8 @@ pub(crate) struct RealmState {
     // Its parse's list of scripts to execute after parsing (script.rs `list_parser_script`), until "the end" takes it,
     // and the source text an inline one of them had at its end tag, until it runs.
     pub(crate) parser_list: Vec<NodeId>,
+    // Whether the parser has waited on a fetch (script.rs `parserWaitsOnFetch`).
+    pub(crate) parser_waited: bool,
     pub(crate) parser_sources: std::collections::HashMap<NodeId, Vec<u16>>,
     // What its document's cascade was made of when last handed to its style engine (sheet_owners.rs `cascade_rekey`), and
     // the rule-set generation each shadow root's sheets were last handed it at (sheet_feed.rs `feed_shadows`).
@@ -1771,6 +1773,7 @@ impl RealmArena {
         self.parsed = Default::default();
         // (…nor is a list of scripts to execute after the old page's parse, one it left before its end, the new one's)
         self.parser_list.clear();
+        self.parser_waited = false;
         self.parser_sources.clear();
         // (…nor what the old page planned for its navigable, which the host took or let go — and the form it held with it)
         self.navigation_plan = Default::default();
