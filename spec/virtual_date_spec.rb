@@ -170,7 +170,8 @@ RSpec.describe 'the virtual clock’s Date' do
     s.visit '/'
     poll_until { s.evaluate_script("document.querySelector('iframe').contentDocument?.body?.textContent == '/f'") }
     s.execute_script('window.d0 = Date.now(); window.o0 = performance.timeOrigin; window.p0 = performance.now()')
-    expect(s.evaluate_script('d0') / 1000.0 - frozen.to_f).to be_between(0, 5)
+    # (…a `Date.now()` whole milliseconds, floored, against a frozen time of microseconds)
+    expect(s.evaluate_script('d0') / 1000.0 - frozen.to_f).to be_between(-0.001, 5)
     sleep 1
     s.execute_script(<<~JS)
       window.w = open('/p');

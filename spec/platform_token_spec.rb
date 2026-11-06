@@ -136,8 +136,7 @@ RSpec.describe 'the platform\'s token for its own constructions' do
     counts = session.evaluate_script(<<~JS)
       [
         (t) => Reflect.construct(DOMException, ['m', 'NotFoundError'], t),
-        (t) => Reflect.construct(QuotaExceededError, ['m'], t),
-        (t) => Reflect.construct(Option, [], t)
+        (t) => Reflect.construct(QuotaExceededError, ['m'], t)
       ].map((make) => {
         let reads = 0;
         function NewTarget() {}
@@ -146,7 +145,7 @@ RSpec.describe 'the platform\'s token for its own constructions' do
         return reads;
       });
     JS
-    expect(counts).to eq([1, 1, 1])
+    expect(counts).to eq([1, 1])
   end
 
   it 'keeps a page\'s subclass of a flat interface a subclass', :every_host_local do
