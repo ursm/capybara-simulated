@@ -484,6 +484,18 @@ RSpec.describe 'a frame navigation as tasks' do
     expect(s).to have_title('done', wait: 10)
   end
 
+  # …and is not held by a frame that navigates itself on every load: its navigations paced as a network's response paces
+  # them, the clock moves and the rest of the page goes on with them.
+  it 'goes on past a frame navigating itself on every load' do
+    s = session(
+      '/'     => '<title>p</title><p id="x">x</p><iframe src="/self"></iframe><script>setTimeout(() => { document.title = "done" }, 100)</script>',
+      '/self' => '<script>onload = () => location.reload()</script>'
+    )
+    s.visit '/'
+    expect(s).to have_title('done', wait: 10)
+    expect(s.find('#x').text).to eq('x')
+  end
+
   # The driver's own wait: a frame entered right after a navigation of it begins is at the next document, its `src` set
   # or a link followed, by a script or by the user.
   it 'enters the document a queued location navigation goes to' do

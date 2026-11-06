@@ -149,6 +149,9 @@ struct Plans {
     // (navigation_plan.rs `next_planned`).
     turn: Option<i64>,
     through: u64,
+    // …and when it last ran, on the virtual clock: one queued at that same instant waits a nested-timer clamp, so a frame
+    // its load handlers navigate again on every load is paced, as a network's response paces it, and the clock moves.
+    turn_ran: Option<f64>,
 }
 
 impl FrameNavigations {
@@ -289,6 +292,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "planFrameLocation", plan_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameReload", plan_frame_reload, context_id);
     crate::dom::register(scope, ns, "navigationTurnQueued", navigation_turn_queued, context_id);
+    crate::dom::register(scope, ns, "navigationTurnDelay", navigation_turn_delay, context_id);
     crate::dom::register(scope, ns, "navigationTurnKey", navigation_turn_key, context_id);
     crate::dom::register(scope, ns, "navigationTurnRan", navigation_turn_ran, context_id);
     crate::dom::register(scope, ns, "dropFrameNavigation", drop_frame_navigation, context_id);
@@ -724,19 +728,28 @@ fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     crate::navigation_plan::supersede_routed(scope, realm);
 }
 // __dom.navigationTurnQueued() -> whether the event loop's navigation turn is queued and not run yet (`Plans::turn`) — its
-// task gone with the realm that queued it is none. __dom.navigationTurnKey(key): the one queued now. __dom.navigationTurnRan():
-// it runs, what is planned so far due for the host.
+// task gone with the realm that queued it is none. __dom.navigationTurnDelay() -> how long one queued now waits, its pace.
+// __dom.navigationTurnKey(key): the one queued now. __dom.navigationTurnRan(): it runs, what is planned so far due for the
+// host.
 fn navigation_turn_queued(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let arena = &crate::dom::dom(scope).arena;
     rv.set_bool(arena.frame_navigations.1.turn.is_some_and(|key| arena.realm_state(0).is_some_and(|s| s.timers.holds(key))));
+}
+fn navigation_turn_delay(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let arena = &crate::dom::dom(scope).arena;
+    let now = arena.event_loop.clock;
+    rv.set_double(if arena.frame_navigations.1.turn_ran.is_some_and(|at| now - at < FRAME_NAV_PACE_MS) { FRAME_NAV_PACE_MS } else { 0.0 });
 }
 fn navigation_turn_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let key = args.get(0).integer_value(scope);
     crate::dom::dom(scope).arena.frame_navigations.1.turn = key;
 }
 fn navigation_turn_ran(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let plans = &mut crate::dom::dom(scope).arena.frame_navigations.1;
+    let arena = &mut crate::dom::dom(scope).arena;
+    let now = arena.event_loop.clock;
+    let plans = &mut arena.frame_navigations.1;
     plans.turn = None;
+    plans.turn_ran = Some(now);
     plans.through = crate::navigation_plan::planned_so_far();
 }
 // __dom.takeFrameNavigations(kind) -> the navigations of the kind `kind` ("navigate", "reload") the host planned of
