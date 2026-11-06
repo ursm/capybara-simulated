@@ -5073,10 +5073,11 @@ module Capybara
         # more of the worker's owners, its port posted to it as a connection (workers.js). One of another type or credentials
         # mode fails the constructor's worker: an `error` event, no connection (Chrome 156 and Firefox 159 alike).
         if shared
-          shared_worker = [url.to_s, name.to_s, creator_key.to_s, site.to_s, worker_type(script_type), credentials.to_s, realm_id.to_i]
-          running = @worker_host.shared_connect(*shared_worker) {|h| !(w = @workers[h]) || !w[:thread]&.alive? || w[:stopping] == true }
-          return running if running.positive?
-          return worker_fail(handle, 'The shared worker is of another type or credentials mode') if running.negative?
+          found = @worker_host.shared_worker(handle, url.to_s, name.to_s, creator_key.to_s, site.to_s, worker_type(script_type), credentials.to_s, realm_id.to_i) do |h|
+            !(w = @workers[h]) || !w[:thread]&.alive? || w[:stopping] == true
+          end
+          return worker_fail(handle, 'The shared worker is of another type or credentials mode') if found.negative?
+          return found unless found == handle
         end
         ctrl = service ? 0 : worker_controller_handle(target, shared, controller_handle, site).to_i
         # A worker whose MAIN SCRIPT a fetch-handling SW controls fetches it THROUGH that SW
@@ -5159,11 +5160,7 @@ module Capybara
                                  elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin] - @clock_epoch_at.to_f
                                  end
         record[:next_timer_at] = record[:origin]
-        # (…a shared worker known by what another SharedWorker connects to it by, and who is connected: worker_host.rs)
-        if shared
-          record[:shared] = true
-          @worker_host.shared_new(handle, *shared_worker)
-        end
+        record[:shared] = true if shared
         # (…its storage partition its owner document's — a nested worker's its parent's — as it was made: blob_rules.rs
         # `partition_site`)
         record[:partition] = site
@@ -6660,41 +6657,15 @@ module Capybara
       # The requests of SW "Update", which `fetch` decides (service_worker.rs `ServiceWorkerUpdate`): the MAIN script, carrying
       # `Service-Worker: script` — servers gate SW scripts on it; imported scripts must NOT (service-worker-header) — of
       # destination "serviceworker", mode "same-origin", the job's client of the script's origin, which a registration's
-      # scope and script are; and, where it comes back byte-identical, each imported script the newest worker noted. Any
-      # difference and a new version installs, of the main bytes fetched and the imports probed (`body`, `imports`). A
-      # failure's class maps to update()'s rejection.
+      # scope and script are; and, where it comes back byte-identical, each imported script the newest worker noted. What
+      # they made of it, `fetch.outcome`.
       private def sw_update_fetch(fetch, script_url)
-        res = rack_fetch('GET', script_url.to_s, '', {'Service-Worker' => 'script'}, 'manual', 'same-origin', cache_mode: fetch.cache_mode, client_origin: url_origin(script_url.to_s).to_s, dest: 'serviceworker') || {}
-        error = fetch.script_response(
-          resource_loaded?(res) ? true : false,
-          res['redirect_loc'] || res['redirect_status'] ? true : false,
-          res['status'].to_i,
-          response_field(res, 'content-type'),
-          # (…a header given more than once combined, as `response_hash` hands every one over)
-          response_field(res, 'service-worker-allowed'),
-          res['body'].to_s
-        )
-        return {'error' => error} if error
-
-        probed = {}
+        fetch.script_response(rack_fetch('GET', script_url.to_s, '', {'Service-Worker' => 'script'}, 'manual', 'same-origin', cache_mode: fetch.cache_mode, client_origin: url_origin(script_url.to_s).to_s, dest: 'serviceworker'))
         while (import = fetch.next_import)
           url, cache_mode, cors, dest = import
-          r = rack_fetch('GET', url, '', {}, 'follow', cors, cache_mode: cache_mode, client_url: script_url.to_s, dest: dest) || {}
-          ok = resource_loaded?(r) && (200..299).cover?(r['status'].to_i)
-          fetch.import_response(ok ? true : false, r['status'].to_i, response_field(r, 'content-type'), r['body'].to_s)
-          # The probe results ARE the new version's script resource map (Chrome fetches each script ONCE during Update and
-          # the new worker runs from those responses): a 404 seen here must be the 404 its importScripts sees, not a lucky
-          # re-fetch (update-import-scripts "missing the other"). The body crosses into the isolate via JSON.generate — a
-          # rack body is BINARY-tagged and a non-UTF-8 one would raise there, failing the update a real browser runs with
-          # replacement characters. (…its tainting kept, for the new version's import to mute an opaque one's errors as the
-          # first did)
-          probed[url] = if ok
-            {'status' => r['status'], 'type' => r['type'], 'tainted' => r['tainted'], 'headers' => r['headers'], 'body' => RuntimeShared.utf8_text(r['body'].to_s.dup)}
-          else
-            {'status' => 404, 'headers' => {}, 'body' => ''}
-          end
+          fetch.import_response(rack_fetch('GET', url, '', {}, 'follow', cors, cache_mode: cache_mode, client_url: script_url.to_s, dest: dest))
         end
-        fetch.changed? ? {'changed' => true, 'body' => res['body'].to_s, 'imports' => (probed if probed.any?)} : {'changed' => false}
+        fetch.outcome
       end
       # A response's header `name`, as `rack_fetch` hands them over.
       private def response_field(response, name) = (response['headers'] || {}).find {|k, _| k.to_s.casecmp(name).zero? }&.last&.to_s

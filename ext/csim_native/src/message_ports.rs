@@ -258,6 +258,7 @@ enum Went {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "portNew", new_op, context_id);
     register(scope, ns, "portEntangle", entangle_op, context_id);
+    register(scope, ns, "portChannel", channel_op, context_id);
     register(scope, ns, "portPeer", peer_op, context_id);
     register(scope, ns, "portDetached", detached_op, context_id);
     register(scope, ns, "portRemoteEnd", remote_end_op, context_id);
@@ -313,6 +314,15 @@ fn new_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
 fn entangle_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (a, b) = (id_arg(scope, args.get(0)), id_arg(scope, args.get(1)));
     dom(scope).message_ports.entangle(a, b);
+}
+// __dom.portChannel() -> the id of a new channel across isolates (port_channels.rs), unique in the process: no document's
+// or worker's own count, which a next document's begins again on the ends of channels the last one left.
+fn channel_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if let Some(channel) = v8::String::new(scope, &format!("pc-{id}")) {
+        rv.set(channel.into());
+    }
 }
 // __dom.portPeer(id) -> the port it is entangled with in this isolate, or null.
 fn peer_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

@@ -60,6 +60,15 @@ RSpec.describe 'SharedWorker matching' do
     expect(got).to eq(['conn1/of1', 'error Event', 'conn2/of2', 'conn3/of3'])
   end
 
+  # (…a next document's channels none of the last one's, whose ends were left held by a worker discarded with it)
+  it 'answers the first SharedWorker of a page after the last page\'s was discarded' do
+    session = simulated_session(app)
+    session.visit '/'
+    expect(run(session, "return await ask(new SharedWorker('/count.js', 'a'));")).to eq('conn1/of1')
+    session.visit '/next'
+    expect(run(session, "return await ask(new SharedWorker('/count.js', 'b'));")).to eq('conn1/of1')
+  end
+
   it 'connects a SharedWorker of the same URL and name to the one running' do
     session = simulated_session(app)
     session.visit '/'

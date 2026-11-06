@@ -1,6 +1,5 @@
 // MessagePort channels across isolates (HTML §9.4): a driver session's, every window's and worker's. A channel's two
-// ends, `<channel>/0` and `<channel>/1` (a channel's id unique in the session: message-port.js, workers.js
-// `__csimAllocPortChannel`), each held by a realm — or a worker, a worker's scope — of a window, whichever isolate holds
+// ends, `<channel>/0` and `<channel>/1` (a channel's id unique in the process: message_ports.rs `portChannel`), each held by a realm — or a worker, a worker's scope — of a window, whichever isolate holds
 // the port at that end, which says so as it takes it (`here`) and as it gives it up to another (`gone`). A message
 // posted at one end goes to the other's holder; one for an end no isolate holds yet waits for its next holder (HTML's
 // port message queue) — the messages its last holder had received and not delivered first.

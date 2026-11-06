@@ -685,7 +685,10 @@ impl Partition {
         if kind == "update" && script.as_ref().is_some_and(|(url, _)| *url != script_url) {
             return self.fail(id, "TypeError", "the newest worker's script URL is not the one update() found.", out);
         }
-        let same_script = script.as_ref().is_some_and(|(url, ty)| *url == script_url && *ty == script_type);
+        // (…no worker to compare where its thread is gone: nothing here runs one again on demand as SW's "Run Service Worker"
+        // does, so a dead newest worker is an update, which is what brings the registration back)
+        let dead = newest.and_then(|h| self.workers.get(&h)).is_some_and(|w| w.dead);
+        let same_script = !dead && script.as_ref().is_some_and(|(url, ty)| *url == script_url && *ty == script_type);
         if kind == "register" && same_script {
             let current = self.mapped(&site, &scope).and_then(|r| r.update_via_cache.clone());
             if mode.is_some() && current.or_else(|| Some("imports".to_owned())) == mode {
@@ -861,8 +864,8 @@ pub(crate) fn update_check(partition: u64, id: u32) -> Option<crate::service_wor
     let newest = p.workers.get(&against).map(|w| w.resources.clone());
     Some(crate::service_worker::UpdateCheck { scope, script_url, update_via_cache, module, newest })
 }
-// What the host fetches for it: `[scope, script URL, mode, type, creator key, top-level site]`, nil for none.
-// for none), the top-level site of its storage key]`, nil for one finished.
+// What the host spawns for it: `[scope, script URL, mode, type, creator key, the top-level site of its storage key]`, nil
+// for one finished.
 #[allow(clippy::type_complexity)]
 pub(crate) fn job_for_ruby(partition: u64, id: u32) -> Option<(String, String, Option<String>, String, String, String)> {
     let mut reg = lock();

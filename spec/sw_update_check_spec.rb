@@ -58,13 +58,40 @@ RSpec.describe 'a service worker update', :every_host_local do
     expect(update).to be(true)
   end
 
-  # (…the map the registry's: a worker whose thread is gone still has one to compare)
-  it 'installs nothing for a byte-identical script where the newest worker\'s thread is gone' do
-    script('/sw.js', 'self.a = 1;')
+  # (…a worker whose thread is gone is no worker to compare with: nothing here runs one again on demand, as SW's "Run Service
+  # Worker" does, so an update is what brings the registration back, and a register's the same)
+  ['update', 'register'].each do |how|
+    it "brings a registration back by #{how} where the newest worker's thread is gone" do
+      script('/sw.js', "addEventListener('fetch', (e) => e.respondWith(new Response('from sw')));")
+      register
+      browser = session.driver.browser
+      browser.instance_variable_get(:@workers).keys.each {|handle| browser.send(:worker_terminate, handle) }
+      how == 'update' ? expect(update).to(be(true)) : register
+      session.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        navigator.serviceWorker.getRegistration().then((r) => {
+          const w = r.installing || r.waiting || r.active;
+          if (w.state === 'activated') return done();
+          w.addEventListener('statechange', () => { if (w.state === 'activated') done(); });
+        });
+      JS
+      session.visit('https://a.test/ans')
+      expect(session.evaluate_script('document.body.textContent')).to eq('from sw')
+    end
+  end
+
+  # ("If importUrl is url, then continue", the new version's own import of it answered from the map all the same)
+  it 'probes its own main script no second time, its new version importing it from the map' do
+    script('/sw.js', "if (!self.once) { self.once = true; importScripts('/a.js', '/sw.js'); }")
+    script('/a.js', 'self.a = 1;')
     register
-    browser = session.driver.browser
-    browser.instance_variable_get(:@workers).keys.each {|handle| browser.send(:worker_terminate, handle) }
+    expect(requests['/sw.js'].size).to eq(2)
     expect(update).to be(false)
+    expect(requests['/sw.js'].size).to eq(3)
+    script('/a.js', 'self.a = 2;')
+    expect(update).to be(true)
+    session.has_css?('#none', wait: 0.1)
+    expect(requests['/sw.js'].size).to eq(4)
   end
 
   # ("The control does not break the loop in this step to continue with all the imported scripts to populate the cache")
