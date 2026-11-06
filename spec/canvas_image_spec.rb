@@ -1495,7 +1495,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['smooth'][3]).to eq(255)       # opaque edge stays opaque (clamp-to-edge)
   end
 
-  it 'does not bleed adjacent atlas cells when smoothing a scaled sub-rect' do
+  it 'lets adjacent atlas cells interfere when smoothing a scaled sub-rect, as HTML says' do
     session = simulated_session(app)
     session.visit('/')
     out = session.evaluate_script(<<~JS)
@@ -1509,9 +1509,10 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       ctx.drawImage(atlas.canvas, 0, 0, 1, 1, 0, 0, 10, 1);
       JSON.stringify([...ctx.getImageData(9, 0, 1, 1).data]);   // rightmost drawn pixel
     JS
-    # The neighbouring red cell must not bleed across the sub-rect seam: the whole
-    # magnified cell stays pure green (clamp-to-sub-rect, not clamp-to-image).
-    expect(JSON.parse(out)).to eq([0, 255, 0, 255])
+    # HTML: "When the filtering algorithm requires a pixel value from outside the source rectangle but inside the original
+    # image data, then the value from the original image data must be used. [...] This does mean that when sprites coming
+    # from a single sprite sheet are to be scaled, adjacent images in the sprite sheet can interfere."
+    expect(JSON.parse(out)).to eq([115, 140, 0, 255])
   end
 
   it 'counts points exactly on the fill boundary as inside (isPointInPath)' do

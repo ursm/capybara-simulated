@@ -473,7 +473,7 @@ enum Paint<'a> {
     // transform, inverted).
     Pattern { px: Cow<'a, [u8]>, w: usize, h: usize, rep_x: bool, rep_y: bool, inv: Matrix },
     // drawImage: the image's (sx, sy, sw, sh) drawn into the user-space rectangle (dx, dy, dw, dh) — nearest, or with
-    // `smooth`, bilinear within the source rectangle (`clamp`: its pixel bounds).
+    // `smooth`, bilinear.
     Image(Image<'a>),
 }
 
@@ -486,7 +486,6 @@ struct Image<'a> {
     // The source pixels per user-space unit, each axis (negative: mirrored).
     scale: (f64, f64),
     smooth: bool,
-    clamp: [i64; 4],
 }
 
 impl Image<'_> {
@@ -513,20 +512,23 @@ impl Image<'_> {
             };
         }
         // The four pixels around the point, weighted by their nearness and premultiplied, so a transparent one
-        // does not bleed its colour in.
-        let (gx, gy) = self.source(ux, uy);
-        let (gx, gy) = (gx - 0.5, gy - 0.5);
+        // does not bleed its colour in — from the image, whatever the source rectangle: "When the filtering algorithm
+        // requires a pixel value from outside the source rectangle but inside the original image data, then the value
+        // from the original image data must be used", and from outside the image "the value from the nearest edge pixel".
+        // What a source point off the image would paint is clipped away: "When the source rectangle is outside the
+        // source image, the source rectangle must be clipped to the source image and the destination rectangle must be
+        // clipped in the same proportion".
+        let (sx, sy) = self.source(ux, uy);
+        if !(sx >= 0.0 && sy >= 0.0 && sx < self.iw as f64 && sy < self.ih as f64) {
+            return whole.then_some((Rgb { r: 0.0, g: 0.0, b: 0.0 }, 0.0));
+        }
+        let (gx, gy) = (sx - 0.5, sy - 0.5);
         let (fx, fy) = (floor(gx), floor(gy));
         let (tx, ty) = (gx - fx, gy - fy);
         let (x0, y0) = (fx as i64, fy as i64);
-        // (…held inside the source rectangle — where that lies wholly off the image, there is nothing to draw)
-        let c = &self.clamp;
-        if c[0] > c[1] || c[2] > c[3] {
-            return whole.then_some((Rgb { r: 0.0, g: 0.0, b: 0.0 }, 0.0));
-        }
-        let held = |v: i64, lo: i64, hi: i64| v.clamp(lo, hi) as usize;
-        let xs = [held(x0, c[0], c[1]), held(x0 + 1, c[0], c[1])];
-        let ys = [held(y0, c[2], c[3]), held(y0 + 1, c[2], c[3])];
+        let held = |v: i64, n: usize| v.clamp(0, n as i64 - 1) as usize;
+        let xs = [held(x0, self.iw), held(x0 + 1, self.iw)];
+        let ys = [held(y0, self.ih), held(y0 + 1, self.ih)];
         let (mut r, mut g, mut b, mut a) = (0.0, 0.0, 0.0, 0.0);
         for k in 0..4 {
             let w = (if k & 1 == 1 { tx } else { 1.0 - tx }) * (if k >> 1 == 1 { ty } else { 1.0 - ty });
@@ -1073,16 +1075,7 @@ pub(crate) fn draw(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, plai
                     || m[2] != 0.0
                     || (dst[2].abs() * m[0].hypot(m[1]) - src[2].abs()).abs() > 1e-3
                     || (dst[3].abs() * m[2].hypot(m[3]) - src[3].abs()).abs() > 1e-3);
-            // (…its neighbours clamped to the SOURCE rectangle, so one cell of a sprite sheet does not bleed in the next)
-            let (rxa, rxb) = (src[0].min(src[0] + src[2]), src[0].max(src[0] + src[2]));
-            let (rya, ryb) = (src[1].min(src[1] + src[3]), src[1].max(src[1] + src[3]));
-            let clamp = [
-                rxa.floor().max(0.0) as i64,
-                (rxb.ceil() - 1.0).min(iw as f64 - 1.0) as i64,
-                rya.floor().max(0.0) as i64,
-                (ryb.ceil() - 1.0).min(ih as f64 - 1.0) as i64,
-            ];
-            Paint::Image(Image { px, iw, ih, src, dst, scale: (src[2] / dst[2], src[3] / dst[3]), smooth, clamp })
+            Paint::Image(Image { px, iw, ih, src, dst, scale: (src[2] / dst[2], src[3] / dst[3]), smooth })
         }
         _ => return,
     };
@@ -1100,9 +1093,27 @@ pub(crate) fn draw(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, plai
     if buf.len() < cw * ch * 4 {
         return;
     }
+    let clears = matches!(paint, Paint::Clear) || !matches!(op, Op::SourceOver);
     let draw = Draw { cw, ch, clip: clip.as_deref(), alpha, op, inv };
     if draw.run(buf, shape, &paint, shadow.as_ref()).is_err() {
-        throw_oom(scope);
+        return throw_oom(scope);
+    }
+    // (…over an opaque bitmap source-over leaves it opaque, a draw loop's usual case: nothing to look at)
+    if clears && !h.alpha() {
+        over_black(buf);
+    }
+}
+
+// A bitmap with its alpha `false` after an operation that may have lowered some of it: "attempts to change the alpha
+// component of any pixel must be silently ignored", but what is drawn is "honoured up to the point where [it] would impact
+// the output bitmap's alpha component" — each pixel as it shows over the black the bitmap starts as.
+fn over_black(buf: &mut [u8]) {
+    for px in buf.chunks_exact_mut(4) {
+        if px[3] != 255 {
+            let a = unit(px[3]);
+            px[..3].iter_mut().for_each(|c| *c = byte(f64::from(*c) * a));
+            px[3] = 255;
+        }
     }
 }
 
@@ -1330,6 +1341,10 @@ fn canvas_put_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let Some(dst) = bytes_mut(bitmap) else { return };
     let [cw, ch] = h.size().map(|v| v as i64);
     copy_rect(&px, image, [x, y, w, hgt], dst, [cw, ch], [dx + x, dy + y]);
+    // (…"the putImageData() method effectively ignores every fourth byte in its input" where its alpha is `false`)
+    if !h.alpha() {
+        dst.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+    }
 }
 
 // The `sw` × `sh` rectangle at (sx, sy) of `src` copied over (dx, dy) of `dst`, scaled to `dw` × `dh` nearest-neighbour,
@@ -1440,6 +1455,29 @@ mod tests {
         // (…a float16 array's bytes twice an 8-bit one's)
         assert_eq!(get_image_data_refusal(true, [32767.0, 32767.0], 1.0), None);
         assert_eq!(get_image_data_refusal(true, [32767.0, 32767.0], 2.0), Some(IMAGE_DATA_TOO_LARGE));
+    }
+
+    // A bilinear sample takes its neighbours from the image, past the source rectangle (HTML: "the value from the original
+    // image data must be used"), holds at its edge, and paints nothing off it.
+    #[test]
+    fn samples_past_the_source_rectangle_but_not_past_the_image() {
+        let px: Cow<'_, [u8]> = Cow::Owned(vec![255, 0, 0, 255, 0, 0, 255, 255]);
+        let image = Image { px, iw: 2, ih: 1, src: [0.0, 0.0, 1.0, 1.0], dst: [0.0, 0.0, 40.0, 40.0], scale: (1.0 / 40.0, 1.0 / 40.0), smooth: true };
+        let (c, a) = image.sample(39.5, 20.0, false).unwrap();
+        assert!((c.r - 130.7).abs() < 0.1 && (c.b - 124.3).abs() < 0.1 && (a - 1.0).abs() < 1e-9, "{} {} {a}", c.r, c.b);
+        let (c, _) = image.sample(0.5, 20.0, false).unwrap();
+        assert_eq!((c.r, c.b), (255.0, 0.0));
+        let outside = Image { src: [-1.0, 0.0, 2.0, 1.0], dst: [0.0, 0.0, 40.0, 40.0], scale: (2.0 / 40.0, 1.0 / 40.0), ..image };
+        assert!(outside.sample(10.0, 20.0, false).is_none());
+        assert!(outside.sample(10.0, 20.0, true).is_some_and(|(_, a)| a == 0.0));
+        assert!(outside.sample(30.0, 20.0, false).is_some());
+    }
+
+    #[test]
+    fn a_pixel_with_its_alpha_fixed_shows_over_black() {
+        let mut px = [255, 0, 100, 255, 255, 0, 100, 0, 200, 100, 0, 51];
+        over_black(&mut px);
+        assert_eq!(px, [255, 0, 100, 255, 0, 0, 0, 255, 40, 20, 0, 255]);
     }
 
     #[test]

@@ -357,6 +357,71 @@ RSpec.describe 'Canvas context bindings' do
     expect(got).to eq(%w[IndexSizeError RangeError none IndexSizeError SecurityError])
   end
 
+  # HTML: "When the filtering algorithm requires a pixel value from outside the source rectangle but inside the original
+  # image data, then the value from the original image data must be used." A pixel of the source rectangle scaled up blends
+  # with its neighbour past the rectangle (Chrome blends too, 143,0,111 at this pixel; Firefox holds at the rectangle). A
+  # source rectangle past the image paints only what is on it, smoothed as not: "the source rectangle must be clipped to the
+  # source image and the destination rectangle must be clipped in the same proportion".
+  it 'samples past the source rectangle, within the image' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const s = new OffscreenCanvas(2, 1), sg = s.getContext('2d');
+        sg.fillStyle = '#f00'; sg.fillRect(0, 0, 1, 1);
+        sg.fillStyle = '#00f'; sg.fillRect(1, 0, 1, 1);
+        const d = new OffscreenCanvas(40, 40), g = d.getContext('2d');
+        g.drawImage(s, 0, 0, 1, 1, 0, 0, 40, 40);
+        const edge = [...g.getImageData(39, 20, 1, 1).data], near = [...g.getImageData(0, 20, 1, 1).data];
+        g.reset();
+        g.drawImage(s, -1, 0, 2, 1, 0, 0, 40, 40);
+        return [edge, near, g.getImageData(10, 20, 1, 1).data[3], g.getImageData(30, 20, 1, 1).data[3]];
+      })()
+    JS
+    expect(got).to eq([[131, 0, 124, 255], [255, 0, 0, 255], 0, 255])
+  end
+
+  # HTML: "When a CanvasSettings object's alpha is false, then its alpha component must be fixed to 1.0 (fully opaque) for
+  # all pixels, and attempts to change the alpha component of any pixel must be silently ignored. Thus, the bitmap of such a
+  # context starts off as opaque black [...] clearRect() always results in opaque black pixels, every fourth byte from
+  # getImageData() is always 255, the putImageData() method effectively ignores every fourth byte in its input". Chrome reads
+  # an untouched one as 0,0,0,0 and keeps a put's alpha, Firefox blends a put over black: the text rules both.
+  it 'keeps a bitmap with no alpha opaque' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const make = () => { const c = document.createElement('canvas'); c.width = c.height = 4; return c.getContext('2d', {alpha: false}); };
+        const px = (g, x = 1) => [...g.getImageData(x, 1, 1, 1).data];
+        const red = (g) => { g.fillStyle = 'red'; g.fillRect(0, 0, 4, 4); return g; };
+        const out = {};
+        out.untouched = px(make());
+        { const g = make(); g.fillStyle = 'rgba(255,0,0,0.5)'; g.fillRect(0, 0, 4, 4); out.half = px(g); }
+        { const g = red(make()); g.clearRect(0, 0, 4, 4); out.clear = px(g); }
+        { const g = red(make()); g.globalCompositeOperation = 'copy'; g.fillStyle = '#0f0'; g.fillRect(3, 3, 1, 1); out.copy = px(g); }
+        { const g = red(make()); g.globalCompositeOperation = 'clear'; g.fillRect(0, 0, 4, 4); out.clearOp = px(g); }
+        { const g = red(make()); g.globalCompositeOperation = 'destination-out'; g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(0, 0, 4, 4); out.destinationOut = px(g); }
+        { const g = make(); g.putImageData(new ImageData(new Uint8ClampedArray(64).fill(128), 4, 4), 0, 0); out.put = px(g); }
+        { const g = red(make()); g.reset(); out.reset = px(g); }
+        { const g = red(make()); g.canvas.width = 4; out.resize = px(g); }
+        { const g = make(); out.outside = px(g, 4); }
+        const into = new OffscreenCanvas(4, 4).getContext('2d');
+        into.drawImage(make().canvas, 0, 0);
+        out.source = px(into);
+        const off = new OffscreenCanvas(4, 4), og = off.getContext('2d', {alpha: false});
+        const bitmap = off.transferToImageBitmap();
+        const fromBitmap = new OffscreenCanvas(4, 4).getContext('2d');
+        fromBitmap.drawImage(bitmap, 0, 0);
+        out.transferred = px(fromBitmap);
+        out.afterTransfer = px(og);
+        out.pattern = make().createPattern(make().canvas, 'repeat') !== null;
+        return out;
+      })()
+    JS
+    black = [0, 0, 0, 255]
+    expect(got).to eq(
+      'untouched' => black, 'half' => [128, 0, 0, 255], 'clear' => black, 'copy' => black, 'clearOp' => black,
+      'destinationOut' => [128, 0, 0, 255], 'put' => [128, 128, 128, 255], 'reset' => black, 'resize' => black,
+      'outside' => [0, 0, 0, 0], 'source' => black, 'transferred' => black, 'afterTransfer' => black, 'pattern' => true
+    )
+  end
+
   # What the engine allocates for a page is V8's to count as it allocates: a loop of dead bitmaps is collected as it goes.
   # Stores made in Rust and attached later put no pressure on the heap, and 4 GB of dead `getImageData` peaked at the 4 GB.
   it 'leaves dead pixels for the collector as they churn', if: File.exist?('/proc/self/clear_refs') do

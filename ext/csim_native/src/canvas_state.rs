@@ -298,22 +298,36 @@ impl CanvasStateHandle {
     pub(crate) fn display_p3(&self) -> bool {
         self.settings.color_space == DISPLAY_P3
     }
-    // Its bitmap (`canvasBitmap`), what an operation draws into — undefined for none, which it draws nothing into.
+    // Whether its bitmap has an alpha channel: none has it fixed at opaque.
+    pub(crate) fn alpha(&self) -> bool {
+        self.settings.alpha
+    }
+    // Its bitmap (`canvasBitmap`), as it reads — undefined for none, transparent black to whoever asks: a bitmap with its
+    // alpha `false` "starts off as opaque black instead of transparent black", which is made here as it is read.
     pub(crate) fn bitmap<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
         // SAFETY: the main thread reads the reference; nothing else writes it meanwhile.
-        unsafe { (*self.bitmap.get()).get(scope) }.map_or_else(|| v8::undefined(scope).into(), Into::into)
+        if let Some(kept) = unsafe { (*self.bitmap.get()).get(scope) } {
+            return kept.into();
+        }
+        let made = if self.settings.alpha { None } else { self.drawable_bitmap(scope).ok().flatten() };
+        made.unwrap_or_else(|| v8::undefined(scope).into())
     }
-    // …what an operation draws into: made now, of transparent black, where it has none — none for a bitmap of no area.
+    // …what an operation draws into: made now, of its initial pixels, where it has none — none for a bitmap of no area.
     pub(crate) fn drawable_bitmap<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Result<Option<v8::Local<'s, v8::Value>>, crate::canvas::Oom> {
         let [w, h] = self.size.get();
         if w == 0 || h == 0 {
             return Ok(None);
         }
-        let kept = self.bitmap(scope);
-        if !kept.is_undefined() {
-            return Ok(Some(kept));
+        // SAFETY: as `bitmap`.
+        if let Some(kept) = unsafe { (*self.bitmap.get()).get(scope) } {
+            return Ok(Some(kept.into()));
         }
         let made = crate::dom::zeroed_clamped_array(scope, w * h * 4).ok_or(crate::canvas::Oom)?;
+        if !self.settings.alpha {
+            if let Some(pixels) = crate::canvas::bytes_mut(made) {
+                pixels.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+            }
+        }
         // SAFETY: the main thread writes the reference.
         unsafe { (*self.bitmap.get()).reset(scope, v8::Local::<v8::Object>::try_from(made).ok()) };
         Ok(Some(made))

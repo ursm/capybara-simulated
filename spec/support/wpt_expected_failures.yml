@@ -3815,18 +3815,6 @@ html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance-wi
 - "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance-with-clipping.ctx-filter-expected.html"
 html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance.ctx-filter.html:
 - "== html/canvas/element/layers/2d.layer.shadow-from-outside-canvas.short-distance.ctx-filter-expected.html"
-html/canvas/element/manual/context-attributes/clearRect_alpha_false.html:
-- "== html/canvas/element/manual/context-attributes/clearRect_alpha_false-ref.html"
-html/canvas/element/manual/context-attributes/drawImage_alpha_false.html:
-- "== html/canvas/element/manual/context-attributes/drawImage_alpha_false-ref.html"
-html/canvas/element/manual/context-attributes/fillRect_alpha_false.html:
-- "== html/canvas/element/manual/context-attributes/fillRect_alpha_false-ref.html"
-html/canvas/element/manual/context-attributes/fill_alpha_false.html:
-- "== html/canvas/element/manual/context-attributes/fill_alpha_false-ref.html"
-html/canvas/element/manual/context-attributes/initial_color_alpha_false.html:
-- "== html/canvas/element/manual/context-attributes/initial_color_alpha_false-ref.html"
-html/canvas/element/manual/context-attributes/reset_color_alpha_false.html:
-- "== html/canvas/element/manual/context-attributes/reset_color_alpha_false-ref.html"
 html/canvas/element/manual/drawing-images-to-the-canvas/drawimage_canvas.html:
 - 'Test scenario 12: sx = -20, sy = -20, sw = 50, sh = 50, dx = 20, dy = 20, dw =
   125, dh = 125 --- Pixel 82,82 should be blue.'
