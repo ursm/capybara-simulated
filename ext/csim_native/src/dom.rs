@@ -2691,12 +2691,17 @@ pub(crate) struct Dom {
     pub(crate) agent_time: crate::agent_clock::AgentTime,
 }
 
-// The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
-// which is freed memory by then (a strong one checks its isolate first): what holds weak handles is let go of whole.
+// The isolate's slots go BEFORE V8's teardown GC (`OwnedIsolate`'s drop: `prepare_annex_for_dispose`, then `dispose`), its
+// thread-safe handle already null. A weak handle dropped then sees no isolate, so it frees its `WeakData` and leaves its
+// node weak, and the teardown GC calls `first_pass_callback` with the freed memory for its parameter: a process crash when
+// a Context is finalized, wherever the allocator has reused that memory by then (`Check failed: node->IsInUse()`, an unwrap on
+// None, a SIGSEGV). So what holds weak handles is let go of whole, leaked: every
+// field of this struct that holds one, as spec/isolate_teardown_spec.rb checks.
 impl Drop for Dom {
     fn drop(&mut self) {
         std::mem::forget(std::mem::take(&mut self.arenas));
         std::mem::forget(std::mem::take(&mut self.factories));
+        std::mem::forget(std::mem::take(&mut self.clone_shadow_hooks));
         self.arena.ce_reactions.leak_weak_handles();
         self.abort_signals.leak_weak_handles();
         self.message_ports.leak_weak_handles();
