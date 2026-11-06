@@ -196,7 +196,8 @@ RSpec.describe 'the event loop of a page and its frames' do
     HTML
     now, timeline, stamp = log.map(&:to_i)
     expect(now).to be_between(100, 120)
-    expect([timeline, stamp]).to all(be_between(now - 17, now))
+    # (…`now` counting the scripts' real time as well as the virtual clock the other two read)
+    expect([timeline, stamp]).to all(be_between(83, now))
   end
 
   # A frame the page's task removes runs none of its timers after — not to the end of the step the removal fell in.
