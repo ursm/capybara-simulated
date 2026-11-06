@@ -99,6 +99,14 @@ RSpec.describe 'an exception of the app under a request of the page' do
     expect { session.visit('/') }.not_to raise_error
   end
 
+  # (…another host's request the network refused comes to the app, for a 404: Forem's page, a script off a CDN)
+  it 'raises nothing of another host\'s request the app was only asked as the network refused it' do
+    allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch).and_return(nil)
+    session.visit('/')
+    session.evaluate_async_script("const d = arguments[0]; fetch('http://cdn.test/raise', {mode: 'no-cors'}).then(() => d('ok'), (e) => d(e.name))")
+    expect { session.visit('/') }.not_to raise_error
+  end
+
   describe 'Capybara\'s settings' do
     around do |example|
       errors, raising = Capybara.server_errors, Capybara.raise_server_errors

@@ -13568,7 +13568,7 @@ module Capybara
         remote = (transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)) unless url_is_local?(url)
         return nil if remote == :network_error
 
-        response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?)))
+        response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?, own_host: url_is_local?(url))))
         # (…the app's body the caller's own from here, which a cancel while it was framed left to the reader: app_call)
         Thread.current[:csim_event_stream_app_body] = nil if transport
         return nil unless response
@@ -13581,7 +13581,9 @@ module Capybara
       # the middle of a middleware or a query on the test's shared database connection would leave it mid-way for the
       # next request — and lets go of the body the app gave before it ends. The session's cancellation alone: the app's
       # own `Timeout.timeout` (Rack::Timeout, a client library's) still interrupts it.
-      def app_call(env, deferring: false)
+      # (…`own_host` that the request was the app's to answer: another host's that the network refused comes to it as well,
+      # for a 404, and what it raises of that is no error of the test's — the browser's request never reached the app)
+      def app_call(env, deferring: false, own_host: true)
         return in_app_call { @app.call(env) } unless deferring
 
         in_app_call {
@@ -13595,7 +13597,7 @@ module Capybara
           }
         }
       rescue StandardError => e
-        unless e.frozen?
+        if own_host && !e.frozen?
           e.extend(RaisedByApp)
           e.csim_driver = @driver
         end
