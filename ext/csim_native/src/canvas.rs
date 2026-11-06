@@ -524,9 +524,11 @@ fn held(v: i64, n: usize) -> usize {
 }
 
 impl Image<'_> {
-    // The source point a user-space point samples.
+    // The source point a user-space point samples, on the image — where a destination too small for its scale to be a
+    // number leaves none, the image's edge: a NaN would reach `composite`, which would store it as 0.
     fn source(&self, ux: f64, uy: f64) -> (f64, f64) {
-        (self.src[0] + (ux - self.dst[0]) * self.scale.0, self.src[1] + (uy - self.dst[1]) * self.scale.1)
+        let on = |p: f64, extent: usize| if p.is_nan() { 0.0 } else { p.clamp(0.0, extent as f64) };
+        (on(self.src[0] + (ux - self.dst[0]) * self.scale.0, self.iw), on(self.src[1] + (uy - self.dst[1]) * self.scale.1, self.ih))
     }
     // The byte offset of the source's nearest pixel to the user-space point — held at the image's edge: the destination
     // rectangle is clipped with the source (canvas_image.rs `clipped_rects`), so only a pixel its edge partly covers can
@@ -1603,6 +1605,12 @@ mod tests {
         let nearest = Image { smooth: false, ..image };
         assert_eq!(nearest.nearest(-3.0, -3.0), 0);
         assert_eq!(nearest.nearest(500.0, 500.0), 4);
+        // (…a destination too small for its scale to be a number: a colour all the same, at the point itself and past it)
+        let tiny = Image { smooth: true, dst: [0.0, 0.0, 1e-320, 1e-320], scale: (f64::INFINITY, f64::INFINITY), ..nearest };
+        for at in [0.0, 1.0, -1.0] {
+            let (c, a) = tiny.sample(at, at, false).unwrap();
+            assert!(!c.r.is_nan() && !c.b.is_nan() && !a.is_nan(), "{at}");
+        }
     }
 
     #[test]

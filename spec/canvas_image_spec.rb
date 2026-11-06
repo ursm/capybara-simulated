@@ -1503,6 +1503,8 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   #   here                  64 255 … 255 191 0      45/78, row 6 `21 239 …`   128 … 128
   #   Chrome                0 255 … 255 255 0       47/78, row 6 `21 234 …`   0 … 255 (snaps)
   #   Firefox               64 255 … 255 191 0      47/78                     128 … 128
+  # With smoothing off and no rotation Chrome and Firefox agree on hard edges, the pixels whose centres the rectangle holds:
+  # row 4 first pixel 0, ninth 255 (HTML is silent). Rotated they differ (47/78, 0/100), and it stays anti-aliased.
   it 'anti-aliases a drawn image\'s edge wherever it falls, and clips a source past the image' do
     session = simulated_session(app)
     session.visit('/')
@@ -1528,7 +1530,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     JS
     expect(JSON.parse(out)).to eq(
       'scaled'       => [64, 255, 255, 255, 255, 255, 255, 255, 191, 0],
-      'nearest'      => [64, 255, 255, 255, 255, 255, 255, 255, 191, 0],
+      'nearest'      => [0, 255, 255, 255, 255, 255, 255, 255, 255, 0],
       'oneToOne'     => [64, 255, 255, 255, 255, 255, 255, 255, 191, 0],
       'scaledCtm'    => [128, 255, 255, 255, 255, 255, 255, 255, 128, 0, 0],
       'rotated'      => [21, 239, 255, 255, 255, 255, 255, 255, 208, 63],
@@ -1558,6 +1560,39 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       })()
     JS
     expect(JSON.parse(out)).to eq([[255, 0, 0, 255]] * 4)
+  end
+
+  # A destination of no area paints nothing, whatever the CTM and the operator: under a shear its ring's noise coverage once
+  # sampled a NaN source point, erasing what it fell on (5 and 12 pixels), and under `copy` it cleared the canvas. Chrome and
+  # Firefox: neither. It still reaches HTML's last step, "If image is not origin-clean", spec/canvas_origin_clean_spec.rb.
+  it 'paints nothing for a destination of no area' do
+    session = simulated_session(app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const source = new OffscreenCanvas(40, 40);
+        source.getContext('2d').fillRect(0, 0, 40, 40);
+        const erased = (draw) => {
+          const g = new OffscreenCanvas(64, 23).getContext('2d');
+          g.fillStyle = '#fff';
+          g.fillRect(0, 0, 64, 23);
+          draw(g);
+          const data = g.getImageData(0, 0, 64, 23).data;
+          let n = 0;
+          for (let i = 3; i < data.length; i += 4) if (data[i] !== 255) n++;
+          return n;
+        };
+        const sheared = (g) => g.setTransform(1, 0.1, 0.1, 2, 3, -2);
+        return JSON.stringify([
+          erased((g) => { sheared(g); g.drawImage(source, 18, 1.169, 33.885, 0); }),
+          erased((g) => { sheared(g); g.drawImage(source, 18, 1.169, 0, 33.885); }),
+          erased((g) => { sheared(g); g.drawImage(source, 18, 1.169, 1e-320, 33.885); }),
+          erased((g) => { g.globalCompositeOperation = 'copy'; g.drawImage(source, 0, 0, 4, 4, 0, 0, 0, 4); }),
+          erased((g) => { g.globalCompositeOperation = 'copy'; g.drawImage(source, 0, 0, 4, 4, 0, 0, 4, 0); })
+        ]);
+      })()
+    JS
+    expect(JSON.parse(out)).to eq([0, 0, 0, 0, 0])
   end
 
   it 'lets adjacent atlas cells interfere when smoothing a scaled sub-rect, as HTML says' do

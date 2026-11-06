@@ -172,6 +172,19 @@ fn clipped_rects([sx, sy, sw, sh, dx, dy, dw, dh]: [f64; 8], [iw, ih]: [u32; 2])
     ([x, y, w, h], [to_x, to_y, to_w, to_h])
 }
 
+// The device box a destination rectangle covers where smoothing is off under a CTM that keeps it axis-aligned: the pixels
+// whose centres it holds, its edges hard. HTML says nothing of the edge, and Chrome and Firefox agree on this
+// (`drawImage(s, .75, .75, 8, 8)`: row 4 first pixel 0, ninth 255). Under a rotation they differ, and it stays anti-aliased.
+fn hard_box(m: [f64; 6], [x, y, w, h]: [f64; 4]) -> [f64; 4] {
+    let edges = |scale: f64, at: f64, len: f64, by: f64| {
+        let (a, b) = (scale * at + by, scale * (at + len) + by);
+        ((a.min(b) - 0.5).ceil(), (a.max(b) - 0.5).ceil())
+    };
+    let (l, r) = edges(m[0], x, w, m[4]);
+    let (t, b) = edges(m[3], y, h, m[5]);
+    [l, t, r, b]
+}
+
 // __dom.canvasDrawImage(state, kind, source, contextState, sx, sy, sw, sh, dx, dy, dw, dh) -> 0, or the verdict of a source
 // that fails its usability check, the bindings' to throw: `drawImage()`, the source as `judge` takes it, an omitted
 // argument undefined. HTML's steps, in their order:
@@ -210,8 +223,9 @@ fn canvas_draw_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         return;
     }
     let ([sx, sy, sw, sh], [dx, dy, dw, dh]) = clipped_rects(rects, judged.size);
-    // (…of a source wholly off the image, nothing to paint: a whole-canvas operator leaves the destination, Chrome and Firefox)
-    if sw > 0.0 && sh > 0.0 {
+    // (…of a source wholly off the image, or a destination of no area, nothing to paint: a whole-canvas operator leaves the
+    // destination, Chrome and Firefox, and a shape of no area under a shear covers nothing)
+    if sw > 0.0 && sh > 0.0 && dw > 0.0 && dh > 0.0 {
         let (pixels, space) = match pixels_of(scope, h, kind, source, context, &judged) {
             Ok(found) => found,
             Err(Oom) => return throw_oom(scope),
@@ -222,7 +236,12 @@ fn canvas_draw_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         };
         let [iw, ih] = judged.size.map(f64::from);
         let paint = [6.0, iw, ih, f64::from(space), sx, sy, sw, sh, dx, dy, dw, dh, f64::from(u8::from(smoothing))];
-        draw(scope, h, false, &Shape::Rings { rings: Path::rect(m, [dx, dy, dw, dh]).fill_rings(), even_odd: false }, &paint, pixels);
+        let shape = if !smoothing && m[1] == 0.0 && m[2] == 0.0 {
+            Shape::Box(hard_box(m, [dx, dy, dw, dh]))
+        } else {
+            Shape::Rings { rings: Path::rect(m, [dx, dy, dw, dh]).fill_rings(), even_odd: false }
+        };
+        draw(scope, h, false, &shape, &paint, pixels);
     }
     if judged.tainted {
         h.taint();
@@ -507,6 +526,15 @@ mod tests {
         assert_eq!(flipped.transformed(&px, [1, 1]), Some((px.to_vec(), [1, 1], true)));
         // (…a size too large to hold)
         assert_eq!(of(&[0.0, 0.0, 0.0, 0.0, 0.0, 65536.0, 65536.0, 0.0, 0.0]).transformed(&px, [1, 1]), None);
+    }
+
+    // Smoothing off and axis-aligned: the pixels whose centres the rectangle holds, whichever way the CTM scales it.
+    #[test]
+    fn a_hard_box_is_the_pixels_whose_centres_it_holds() {
+        let identity = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        assert_eq!(hard_box(identity, [0.75, 0.75, 8.0, 8.0]), [1.0, 1.0, 9.0, 9.0]);
+        assert_eq!(hard_box(identity, [0.25, 0.25, 8.0, 8.0]), [0.0, 0.0, 8.0, 8.0]);
+        assert_eq!(hard_box([2.0, 0.0, 0.0, -1.0, 1.0, 10.0], [0.0, 0.0, 2.0, 2.0]), [1.0, 8.0, 5.0, 10.0]);
     }
 
     // A negative size moves a rectangle, in either; a source past the image is clipped, the destination in proportion.
