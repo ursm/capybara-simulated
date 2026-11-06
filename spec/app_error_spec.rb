@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # What the app raises under a request of the page, as a browser run's stack has it. The driver stands for Puma and
 # Capybara::Server::Middleware: every client gets Puma's 500, and the session raises the error where Capybara does,
@@ -158,12 +159,52 @@ RSpec.describe 'an exception of the app under a request of the page' do
     expect(session.driver.browser.send(:app_exception?, Capybara::Simulated::Browser.const_get(:EventSourceCancelled).new)).to be(false)
   end
 
-  # (…another host's request the network refused comes to the app, for a 404: Forem's page, a script off a CDN)
-  it 'raises nothing of another host\'s request the app was only asked as the network refused it' do
-    allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch).and_return(nil)
-    session.visit('/')
-    expect(session.evaluate_async_script("const d = arguments[0]; fetch('http://cdn.test/raise', {mode: 'no-cors'}).then(() => d('ok'), (e) => d(e.name))")).to eq('TypeError')
-    expect { session.visit('/') }.not_to raise_error
+  # What a browser's request would have reached the server by. Cuprite and Puma on port 18555, `host-resolver-rules` mapping every
+  # name here (reviewer's `p/r1/sub.rb`): a name of the page's site, a page on a subdomain to its apex, and another name at that
+  # port: 500, the next `visit` raises. Another port with no server, a CDN's name: TypeError, nothing raised. (Here the network
+  # refuses all of them, and the app is asked for each: Forem's CDN script, `NOTOWN`.)
+  describe 'a request off the page\'s own host' do
+    before { allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch).and_return(nil) }
+
+    def request_from(page, url)
+      session.visit(page)
+      session.evaluate_async_script("const d = arguments[0]; fetch(#{url.to_json}, {mode: 'no-cors'}).then((r) => d(r.type), (e) => d(e.name))")
+    end
+
+    [
+      ['http://lvh.test:18555/', 'http://foo.lvh.test:18555/raise', :raises],
+      ['http://foo.lvh.test:18555/', 'http://lvh.test:18555/raise', :raises],
+      ['http://lvh.test:18555/', 'http://other.test:18555/raise', :raises],
+      ['http://lvh.test/', 'http://foo.lvh.test/raise', :raises],
+      ['http://lvh.test:18555/', 'http://lvh.test:18556/raise', :none],
+      ['http://lvh.test:18555/', 'http://cdn.example.invalid/raise', :none],
+      ['http://lvh.test/', 'http://cdn.example.invalid/raise', :none]
+    ].each do |page, url, outcome|
+      it "#{outcome == :raises ? 'raises' : 'raises nothing of'} #{url} from #{page}" do
+        got = request_from(page, url)
+        if outcome == :raises
+          expect(got).not_to eq('TypeError')
+          expect { session.visit(page) }.to raise_error(ArgumentError, 'of the app')
+        else
+          expect(got).to eq('TypeError')
+          expect { session.visit(page) }.not_to raise_error
+        end
+      end
+    end
+  end
+
+  # (…a Host, as every real request sends: a subdomain middleware reads the raw env)
+  it 'tells the app the Host', :every_host_local do
+    hosts = []
+    s = simulated_session(lambda {|env|
+      hosts << env['HTTP_HOST']
+      [200, {'content-type' => 'text/html'}, ['<p>x</p>']]
+    })
+    s.visit('http://foo.lvh.test:18555/x')
+    s.visit('http://lvh.test/x')
+    s.visit('https://lvh.test/x')
+    s.visit('https://lvh.test:444/x')
+    expect(hosts).to eq(['foo.lvh.test:18555', 'lvh.test', 'lvh.test', 'lvh.test:444'])
   end
 
   describe 'Capybara\'s settings' do

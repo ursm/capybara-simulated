@@ -13388,16 +13388,20 @@ module Capybara
       # sticky headers and an `Accept` (`force: false` keeping any the caller set already).
       def apply_user_agent_env(env, force: true)
         # `Rack::MockRequest.env_for` populates `SERVER_NAME` /
-        # `SERVER_PORT` from the URL but leaves `HTTP_HOST` nil. Read
-        # SERVER_NAME so the IPv4/IPv6 loopback choice still matches
-        # what real Chrome would have done after DNS resolution.
+        # `SERVER_PORT` from the URL but leaves `HTTP_HOST` nil: the Host every real request sends, set here — but the default
+        # host's, the stand-in a real run's 127.0.0.1 is no name of, which an app's host check (Sinatra's) refuses. The
+        # IPv4/IPv6 loopback choice reads SERVER_NAME, which matches what real Chrome would have done after DNS resolution.
+        unless @loopback_stand_in && env['SERVER_NAME'] == 'www.example.com'
+          default_port = env['rack.url_scheme'] == 'https' ? '443' : '80'
+          env['HTTP_HOST'] ||= env['SERVER_PORT'].to_s == default_port ? env['SERVER_NAME'] : "#{env['SERVER_NAME']}:#{env['SERVER_PORT']}"
+        end
         if force
           env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
-          env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
+          env['REMOTE_ADDR']     = self.class.remote_addr_for(env['SERVER_NAME'])
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] = v }
         else
           env['HTTP_USER_AGENT'] ||= (@default_user_agent || USER_AGENT)
-          env['REMOTE_ADDR']     ||= self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
+          env['REMOTE_ADDR']     ||= self.class.remote_addr_for(env['SERVER_NAME'])
           @sticky_headers.each {|k, v| env["HTTP_#{k.upcase.tr('-', '_')}"] ||= v }
         end
         # Browsers always send an `Accept` header; Rack::MockRequest
@@ -13571,7 +13575,7 @@ module Capybara
         remote = (transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)) unless url_is_local?(url)
         return nil if remote == :network_error
 
-        response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?, own_host: url_is_local?(url))))
+        response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?, own_host: reaches_app?(url))))
         # (…the app's body the caller's own from here, which a cancel while it was framed left to the reader: app_call)
         Thread.current[:csim_event_stream_app_body] = nil if transport
         return nil unless response
@@ -13584,9 +13588,9 @@ module Capybara
       # the middle of a middleware or a query on the test's shared database connection would leave it mid-way for the
       # next request — and lets go of the body the app gave before it ends. The session's cancellation alone: the app's
       # own `Timeout.timeout` (Rack::Timeout, a client library's) still interrupts it.
-      # (…`own_host` that the request was the app's to answer: another host's that the network refused comes to it as well,
-      # for a 404, and what it raises of that is no error of the test's — the browser's request never reached the app: it
-      # goes up to what asked, a network error)
+      # (…`own_host` that a browser's request would have reached the app — `reaches_app?`: another host's that the network
+      # refused comes to it as well, for a 404, and what it raises of that is no error of the test's: it goes up to what asked, a
+      # network error)
       def app_call(env, deferring: false, own_host: true)
         return in_app_call { @app.call(env) } unless deferring
 
@@ -13682,6 +13686,20 @@ module Capybara
       # url_is_local? compares only host:port (ignoring scheme) and treats a missing
       # ref origin as local, which would eager-build frames the baseline left lazy.
       def all_hosts_local? = @all_hosts_local
+
+      # Whether a browser's request of `url` would have reached the app's server, which a run with a server listens on one port
+      # under any name that resolves to it: a subdomain's, an apex's — the page's own, or its port under a name of its site, or
+      # under any name at a port no CDN is on (cuprite with `host-resolver-rules`, measured). A limit: another site's name at the
+      # same non-default port counts, which a browser reaches only where it resolves here.
+      private def reaches_app?(url)
+        return true if url_is_local?(url)
+
+        uri = parse_url(url.to_s)
+        ref = current_url_parts || parse_url(@default_host.to_s)
+        return false if uri.nil? || ref.nil? || effective_port(uri) != effective_port(ref)
+
+        ![80, 443].include?(effective_port(uri).to_i) || Native.site(url.to_s).to_s == Native.site(page_url.to_s).to_s
+      end
 
       # Path-only or fragment-only URLs are always against the current
       # origin. For absolute URLs, compare host:port to the cached

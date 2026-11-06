@@ -228,17 +228,15 @@ module Capybara
       def needs_server?       = false
       def javascript_enabled? = true
 
-      # What the app raised under any request, as a browser run's server has it (Capybara::Server::Middleware): the first
-      # kept, from any thread, of the classes `Capybara.server_errors` names — a service worker's fetch is its worker's —
-      # for the session to raise at its next `raise_server_error!` (capybara/simulated.rb).
-      def app_raised(error)
-        @app_error ||= error if ::Capybara.server_errors.any? {|kind| error.is_a?(kind) }
-      end
+      # What the app raised under any request, as a browser run's server has it (Capybara::Server::Middleware), from any
+      # thread — a service worker's fetch is its worker's — for the session to raise the first of what its `server_errors`
+      # names at its next `raise_server_error!` (capybara/simulated.rb).
+      def app_raised(error) = (@app_errors ||= []) << error
 
-      def take_app_error
-        error = @app_error
-        @app_error = nil
-        error
+      def take_app_errors
+        errors = @app_errors
+        @app_errors = nil
+        errors
       end
 
       # Playwright-driver compatibility shim. Discourse's system-spec
