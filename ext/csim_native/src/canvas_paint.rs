@@ -31,6 +31,7 @@ struct Tile {
     repeat_y: bool,
     p3: bool,
     m: [f64; 6],
+    tainted: bool,
 }
 
 enum Paint {
@@ -182,8 +183,9 @@ fn canvas_gradient_init(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 // `repeat-y`, `no-repeat`.
 const REPEATS: [(bool, bool); 4] = [(true, true), (true, false), (false, true), (false, false)];
 
-// A pattern (`canvasPatternTile`), its interface object `wrapper`: its `size` tile `pixels` (its own copy, a Display P3 one
-// where `p3`), repeating as `repetition` says (`REPEATS`), under the identity until its transform is set.
+// A pattern (`canvasCreatePattern`), its interface object `wrapper`: its `size` tile `pixels` (its own copy, a Display P3 one
+// where `p3`), repeating as `repetition` says (`REPEATS`), under the identity until its transform is set — and not
+// origin-clean where it was made of a source that is not (`origin_clean_lost`): it taints a canvas it is set on.
 pub(crate) fn init_pattern(
     scope: &mut v8::PinScope<'_, '_>,
     paint: v8::Local<'_, v8::Value>,
@@ -192,6 +194,7 @@ pub(crate) fn init_pattern(
     [w, hgt]: [f64; 2],
     repetition: u32,
     p3: bool,
+    origin_clean_lost: bool,
 ) {
     let Some(h) = handle(scope, paint) else { return };
     own(scope, h, wrapper);
@@ -199,7 +202,11 @@ pub(crate) fn init_pattern(
     // SAFETY: the main thread writes the reference.
     unsafe { (*h.pixels.get()).reset(scope, pixels) };
     let (repeat_x, repeat_y) = REPEATS[repetition.min(3) as usize];
-    *h.paint.borrow_mut() = Some(Paint::Pattern(Tile { w, h: hgt, repeat_x, repeat_y, p3, m: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0] }));
+    *h.paint.borrow_mut() = Some(Paint::Pattern(Tile { w, h: hgt, repeat_x, repeat_y, p3, m: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], tainted: origin_clean_lost }));
+}
+// Whether a paint object is a pattern that is not origin-clean.
+pub(crate) fn tainted(scope: &mut v8::PinScope<'_, '_>, paint: v8::Local<'_, v8::Value>) -> bool {
+    handle(scope, paint).is_some_and(|h| matches!(h.paint.borrow().as_ref(), Some(Paint::Pattern(t)) if t.tainted))
 }
 
 // Why `addColorStop` refuses a stop.

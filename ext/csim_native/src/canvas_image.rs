@@ -142,31 +142,16 @@ fn image_rects(given: [Option<f64>; 8], size: [u32; 2], natural: [u32; 2]) -> [f
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    register(scope, ns, "canvasImageSource", canvas_image_source_op, context_id);
     register(scope, ns, "canvasDrawImage", canvas_draw_image, context_id);
-    register(scope, ns, "canvasPatternTile", canvas_pattern_tile, context_id);
+    register(scope, ns, "canvasCreatePattern", canvas_create_pattern, context_id);
     register(scope, ns, "imageBitmapOfSource", image_bitmap_of_source, context_id);
     register(scope, ns, "imageBitmapOfBlob", image_bitmap_of_blob, context_id);
     register(scope, ns, "imageBitmapOfImageData", image_bitmap_of_image_data, context_id);
 }
 
-// __dom.canvasImageSource(kind, source, contextState) -> [verdict, width, height, tainted, blank] of a source (`judge`).
-fn canvas_image_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let kind = args.get(0).uint32_value(scope).unwrap_or(u32::MAX);
-    let judged = judge(scope, kind, args.get(1), args.get(2));
-    let items = [
-        v8::Integer::new_from_unsigned(scope, judged.verdict).into(),
-        v8::Integer::new_from_unsigned(scope, judged.size[0]).into(),
-        v8::Integer::new_from_unsigned(scope, judged.size[1]).into(),
-        v8::Boolean::new(scope, judged.tainted).into(),
-        v8::Boolean::new(scope, judged.blank).into(),
-    ];
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-
 // __dom.canvasDrawImage(state, kind, source, contextState, sx, sy, sw, sh, dx, dy, dw, dh) -> 0, or the verdict of a source
-// that fails its usability check, the bindings' to throw: `drawImage()`, the source as `canvasImageSource` takes it, an
-// omitted argument undefined. HTML's steps, in their order:
+// that fails its usability check, the bindings' to throw: `drawImage()`, the source as `judge` takes it, an omitted
+// argument undefined. HTML's steps, in their order:
 //   "If any of the arguments are infinite or NaN, then return."
 //   "Let usability be the result of checking the usability of image." — a failing one thrown, "If usability is bad, then
 //   return (without drawing anything)."
@@ -217,19 +202,30 @@ fn canvas_draw_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     }
 }
 
-// __dom.canvasPatternTile(paint, wrapper, state, kind, source, contextState, repetition): a pattern made of a source judged
-// usable (`canvasImageSource`) for the context `state`, its tile a copy of the pixels it reads now (canvas_paint.rs `init_pattern`): a
-// later draw to a live source canvas does not change the pattern. A RangeError for a tile too large to hold.
-fn canvas_pattern_tile(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// Why `canvasCreatePattern` makes none, past the source's verdicts: a repetition that is no keyword's a SyntaxError.
+const BAD_REPETITION: u32 = 6;
+
+// __dom.canvasCreatePattern(paint, wrapper, state, kind, source, contextState, repetition) -> 0, or why it made no pattern:
+// `createPattern()`, the source as `judge` takes it, its repetition's code (`canvas_paint.rs` `REPEATS`), -1 for
+// none. HTML's steps, in their order: "Let usability be the result of checking the usability of image." — a failing one's
+// verdict the bindings' to throw — "If usability is bad, then return null." — the repetition's SyntaxError — then the
+// pattern, its tile a copy of the pixels it reads now (canvas_paint.rs `init_pattern`), so that a later draw to a live
+// source canvas does not change the pattern: "If image is not origin-clean, then mark pattern as not origin-clean." A
+// RangeError for a tile too large to hold.
+fn canvas_create_pattern(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = crate::canvas_state::handle(scope, args.get(2)) else { return };
     let kind = args.get(3).uint32_value(scope).unwrap_or(u32::MAX);
     let (source, context) = (args.get(4), args.get(5));
     let judged = judge(scope, kind, source, context);
+    if judged.verdict != GOOD {
+        return rv.set_uint32(judged.verdict);
+    }
+    let Ok(repetition) = u32::try_from(args.get(6).int32_value(scope).unwrap_or(-1)) else { return rv.set_uint32(BAD_REPETITION) };
     let Ok((pixels, p3)) = pixels_of(scope, h, kind, source, context, &judged) else { return throw_oom(scope) };
     let tile = bytes_read(pixels, None).unwrap_or_default().into_owned();
     let tile = crate::dom::u8_clamped_array(scope, tile);
-    let repetition = args.get(6).uint32_value(scope).unwrap_or(0);
-    crate::canvas_paint::init_pattern(scope, args.get(0), args.get(1), tile, judged.size.map(f64::from), repetition, p3);
+    crate::canvas_paint::init_pattern(scope, args.get(0), args.get(1), tile, judged.size.map(f64::from), repetition, p3, judged.tainted);
+    rv.set_uint32(GOOD);
 }
 
 // ── createImageBitmap (HTML §8.10) ──

@@ -476,7 +476,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasLineDash", canvas_line_dash, context_id);
     crate::dom::register(scope, ns, "canvasFontFace", canvas_font_face, context_id);
     crate::dom::register(scope, ns, "canvasOriginClean", canvas_origin_clean, context_id);
-    crate::dom::register(scope, ns, "canvasTaint", canvas_taint, context_id);
     crate::dom::register(scope, ns, "canvasBitmap", canvas_bitmap, context_id);
     crate::dom::register(scope, ns, "canvasTakeBitmap", canvas_take_bitmap, context_id);
     crate::dom::register(scope, ns, "canvasResize", canvas_resize, context_id);
@@ -621,8 +620,13 @@ fn canvas_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let which = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
     let value = args.get(2);
     let extra = args.get(3);
-    // (…a style's paint object: traced, the colour it had kept for a colour set again)
+    // (…a style's paint object: traced, the colour it had kept for a colour set again — one not origin-clean tainting the
+    // bitmap as it is set: "If the given value is a CanvasPattern object that is marked as not origin-clean, then set this's
+    // origin-clean flag to false.")
     if matches!(which, FILL_STYLE | STROKE_STYLE) && extra.is_true() {
+        if crate::canvas_paint::tainted(scope, value) {
+            h.taint();
+        }
         let object = v8::Local::<v8::Object>::try_from(value).ok();
         h.set_object(scope, if which == FILL_STYLE { FILL } else { STROKE }, object);
         return;
@@ -732,13 +736,6 @@ fn canvas_stack(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 // __dom.canvasOriginClean(state) -> whether the bitmap is origin-clean — false for anything that is no state's object.
 fn canvas_origin_clean(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(handle(scope, args.get(0)).is_some_and(|h| h.origin_clean.get()));
-}
-
-// __dom.canvasTaint(state): the bitmap no longer origin-clean.
-fn canvas_taint(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    if let Some(h) = handle(scope, args.get(0)) {
-        h.taint();
-    }
 }
 
 // What `canvasTransform` does to the current transformation matrix.
