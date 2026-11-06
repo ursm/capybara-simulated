@@ -203,14 +203,14 @@ RSpec.describe 'the session history of each traversable' do
   context 'navigated to a javascript: URL by another window' do
     it 'runs it in a window of the same origin as a task of its own' do
       session.execute_script("window.w = window.open('/a')")
-      expect(read("(() => { w.location = 'javascript:document.title = \"ran\"'; return w.document.title; })()")).to eq('a')
+      expect(read("(() => { w.location = 'javascript:void(document.title = \"ran\")'; return w.document.title; })()")).to eq('a')
       expect(read('[w.document.title, w.location.pathname, w.history.length]')).to eq(['ran', '/a', 1])
     end
 
     # (…HTML "navigate to a javascript: URL": its initiator's origin against the active document's as its task runs)
     it 'runs none in a window of another origin' do
       session.execute_script("window.w = window.open('http://b.test/far')")
-      session.execute_script("w.location = 'javascript:document.title = \"ran\"'")
+      session.execute_script("w.location = 'javascript:void(document.title = \"ran\")'")
       session.within_window(session.windows.last) do
         expect(session).to have_title('far')
       end
@@ -220,9 +220,9 @@ RSpec.describe 'the session history of each traversable' do
     # longer navigationId, then return")
     it 'runs none a later navigation replaced, and replaces an earlier one' do
       session.execute_script("window.w = window.open('/a')")
-      session.execute_script("w.location = 'javascript:document.title = \"ran\"'; w.location = '/c'")
+      session.execute_script("w.location = 'javascript:void(document.title = \"ran\")'; w.location = '/c'")
       expect(read('[w.document.title, w.location.pathname]')).to eq(['c', '/c'])
-      session.execute_script("w.location = '/d'; w.location = 'javascript:document.title = \"ran\"'")
+      session.execute_script("w.location = '/d'; w.location = 'javascript:void(document.title = \"ran\")'")
       expect(read('[w.document.title, w.location.pathname]')).to eq(['ran', '/c'])
       expect(hits('/d')).to eq(0)
     end

@@ -141,7 +141,7 @@ RSpec.describe 'a navigation into the scope of an activating service worker', :e
 
     it "makes none a `javascript:` URL's navigation replaced" do
       session.execute_script("location.href = '/sw/first'")
-      session.execute_script("location.href = 'javascript:document.title = \"JS\"'")
+      session.execute_script("location.href = 'javascript:void(document.title = \"JS\")'")
       expect(session).to have_title('JS')
       activate!
       expect(session.has_title?('FROM-SW', wait: 0.5)).to be(false)

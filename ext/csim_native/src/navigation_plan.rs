@@ -45,6 +45,9 @@ pub(crate) struct Location {
     // …the number of the navigation it is, its navigable's ongoing one as it was planned (HTML "navigate" step 20): the
     // one record of it, which the host goes on with as it takes it (browser.rb `navigate_top_level`).
     ongoing: u64,
+    // …and, a `javascript:` URL's, the string its script returned: the markup of the document that replaces the one it ran
+    // in, at that document's URL, no request made of it (`planJavascriptDocument`).
+    document: Option<String>,
 }
 
 // A form's submission a frame's document made that navigates the top-level document (its target `_top`, or a `_parent`
@@ -308,6 +311,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "planReload", plan_reload, context_id);
     register(scope, ns, "planJavascript", plan_javascript, context_id);
     register(scope, ns, "javascriptOngoing", javascript_ongoing, context_id);
+    register(scope, ns, "planJavascriptDocument", plan_javascript_document, context_id);
     register(scope, ns, "navigationBegun", navigation_begun, context_id);
     register(scope, ns, "takeLocation", take_location, context_id);
     register(scope, ns, "takeReload", take_reload, context_id);
@@ -491,7 +495,7 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     // `abort_document`)
     crate::frame_navigation::abort_document(arena, cid);
     let plan = &mut arena.navigation_plan;
-    plan.own.location = Some(Location { url, replace, initiator, activated, blob, ongoing });
+    plan.own.location = Some(Location { url, replace, initiator, activated, blob, ongoing, document: None });
     plan.own.planned = next_planned();
 }
 // __dom.planJavascript() -> a navigation of the calling realm's navigable — its page's, a window's of this isolate, a
@@ -537,6 +541,24 @@ fn javascript_ongoing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let of = if args.get(1).is_int32() { args.get(1).int32_value(scope).unwrap_or(cid) } else { cid };
     rv.set_bool(navigation_ongoing_of(realm(scope, cid), of, at));
 }
+// __dom.planJavascriptDocument(markup, url, at): the string a top-level document's `javascript:` URL's script returned, begun
+// at `at`, planned as the document that replaces it at `url`, its own — HTML "navigate to a javascript: URL" finalizing its
+// navigation with a new entry in place of the active one, on the traversal queue, so off the stack of the script that made
+// it. None where a navigation begun since ended it ("ongoing navigation"), nor beside a traversal or a reload planned, whose
+// document is the one its navigable goes on to make either way (url-parse.js `evaluateJavascriptURL`).
+fn plan_javascript_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let markup = args.get(0).to_rust_string_lossy(scope);
+    let url = args.get(1).to_rust_string_lossy(scope);
+    let at = args.get(2).number_value(scope).map_or(0, |n| n as u64);
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    if !navigation_ongoing_of(arena, cid, at) || arena.navigation_plan.traversal_planned() || arena.navigation_plan.own.reload.is_some() {
+        return;
+    }
+    let plan = &mut arena.navigation_plan;
+    plan.own.location = Some(Location { url, replace: true, initiator: None, activated: false, blob: None, ongoing: at, document: Some(markup) });
+    plan.own.planned = next_planned();
+}
 // __dom.planReload(activated, blob): the calling realm's document's reload planned, superseding what it planned before —
 // `activated` whether its window had transient activation as it began, `blob` its document's blob where that is at a
 // `blob:` URL, else undefined (`Reload`). None while a traversal is planned. (…which ends a location navigation or a
@@ -553,9 +575,9 @@ fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     plan.own.reload = Some(Reload { activated, blob, mark: None });
     plan.own.planned = next_planned();
 }
-// __dom.takeLocation() -> [url, replace, initiatorRealm, referrerSource, referrerPolicy, activated, blob, ongoing] of the
-// location navigation planned (initiatorRealm and the Referer null for the document's own, blob undefined for none), which
-// it plans no more — or null.
+// __dom.takeLocation() -> [url, replace, initiatorRealm, referrerSource, referrerPolicy, activated, blob, ongoing, document]
+// of the location navigation planned (initiatorRealm and the Referer null for the document's own, blob undefined for none,
+// document null for all but a `javascript:` URL's), which it plans no more — or null.
 fn take_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Some(l) = plan(scope, &args).own.location.take() else { return };
@@ -585,6 +607,7 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
         v8::Boolean::new(scope, l.activated).into(),
         l.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
         v8::Number::new(scope, l.ongoing as f64).into(),
+        text_or_null(scope, l.document),
     ]
 }
 // __dom.windowsPlanned() -> whether a window `window.open` made in this isolate has a navigation of its own planned —
@@ -604,8 +627,8 @@ fn windows_planned(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallback
     rv.set_bool(false);
 }
 // __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
-// in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]`, `[realm, "reload",
-// activated, blob]` and `[realm, "traverse", step, url, referrer, body, contentType]` (`Traversal`) — after the
+// in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]` — `"javascript"` for a
+// `javascript:` URL's document (`planJavascriptDocument`) — `[realm, "reload", activated, blob]` and `[realm, "traverse", step, url, referrer, body, contentType]` (`Traversal`) — after the
 // traversals that move a frame of one, whose tasks ran before them: `[realm, "traverse_navigables", step,
 // navigable, entry, same document, …]` (`FrameTraversal`). A window closed is stepped no more,
 // and plans none the host takes — nor one closing, whose navigation the task its close queued aborts (HTML "destroy a
@@ -666,7 +689,10 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     for (_, w, own) in taken {
         let realm = v8::Integer::new(scope, w).into();
         let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload, own.traversal) {
-            (Some(l), ..) => [vec![realm, v8::String::new(scope, "location").unwrap().into()], location_items(scope, l)].concat(),
+            (Some(l), ..) => {
+                let kind = if l.document.is_some() { "javascript" } else { "location" };
+                [vec![realm, v8::String::new(scope, kind).unwrap().into()], location_items(scope, l)].concat()
+            }
             (None, Some(r), _) => vec![
                 realm,
                 v8::String::new(scope, "reload").unwrap().into(),

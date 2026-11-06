@@ -1279,6 +1279,11 @@ impl SessionHistory {
     fn set_opener_policy(&self, name: String) {
         self.lock().opener_policy = crate::coop::Value::named(&name);
     }
+    // #opener_policy -> the name of its document's: what a `javascript:` URL's document keeps (browser.rb
+    // `commit_javascript_document`).
+    fn opener_policy(&self) -> &'static str {
+        self.lock().opener_policy.name()
+    }
     // #commit_opener_policy(name, response origin, carried) { [origin, initial about:blank] } -> [switch, isolated]: the
     // document a navigation of it makes, of that policy, is its document's from here on, and what that does to its browsing
     // context group (coop.rs `commit_verdict`), the block giving the facts of the document it leaves.
@@ -1445,6 +1450,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("by_web_content=", method!(SessionHistory::set_by_web_content, 1))?;
     class.define_method("popup_sandbox=", method!(SessionHistory::set_popup_sandbox, 1))?;
     class.define_method("opener_policy=", method!(SessionHistory::set_opener_policy, 1))?;
+    class.define_method("opener_policy", method!(SessionHistory::opener_policy, 0))?;
     class.define_method("loopback_stand_in=", method!(SessionHistory::set_loopback_stand_in, 1))?;
     class.define_method("commit_opener_policy", method!(SessionHistory::commit_opener_policy, 3))?;
     class.define_method("inherited_opener_policy", method!(SessionHistory::inherited_opener_policy, 0))?;

@@ -100,6 +100,13 @@ IN_SCOPE_NOTES = {
     '(`assert_not_equals(openee.tiedToGlobalObject, openee.document)`), the Window kept. The driver keeps the Window and ' \
     'renews the Document object in place (v8_runtime.rb `reuse_window_realm`): one document per realm. Its other subtest ' \
     'holds text whatwg/html #6530 withdrew and is out of scope (wpt_out_of_scope.yml).',
+  'html/browsers/browsing-the-web/navigating-across-documents/javascript-url-referrer.window.js' =>
+    'IN SCOPE, against the test: it asserts that a `javascript:` URL\'s document has the referrer of the one it replaces ' \
+    '(`assert_equals(referrer, originalReferrer, ...)`). Current HTML "evaluate a javascript: URL" makes its navigation ' \
+    'params with "request: null", and "create and initialize a Document object" sets a referrer only "If ' \
+    'navigationParams\'s request is non-null"; the old referrer goes to the new entry\'s document state ("request ' \
+    'referrer: oldDocState\'s request referrer"), what a reload sends. So the document\'s is the empty string. Chrome ' \
+    'keeps it, Firefox has none (measured 2026-11-07). Its `no-referrer` subtest passes either way.',
   'url/javascript-urls.window.js' =>
     'IN SCOPE, against the test: it asserts that both of two `javascript:` URL navigations begun in one task run ' \
     '("Property is ... once the navigation happened" after a second `anchor.click()` to `javascript:globalThis.verify()`). ' \

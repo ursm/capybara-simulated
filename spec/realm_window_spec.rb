@@ -387,9 +387,9 @@ RSpec.describe 'a window made in its opener\'s isolate' do
   it 'runs a javascript: URL its opener navigates it to in place of the navigation planned before it, none planned after' do
     session.execute_script("window.w = window.open(); w.location = '/second';")
     session.within_window(session.windows.last) { expect(session).to have_css('#second') }
-    session.execute_script("w.location = '/third'; w.location = 'javascript:document.title = \"ran\"'")
+    session.execute_script("w.location = '/third'; w.location = 'javascript:void(document.title = \"ran\")'")
     expect(session.evaluate_script('[w.document.title, w.location.pathname]')).to eq(['ran', '/second'])
-    session.execute_script("w.location = 'javascript:document.title = \"again\"'; w.location = '/third'")
+    session.execute_script("w.location = 'javascript:void(document.title = \"again\")'; w.location = '/third'")
     session.within_window(session.windows.last) { expect(session).to have_css('#third') }
     expect(session.evaluate_script('w.document.title')).to eq('third')
   end
@@ -854,7 +854,7 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
           <!doctype html><html><head><meta charset="utf-8"><title>main</title></head><body>
             <p id="main">MAIN</p>
             <form action="http://a.test/landed" target="w"><button>form</button></form>
-            <form action="javascript:document.title = 'by script'" target="w"><button>script action</button></form>
+            <form action="javascript:void(document.title = 'by script')" target="w"><button>script action</button></form>
             <iframe src="http://b.test/frame"#{sandbox}></iframe>
             <iframe src="http://a.test/frame#{'?opens' if frame_opens}"#{sandbox}></iframe>
             <script>#{open_w unless frame_opens}</script>
@@ -868,7 +868,7 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
             <button id="url">url</button>
             <button id="inline" onclick="open('', 'w').location = 'http://a.test/landed'">inline</button>
             <form action="http://a.test/landed" target="w"><button>form</button></form>
-            <form action="javascript:document.title = 'by script'" target="w"><button>script action</button></form>
+            <form action="javascript:void(document.title = 'by script')" target="w"><button>script action</button></form>
             <form id="post" method="post" action="http://a.test/posted" target="w"><input name="q" value="v"></form>
             <button id="post-away">post away</button>
             <script>

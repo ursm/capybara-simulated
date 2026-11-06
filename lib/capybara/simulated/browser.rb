@@ -10938,8 +10938,9 @@ module Capybara
       # document that began it where that is another's than the page's with the Referer it sends, its source's
       # activation, a `blob:` one's blob as it began (location.js `dispatchNav`).
       def consume_pending_location
-        url, replace, initiator_realm, source, policy, activated, blob, ongoing = @runtime.call('__csimTakeLocation')
+        url, replace, initiator_realm, source, policy, activated, blob, ongoing, document = @runtime.call('__csimTakeLocation')
         return unless url
+        return commit_javascript_document(url, document, ongoing.to_i) if document
 
         # The page's `location` navigates the page, whichever realm's script set it — a frame's own is its container's to
         # navigate (location.js `dispatchNav`), an entered one's too — each judged against the document it navigates, by
@@ -10951,6 +10952,41 @@ module Capybara
         in_top_context do
           navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i)
         end
+      end
+      # The document a `javascript:` URL's string result makes of the page (HTML "navigate to a javascript: URL", navigation_plan.rs
+      # `planJavascriptDocument`) — its realm's task over, the realm free to go — unasked, as no such navigation "checks if
+      # unloading is canceled": at the URL of the document it replaces, in a new entry in place of that one's, the request
+      # referrer the entry's document state had kept, and no resource: a reload's a GET (Chrome re-POSTs). Of that document's
+      # origin, policy container and opener policy, no browsing context group left; its own referrer none, of no request
+      # (Chrome keeps the last, Firefox none), its classic history state none (Chrome keeps it, Firefox none).
+      JAVASCRIPT_DOCUMENT_ENTRY_KEEPS = %i[referer referrer_policy referrer origin cross_site opener_policy].freeze
+      private def commit_javascript_document(url, markup, ongoing)
+        invalidate_find_cache
+        # (…what is due on the page run first, as before any navigation: `flush_outgoing_page_init`; a navigation of its the
+        # one that goes on, which ends this one)
+        flush_outgoing_page_init if @timers_active
+        return restore_flushed_nav_intents unless @session_history.navigation_ongoing?(0, ongoing)
+
+        if (id = @session_history.active(0))
+          record_history({url: url}.merge(@session_history.entry(id).slice(*JAVASCRIPT_DOCUMENT_ENTRY_KEEPS)), replace: true)
+        end
+        inherit_creator(origin: document_origin(0), base: @runtime.realm_direct_call(0, '__csimBaseURL')) if about_blank_url?(url)
+        opaque  = document_origin_opaque?(0) == true
+        headers = javascript_document_headers(0, url, @last_response_headers)
+        self.page_url = url
+        record_response(200, headers)
+        @current_referer = ''
+        boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy)
+      end
+      # …the response it is made of, HTML's: `text/html;charset=utf-8` and, given here as its headers, the policy container of
+      # realm `realm`'s document: the Content-Security-Policy its own response had (`headers`), the referrer policy it has now.
+      private def javascript_document_headers(realm, url, headers)
+        _, csp,  = Native.document_params(headers, url, @loopback_stand_in)
+        policy   = @runtime.realm_direct_call(realm, '__csimDocumentReferrerPolicy').to_s
+        response = {'content-type' => 'text/html;charset=utf-8'}
+        response['content-security-policy'] = csp if csp
+        response['referrer-policy'] = policy unless policy.empty?
+        response
       end
       # The navigations of frames planned for the host — a frame's own `location`'s, a link's targeting one — taken at the
       # event loop's navigation turn, in the order they were planned (frame_navigation.rs `takeFrameNavigations`): each its URL, whether it
@@ -11034,6 +11070,8 @@ module Capybara
             next run_queued_before_reload(realm_id, plan[0]) if kind == 'queued'
             # (…a traversal that keeps the window's document, moving a frame of it, applied as the page's frames' are)
             next traverse_window_navigables(realm_id, *plan) if kind == 'traverse_navigables'
+            # (…a `javascript:` URL's document, its URL, the navigation it is and its markup: `planJavascriptDocument`)
+            next commit_window_javascript_document(realm_id, *plan.values_at(0, 7, 8)) if kind == 'javascript'
 
             navigate_window_realm(realm_id, kind, plan)
           rescue StandardError => e
@@ -11188,9 +11226,23 @@ module Capybara
           moved = made.merge(entry: entry, content_type: ctype, blob: blob && blob.merge(type: ctype))
           return @driver.move_window_to_new_group(self, realm_id, url, response || [200, {'content-type' => ctype.to_s}], body, moved)
         end
-        # (…the window's initial about:blank's realm the one a document of its origin is loaded into, its Window kept — and
-        # its Document object, renewed)
-        keeps = kind == 'location' && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
+        new_id = replace_window_document(realm_id, url, body, ctype, entry, made, reuses: kind == 'location')
+        return unless new_id
+
+        @runtime.window_realm_meta[new_id][:response] = response || ABOUT_BLANK_RESPONSE
+        history.update(history.active(0), {opener_policy: opener_policy}) if local && history
+        # (…a traversal's document given the state its entry's controls were left in, as the page's is: `restore_form_state`)
+        if kind == 'traverse' && (state = history&.entry(history.active(0))&.fetch(:form_state, nil))
+          @runtime.realm_call(new_id, '__csimRestoreFormState', state)
+        end
+        retarget_scope(realm_id, new_id)
+        new_id
+      end
+      # …the document it makes replacing the one it is at, the window's next document's realm returned: `entry` how its entry
+      # is made, `made` what the document is of. (…`reuses` where its initial about:blank's realm is the one a document of its
+      # origin is loaded into, its Window kept — and its Document object, renewed: a location's, a `javascript:` URL's)
+      private def replace_window_document(realm_id, url, body, ctype, entry, made, reuses:)
+        keeps = reuses && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
         # (…the document it replaces unloaded first, its frames' with it — HTML "unload a document and its descendants", as
         # the page's is: `boot_response_into_ctx` — while its realms still live, an initial about:blank's too, its renewed
         # Document visible all the same)
@@ -11201,23 +11253,35 @@ module Capybara
         if (id = history&.active(0)) && (state = @runtime.realm_call(realm_id, '__csimCaptureFormState'))
           history.update(id, {form_state: state})
         end
-        new_id =
-          if keeps
-            @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
-          else
-            made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
-            # (…its name the one the window's next document keeps: window.js `__csimWindowNameFor`)
-            made[:window_name] = @runtime.realm_call(realm_id, '__csimWindowNameFor', url.to_s, made[:csp], *made[:doc_origin])
-            @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
-          end
+        return @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made) if keeps
+
+        made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
+        # (…its name the one the window's next document keeps: window.js `__csimWindowNameFor`)
+        made[:window_name] = @runtime.realm_call(realm_id, '__csimWindowNameFor', url.to_s, made[:csp], *made[:doc_origin])
+        @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
+      end
+      # The document a `javascript:` URL's string result makes of window realm `realm_id` (`commit_javascript_document`, the
+      # page's), `ongoing` the navigation it is. (…an about:blank one's origins and base URL the document's: `window_about_blank`)
+      private def commit_window_javascript_document(realm_id, url, ongoing, markup)
+        invalidate_find_cache
+        history = window_history(realm_id)
+        return unless history&.navigation_ongoing?(0, ongoing.to_i)
+
+        given   = @runtime.window_realm_meta[realm_id]&.fetch(:response, nil) || ABOUT_BLANK_RESPONSE
+        headers = javascript_document_headers(realm_id, url, given[1])
+        _, csp, referrer_policy = Native.document_params(headers, url, @loopback_stand_in)
+        made = {csp: csp, referrer_policy: referrer_policy}
+        kept = history.active(0)&.then {|id| history.entry(id).slice(*JAVASCRIPT_DOCUMENT_ENTRY_KEEPS) }
+        if about_blank_url?(url)
+          made.merge!(window_about_blank(realm_id, 'reload', realm_id, nil, nil, nil, url).except(:referrer, :referrer_policy))
+        elsif document_origin_opaque?(realm_id)
+          made[:doc_origin] = 'null'
+        end
+        new_id = replace_window_document(realm_id, url, markup, 'text/html;charset=utf-8', ['replace', nil, nil], made, reuses: true)
         return unless new_id
 
-        @runtime.window_realm_meta[new_id][:response] = response || ABOUT_BLANK_RESPONSE
-        history.update(history.active(0), {opener_policy: opener_policy}) if local && history
-        # (…a traversal's document given the state its entry's controls were left in, as the page's is: `restore_form_state`)
-        if kind == 'traverse' && (state = history&.entry(history.active(0))&.fetch(:form_state, nil))
-          @runtime.realm_call(new_id, '__csimRestoreFormState', state)
-        end
+        @runtime.window_realm_meta[new_id][:response] = [200, headers]
+        history.update(history.active(0), kept) if kept
         retarget_scope(realm_id, new_id)
         new_id
       end

@@ -296,6 +296,7 @@ const HARNESS_ONLY_TREES = ['css/css-flexbox'];
 // checks the IDL says, held against the page's — what the bindings generated from the same IDL must answer.
 const SUPPORT_TREES = [
   'common',
+  'html/browsers/browsing-the-web/resources', // navigating-across-documents' `../resources/helpers.js`
   'html/canvas/resources',
   'images',
   'fonts',

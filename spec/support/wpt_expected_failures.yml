@@ -2909,28 +2909,13 @@ html/browsers/browsing-the-web/navigating-across-documents/initial-empty-documen
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-204-pushState-replaceState.html:
 - history.pushState
 - history.replaceState
-html/browsers/browsing-the-web/navigating-across-documents/javascript-url-load-as-html.xhtml:
-- 'javascript: URL navigation to a string must create a HTML document using the correct
-  properties'
-html/browsers/browsing-the-web/navigating-across-documents/javascript-url-no-beforeunload.window.js:
-- 'Navigating an iframe via location.href to a javascript: URL must not fire beforeunload:
-  string completion'
-- 'Navigating an iframe via location.href to a javascript: URL must not fire beforeunload:
-  undefined completion'
-- 'Navigating an iframe via src="" to a javascript: URL after insertion must not fire
-  beforeunload: string completion'
-- 'Navigating an iframe via src="" to a javascript: URL after insertion must not fire
-  beforeunload: undefined completion'
-- 'Navigating an opened window via location.href to a javascript: URL must not fire
-  beforeunload: string completion'
-- 'Navigating an opened window via location.href to a javascript: URL must not fire
-  beforeunload: undefined completion'
-- 'Navigating an opened window with an iframe via location.href to a javascript: URL
-  must not fire beforeunload on the iframe: string completion'
-- 'Navigating an opened window with an iframe via location.href to a javascript: URL
-  must not fire beforeunload on the iframe: undefined completion'
+# IN SCOPE, against the test: it asserts that a `javascript:` URL's document has the referrer of the one it replaces
+# (`assert_equals(referrer, originalReferrer, ...)`). Current HTML "evaluate a javascript: URL" makes its navigation
+# params with "request: null", and "create and initialize a Document object" sets a referrer only "If
+# navigationParams's request is non-null"; the old referrer goes to the new entry's document state ("request
+# referrer: oldDocState's request referrer"), what a reload sends. So the document's is the empty string. Chrome
+# keeps it, Firefox has none (measured 2026-11-07). Its `no-referrer` subtest passes either way.
 html/browsers/browsing-the-web/navigating-across-documents/javascript-url-referrer.window.js:
-- no-referrer referrer policy used to create the starting page
 - origin referrer policy used to create the starting page
 - unsafe-url referrer policy used to create the starting page
 html/browsers/browsing-the-web/navigating-across-documents/javascript-url-security-check-failure.sub.html:
@@ -2952,14 +2937,6 @@ html/browsers/browsing-the-web/navigating-across-documents/multiple-globals/cont
 html/browsers/browsing-the-web/navigating-across-documents/navigate_too_many_calls.optional.html:
 - fragment navigations through navigate are ignored after too many calls
 - rate-limited navigations cancel pending lazy-load iframe navigations
-html/browsers/browsing-the-web/navigating-across-documents/navigation-unload-cross-origin.sub.window.js:
-- navigation-unload-cross-origin
-html/browsers/browsing-the-web/navigating-across-documents/navigation-unload-data-url.window.js:
-- navigation-unload-data-url
-html/browsers/browsing-the-web/navigating-across-documents/navigation-unload-javascript-url.window.js:
-- navigation-unload-javascript-url
-html/browsers/browsing-the-web/navigating-across-documents/navigation-unload-same-origin.window.js:
-- navigation-unload-same-origin
 html/browsers/browsing-the-web/navigating-across-documents/refresh/after-same-document-navigation.html:
 - Referrer from Refresh after Same-Document Navigation
 html/browsers/browsing-the-web/navigating-across-documents/refresh/navigate.window.js:
@@ -4025,34 +4002,6 @@ html/cross-origin-opener-policy/coep-blob-popup.https.html:
 - 'COOP+COEP blob URL popup: <a rel=noopener>'
 - 'COOP+COEP blob URL popup: <a>'
 - 'COOP+COEP blob URL popup: window.open()'
-html/cross-origin-opener-policy/javascript-url.https.html:
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- 'navigation: SAME_ORIGIN; parentCOOP: same-origin-allow-popups; childCOOP: same-origin'
-- 'navigation: SAME_ORIGIN; parentCOOP: same-origin-allow-popups; childCOOP: same-origin-allow-popups'
-- 'navigation: SAME_ORIGIN; parentCOOP: same-origin-allow-popups; childCOOP: unsafe-none'
-- 'navigation: SAME_ORIGIN; parentCOOP: same-origin; childCOOP: same-origin'
-- 'navigation: SAME_ORIGIN; parentCOOP: same-origin; childCOOP: same-origin-allow-popups'
-- 'navigation: SAME_ORIGIN; parentCOOP: same-origin; childCOOP: unsafe-none'
-- 'navigation: SAME_ORIGIN; parentCOOP: unsafe-none; childCOOP: same-origin'
-- 'navigation: SAME_ORIGIN; parentCOOP: unsafe-none; childCOOP: same-origin-allow-popups'
-- 'navigation: SAME_ORIGIN; parentCOOP: unsafe-none; childCOOP: unsafe-none'
-- 'navigation: SAME_SITE; parentCOOP: same-origin-allow-popups; childCOOP: same-origin'
-- 'navigation: SAME_SITE; parentCOOP: same-origin-allow-popups; childCOOP: same-origin-allow-popups'
-- 'navigation: SAME_SITE; parentCOOP: same-origin-allow-popups; childCOOP: unsafe-none'
-- 'navigation: SAME_SITE; parentCOOP: same-origin; childCOOP: same-origin'
-- 'navigation: SAME_SITE; parentCOOP: same-origin; childCOOP: same-origin-allow-popups'
-- 'navigation: SAME_SITE; parentCOOP: same-origin; childCOOP: unsafe-none'
-- 'navigation: SAME_SITE; parentCOOP: unsafe-none; childCOOP: same-origin'
-- 'navigation: SAME_SITE; parentCOOP: unsafe-none; childCOOP: same-origin-allow-popups'
-- 'navigation: SAME_SITE; parentCOOP: unsafe-none; childCOOP: unsafe-none'
 html/dom/elements/global-attributes/dir-auto-dynamic-simple-dataChange.html:
 - "== html/dom/elements/global-attributes/dir-auto-dynamic-simple-ref.html (never
   ready to capture)"
