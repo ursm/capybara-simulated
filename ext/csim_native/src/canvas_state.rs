@@ -288,6 +288,12 @@ impl CanvasStateHandle {
     pub(crate) fn taint(&self) {
         self.origin_clean.set(false);
     }
+    pub(crate) fn origin_clean(&self) -> bool {
+        self.origin_clean.get()
+    }
+    pub(crate) fn color_space(&self) -> &'static str {
+        self.settings.color_space()
+    }
     // Whether its bitmap holds Display P3 values.
     pub(crate) fn display_p3(&self) -> bool {
         self.settings.color_space == DISPLAY_P3
@@ -472,7 +478,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasOriginClean", canvas_origin_clean, context_id);
     crate::dom::register(scope, ns, "canvasTaint", canvas_taint, context_id);
     crate::dom::register(scope, ns, "canvasBitmap", canvas_bitmap, context_id);
-    crate::dom::register(scope, ns, "canvasDrawableBitmap", canvas_drawable_bitmap, context_id);
     crate::dom::register(scope, ns, "canvasTakeBitmap", canvas_take_bitmap, context_id);
     crate::dom::register(scope, ns, "canvasResize", canvas_resize, context_id);
 }
@@ -484,15 +489,6 @@ fn canvas_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     // SAFETY: the handle lives while its object, the argument, does.
     let bitmap = unsafe { &*(h.as_ref() as *const CanvasStateHandle) }.bitmap(scope);
     if bitmap.is_undefined() { rv.set_null() } else { rv.set(bitmap) }
-}
-// __dom.canvasDrawableBitmap(state) -> the context's bitmap, made now where it has none — null for one of no area.
-fn canvas_drawable_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(h) = handle(scope, args.get(0)) else { return rv.set_null() };
-    match h.drawable_bitmap(scope) {
-        Ok(Some(bitmap)) => rv.set(bitmap),
-        Ok(None) => rv.set_null(),
-        Err(crate::canvas::Oom) => crate::canvas::throw_oom(scope),
-    }
 }
 // __dom.canvasTakeBitmap(state) -> the context's bitmap, which it has none of from now on (`transferToImageBitmap`), or
 // null where it had none.

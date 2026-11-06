@@ -864,7 +864,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasConvert", canvas_convert, context_id);
     crate::dom::register(scope, ns, "pixelsUnorm8", pixels_unorm8, context_id);
     crate::dom::register(scope, ns, "pixelsFloat16", pixels_float16, context_id);
-    crate::dom::register(scope, ns, "canvasBlit", canvas_blit, context_id);
+    crate::dom::register(scope, ns, "canvasGetImageData", canvas_get_image_data, context_id);
+    crate::dom::register(scope, ns, "canvasPutImageData", canvas_put_image_data, context_id);
     crate::dom::register(scope, ns, "bitmapPixels", bitmap_pixels_op, context_id);
 }
 
@@ -1203,11 +1204,15 @@ fn half_bits(value: f64) -> u16 {
     }
     sign | (((exponent + 15) as u16) << 10) | (significand as u16 - 1024)
 }
-// __dom.pixelsUnorm8(float16Components) -> a new ArrayBuffer of each component scaled to a byte (`byte(v * 255)`) — what
-// `Uint8ClampedArray.from(data, (v) => v * 255)` makes, at no call per component.
+// "rgba-float16" components, each scaled to a byte (`byte(v * 255)`): what `Uint8ClampedArray.from(data, (v) => v * 255)`
+// makes, at no call per component.
+fn unorm8(halves: &[u8]) -> Vec<u8> {
+    halves.chunks_exact(2).map(|h| byte(half_value(u16::from_ne_bytes([h[0], h[1]])) * 255.0)).collect()
+}
+// __dom.pixelsUnorm8(float16Components) -> a new ArrayBuffer of them (`unorm8`).
 fn pixels_unorm8(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let halves = bytes_read(args.get(0), None).unwrap_or_default();
-    let bytes: Vec<u8> = halves.chunks_exact(2).map(|h| byte(half_value(u16::from_ne_bytes([h[0], h[1]])) * 255.0)).collect();
+    let bytes = unorm8(&halves);
     rv.set(crate::webcrypto::array_buffer(scope, bytes));
 }
 // __dom.pixelsFloat16(bytes) -> a new ArrayBuffer of each byte over 255 as a half (`half_bits(v / 255)`) — what
@@ -1220,12 +1225,16 @@ fn pixels_float16(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 
 fn canvas_convert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (from, to) = (args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
+    if let Some(data) = bytes_mut(args.get(0)) {
+        convert_spaces(data, &from, &to);
+    }
+}
+fn convert_spaces(data: &mut [u8], from: &str, to: &str) {
     if from == to {
         return;
     }
-    let Some(data) = bytes_mut(args.get(0)) else { return };
-    let (from_base, from_linear) = from.strip_suffix("-linear").map_or((from.as_str(), false), |b| (b, true));
-    let (to_base, to_linear) = to.strip_suffix("-linear").map_or((to.as_str(), false), |b| (b, true));
+    let (from_base, from_linear) = from.strip_suffix("-linear").map_or((from, false), |b| (b, true));
+    let (to_base, to_linear) = to.strip_suffix("-linear").map_or((to, false), |b| (b, true));
     let transfer = |data: &mut [u8], f: fn(f64) -> f64| {
         for px in data.chunks_exact_mut(4) {
             for c in &mut px[..3] {
@@ -1244,19 +1253,111 @@ fn canvas_convert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 
-// __dom.canvasBlit(src, dst, geometry): `[srcW, srcH, sx, sy, sw, sh, dstW, dstH, dx, dy, dw, dh]` — the `sw` × `sh`
-// rectangle at (sx, sy) of `src` copied over (dx, dy) of `dst`, scaled to `dw` × `dh` nearest-neighbour, what falls
-// outside either left alone. What getImageData / putImageData move.
-fn canvas_blit(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let g = crate::dom::f64_arg(args.get(2)).to_vec();
-    if g.len() < 12 {
-        return;
+// A rectangle `[x, y, w, h]` with a negative width or height moved rather than mirrored: HTML's getImageData (by way of
+// "initialize an ImageData", the magnitudes) and "put pixels from an ImageData onto a bitmap".
+fn normalized([mut x, mut y, mut w, mut h]: [f64; 4]) -> [f64; 4] {
+    if w < 0.0 {
+        (x, w) = (x + w, -w);
     }
-    let Some(src) = bytes_read(args.get(0), bytes_span(args.get(1))) else { return };
-    let Some(dst) = bytes_mut(args.get(1)) else { return };
-    blit(&src, dst, g[..12].try_into().unwrap());
+    if h < 0.0 {
+        (y, h) = (y + h, -h);
+    }
+    [x, y, w, h]
 }
 
+// The `w` × `h` rectangle at (sx, sy) of `src` copied to (dx, dy) of `dst`, whole rows at a time, what falls outside
+// either left alone. Each buffer is `[width, height]` of RGBA; nothing for one shorter than that.
+fn copy_rect(src: &[u8], src_size: [i64; 2], [sx, sy, w, h]: [i64; 4], dst: &mut [u8], dst_size: [i64; 2], [dx, dy]: [i64; 2]) {
+    if (src.len() as i64) < src_size[0] * src_size[1] * 4 || (dst.len() as i64) < dst_size[0] * dst_size[1] * 4 {
+        return;
+    }
+    let (off_x, off_y) = (dx - sx, dy - sy);
+    let (x0, x1) = (sx.max(0).max(-off_x), (sx + w).min(src_size[0]).min(dst_size[0] - off_x));
+    let (y0, y1) = (sy.max(0).max(-off_y), (sy + h).min(src_size[1]).min(dst_size[1] - off_y));
+    if x0 >= x1 || y0 >= y1 {
+        return;
+    }
+    let bytes = ((x1 - x0) * 4) as usize;
+    for y in y0..y1 {
+        let from = ((y * src_size[0] + x0) * 4) as usize;
+        let to = (((y + off_y) * dst_size[0] + x0 + off_x) * 4) as usize;
+        dst[to..to + bytes].copy_from_slice(&src[from..from + bytes]);
+    }
+}
+
+// Why `canvasGetImageData` refuses: HTML's order, an IndexSizeError for no area, a SecurityError for a bitmap that is not
+// origin-clean, then "initialize an ImageData"'s RangeError, for a pixel array past any (whatwg/html#520): the check is
+// before the attempt, as an absurd size would abort the isolate rather than throw.
+const IMAGE_DATA_NO_AREA: u32 = 1;
+const IMAGE_DATA_TAINTED: u32 = 2;
+const IMAGE_DATA_TOO_LARGE: u32 = 3;
+fn get_image_data_refusal(origin_clean: bool, [w, h]: [f64; 2], component_bytes: f64) -> Option<u32> {
+    if w == 0.0 || h == 0.0 {
+        return Some(IMAGE_DATA_NO_AREA);
+    }
+    if !origin_clean {
+        return Some(IMAGE_DATA_TAINTED);
+    }
+    (w.abs() * h.abs() * 4.0 * component_bytes > crate::canvas_image::MAX_IMAGE_BYTES as f64).then_some(IMAGE_DATA_TOO_LARGE)
+}
+
+// __dom.canvasGetImageData(state, x, y, w, h, componentBytes) -> the rectangle's pixels, RGBA bytes in the context's colour
+// space in a new Uint8ClampedArray of its magnitudes — transparent black outside the bitmap — or why it refuses
+// (`IMAGE_DATA_NO_AREA` …), the bindings' to throw, as the ImageData is theirs to make. `componentBytes` what a component
+// of the pixel format it is to have takes.
+fn canvas_get_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
+    let rect: [f64; 4] = std::array::from_fn(|i| args.get(i as i32 + 1).number_value(scope).unwrap_or(0.0));
+    let component_bytes = args.get(5).number_value(scope).unwrap_or(1.0);
+    if let Some(refusal) = get_image_data_refusal(h.origin_clean(), [rect[2], rect[3]], component_bytes) {
+        return rv.set_uint32(refusal);
+    }
+    let [x, y, w, hgt] = normalized(rect).map(|v| v as i64);
+    let Ok(mut out) = zeroed_bytes((w * hgt * 4) as usize) else { return throw_oom(scope) };
+    let bitmap = h.bitmap(scope);
+    if let Some(bytes) = bytes_read(bitmap, None) {
+        let [cw, ch] = h.size().map(|v| v as i64);
+        copy_rect(&bytes, [cw, ch], [x, y, w, hgt], &mut out, [w, hgt], [0, 0]);
+    }
+    rv.set(crate::dom::u8_clamped_array(scope, out));
+}
+
+// __dom.canvasPutImageData(state, data, float16, colorSpace, width, height, dx, dy, dirtyX, dirtyY, dirtyWidth,
+// dirtyHeight) -> HTML's "put pixels from an ImageData onto a bitmap": `data` its pixel array, in that colour space, of
+// that size and of "rgba-float16" components where `float16`, its dirty rectangle's pixels replacing those at (dx, dy) on
+// the bitmap, in the context's colour space, what falls outside either left alone — whether its buffer was detached, the
+// bindings' to throw for.
+fn canvas_put_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
+    if bytes_span(args.get(1)).is_none() {
+        return rv.set_bool(true);
+    }
+    rv.set_bool(false);
+    let number = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).number_value(scope).unwrap_or(0.0);
+    let image = [number(scope, 4) as i64, number(scope, 5) as i64];
+    let (dx, dy) = (number(scope, 6) as i64, number(scope, 7) as i64);
+    let dirty = [number(scope, 8), number(scope, 9), number(scope, 10), number(scope, 11)];
+    let [x, y, w, hgt] = normalized(dirty).map(|v| v as i64);
+    let bitmap = match h.drawable_bitmap(scope) {
+        Ok(Some(bitmap)) => bitmap,
+        Ok(None) => return,
+        Err(Oom) => return throw_oom(scope),
+    };
+    let from = args.get(3).to_rust_string_lossy(scope);
+    let Some(mut px) = bytes_read(args.get(1), bytes_span(bitmap)) else { return };
+    if args.get(2).is_true() {
+        px = Cow::Owned(unorm8(&px));
+    }
+    if from != h.color_space() {
+        convert_spaces(px.to_mut(), &from, h.color_space());
+    }
+    let Some(dst) = bytes_mut(bitmap) else { return };
+    let [cw, ch] = h.size().map(|v| v as i64);
+    copy_rect(&px, image, [x, y, w, hgt], dst, [cw, ch], [dx + x, dy + y]);
+}
+
+// The `sw` × `sh` rectangle at (sx, sy) of `src` copied over (dx, dy) of `dst`, scaled to `dw` × `dh` nearest-neighbour,
+// what falls outside either left alone.
 fn blit(src: &[u8], dst: &mut [u8], [src_w, src_h, sx, sy, sw, sh, dst_w, dst_h, dx, dy, dw, dh]: [f64; 12]) {
     if src.len() < (src_w * src_h * 4.0) as usize || dst.len() < (dst_w * dst_h * 4.0) as usize {
         return;
@@ -1338,6 +1439,54 @@ fn bitmap_pixels_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A rectangle of pixels copied, each byte its pixel's column, as `blit` at no scale copies it — wherever the two
+    // rectangles lie, off either buffer on any side.
+    #[test]
+    fn copies_a_rectangle_as_a_blit_at_no_scale_does() {
+        let src: Vec<u8> = (0..4 * 3 * 4).map(|i| i as u8 + 1).collect();
+        let cases = [
+            ([0, 0, 4, 3], [0, 0]),
+            ([1, 1, 2, 2], [0, 0]),
+            ([-2, -1, 4, 3], [0, 0]),
+            ([2, 1, 9, 9], [1, 1]),
+            ([0, 0, 4, 3], [-1, -1]),
+            ([0, 0, 4, 3], [3, 4]),
+            ([9, 9, 2, 2], [0, 0]),
+            ([0, 0, 2, 2], [9, 9]),
+            ([0, 0, 0, 2], [0, 0]),
+        ];
+        for ([sx, sy, w, h], [dx, dy]) in cases {
+            let (mut copied, mut blitted) = (vec![0; 5 * 5 * 4], vec![0; 5 * 5 * 4]);
+            copy_rect(&src, [4, 3], [sx, sy, w, h], &mut copied, [5, 5], [dx, dy]);
+            let g = [4.0, 3.0, sx as f64, sy as f64, w as f64, h as f64, 5.0, 5.0, dx as f64, dy as f64, w as f64, h as f64];
+            blit(&src, &mut blitted, g);
+            assert_eq!(copied, blitted, "{sx},{sy} {w}x{h} to {dx},{dy}");
+        }
+        // (…a buffer shorter than its size, a resizable one shrunk: nothing)
+        let mut dst = vec![0; 4];
+        copy_rect(&src[..4], [4, 3], [0, 0, 1, 1], &mut dst, [1, 1], [0, 0]);
+        assert_eq!(dst, vec![0; 4]);
+    }
+
+    // HTML's getImageData refuses no area first, a bitmap not origin-clean next, a size past any array last.
+    #[test]
+    fn get_image_data_refuses_in_html_s_order() {
+        assert_eq!(get_image_data_refusal(true, [1.0, 1.0], 1.0), None);
+        assert_eq!(get_image_data_refusal(true, [-1.0, 1.0], 1.0), None);
+        assert_eq!(get_image_data_refusal(false, [0.0, 1.0], 1.0), Some(IMAGE_DATA_NO_AREA));
+        assert_eq!(get_image_data_refusal(false, [1e9, 1e9], 1.0), Some(IMAGE_DATA_TAINTED));
+        assert_eq!(get_image_data_refusal(true, [1e9, -1e9], 1.0), Some(IMAGE_DATA_TOO_LARGE));
+        // (…a float16 array's bytes twice an 8-bit one's)
+        assert_eq!(get_image_data_refusal(true, [32767.0, 32767.0], 1.0), None);
+        assert_eq!(get_image_data_refusal(true, [32767.0, 32767.0], 2.0), Some(IMAGE_DATA_TOO_LARGE));
+    }
+
+    #[test]
+    fn a_negative_extent_moves_a_rectangle() {
+        assert_eq!(normalized([5.0, 6.0, -2.0, -3.0]), [3.0, 3.0, 2.0, 3.0]);
+        assert_eq!(normalized([5.0, 6.0, 2.0, 3.0]), [5.0, 6.0, 2.0, 3.0]);
+    }
 
     // HTML's early returns of fillRect, clearRect and strokeRect: non-finite first, no area for the two that fill, no
     // width AND no height for the one that strokes.

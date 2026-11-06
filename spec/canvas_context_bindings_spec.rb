@@ -243,4 +243,98 @@ RSpec.describe 'Canvas context bindings' do
     JS
     expect(got).to eq([[255, 0, 0, 255, 0, 0], 255, 0, 255, 0])
   end
+
+  # getImageData and putImageData: a negative extent moves the rectangle, what falls outside the bitmap is transparent
+  # black or left alone, the dirty rectangle clips to the ImageData and lands at (dx + dirtyX, dy + dirtyY), a float16
+  # ImageData's components and a linear one's colour space are converted on the way in, and the array it was given is
+  # left as it was.
+  it 'reads and writes the rectangles HTML says' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const ctx = document.createElement('canvas').getContext('2d');
+        ctx.canvas.width = ctx.canvas.height = 4;
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(1, 1, 1, 1);
+        const alpha = (d) => [...d.data].filter((_, i) => i % 4 === 3);
+        const out = [
+          alpha(ctx.getImageData(2, 2, -2, -2)),
+          alpha(ctx.getImageData(-1, 1, 3, 1)),
+          [ctx.getImageData(2, 2, -2, -2).width, ctx.getImageData(2, 2, -2, -1).height],
+          alpha(ctx.getImageData(3, 3, 3, 1))
+        ];
+
+        ctx.reset();
+        const opaque = new ImageData(new Uint8ClampedArray(2 * 2 * 4).fill(255), 2, 2);
+        ctx.putImageData(opaque, 1, 1, 1, 1, -1, -1);
+        out.push(alpha(ctx.getImageData(0, 0, 4, 4)));
+        ctx.reset();
+        ctx.putImageData(opaque, 1, 1, -5, -5, 7, 7);
+        out.push(alpha(ctx.getImageData(0, 0, 4, 4)));
+        ctx.reset();
+        ctx.putImageData(opaque, 3, 3);
+        ctx.putImageData(opaque, -1, -1);
+        out.push(alpha(ctx.getImageData(0, 0, 4, 4)));
+        ctx.reset();
+        ctx.putImageData(opaque, 0, 0, 5, 5, 1, 1);
+        ctx.putImageData(opaque, 0, 0, 0, 0, 0, 1);
+        out.push(alpha(ctx.getImageData(0, 0, 4, 4)));
+
+        ctx.reset();
+        const half = new Float16Array([0.5, 0, 0, 1]);
+        ctx.putImageData(new ImageData(half, 1, 1, {pixelFormat: 'rgba-float16'}), 0, 0);
+        out.push([...ctx.getImageData(0, 0, 1, 1).data]);
+        const linear = new ImageData(new Uint8ClampedArray([128, 0, 0, 255]), 1, 1, {colorSpace: 'srgb-linear'});
+        ctx.putImageData(linear, 1, 0);
+        out.push([...ctx.getImageData(1, 0, 1, 1).data], [...linear.data]);
+        const back = ctx.getImageData(0, 0, 1, 1, {pixelFormat: 'rgba-float16'});
+        out.push([back.data.constructor.name, back.pixelFormat, back.data[3]]);
+
+        const gone = new ImageData(1, 1);
+        structuredClone(gone.data.buffer, {transfer: [gone.data.buffer]});
+        out.push(#{error('ctx.putImageData(gone, 0, 0)')});
+        return out;
+      })()
+    JS
+    expect(got).to eq([
+      [0, 0, 0, 255],
+      [0, 0, 255],
+      [2, 1],
+      [0, 0, 0],
+      [0, 0, 0, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 0, 0, 0],
+      [255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255],
+      [0] * 16,
+      [128, 0, 0, 255],
+      [188, 0, 0, 255], [128, 0, 0, 255],
+      ['Float16Array', 'rgba-float16', 1],
+      'InvalidStateError'
+    ])
+  end
+
+  # The order of its refusals (HTML's getImageData steps): no area, then a bitmap not origin-clean, then a pixel array too
+  # large to make.
+  it 'refuses a getImageData in the order HTML says' do
+    png = File.binread(File.expand_path('wpt/images/green-1x1.png', __dir__))
+    s = simulated_session(->(env) {
+      if env['PATH_INFO'] == '/a.png'
+        [200, {'content-type' => 'image/png'}, [png]]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']]
+      end
+    })
+    s.visit('/')
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const threw = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+      const ctx = document.createElement('canvas').getContext('2d');
+      const before = [threw(() => ctx.getImageData(0, 0, 0, 1)), threw(() => ctx.getImageData(0, 0, 100000, 100000)), threw(() => ctx.getImageData(0, 0, 1, 1))];
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0);
+        done([...before, threw(() => ctx.getImageData(0, 0, 1, 0)), threw(() => ctx.getImageData(0, 0, 100000, 100000))]);
+      };
+      img.src = 'http://other.test/a.png';
+    JS
+    expect(got).to eq(%w[IndexSizeError RangeError none IndexSizeError SecurityError])
+  end
 end
