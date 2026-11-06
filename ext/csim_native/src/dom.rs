@@ -6000,10 +6000,25 @@ unsafe extern "C" {
 }
 // …and a Uint8ClampedArray of `n` zero bytes, as `new Uint8ClampedArray(n)` makes one: a page that churns through bitmaps
 // has the heap collect for room as it allocates them, so its dead ones go. None where they cannot be had.
-pub(crate) fn zeroed_clamped_array<'s>(scope: &mut v8::PinScope<'s, '_>, n: usize) -> Option<v8::Local<'s, v8::Value>> {
+fn zeroed_buffer<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: usize) -> Option<v8::Local<'s, v8::ArrayBuffer>> {
     // SAFETY: the shim answers a handle of this callback's scope (a `Local`'s representation) or null.
-    let buffer: Option<v8::Local<v8::ArrayBuffer>> = unsafe { std::mem::transmute(csim_array_buffer_maybe_new(scope.as_raw_isolate_ptr(), n)) };
-    v8::Uint8ClampedArray::new(scope, buffer?, 0, n).map(Into::into)
+    unsafe { std::mem::transmute(csim_array_buffer_maybe_new(scope.as_raw_isolate_ptr(), bytes)) }
+}
+pub(crate) fn zeroed_clamped_array<'s>(scope: &mut v8::PinScope<'s, '_>, n: usize) -> Option<v8::Local<'s, v8::Value>> {
+    let buffer = zeroed_buffer(scope, n)?;
+    v8::Uint8ClampedArray::new(scope, buffer, 0, n).map(Into::into)
+}
+// …and a Float16Array of `n` zero components, whichever `Float16Array` the page's global holds.
+pub(crate) fn zeroed_float16_array<'s>(scope: &mut v8::PinScope<'s, '_>, n: usize) -> Option<v8::Local<'s, v8::Value>> {
+    let buffer = zeroed_buffer(scope, n * 2)?;
+    float16_array(scope, buffer, 0, n)
+}
+// …over `n` components of a buffer. (The crate has no conversion of one to a Value, which it is: a handle's the same either
+// way.)
+pub(crate) fn float16_array<'s>(scope: &mut v8::PinScope<'s, '_>, buffer: v8::Local<'_, v8::ArrayBuffer>, offset: usize, n: usize) -> Option<v8::Local<'s, v8::Value>> {
+    let array = v8::Float16Array::new(scope, buffer, offset, n)?;
+    // SAFETY: a Float16Array is a Value, and a `Local` of either is a pointer to the same handle.
+    Some(unsafe { std::mem::transmute::<v8::Local<'s, v8::Float16Array>, v8::Local<'s, v8::Value>>(array) })
 }
 // …of `bytes`: pixels. Undefined where they cannot be had.
 pub(crate) fn u8_clamped_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {

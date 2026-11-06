@@ -164,9 +164,10 @@ fn own(scope: &mut v8::PinScope<'_, '_>, h: &CanvasPaintHandle, wrapper: v8::Loc
     unsafe { (*h.wrapper.get()).reset(scope, wrapper) };
 }
 
-// __dom.canvasGradientInit(paint, wrapper, kind, …geometry) — a gradient, its interface object `wrapper`: of `kind` (2
-// linear, 3 radial, 4 conic) and its geometry (`Paint::Gradient`), no stops yet.
-fn canvas_gradient_init(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.canvasGradientInit(paint, wrapper, kind, …geometry) -> false where a radial one is refused, "If either of r0 or r1
+// are negative, then throw an "IndexSizeError"", the bindings' to throw; else true, a gradient, its interface object
+// `wrapper`: of `kind` (2 linear, 3 radial, 4 conic) and its geometry (`Paint::Gradient`), no stops yet.
+fn canvas_gradient_init(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
     own(scope, h, args.get(1));
     let kind = args.get(2).uint32_value(scope).unwrap_or(LINEAR);
@@ -175,8 +176,12 @@ fn canvas_gradient_init(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         CONIC => 3,
         _ => 4,
     };
-    let geometry = (0..n).map(|k| args.get(3 + k).number_value(scope).unwrap_or(f64::NAN)).collect();
-    *h.paint.borrow_mut() = Some(Paint::Gradient(kind, geometry));
+    let geometry: Vec<f64> = (0..n).map(|k| args.get(3 + k).number_value(scope).unwrap_or(f64::NAN)).collect();
+    let refused = kind == RADIAL && (geometry[2] < 0.0 || geometry[5] < 0.0);
+    rv.set_bool(!refused);
+    if !refused {
+        *h.paint.borrow_mut() = Some(Paint::Gradient(kind, geometry));
+    }
 }
 
 // What a `createPattern` repetition repeats on, by the code the bindings name it with: `repeat`, `repeat-x`,

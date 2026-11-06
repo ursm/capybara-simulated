@@ -92,6 +92,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "offscreenCanvasResize", resize_op, context_id);
     crate::dom::register(scope, ns, "offscreenCanvasDetached", detached_op, context_id);
     crate::dom::register(scope, ns, "offscreenCanvasDetach", detach_op, context_id);
+    crate::dom::register(scope, ns, "offscreenCanvasTransferRefusal", transfer_refusal_op, context_id);
 }
 
 // __dom.offscreenCanvasSize(state, axis) -> its width (axis 0) or height (1).
@@ -113,6 +114,13 @@ fn resize_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // __dom.offscreenCanvasDetached(state) -> whether a transfer detached it.
 fn detached_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(handle(scope, args.get(0)).is_some_and(|h| h.detached.get()));
+}
+
+// __dom.offscreenCanvasTransferRefusal(state, hasContext) -> why it cannot be transferred, its transfer steps': 1 detached
+// already (a "DataCloneError"), 2 with a context (an "InvalidStateError"); 0 for neither.
+fn transfer_refusal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let detached = handle(scope, args.get(0)).is_some_and(|h| h.detached.get());
+    rv.set_uint32(if detached { 1 } else { u32::from(args.get(1).is_true()) * 2 });
 }
 
 // __dom.offscreenCanvasDetach(state): detached by its transfer — of no size from now on.

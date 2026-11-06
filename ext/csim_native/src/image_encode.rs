@@ -91,6 +91,7 @@ fn display_p3_profile() -> &'static [u8] {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "encodeImage", encode_image, context_id);
+    crate::dom::register(scope, ns, "canvasEncode", canvas_encode, context_id);
 }
 
 // __dom.encodeImage(pixels, width, height, type, quality, colorSpace) -> `[mime, bytes]`: the bitmap (`pixels` RGBA,
@@ -103,18 +104,61 @@ fn encode_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let quality = args.get(4).number_value(scope).unwrap_or(f64::NAN);
     let space = crate::canvas::Space::of_name(&args.get(5).to_rust_string_lossy(scope));
     let Some(pixels) = crate::canvas::bytes_read(args.get(0), None) else { return };
-    let need = (w as usize).checked_mul(h as usize).and_then(|n| n.checked_mul(4));
-    let Some(rgba) = need.and_then(|n| pixels.get(..n)) else { return };
+    if let Some(file) = file_of(scope, &pixels, [w, h], format, quality, space) {
+        rv.set(file);
+    }
+}
+// `[mime, bytes]` of the pixels, as `encodeImage` says.
+fn file_of<'s>(scope: &mut v8::PinScope<'s, '_>, pixels: &[u8], [w, h]: [u32; 2], format: Format, quality: f64, space: crate::canvas::Space) -> Option<v8::Local<'s, v8::Value>> {
+    let need = (w as usize).checked_mul(h as usize)?.checked_mul(4)?;
+    let rgba = pixels.get(..need)?;
     let mut encoded = None;
     if space != space.encoded() {
         let mut px = rgba.to_vec();
         crate::canvas::convert_buffer(space, space.encoded(), &mut px);
         encoded = Some(px);
     }
-    let Some(bytes) = encode(encoded.as_deref().unwrap_or(rgba), w, h, format, quality, space.is_p3()) else { return };
+    let bytes = encode(encoded.as_deref().unwrap_or(rgba), w, h, format, quality, space.is_p3())?;
     let mime = v8::String::new(scope, format.mime()).expect("a short string").into();
     let bytes = crate::dom::u8_array(scope, bytes);
-    rv.set(v8::Array::new_with_elements(scope, &[mime, bytes]).into());
+    Some(v8::Array::new_with_elements(scope, &[mime, bytes]).into())
+}
+
+// Why `canvasEncode` makes no file: a bitmap that is not origin-clean, HTML's SecurityError; one with no pixels, which
+// `toBlob` and `toDataURL` answer with none and `convertToBlob` refuses.
+const ENCODE_TAINTED: u32 = 1;
+const ENCODE_NO_PIXELS: u32 = 2;
+// __dom.canvasEncode(contextState | null, width, height, type, quality) -> a canvas's bitmap as a file, `[mime, bytes]` as
+// `encodeImage` says — a sized canvas never drawn on transparent black, as a browser always backs one — or why not, or null
+// for a size no bitmap or the format can hold. `type` a string and `quality` a number already, NaN for none.
+fn canvas_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let state = crate::canvas_state::handle(scope, args.get(0));
+    if state.is_some_and(|h| !h.origin_clean()) {
+        return rv.set_uint32(ENCODE_TAINTED);
+    }
+    let [w, h] = [1, 2].map(|k| args.get(k).number_value(scope).unwrap_or(0.0));
+    if w == 0.0 || h == 0.0 {
+        return rv.set_uint32(ENCODE_NO_PIXELS);
+    }
+    rv.set_null();
+    if w * h * 4.0 > crate::canvas_image::MAX_IMAGE_BYTES as f64 {
+        return;
+    }
+    let format = Format::of(&args.get(3).to_rust_string_lossy(scope));
+    let quality = args.get(4).number_value(scope).unwrap_or(f64::NAN);
+    let space = crate::canvas::Space::of_code(state.map_or(0, |h| h.color_space_code()));
+    let kept = state.map(|h| h.bitmap(scope)).filter(|b| !b.is_undefined());
+    let pixels = match kept {
+        Some(bitmap) => bitmap,
+        None => {
+            let Some(blank) = crate::dom::zeroed_clamped_array(scope, (w * h * 4.0) as usize) else { return };
+            blank
+        }
+    };
+    let Some(bytes) = crate::canvas::bytes_read(pixels, None) else { return };
+    if let Some(file) = file_of(scope, &bytes, [w as u32, h as u32], format, quality, space) {
+        rv.set(file);
+    }
 }
 
 #[cfg(test)]

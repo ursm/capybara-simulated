@@ -527,6 +527,54 @@ RSpec.describe 'Canvas context bindings' do
     )
   end
 
+  # A float16 ImageData's array is the platform's, whatever a page's global `Float16Array` has become.
+  it 'makes its pixel arrays whatever the page replaced' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const type = (d) => Object.prototype.toString.call(d.data);
+        const own = window.Float16Array;
+        const settings = {pixelFormat: 'rgba-float16'};
+        const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+        ctx.fillRect(0, 0, 1, 1);
+        window.Float16Array = function () { throw new Error('the page\\'s'); };
+        const out = [type(new ImageData(1, 1, settings)), type(ctx.getImageData(0, 0, 1, 1, settings)), type(ctx.createImageData(1, 1, settings))];
+        out.push(ctx.getImageData(0, 0, 1, 1, settings).data[3]);
+        window.Float16Array = own;
+        return out;
+      })()
+    JS
+    expect(got).to eq(['[object Float16Array]', '[object Float16Array]', '[object Float16Array]', 1])
+  end
+
+  # HTML's drawFocusIfNeeded: "If element is not focused or is not a descendant of context's canvas element, then return" —
+  # so the canvas itself, focused, is none (base drew for it: `contains` is inclusive).
+  it 'draws a focus ring for a focused descendant alone' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const canvas = document.body.appendChild(document.createElement('canvas'));
+        canvas.tabIndex = 0;
+        const inside = canvas.appendChild(document.createElement('button'));
+        const outside = document.body.appendChild(document.createElement('button'));
+        const ctx = canvas.getContext('2d');
+        ctx.rect(5, 5, 20, 20);
+        const drawn = (element) => {
+          ctx.clearRect(0, 0, 300, 150);
+          ctx.drawFocusIfNeeded(element);
+          return ctx.getImageData(5, 15, 1, 1).data[3] > 0;
+        };
+        const out = [];
+        inside.focus();
+        out.push(drawn(inside), drawn(outside));
+        outside.focus();
+        out.push(drawn(inside), drawn(outside));
+        canvas.focus();
+        out.push(document.activeElement === canvas, drawn(canvas));
+        return out;
+      })()
+    JS
+    expect(got).to eq([true, false, false, false, true, false])
+  end
+
   # What the engine allocates for a page is V8's to count as it allocates: a loop of dead bitmaps is collected as it goes.
   # Stores made in Rust and attached later put no pressure on the heap, and 4 GB of dead `getImageData` peaked at the 4 GB.
   it 'leaves dead pixels for the collector as they churn', if: File.exist?('/proc/self/clear_refs') do

@@ -873,8 +873,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasRect", canvas_rect, context_id);
     crate::dom::register(scope, ns, "canvasDrawPath", canvas_draw_path, context_id);
     crate::dom::register(scope, ns, "canvasClip", canvas_clip, context_id);
-    crate::dom::register(scope, ns, "canvasConvert", canvas_convert, context_id);
-    crate::dom::register(scope, ns, "pixelsFloat16", pixels_float16, context_id);
+    crate::dom::register(scope, ns, "imageDataAllocate", image_data_allocate, context_id);
+    crate::dom::register(scope, ns, "imageDataCheck", image_data_check, context_id);
+    crate::dom::register(scope, ns, "imageDataArrayOver", image_data_array_over, context_id);
+    crate::dom::register(scope, ns, "canvasFocusRing", canvas_focus_ring, context_id);
     crate::dom::register(scope, ns, "canvasGetImageData", canvas_get_image_data, context_id);
     crate::dom::register(scope, ns, "canvasPutImageData", canvas_put_image_data, context_id);
 }
@@ -972,15 +974,30 @@ fn canvas_rect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 
 // __dom.canvasDrawPath(state, how, path, baked): a path array — a Path2D's, or the context's current default path, whose
-// points are device space already (`baked`) — filled by the nonzero or the even-odd rule with the fill style, stroked with
-// the stroke style, or its focus ring drawn (`FOCUS_RING`: a UA decoration, not an author stroke: a plain line, opaque and
-// source-over, the clip alone applying). Nothing for a path of no subpaths.
+// points are device space already (`baked`) — filled by the nonzero or the even-odd rule with the fill style or stroked with
+// the stroke style. Nothing for a path of no subpaths.
 fn canvas_draw_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
     let how = args.get(1).uint32_value(scope).unwrap_or(crate::canvas_path::FILL_NONZERO);
     let baked = args.get(3).boolean_value(scope);
+    draw_path(scope, h, how, args.get(2), baked);
+}
+// __dom.canvasFocusRing(state, canvas, element, path, baked): `drawFocusIfNeeded()`: "If element is not focused or is not a
+// descendant of context's canvas element, then return" — else the path's focus ring (`FOCUS_RING`: a UA decoration, not an
+// author stroke: a plain line, opaque and source-over, the clip alone applying).
+fn canvas_focus_ring(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
+    let (Some(canvas), Some(element)) = (crate::node_handle::nid_of(scope, args.get(1)), crate::node_handle::nid_of(scope, args.get(2))) else { return };
+    let arena = &crate::dom::dom(scope).arena;
+    if element == canvas || crate::focus::document_focus(arena, canvas) != Some(element) || !crate::ranges::contains(arena, canvas, element) {
+        return;
+    }
+    let baked = args.get(4).boolean_value(scope);
+    draw_path(scope, h, FOCUS_RING, args.get(3), baked);
+}
+fn draw_path(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, how: u32, path: v8::Local<'_, v8::Value>, baked: bool) {
     let (rings, even_odd) = {
-        let path = crate::dom::f64_arg(args.get(2));
+        let path = crate::dom::f64_arg(path);
         if crate::canvas_path::path_empty(&path) {
             return;
         }
@@ -1230,19 +1247,11 @@ fn half_bits(value: f64) -> u16 {
 pub(crate) fn unorm8(halves: &[u8]) -> Vec<u8> {
     halves.chunks_exact(2).map(|h| byte(half_value(u16::from_ne_bytes([h[0], h[1]])) * 255.0)).collect()
 }
-// __dom.pixelsFloat16(bytes) -> a new ArrayBuffer of each byte over 255 as a half (`half_bits(v / 255)`) — what
+// The components of a Float16Array of `bytes`: each byte over 255 as a half (`half_bits(v / 255)`), what
 // `Float16Array.from(bytes, (v) => v / 255)` makes.
-fn pixels_float16(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let bytes = bytes_read(args.get(0), None).unwrap_or_default();
-    let halves: Vec<u8> = bytes.iter().flat_map(|&b| half_bits(f64::from(b) / 255.0).to_ne_bytes()).collect();
-    rv.set(crate::webcrypto::array_buffer(scope, halves));
-}
-
-// __dom.canvasConvert(pixels, from, to): an RGBA buffer converted in place from one PredefinedColorSpace to another.
-fn canvas_convert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (from, to) = (args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
-    if let Some(data) = bytes_mut(args.get(0)) {
-        convert_buffer(Space::of_name(&from), Space::of_name(&to), data);
+fn float16_into(bytes: &[u8], halves: &mut [u8]) {
+    for (&b, half) in bytes.iter().zip(halves.chunks_exact_mut(2)) {
+        half.copy_from_slice(&half_bits(f64::from(b) / 255.0).to_ne_bytes());
     }
 }
 
@@ -1278,41 +1287,119 @@ fn copy_rect(src: &[u8], src_size: [i64; 2], [sx, sy, w, h]: [i64; 4], dst: &mut
     }
 }
 
-// Why `canvasGetImageData` refuses: HTML's order, an IndexSizeError for no area, a SecurityError for a bitmap that is not
-// origin-clean, then "initialize an ImageData"'s RangeError, for a pixel array past any (whatwg/html#520): the check is
-// before the attempt, as an absurd size would abort the isolate rather than throw.
+// Why an ImageData is not made (HTML §4.12.5.1.15), the bindings' to throw, as the object is theirs to make: an
+// IndexSizeError for no area; a SecurityError for a bitmap that is not origin-clean; "initialize an ImageData"'s RangeError,
+// for a pixel array past any (whatwg/html#520), the check before the attempt, as an absurd size would abort the isolate
+// rather than throw; for an array given, an InvalidStateError for a length no whole number of pixels, an IndexSizeError for
+// one that is no multiple of its width or does not make its height, and an InvalidStateError for an array of the other
+// pixel format's type, refused only after those.
 const IMAGE_DATA_NO_AREA: u32 = 1;
 const IMAGE_DATA_TAINTED: u32 = 2;
 const IMAGE_DATA_TOO_LARGE: u32 = 3;
-fn get_image_data_refusal(origin_clean: bool, [w, h]: [f64; 2], component_bytes: f64) -> Option<u32> {
+const IMAGE_DATA_BAD_LENGTH: u32 = 4;
+const IMAGE_DATA_BAD_WIDTH: u32 = 5;
+const IMAGE_DATA_BAD_HEIGHT: u32 = 6;
+const IMAGE_DATA_BAD_TYPE: u32 = 7;
+fn image_data_area_refusal([w, h]: [f64; 2], float16: bool) -> Option<u32> {
     if w == 0.0 || h == 0.0 {
         return Some(IMAGE_DATA_NO_AREA);
     }
-    if !origin_clean {
-        return Some(IMAGE_DATA_TAINTED);
-    }
+    let component_bytes = if float16 { 2.0 } else { 1.0 };
     (w.abs() * h.abs() * 4.0 * component_bytes > crate::canvas_image::MAX_IMAGE_BYTES as f64).then_some(IMAGE_DATA_TOO_LARGE)
 }
+fn get_image_data_refusal(origin_clean: bool, size: [f64; 2], float16: bool) -> Option<u32> {
+    match image_data_area_refusal(size, float16) {
+        Some(IMAGE_DATA_NO_AREA) => Some(IMAGE_DATA_NO_AREA),
+        _ if !origin_clean => Some(IMAGE_DATA_TAINTED),
+        refusal => refusal,
+    }
+}
+// …of an array of `bytes`, of its pixel format's type or not: its height, or why not.
+fn image_data_height(bytes: usize, width: f64, height: Option<f64>, float16: bool, of_type: bool) -> Result<f64, u32> {
+    let pixels = bytes as f64 / if float16 { 8.0 } else { 4.0 };
+    if pixels == 0.0 || pixels.fract() != 0.0 {
+        return Err(IMAGE_DATA_BAD_LENGTH);
+    }
+    if width == 0.0 || pixels % width != 0.0 {
+        return Err(IMAGE_DATA_BAD_WIDTH);
+    }
+    let rows = pixels / width;
+    if height.is_some_and(|h| h != rows) {
+        return Err(IMAGE_DATA_BAD_HEIGHT);
+    }
+    if of_type { Ok(rows) } else { Err(IMAGE_DATA_BAD_TYPE) }
+}
+// __dom.imageDataAllocate(width, height, float16) -> a new pixel array of transparent black, of its pixel format's type,
+// or why not (`IMAGE_DATA_NO_AREA`, `IMAGE_DATA_TOO_LARGE`).
+fn image_data_allocate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let [w, h] = [0, 1].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+    let float16 = args.get(2).is_true();
+    if let Some(refusal) = image_data_area_refusal([w, h], float16) {
+        return rv.set_uint32(refusal);
+    }
+    let n = (w * h * 4.0) as usize;
+    let made = if float16 { crate::dom::zeroed_float16_array(scope, n) } else { crate::dom::zeroed_clamped_array(scope, n) };
+    match made {
+        Some(array) => rv.set(array),
+        None => throw_oom(scope),
+    }
+}
+// __dom.imageDataCheck(data, width, height | undefined, float16) -> the height of an ImageData of the array `data`, or
+// minus why not.
+fn image_data_check(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let data = args.get(0);
+    let bytes = v8::Local::<v8::ArrayBufferView>::try_from(data).map_or(0, |v| v.byte_length());
+    let width = args.get(1).number_value(scope).unwrap_or(0.0);
+    let height = (!args.get(2).is_undefined()).then(|| args.get(2).number_value(scope).unwrap_or(0.0));
+    let float16 = args.get(3).is_true();
+    let of_type = if float16 { data.is_float16_array() } else { data.is_uint8_clamped_array() };
+    match image_data_height(bytes, width, height, float16, of_type) {
+        Ok(rows) => rv.set_double(rows),
+        Err(refusal) => rv.set_double(-f64::from(refusal)),
+    }
+}
+// __dom.imageDataArrayOver(view, float16) -> a pixel array over the bytes of `view`, as a worker's message carried them.
+fn image_data_array_over(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(args.get(0)) else { return };
+    let Some(buffer) = view.buffer(scope) else { return };
+    let (offset, bytes) = (view.byte_offset(), view.byte_length());
+    let made: Option<v8::Local<'_, v8::Value>> = if args.get(1).is_true() {
+        crate::dom::float16_array(scope, buffer, offset, bytes / 2)
+    } else {
+        v8::Uint8ClampedArray::new(scope, buffer, offset, bytes).map(Into::into)
+    };
+    if let Some(array) = made {
+        rv.set(array);
+    }
+}
 
-// __dom.canvasGetImageData(state, x, y, w, h, componentBytes) -> the rectangle's pixels, RGBA bytes in the context's colour
-// space in a new Uint8ClampedArray of its magnitudes — transparent black outside the bitmap — or why it refuses
-// (`IMAGE_DATA_NO_AREA` …), the bindings' to throw, as the ImageData is theirs to make. `componentBytes` what a component
-// of the pixel format it is to have takes.
+// __dom.canvasGetImageData(state, x, y, w, h, float16, colorSpace) -> the rectangle's pixels in a new pixel array of its
+// magnitudes, in the colour space given and its pixel format's type (`float16`: each byte over 255) — transparent black
+// outside the bitmap — or why it refuses (`IMAGE_DATA_NO_AREA` …).
 fn canvas_get_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
     let rect: [f64; 4] = std::array::from_fn(|i| args.get(i as i32 + 1).number_value(scope).unwrap_or(0.0));
-    let component_bytes = args.get(5).number_value(scope).unwrap_or(1.0);
-    if let Some(refusal) = get_image_data_refusal(h.origin_clean(), [rect[2], rect[3]], component_bytes) {
+    let float16 = args.get(5).is_true();
+    if let Some(refusal) = get_image_data_refusal(h.origin_clean(), [rect[2], rect[3]], float16) {
         return rv.set_uint32(refusal);
     }
+    let target = Space::of_name(&args.get(6).to_rust_string_lossy(scope));
     let [x, y, w, hgt] = normalized(rect).map(|v| v as i64);
     let Some(made) = crate::dom::zeroed_clamped_array(scope, (w * hgt * 4) as usize) else { return throw_oom(scope) };
     let bitmap = h.bitmap(scope);
     if let (Some(bytes), Some(out)) = (bytes_read(bitmap, None), bytes_mut(made)) {
         let [cw, ch] = h.size().map(|v| v as i64);
         copy_rect(&bytes, [cw, ch], [x, y, w, hgt], out, [w, hgt], [0, 0]);
+        convert_buffer(Space::of_code(h.color_space_code()), target, out);
     }
-    rv.set(made);
+    if !float16 {
+        return rv.set(made);
+    }
+    let Some(halves) = crate::dom::zeroed_float16_array(scope, (w * hgt * 4) as usize) else { return throw_oom(scope) };
+    if let (Some(bytes), Some(out)) = (bytes_read(made, None), bytes_mut(halves)) {
+        float16_into(&bytes, out);
+    }
+    rv.set(halves);
 }
 
 // __dom.canvasPutImageData(state, data, float16, colorSpace, width, height, dx, dy, dirtyX, dirtyY, dirtyWidth,
@@ -1453,14 +1540,28 @@ mod tests {
     // HTML's getImageData refuses no area first, a bitmap not origin-clean next, a size past any array last.
     #[test]
     fn get_image_data_refuses_in_html_s_order() {
-        assert_eq!(get_image_data_refusal(true, [1.0, 1.0], 1.0), None);
-        assert_eq!(get_image_data_refusal(true, [-1.0, 1.0], 1.0), None);
-        assert_eq!(get_image_data_refusal(false, [0.0, 1.0], 1.0), Some(IMAGE_DATA_NO_AREA));
-        assert_eq!(get_image_data_refusal(false, [1e9, 1e9], 1.0), Some(IMAGE_DATA_TAINTED));
-        assert_eq!(get_image_data_refusal(true, [1e9, -1e9], 1.0), Some(IMAGE_DATA_TOO_LARGE));
+        assert_eq!(get_image_data_refusal(true, [1.0, 1.0], false), None);
+        assert_eq!(get_image_data_refusal(true, [-1.0, 1.0], false), None);
+        assert_eq!(get_image_data_refusal(false, [0.0, 1.0], false), Some(IMAGE_DATA_NO_AREA));
+        assert_eq!(get_image_data_refusal(false, [1e9, 1e9], false), Some(IMAGE_DATA_TAINTED));
+        assert_eq!(get_image_data_refusal(true, [1e9, -1e9], false), Some(IMAGE_DATA_TOO_LARGE));
         // (…a float16 array's bytes twice an 8-bit one's)
-        assert_eq!(get_image_data_refusal(true, [32767.0, 32767.0], 1.0), None);
-        assert_eq!(get_image_data_refusal(true, [32767.0, 32767.0], 2.0), Some(IMAGE_DATA_TOO_LARGE));
+        assert_eq!(get_image_data_refusal(true, [32767.0, 32767.0], false), None);
+        assert_eq!(get_image_data_refusal(true, [32767.0, 32767.0], true), Some(IMAGE_DATA_TOO_LARGE));
+    }
+
+    // An array given to `new ImageData`: its length first, its width, its height, and last its type.
+    #[test]
+    fn an_image_data_array_is_refused_in_html_s_order() {
+        assert_eq!(image_data_height(16, 2.0, None, false, true), Ok(2.0));
+        assert_eq!(image_data_height(16, 2.0, Some(2.0), false, true), Ok(2.0));
+        assert_eq!(image_data_height(16, 1.0, None, true, true), Ok(2.0));
+        assert_eq!(image_data_height(0, 1.0, None, false, true), Err(IMAGE_DATA_BAD_LENGTH));
+        assert_eq!(image_data_height(6, 1.0, None, false, false), Err(IMAGE_DATA_BAD_LENGTH));
+        assert_eq!(image_data_height(12, 0.0, None, false, false), Err(IMAGE_DATA_BAD_WIDTH));
+        assert_eq!(image_data_height(12, 2.0, None, false, false), Err(IMAGE_DATA_BAD_WIDTH));
+        assert_eq!(image_data_height(16, 2.0, Some(3.0), false, false), Err(IMAGE_DATA_BAD_HEIGHT));
+        assert_eq!(image_data_height(16, 2.0, None, false, false), Err(IMAGE_DATA_BAD_TYPE));
     }
 
     // A bilinear sample takes its neighbours from the image, past the source rectangle (HTML: "the value from the original
