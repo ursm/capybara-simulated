@@ -707,8 +707,10 @@ RSpec.describe 'WebAuthn bindings' do
     end
   end
 
-  # HTML "is a registrable domain suffix of or is equal to" parses the suffix first: an RP ID in capitals passes, and stays
-  # as given. (Chrome and Firefox both say SecurityError, measured: the rule is explicit.)
+  # An RP ID is a valid domain string (§4; URL's strict domain parser), and HTML "is a registrable domain suffix of or is
+  # equal to" compares what it parses to: capitals pass, and stay as given (Chrome and Firefox both say SecurityError,
+  # measured: the rule is explicit), where a percent sign and a tab are no such string (both browsers alike), nor an
+  # underscore, in the page's own host either (both browsers take it, measured: UseSTD3ASCIIRules is explicit).
   it 'checks the host an RP ID parses to' do
     session = simulated_session(app)
     session.visit 'http://a.rp.example.test/'
@@ -716,10 +718,18 @@ RSpec.describe 'WebAuthn bindings' do
     out = run(session, <<~JS)
       #{base64url}
       const made = await navigator.credentials.create(options({rp: {name: 'x', id: 'RP.Example.TEST'}}));
-      return [b64(made.response.getAuthenticatorData()), await rejection(navigator.credentials.create(options({rp: {name: 'x', id: 'a b'}})))];
+      const refused = (id) => rejection(navigator.credentials.create(options({rp: {name: 'x', id}})));
+      return [b64(made.response.getAuthenticatorData()), await refused('a b'), await refused('rp%2eexample.test'), await refused('%72p.example.test'), await refused('rp.example.test\t')];
     JS
     expect(WebauthnVerifier.authenticator_data(WebauthnVerifier.decode(out[0]))[:rp_id_hash]).to eq(Digest::SHA256.digest('RP.Example.TEST'))
-    expect(out[1]).to eq('SecurityError')
+    expect(out[1..]).to eq(%w[SecurityError SecurityError SecurityError SecurityError])
+
+    session.visit 'http://foo_bar.example.test/'
+    out = run(session, <<~JS)
+      #{base64url}
+      return [location.hostname, await rejection(navigator.credentials.create(options())), await rejection(navigator.credentials.get({publicKey: {challenge: new Uint8Array(1)}}))];
+    JS
+    expect(out).to eq(%w[foo_bar.example.test SecurityError SecurityError])
   end
 
   # Active credential types are the settings object's: a document renewed in its realm (a frame's or a window's initial
@@ -754,6 +764,45 @@ RSpec.describe 'WebAuthn bindings' do
       return rejection(navigator.credentials.create(options()));
     JS
     expect(out).to eq('none')
+  end
+
+  # What a click's ceremony shows under `find`, with the clock only where a page's own timer would have it. An authenticator
+  # that could be asked and refuses is a NotAllowedError at once (§5.1.3 "cancel the process"), and no authenticator to ask
+  # waits for its timer (§5.1.3 "If an authenticator becomes available"). Measured, ms to the rejection, Chrome / Firefox:
+  [
+    ['resident key required on one without', {},                         "create(pk({authenticatorSelection: {residentKey: 'required'}}))",           'NotAllowedError'], # 5 / 11
+    ['requireResidentKey on one without',    {},                         'create(pk({authenticatorSelection: {requireResidentKey: true}}))',          'NotAllowedError'], # 0 / 0
+    ['no discoverable credential',           {},                         'get(gk())',                                                                 'NotAllowedError'], # 1 / 4
+    ['user verification on one without',     {},                         "create(pk({authenticatorSelection: {userVerification: 'required'}}))",      'NotAllowedError'], # 1 / F created it
+    ['user not verified',                    {'hasUserVerification' => true}, 'create(pk())',                                                         'NotAllowedError'], # 0 / 0
+    ['unknown algorithm',                    {},                         "create(pk({pubKeyCredParams: [{type: 'public-key', alg: -999}]}))",         'NotAllowedError'], # 0 / 0
+    ['allow list missed',                    {},                         "get(gk({allowCredentials: [{type: 'public-key', id: new Uint8Array(4)}]}))", 'NotAllowedError'], # 0 / 0
+    ['wrong attachment, timeout 1000',       {},                         "create(pk({timeout: 1000, authenticatorSelection: {authenticatorAttachment: 'platform'}}))", 'NotAllowedError'], # 1501 at the timer / 1
+    ['no authenticator, timeout 1000',       nil,                        'create(pk({timeout: 1000}))',                                               'NotAllowedError'], # 1006 / 5
+    ['no authenticator, get, timeout 1000',  nil,                        'get(gk({timeout: 1000}))',                                                  'NotAllowedError'], # 1000 / 4
+    ['no authenticator, allow list',         nil,                        "get(gk({timeout: 1000, allowCredentials: [{type: 'public-key', id: new Uint8Array(4)}]}))", 'NotAllowedError'], # 1000 / 0
+    ['no authenticator, default timeout',    nil,                        'create(pk())',                                                              nil]                # past a find's horizon
+  ].each do |name, authenticator, ceremony, expected|
+    it "shows #{name} under a find" do
+      page = <<~HTML
+        <!doctype html><meta charset="utf-8"><body><button id="go">go</button><script>
+          const pk = (extra) => ({publicKey: {rp: {name: 'x'}, user: {id: new Uint8Array([1]), name: 'u', displayName: 'U'}, challenge: new Uint8Array(1), pubKeyCredParams: [{type: 'public-key', alg: -7}], ...extra}});
+          const gk = (extra) => ({publicKey: {challenge: new Uint8Array(1), ...extra}});
+          document.getElementById('go').onclick = () => navigator.credentials.#{ceremony}.then(() => 'created', (e) => e.name).then((text) => {
+            document.body.append(Object.assign(document.createElement('p'), {id: 'res', textContent: text}));
+          });
+        </script>
+      HTML
+      session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+      session.visit 'http://rp.example.test/'
+      session.driver.browser.webauthn.add_virtual_authenticator(authenticator) if authenticator
+      session.click_button 'go'
+      if expected
+        expect(session.find('#res', wait: 2).text).to eq(expected)
+      else
+        expect(session).to have_no_css('#res', wait: 0.5)
+      end
+    end
   end
 
   # An authenticator becoming available answers what is pending (§5.1.3, §5.1.4.1: "If an authenticator becomes
@@ -801,8 +850,8 @@ RSpec.describe 'WebAuthn bindings' do
     expect(session.evaluate_script('globalThis.__made')).to eq('string')
   end
 
-  # A request none can answer lives till its lifetime timer (§5.1.3, §5.1.4.1), `timeout` corrected to §15.1's range; only
-  # a list of credentials none could answer for ends early, and an abort.
+  # With no authenticator to ask, a request lives till its lifetime timer (§5.1.3, §5.1.4.1): the page's `timeout`, up to
+  # §15.1's longest; or till an abort.
   it 'runs a lifetime timer' do
     session = simulated_session(app)
     session.visit 'http://rp.example.test/'
@@ -816,10 +865,10 @@ RSpec.describe 'WebAuthn bindings' do
     creation = "{rp: {name: 'x'}, user: {id: new Uint8Array([1]), name: 'u', displayName: 'U'}, challenge: new Uint8Array(1), pubKeyCredParams: [{type: 'public-key', alg: -7}]"
     clock = session.driver.browser
 
-    start.call('a', "navigator.credentials.create({publicKey: #{creation}, timeout: 1000}})")
-    clock.advance_virtual_clock_ms(299_000)
+    start.call('a', "navigator.credentials.create({publicKey: #{creation}, timeout: 60000}})")
+    clock.advance_virtual_clock_ms(50_000)
     expect(read.call('a')).to eq('pending')
-    clock.advance_virtual_clock_ms(2_000)
+    clock.advance_virtual_clock_ms(11_000)
     expect(read.call('a')).to eq('NotAllowedError')
 
     start.call('b', "navigator.credentials.get({publicKey: {challenge: new Uint8Array(1), timeout: 9000000}})")
@@ -827,9 +876,6 @@ RSpec.describe 'WebAuthn bindings' do
     expect(read.call('b')).to eq('pending')
     clock.advance_virtual_clock_ms(2_000)
     expect(read.call('b')).to eq('NotAllowedError')
-
-    start.call('c', "navigator.credentials.get({publicKey: {challenge: new Uint8Array(1), allowCredentials: [{type: 'public-key', id: new Uint8Array(1)}]}})")
-    expect(read.call('c')).to eq('NotAllowedError')
 
     start.call('d', "(globalThis.__ac = new AbortController(), navigator.credentials.create({publicKey: #{creation}}, signal: globalThis.__ac.signal}))")
     expect(read.call('d')).to eq('pending')

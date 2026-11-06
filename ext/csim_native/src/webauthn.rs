@@ -8,9 +8,9 @@
 // order and makes the request its document's one active request (`RealmState::webauthn_request`), the options
 // snapshotted (their BufferSources must be, §5.1.3) and WebAuthn's client steps run, which a task then rejects with; and
 // `ask`, in that task, asks the authenticators, again each time the driver adds one or a credential (§5.1.3 "If an
-// authenticator becomes available"). A request none answers waits for its lifetime timer, on the agent's event loop as a
-// page's own timer is (webauthn.js), so an abort cancels a request no authenticator has answered, and no credential is
-// made for it.
+// authenticator becomes available"). With none to ask, a request waits for its lifetime timer, on the agent's event loop
+// as a page's own timer is (webauthn.js), so an abort cancels a request no authenticator has answered, and no credential
+// is made for it.
 //
 // ES256 is the one algorithm these authenticators make keys of (a request for no other is one they refuse), and they
 // attest a credential with its own key: `packed` self attestation (§8.2), or `none`.
@@ -145,19 +145,20 @@ struct Caller {
 }
 impl Caller {
     // "effectiveDomain" and the RP ID of a request, `requested` or that domain (§5.1.3 steps 6-8, §5.1.4.1, §5.1.10.1):
-    // an opaque origin a NotAllowedError, a host that is no valid domain — an IP address — a SecurityError, and a
-    // requested one that is neither the domain nor a registrable domain suffix of it (no public suffix) a SecurityError.
-    // HTML's check is of what it parses to, so `LOCALHOST` passes on `localhost`; the RP ID stays as it was given.
+    // an opaque origin a NotAllowedError, and a SecurityError for a host that is no valid domain and for a requested ID
+    // that is none either (§4: "a valid domain string"), or is neither the domain nor a registrable domain suffix of it
+    // (no public suffix). The check is of the domain it parses to, so `LOCALHOST` passes on `localhost`; the RP ID stays
+    // as it was given.
     fn rp_id(&self, requested: Option<&str>) -> Outcome<String> {
         let Some(domain) = self.effective_domain.as_deref() else {
             return fail("NotAllowedError", "The origin is opaque.");
         };
-        if domain.is_empty() || crate::realm_location::ip_host(domain) {
+        if crate::realm_location::valid_domain(domain).is_none() {
             return fail("SecurityError", "This is an invalid domain.");
         }
         match requested {
             None => Ok(domain.to_owned()),
-            Some(rp_id) if crate::realm_location::domain_host(rp_id).is_some_and(|host| crate::realm_location::registrable_domain_suffix(&host, domain)) => Ok(rp_id.to_owned()),
+            Some(rp_id) if crate::realm_location::valid_domain(rp_id).is_some_and(|host| crate::realm_location::registrable_domain_suffix(&host, domain)) => Ok(rp_id.to_owned()),
             Some(rp_id) => fail("SecurityError", format!("The relying party ID '{rp_id}' is not a registrable domain suffix of, nor equal to the current domain.")),
         }
     }
@@ -292,9 +293,11 @@ pub(crate) struct ActiveRequest {
     lifetime: Option<f64>,
     request: Request,
 }
-// §15.1's recommended range and default for a ceremony's timeout, which a request's is corrected to (§5.1.3 step 4).
+// A ceremony's lifetime: the page's `timeout`, up to §15.1's longest, its default where it gives none. (§5.1.3 leaves the
+// range to the client, and §15.1's lower bound is an accessibility recommendation for people, which a virtual user is
+// not; Chrome's virtual environment honours `timeout: 1000`, measured at 1006 ms.)
 fn lifetime_of(timeout: Option<f64>) -> f64 {
-    timeout.unwrap_or(300_000.0).clamp(300_000.0, 600_000.0)
+    timeout.unwrap_or(300_000.0).min(600_000.0)
 }
 struct Creation {
     rp_id: String,
@@ -338,6 +341,7 @@ impl ResidentKey {
         }
     }
 }
+
 
 // [[Create]]'s client steps (§5.1.3), up to the authenticators.
 fn begin_create(options: CreationOptions, caller: &Caller) -> Outcome<Creation> {
@@ -625,7 +629,7 @@ const NOT_ALLOWED: &str = "The operation either timed out or was not allowed.";
 
 // §5.1.3's steps over the authenticators, in the order they were added — one with a discoverable credential's place
 // first where the relying party prefers one. An authenticator's refusal removes it from the request, save an
-// InvalidStateError, which ends it; and with none left the request's lifetime has nothing left to wait for.
+// InvalidStateError, which ends it; `ask` says what comes of none answering.
 fn finish_create(session: &mut Session, request: &Creation) -> Outcome<Created> {
     let mut candidates: Vec<&mut Authenticator> = session.authenticators.iter_mut().collect();
     if request.resident_key == ResidentKey::Preferred {
@@ -659,23 +663,31 @@ fn finish_get(session: &mut Session, request: &Assertion) -> Outcome<Asserted> {
     }
     fail("NotAllowedError", NOT_ALLOWED)
 }
-// A request asked of the authenticators, each refusal removing one from it (§5.1.3 "not equivalent to InvalidStateError",
-// §5.1.4.1 "any authenticator returns an error status"), which leaves it to wait, as the only ends a request has are an
-// authenticator's answer, its abort and its lifetime timer — but for an InvalidStateError, and a list of credentials none
-// of the authenticators could answer for (§5.1.4.1 "no eligible credential could be found"; a conditional request's list
-// is no such list).
+// A request asked of the authenticators. An InvalidStateError ends it. Where any was there to ask and each refused, it is
+// refused at once: its virtual user cancelling a prompt nothing can satisfy (§5.1.3 "If the user exercises a user agent
+// user-interface option to cancel the process"), as Chrome and Firefox do. Where none was — none there, or none of the
+// attachment asked for, on which they differ — it waits, as the text does, for "an authenticator becomes available" or
+// its lifetime timer. A conditional get waits regardless (§5.1.4.1). One that can be answered is, at once: these
+// authenticators take §5.1.4.1's "Else:" branch, having no `silentCredentialDiscovery` operation. Chrome's virtual
+// authenticator answers so too and Firefox's waits; Discourse's passkey login depends on it.
 fn ask(session: &mut Session, request: &Request) -> Asked {
     match request {
-        Request::Create(request) => match finish_create(session, request) {
-            Ok(created) => Asked::Answered(Answer::Created(created)),
-            Err(failure) if failure.name == "InvalidStateError" => Asked::Refused(failure),
-            Err(_) => Asked::Waits,
-        },
-        Request::Get(request) => match finish_get(session, request) {
-            Ok(asserted) => Asked::Answered(Answer::Asserted(asserted)),
-            Err(failure) if request.allow_given => Asked::Refused(failure),
-            Err(_) => Asked::Waits,
-        },
+        Request::Create(request) => {
+            let any = session.authenticators.iter().any(|a| request.attachment.as_deref().is_none_or(|wanted| wanted == a.attachment()));
+            match finish_create(session, request) {
+                Ok(created) => Asked::Answered(Answer::Created(created)),
+                Err(failure) if failure.name == "InvalidStateError" || any => Asked::Refused(failure),
+                Err(_) => Asked::Waits,
+            }
+        }
+        Request::Get(request) => {
+            let any = !session.authenticators.is_empty();
+            match finish_get(session, request) {
+                Ok(asserted) => Asked::Answered(Answer::Asserted(asserted)),
+                Err(failure) if any && !request.conditional => Asked::Refused(failure),
+                Err(_) => Asked::Waits,
+            }
+        }
         Request::Refused(_) | Request::Silent => Asked::Waits,
     }
 }
@@ -702,6 +714,7 @@ fn platform_authenticators(partition: u64) -> (bool, bool) {
     let platform = || sessions.get(&partition).into_iter().flat_map(|s| &s.authenticators).filter(|a| a.transport == "internal" && a.has_user_verification);
     (platform().next().is_some(), platform().any(|a| a.has_resident_key))
 }
+
 
 // ── The driver's commands (§11.3-11.9): text the host passes through, as JSON ───────────────────────────────────────
 // (…the session's pending requests told, as anything a request could now be answered by arrives: a task of each window's)
@@ -1462,28 +1475,41 @@ mod tests {
     }
 
     #[test]
-    fn a_request_none_can_answer_waits() {
+    fn a_request_waits_only_where_no_authenticator_can_be_asked() {
+        let created = |options: CreationOptions| Request::Create(begin_create(options, &page()).ok().unwrap());
+        let got = |options: RequestOptions| Request::Get(begin_get(options, &page()).ok().unwrap());
+        let conditional = |allow: Vec<Descriptor>| got(RequestOptions { allow, conditional: true, ..request() });
+        let refused = |asked: Asked| matches!(asked, Asked::Refused(f) if f.name == "NotAllowedError");
+
+        let mut none = Session::default();
+        assert!(matches!(ask(&mut none, &created(creation())), Asked::Waits));
+        assert!(matches!(ask(&mut none, &got(request())), Asked::Waits));
+        assert!(matches!(ask(&mut none, &got(allow(&[9]))), Asked::Waits));
+        assert!(matches!(ask(&mut none, &conditional(Vec::new())), Asked::Waits));
+
+        let mut unable = session(json!({}));
+        assert!(refused(ask(&mut unable, &created(CreationOptions { resident_key: Some("required".to_owned()), ..creation() }))));
+
         let mut session = session(json!({"hasResidentKey": true}));
-        let conditional = |allow: Vec<Descriptor>| Request::Get(begin_get(RequestOptions { allow, conditional: true, ..request() }, &page()).ok().unwrap());
-        let modal = |options: RequestOptions| Request::Get(begin_get(options, &page()).ok().unwrap());
+        assert!(matches!(ask(&mut session, &created(CreationOptions { attachment: Some("platform".to_owned()), ..creation() })), Asked::Waits));
+        assert!(refused(ask(&mut session, &got(request()))));
+        assert!(refused(ask(&mut session, &got(allow(&[9])))));
+        assert!(refused(ask(&mut session, &created(CreationOptions { user_verification: "required".to_owned(), ..creation() }))));
+        assert!(refused(ask(&mut session, &created(CreationOptions { parameters: vec![(PUBLIC_KEY.to_owned(), -999)], ..creation() }))));
         assert!(matches!(ask(&mut session, &conditional(Vec::new())), Asked::Waits));
-        assert!(matches!(ask(&mut session, &modal(request())), Asked::Waits));
-        assert!(matches!(ask(&mut Session::default(), &Request::Create(begin_create(creation(), &page()).ok().unwrap())), Asked::Waits));
-        assert!(matches!(ask(&mut session, &modal(allow(&[9]))), Asked::Refused(_)));
-        let made = Request::Create(begin_create(CreationOptions { resident_key: Some("required".to_owned()), ..creation() }, &page()).ok().unwrap());
-        let Asked::Answered(Answer::Created(created)) = ask(&mut session, &made) else { panic!() };
+
+        let Asked::Answered(Answer::Created(made)) = ask(&mut session, &created(CreationOptions { resident_key: Some("required".to_owned()), ..creation() })) else { panic!() };
         assert!(matches!(ask(&mut session, &conditional(vec![descriptor(&[9])])), Asked::Waits));
-        assert!(matches!(ask(&mut session, &conditional(vec![descriptor(&created.id)])), Asked::Answered(_)));
-        assert!(matches!(ask(&mut session, &modal(request())), Asked::Answered(_)));
-        let excluded = Request::Create(begin_create(CreationOptions { exclude: vec![descriptor(&created.id)], ..creation() }, &page()).ok().unwrap());
-        assert!(matches!(ask(&mut session, &excluded), Asked::Refused(_)));
+        assert!(matches!(ask(&mut session, &conditional(vec![descriptor(&made.id)])), Asked::Answered(_)));
+        assert!(matches!(ask(&mut session, &got(request())), Asked::Answered(_)));
+        assert!(matches!(ask(&mut session, &created(CreationOptions { exclude: vec![descriptor(&made.id)], ..creation() })), Asked::Refused(f) if f.name == "InvalidStateError"));
     }
 
     #[test]
-    fn a_requests_timeout_is_corrected_to_the_recommended_range() {
+    fn a_requests_timeout_is_honoured_up_to_the_longest() {
         assert_eq!(lifetime_of(None), 300_000.0);
-        assert_eq!(lifetime_of(Some(1000.0)), 300_000.0);
-        assert_eq!(lifetime_of(Some(400_000.0)), 400_000.0);
+        assert_eq!(lifetime_of(Some(1000.0)), 1000.0);
+        assert_eq!(lifetime_of(Some(60_000.0)), 60_000.0);
         assert_eq!(lifetime_of(Some(9_000_000.0)), 600_000.0);
     }
 
@@ -1510,14 +1536,26 @@ mod tests {
     }
 
     #[test]
-    fn an_rp_id_is_checked_as_the_host_it_parses_to() {
-        for (requested, host, ok) in [("LOCALHOST", "localhost", true), ("B.EXAMPLE.com", "a.b.example.com", true), ("a b", "localhost", false), ("OTHER.test", "localhost", false)] {
+    fn an_rp_id_is_a_valid_domain_string() {
+        for (requested, host, ok) in [
+            ("LOCALHOST", "localhost", true),
+            ("B.EXAMPLE.com", "a.b.example.com", true),
+            ("a b", "localhost", false),
+            ("OTHER.test", "localhost", false),
+            ("b%2eexample.test", "b.example.test", false),
+            ("%62.example.test", "b.example.test", false),
+            ("b.example.test\t", "b.example.test", false),
+            ("example.test.", "example.test", false),
+        ] {
             let got = caller("https://x", host).rp_id(Some(requested));
             assert_eq!(got.is_ok(), ok, "{requested}");
             if ok {
                 assert_eq!(got.ok().unwrap(), requested);
             }
         }
+        assert_eq!(name(caller("http://foo_bar.test", "foo_bar.test").rp_id(None)), "SecurityError");
+        assert_eq!(name(caller("http://1.2.3.4", "1.2.3.4").rp_id(None)), "SecurityError");
+        assert_eq!(name(caller("http://a.0x10", "a.0x10").rp_id(None)), "SecurityError");
     }
 
     #[test]

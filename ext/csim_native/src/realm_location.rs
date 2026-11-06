@@ -638,13 +638,27 @@ pub(crate) fn site_for_ruby(url: String) -> Option<String> {
 }
 // `value` host-parsed (URL "host parsing"), or None where it is no host — nothing but a host, as a URL's authority would
 // take it, with no port (`:` a forbidden host code point outside an IPv6 address's brackets).
-pub(crate) fn domain_host(value: &str) -> Option<String> {
+fn domain_host(value: &str) -> Option<String> {
     if !value.starts_with('[') && value.contains(':') {
         return None;
     }
     let url = ada_url::Url::parse(format!("http://{value}/"), None).ok()?;
     let bare = url.host() == url.hostname() && url.pathname() == "/" && url.search().is_empty() && url.hash().is_empty();
     (bare && url.href() == format!("http://{}/", url.host())).then(|| url.hostname().to_owned())
+}
+// URL "valid domain": what the strict domain parser makes of `text` — UTS #46 ToASCII with CheckHyphens, UseSTD3ASCIIRules
+// and VerifyDnsLength — unless it ends in a number. None for one that is not: an IP address, a percent sign, a tab, an
+// underscore (Chrome and Firefox take `foo_bar.localhost`; the URL Standard's strict rules do not).
+pub(crate) fn valid_domain(text: &str) -> Option<String> {
+    use idna::uts46::{AsciiDenyList, DnsLength, Hyphens, Uts46};
+    let domain = Uts46::new().to_ascii(text.as_bytes(), AsciiDenyList::STD3, Hyphens::Check, DnsLength::VerifyAllowRootDot).ok()?;
+    (!ends_in_number(&domain)).then(|| domain.into_owned())
+}
+// URL "ends in a number checker": its last label — before a trailing dot — all digits, or `0x` hexadecimal digits.
+fn ends_in_number(domain: &str) -> bool {
+    let last = domain.strip_suffix('.').unwrap_or(domain).rsplit('.').next().unwrap_or_default();
+    let hex = last.strip_prefix("0x").or_else(|| last.strip_prefix("0X"));
+    (!last.is_empty() && last.bytes().all(|b| b.is_ascii_digit())) || hex.is_some_and(|h| h.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 // `document.domain`'s setter steps past "has a browsing context" (HTML §7.5.2): what a write of `value` sets, or why it
 // may not (dom-nodes.js `DOMAIN_*`) — an opaque origin, no host, or one that is no registrable domain suffix of the
@@ -705,6 +719,17 @@ fn set_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_valid_domain_is_what_the_strict_domain_parser_takes() {
+        assert_eq!(valid_domain("Example.COM").as_deref(), Some("example.com"));
+        assert_eq!(valid_domain("example.com.").as_deref(), Some("example.com."));
+        assert_eq!(valid_domain("☕.example").as_deref(), Some("xn--53h.example"));
+        for text in ["", "foo_bar.example", "a b", "b%2eexample.test", "%62.example.test", "b.example.test\t", "-a.example", "a..b", "1.2.3.4", "a.0x10", "a.12.", "[::1]"] {
+            assert_eq!(valid_domain(text), None, "{text}");
+        }
+        assert_eq!(valid_domain("a.1b").as_deref(), Some("a.1b"));
+    }
 
     #[test]
     fn a_site_is_a_registrable_domain_by_the_public_suffix_list() {

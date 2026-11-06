@@ -268,11 +268,7 @@ traversal or reload has replaced it as its navigable's ongoing one
 (session_history.rs `begin_navigation`) — except a
 redirect's later hop into such a scope, which waits what it can in place
 and, as no deferral can make a chain's hop again, goes on to the network
-where it can't; and a conditional WebAuthn get that a virtual authenticator can
-answer is answered at once, where the spec waits for the user to interact with a
-`webauthn` autofill field: the driver has no autofill UI to choose from, its virtual
-user always consents, and Chrome's virtual authenticator does the same, which a
-test of a passkey login depends on (Firefox waits) (`ask`, webauthn.rs). List and justify these explicitly; don't let them
+where it can't. List and justify these explicitly; don't let them
 multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does

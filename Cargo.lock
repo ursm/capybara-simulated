@@ -401,6 +401,7 @@ dependencies = [
  "html5ever",
  "icu_properties",
  "icu_segmenter",
+ "idna",
  "image",
  "image-webp",
  "jpeg-encoder",
