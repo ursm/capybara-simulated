@@ -83,6 +83,10 @@ impl Lifecycle {
         self.aborted = true;
         true
     }
+    // Whether it is completely loaded: a navigation of its frame's attributes replaces its entry until then.
+    pub(crate) fn is_completely_loaded(&self) -> bool {
+        self.completely_loaded
+    }
     // HTML document open steps: a document of its own written into it from here, numbered `generation` — "the end" of its
     // parse owed nothing of what the last one had (a task of that one's still queued, for its number, fires nothing) —
     // its container's load muted where it was being fired as it was opened, and loading again: whether that changed its

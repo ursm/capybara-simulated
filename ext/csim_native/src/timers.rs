@@ -86,19 +86,21 @@ pub(crate) struct Timers {
 }
 
 // The source of a platform task the event loop treats apart (`timerAdd`'s `source`): a crossing queue's turn (timers.js
-// `runCrossings`), which another realm's turn does not wait behind; or a request's (xhr.js), which runs on with the step
+// `runCrossings`), which another realm's turn does not wait behind; a request's (xhr.js), which runs on with the step
 // its own realm's task disposed its context in — a message it posted to itself does not, its document no longer fully
-// active (Chrome and Firefox: a frame posting to itself and removing itself hears nothing).
+// active (Chrome and Firefox: a frame posting to itself and removing itself hears nothing); or a navigation's (`BEHIND`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Source {
     Turn,
     Network,
+    Navigation,
 }
 impl Source {
     fn of(code: i32) -> Option<Source> {
         match code {
             1 => Some(Source::Turn),
             2 => Some(Source::Network),
+            3 => Some(Source::Navigation),
             _ => None,
         }
     }
@@ -188,9 +190,15 @@ impl Ord for Due {
 // the parse queued where the parse ends at once, and the load that nothing delays before such a message (Chrome before
 // the timer too, `dcl, load, msg, t0`; Firefox after it); where the parse waits on a slow external script Chrome runs the
 // timer and the message first (`t0, msg, dcl`). No turn starves: an `AHEAD` task is one of a document's two, never
-// queued again by what runs.
+// queued again by what runs. Or behind them (`BEHIND`), whichever realm's they are and whenever they were queued: what
+// a frame's navigation goes on with once the steps HTML "navigate" runs at once are done — its document asked and left,
+// the response in — which HTML runs in parallel with the event loop, a network's time away from the task that began it.
+// A zero timer queued after the `src` set comes first, and the chain it starts, until its nesting clamp moves it past
+// this instant (`old-t30 P0 old-pagehide`; Chrome `c0 … c4` before the pagehide, Firefox `c0 c1 c2`). The clock moving on
+// ends the wait: a task due earlier runs first, so none starves.
 pub(crate) const AHEAD: u8 = 0;
 const IN_TURN: u8 = 1;
+const BEHIND: u8 = 2;
 
 impl Timers {
     // Its networking tasks kept, the rest gone: its page's timers, its other platform tasks, animation frame and idle
@@ -359,7 +367,7 @@ impl RealmArena {
         let mut first: Option<((Due, u8, u64, i64), i32)> = None;
         self.each_event_loop_realm(|realm| {
             let Some(h) = head(realm) else { return };
-            if first.is_none_or(|(f, _)| (h.0, h.2) < (f.0, f.2)) {
+            if first.is_none_or(|(f, _)| (h.0, h.1 == BEHIND, h.2) < (f.0, f.1 == BEHIND, f.2)) {
                 first = Some((h, realm));
             }
         });
@@ -708,7 +716,8 @@ fn clock_followed(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 // timeout — an XHR's `timeout`, an AbortSignal's — falls due later the first time by what the realm's `Date` stands ahead
 // of this clock by (agent_clock.rs `Read::lead`), which its timeout is counted from, and runs no earlier on its realm's
 // clock than its timeout after it was set (`Timer::not_early`). A platform task of a source the event loop treats apart
-// is kept as one (`source`: 1 a crossing queue's turn, which neither, 2 a request's — `Source`).
+// is kept as one (`source`: 1 a crossing queue's turn, which neither, 2 a request's, 3 a navigation's, `BEHIND` those due
+// with it — `Source`).
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
     let list = args.get(1);
@@ -716,8 +725,12 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let timeout = args.get(2).number_value(scope).unwrap_or(0.0);
     let repeats = args.get(3).is_true();
     let task = args.get(4).is_true();
-    let turn = if task && args.get(5).is_true() { AHEAD } else { IN_TURN };
     let source = if task { args.get(6).int32_value(scope).and_then(Source::of) } else { None };
+    let turn = match source {
+        Some(Source::Navigation) => BEHIND,
+        _ if task && args.get(5).is_true() => AHEAD,
+        _ => IN_TURN,
+    };
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let (not_early, lead) = if (timeout > 0.0 && source != Some(Source::Turn)) || !task {

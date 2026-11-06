@@ -318,9 +318,10 @@ RSpec.describe 'choosing a navigable by name' do
     ])
   end
 
-  # …and one a beforeunload handler re-navigates — the document above it asked, not yet unloaded — is asked itself, for
-  # its own navigation, and again with the tree; each document is unloaded once, in whichever order the two navigations
-  # commit (Chrome: c:bu, g:bu, g:bu, then g's pagehide / unload and c's, the frame's response the first in).
+  # …and one a beforeunload handler re-navigates — the document above it asked, not yet unloaded — is asked with the tree;
+  # its own navigation's task, behind the frame's (HTML queues asking it: "checking if unloading is canceled"), finds it
+  # gone. Each document is unloaded once. (Chrome asks inside `navigate`: c:bu, g:bu, g:bu, then g's pagehide / unload and
+  # c's, the frame's response the first in.)
   it "asks a frame a beforeunload handler navigates" do
     s, = session_for(
       '/p' => '<script>window.L = []</script><iframe id="c" src="/c"></iframe>',
@@ -329,9 +330,9 @@ RSpec.describe 'choosing a navigable by name' do
     )
     s.evaluate_script('frames[0].frames[0].document.body.textContent')
     s.execute_script('frames[0].location = "http://www.example.com/d"')
-    log = poll_until { s.evaluate_script('L').then {|l| l if l.size >= 7 } }
-    expect(log.first(3)).to eq(%w[c:beforeunload:c g:beforeunload:g g:beforeunload:g])
-    expect(log.drop(3)).to contain_exactly('c:pagehide:c', 'c:unload:c', 'g:pagehide:g', 'g:unload:g')
+    log = poll_until { s.evaluate_script('L').then {|l| l if l.size >= 6 } }
+    expect(log.first(2)).to eq(%w[c:beforeunload:c g:beforeunload:g])
+    expect(log.drop(2)).to contain_exactly('c:pagehide:c', 'c:unload:c', 'g:pagehide:g', 'g:unload:g')
   end
 
   # A redirect's Location is parsed against the URL of the response that carries it (Fetch "HTTP-redirect fetch") —
@@ -388,9 +389,10 @@ RSpec.describe 'choosing a navigable by name' do
     expect(poll_until { s.evaluate_script('1') && cookies['/d'] }).to eq('bu=1')
   end
 
-  # …a `src` change the same: its document asked at once, unloaded when the response is in — its window the frame's
-  # until then, a second change asking it again (Chrome: beforeunload twice, `contentWindow` the old window, the old
-  # document's text, one unload), and a beforeunload handler rewriting `src` a navigation of its own, ignored.
+  # …a `src` change the same: its document asked on the navigation's task (HTML "checking if unloading is canceled" step 7,
+  # where Chrome and Firefox ask inside the setter), unloaded when the response is in — its window the frame's until then,
+  # a second change asking it again (Chrome: beforeunload twice, `contentWindow` the old window, the old document's text,
+  # one unload), and a beforeunload handler rewriting `src` a navigation of its own, ignored.
   it 'keeps a frame on its document until the response of a src navigation is in' do
     cookies = {}
     s = simulated_session(->(env) {
@@ -403,7 +405,7 @@ RSpec.describe 'choosing a navigable by name' do
     })
     s.visit '/p'
     s.evaluate_script('frames[0].document.body.textContent')
-    expect(s.evaluate_script(<<~JS)).to eq([true, 'c', %w[beforeunload beforeunload]])
+    expect(s.evaluate_script(<<~JS)).to eq([true, 'c', []])
       (() => {
         const f = document.getElementById('c'), w = f.contentWindow;
         f.src = '/d';
