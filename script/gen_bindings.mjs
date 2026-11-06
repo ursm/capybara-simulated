@@ -704,7 +704,7 @@ const REFLECTION = [
 ];
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'argumentList', 'reflectApply', 'reflectConstruct', 'Dictionary', 'EMPTY_DICTIONARY', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'Dictionary', 'EMPTY_DICTIONARY', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -1593,9 +1593,11 @@ function generateInterface(def, options = {}) {
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
   lines.push(`  // (…made by the platform alone: the interface has no constructor)`);
   lines.push(`  class ${name} {`);
-  lines.push(`    constructor(...args) {`);
-  lines.push(`      constructedBy(PLATFORM, args[0], '${name}');`);
-  lines.push(`      reflectApply(impl.init, impl, argumentList(makeSlots(this, KEY), args, 1));`);
+  // (…its state's arguments by position: no array to make per object, no spread to run a page's iterator, and a length of 0
+  // on the interface object)
+  lines.push(`    constructor() {`);
+  lines.push(`      constructedBy(PLATFORM, arguments[0], '${name}');`);
+  lines.push(`      impl.init(makeSlots(this, KEY), arguments[1], arguments[2], arguments[3], arguments[4], arguments[5], arguments[6]);`);
   lines.push(`    }`);
   lines.push(...body);
   lines.push(`  }`);
@@ -1613,16 +1615,17 @@ function generateInterface(def, options = {}) {
   } else if (indexed) {
     lines.push(`  defineIndexedIterator(${name}.prototype);`);
   }
-  // …and its objects, as the platform makes them (`create(...state)`), exotic where it has an indexed getter.
-  const made = `reflectConstruct(${name}, argumentList(PLATFORM, state))`;
+  // …and its objects, as the platform makes them (`create(a, …)`, each `init`'s state by position), exotic where it has an
+  // indexed getter.
+  const made = `new ${name}(PLATFORM, a, b, c, d, e, f)`;
   const make = !indexed
     ? made
     : options.nativeIndexed
-      ? `{ const s = nativeIndexedObject(${name}.prototype, KEY, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s)); reflectApply(impl.init, impl, argumentList(s, state)); return s.owner; }`
+      ? `{ const s = nativeIndexedObject(${name}.prototype, KEY, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s)); impl.init(s, a, b, c, d, e, f); return s.owner; }`
       : options.namedGetter
         ? `withIndexedGetter(${made}, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s), (s) => impl.supportedNames(s), (s, n) => impl.namedItem(s, n))`
         : `withIndexedGetter(${made}, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s))`;
-  lines.push(`  return { interface: ${name}, create: (...state) => ${make} };`);
+  lines.push(`  return { interface: ${name}, create: (a, b, c, d, e, f) => ${make} };`);
   lines.push(`}`);
   return lines.join('\n');
 }

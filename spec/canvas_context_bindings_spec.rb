@@ -622,6 +622,60 @@ RSpec.describe 'Canvas context bindings' do
     )
   end
 
+  # The other way a page's `Array.prototype` could reach an argument list: `concat` asks it `Symbol.isConcatSpreadable` and
+  # its `constructor`, and a Window operation or a platform object's making has no array to ask (positional arguments).
+  # roundRect's radii arrive whatever setters it has too. Base, Chrome and Firefox: no difference.
+  it 'makes platform objects and calls Window operations whatever a page did to Array.prototype' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const proto = Array.prototype;
+      const own = Object.getOwnPropertyDescriptor(proto, 'constructor');
+      const run = async () => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 4;
+        const g = c.getContext('2d');
+        g.fillRect(0, 0, 4, 4);
+        const o = new OffscreenCanvas(2, 2);
+        o.getContext('2d');
+        const div = document.createElement('div');
+        div.classList.add('a');
+        const out = [
+          await new Promise((r) => setTimeout((a, b) => r(a + b), 0, 'x', 'y')),
+          await new Promise((r) => queueMicrotask(() => r('micro'))),
+          atob('QQ=='),
+          getComputedStyle(document.body).display,
+          (await createImageBitmap(c)).width,
+          o.transferToImageBitmap().width,
+          g.createPattern(c, 'repeat') !== null,
+          g.createLinearGradient(0, 0, 1, 1).constructor.name,
+          typeof g.measureText('x').width,
+          document.adoptedStyleSheets.length,
+          div.classList.length
+        ];
+        const p = new Path2D();
+        p.roundRect(0, 0, 4, 4, [1, 2]);
+        out.push(p instanceof Path2D);
+        return out;
+      };
+      (async () => {
+        proto[Symbol.isConcatSpreadable] = false;
+        const spreadable = await run();
+        delete proto[Symbol.isConcatSpreadable];
+        let set = 0;
+        Object.defineProperty(proto, '1', {configurable: true, set() { set++; }});
+        Object.defineProperty(proto, '2', {configurable: true, set() { set++; }});
+        const g = new OffscreenCanvas(9, 9).getContext('2d');
+        g.roundRect(0, 0, 9, 9, [{x: 0, y: 0}, {x: 0, y: 0}]);
+        g.fill();
+        const alpha = g.getImageData(0, 0, 1, 1).data[3];
+        delete proto['1'];
+        delete proto['2'];
+        done([spreadable, alpha, set]);
+      })();
+    JS
+    expect(got).to eq([['xy', 'micro', 'A', 'block', 4, 2, true, 'CanvasGradient', 'number', 0, 1, true], 255, 0])
+  end
+
   # What the engine allocates for a page is V8's to count as it allocates: a loop of dead bitmaps is collected as it goes.
   # Stores made in Rust and attached later put no pressure on the heap, and 4 GB of dead `getImageData` peaked at the 4 GB.
   it 'leaves dead pixels for the collector as they churn', if: File.exist?('/proc/self/clear_refs') do

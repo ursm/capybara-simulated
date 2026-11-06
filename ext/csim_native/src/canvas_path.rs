@@ -1022,6 +1022,7 @@ fn dist_to_segment(px: f64, py: f64, p1: (f64, f64), p2: (f64, f64)) -> f64 {
 // ── the ops ──
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "canvasPath", canvas_path, context_id);
+    crate::dom::register(scope, ns, "canvasPathRoundRect", canvas_path_round_rect, context_id);
     crate::dom::register(scope, ns, "canvasPathAdd", canvas_path_add, context_id);
     crate::dom::register(scope, ns, "canvasPathSvg", canvas_path_svg, context_id);
     crate::dom::register(scope, ns, "canvasPathEmpty", canvas_path_empty, context_id);
@@ -1068,20 +1069,18 @@ fn canvas_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let num = |k: i32| v8::Local::<v8::Number>::try_from(args.get(k)).map_or(f64::NAN, |n| n.value());
     let op = num(1) as i32;
     let ctm = crate::canvas_state::handle_of(scope, args.get(2)).map(|h| unsafe { h.as_ref() }.state().m);
-    // (…the op's own arguments, missing ones NaN; roundRect's radii are the rest)
+    // (…the op's own arguments, missing ones NaN)
     let n = arity(op);
     let mut fixed = [f64::NAN; 8];
-    let radii: Vec<f64>;
-    let a: &[f64] = if op == OP_ROUND_RECT {
-        radii = (3..args.length().max(3 + n as i32)).map(num).collect();
-        &radii
-    } else {
-        fixed[..n].iter_mut().enumerate().for_each(|(k, v)| *v = num(3 + k as i32));
-        &fixed[..n]
-    };
+    fixed[..n].iter_mut().enumerate().for_each(|(k, v)| *v = num(3 + k as i32));
     let mut b = Builder::new(path_mut(args.get(0)), ctm);
-    match b.op(op, a) {
-        Ok(()) => finish(scope, b, &mut rv),
+    let built = b.op(op, &fixed[..n]);
+    answer(scope, b, built, &mut rv);
+}
+// Hand back what an op did: as `finish`, or its refusal.
+fn answer(scope: &mut v8::PinScope<'_, '_>, b: Builder<'_>, built: Result<(), Refusal>, rv: &mut v8::ReturnValue<'_, v8::Value>) {
+    match built {
+        Ok(()) => finish(scope, b, rv),
         Err(refusal) => {
             let (name, message) = match refusal {
                 Refusal::Range(m) => ("RangeError", m),
@@ -1091,6 +1090,19 @@ fn canvas_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             rv.set(v8::Array::new_with_elements(scope, &parts).into());
         }
     }
+}
+
+// __dom.canvasPathRoundRect(path, state, x, y, w, h, radii, count) -> `roundRect()`, returning as `canvasPath`: `radii` a
+// Float64Array whose first `count` are its x and y pairs.
+fn canvas_path_round_rect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let ctm = crate::canvas_state::handle_of(scope, args.get(1)).map(|h| unsafe { h.as_ref() }.state().m);
+    let rect: [f64; 4] = std::array::from_fn(|k| v8::Local::<v8::Number>::try_from(args.get(k as i32 + 2)).map_or(f64::NAN, |n| n.value()));
+    let count = args.get(7).uint32_value(scope).unwrap_or(0) as usize;
+    let radii = crate::dom::f64_arg(args.get(6));
+    let a: Vec<f64> = rect.iter().chain(radii.iter().take(count)).copied().collect();
+    let mut b = Builder::new(path_mut(args.get(0)), ctm);
+    let built = b.op(OP_ROUND_RECT, &a);
+    answer(scope, b, built, &mut rv);
 }
 
 // __dom.canvasPathAdd(path, other, m) -> Path2D's addPath: `other`'s subpaths appended, through the matrix `m` where it
