@@ -8153,8 +8153,7 @@ module Capybara
           group:           @runtime.window_group(opener_realm_id)
         )
         # (…and its opener policy its creator's top-level document's, where it takes it)
-        creator = document_traversable(opener_realm_id)
-        window_history(realm)&.inherit_opener_policy(creator) { top_level_origins(opener_realm_id) } if realm && creator
+        window_history(realm)&.opener_policy = inherited_opener_policy(opener_realm_id) if realm
         realm
       end
 
@@ -8255,9 +8254,10 @@ module Capybara
       # Referer its request sent and its policy, and its origin, `null` an error document's — a new opaque one — its
       # Content-Security-Policy and Refresh the response headers' own, as the page's commit reads them).
       # (…`traversable` the window's, kept across the switch: its session history and its session storage this one's)
-      # (…`blob` the blob a `blob:` URL's document is made of: `boot_blob_document`; an about:blank one's its initiator's
-      # origin and base URL, as the page's takes them: `navigate_top_level`)
-      def adopt_navigation_response(url, response, body, made, traversable: nil, blob: nil)
+      # (…`made[:blob]` the blob a `blob:` URL's document is made of, its type its document's: `boot_blob_document`; an
+      # about:blank one's its initiator's origin and base URL, as the page's takes them: `navigate_top_level`. `made[:entry]`
+      # what the navigation does to the session history: `navigate_window_realm`)
+      def adopt_navigation_response(url, response, body, made, traversable: nil)
         referrer, referrer_policy = made.values_at(:referrer, :referrer_policy)
         if traversable
           Native.storage_clear(@session_storage)
@@ -8265,8 +8265,19 @@ module Capybara
           @session_storage = traversable.session_storage
         end
         @current_referer = referrer.to_s
-        record_history({url: url.to_s, referer: referrer, referrer_policy: referrer_policy}.compact)
-        return boot_blob_document(url, blob[:bytes], blob[:type], coop_switch: true) if blob
+        how, step, post = made[:entry]
+        case how
+        when 'step'
+          @session_history.go_to(step)
+        when 'reload'
+          nil
+        else
+          entry = {url: url.to_s, referer: referrer, referrer_policy: referrer_policy}.compact
+          entry.update(body: post[0], content_type: post[1]) if post
+          record_history(entry, replace: how == 'replace')
+        end
+        blob = made[:blob]
+        return boot_blob_document(url, blob[:bytes], blob[:type], coop_switch: true) if blob && made[:doc_origin] != 'null'
 
         inherit_creator(origin: made[:doc_origin], base: made[:about_base]) if about_blank_url?(url)
         self.page_url = url.to_s
@@ -9246,19 +9257,14 @@ module Capybara
       # document — for `window.open(blobURL)` / a blob: aux-window navigation,
       # where the blob isn't rack-navigable and lives in the opener's isolate.
       # (…`flushed` where its caller flushed the outgoing page already: `navigate`, before the history entry it records)
-      # (…`coop_switch` as `boot_response_into_ctx`'s)
-      def boot_blob_document(url, bytes, content_type, flushed: false, coop_switch: nil)
+      # (…`coop_switch` and `inherited_coop` as `boot_response_into_ctx`'s)
+      def boot_blob_document(url, bytes, content_type, flushed: false, coop_switch: false, inherited_coop: nil)
         # Before the URL below lands (see `flush_outgoing_page_init`).
         flush_outgoing_page_init if @timers_active && !flushed
         self.page_url = url.to_s
-        ct = content_type.to_s.empty? ? 'text/html' : content_type.to_s
-        # Blob string parts are UTF-8-encoded; when the Blob type carries no
-        # charset, decode the document as UTF-8 (not the windows-1252 HTML locale
-        # default, which is an HTTP concept that doesn't apply to in-memory blobs —
-        # matches the iframe blob: path's decodeBlobBody). A charset in the Blob
-        # type (url-charset) is preserved so it can override <meta charset>.
-        ct = "#{ct};charset=utf-8" unless ct.downcase.include?('charset')
-        record_response(200, {'content-type' => ct})
+        # (…its encoding its type's where that says, the locale's default otherwise, as any top-level document's: Chrome and
+        # Firefox alike, `cafÃ©` of a type with no charset, measured 2026-11-06)
+        record_response(200, {'content-type' => content_type.to_s.empty? ? 'text/html' : content_type.to_s})
         bytes = bytes.to_s.b
         # Make the blob URL fetchable from the document we're about to load — a blob:
         # document that fetches itself (or a media `src` first-party load) snapshots
@@ -9268,7 +9274,7 @@ module Capybara
         # partition entry — the blob keeps its original storage partition; this only makes it
         # first-party-fetchable in the window it was navigated into; a copy, which the next
         # page to begin here lets go of.
-        boot_response_into_ctx(bytes, coop_switch: coop_switch) { Native.blob_registry_copy(@blob_window, url.to_s, bytes, content_type.to_s) }
+        boot_response_into_ctx(bytes, coop_switch: coop_switch, inherited_coop: inherited_coop) { Native.blob_registry_copy(@blob_window, url.to_s, bytes, content_type.to_s) }
         # Adopt into the in-VM store too, so the document's blob resolves as the blob it is.
         @runtime.call('__csimAdoptBlobBytes', url.to_s, bytes, content_type.to_s) rescue nil
       end
@@ -11184,16 +11190,23 @@ module Capybara
           body, ctype = '', 'text/html'
           made = window_about_blank(realm_id, kind, initiator, source, policy, referred, url) unless by_user
         end
-        # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
-        # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
-        # use for a navigation response". One no hop enforced, an about:blank document's or a `blob:` or `data:` URL's, of
-        # no policy judged here: the page's is, `commit_coop`)
-        switch = history&.opener_policy_switch { coop_facts(realm_id).first(2) } if switch.nil?
-        if switch && @driver.respond_to?(:move_window_to_new_group)
-          return @driver.move_window_to_new_group(self, realm_id, url, response || [200, {'content-type' => ctype.to_s}], body, made, blob)
-        end
         # (…its entry of the window's session history: how it is made, the step a traversal goes to, a POST's resource)
         entry = [how, step, (post if http_url?(url))]
+        # (…an about:blank document's or a blob's opener policy the one it inherits: coop.rs `inherited`)
+        local = blob || start == 'about_blank'
+        if local
+          opener_policy = kind == 'traverse' ? history&.text(history.entry_at_step(step), :opener_policy) || 'unsafe-none' : inherited_opener_policy(initiator)
+        end
+        # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
+        # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
+        # use for a navigation response")
+        # (…a blob's origin its URL's, as its policy is judged, though its viewer's document for inline content is opaque)
+        response_origin = blob ? url_origin(url.to_s.sub(/\Ablob:/i, '')) : made[:doc_origin] || url_origin(url)
+        switch, = history&.commit_opener_policy(opener_policy || 'unsafe-none', response_origin.to_s, switch == true) { coop_leaving_facts(realm_id) }
+        if switch && @driver.respond_to?(:move_window_to_new_group)
+          moved = made.merge(entry: entry, blob: blob && blob.merge(type: ctype))
+          return @driver.move_window_to_new_group(self, realm_id, url, response || [200, {'content-type' => ctype.to_s}], body, moved)
+        end
         # (…the window's initial about:blank's realm the one a document of its origin is loaded into, its Window kept — and
         # its Document object, renewed)
         keeps = kind == 'location' && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
@@ -11219,7 +11232,7 @@ module Capybara
         return unless new_id
 
         @runtime.window_realm_meta[new_id][:response] = response || ABOUT_BLANK_RESPONSE
-        history&.opener_policy = opener_policy || 'unsafe-none'
+        history.update(history.active(0), {opener_policy: opener_policy}) if local && history
         # (…a traversal's document given the state its entry's controls were left in, as the page's is: `restore_form_state`)
         if kind == 'traverse' && (state = history&.entry(history.active(0))&.fetch(:form_state, nil))
           @runtime.realm_call(new_id, '__csimRestoreFormState', state)
@@ -12534,9 +12547,9 @@ module Capybara
         # — `clear_navigable_name`, an error document's of an opaque one — a replay's left as it was)
         leaving_origin = leaving_document_origin unless from_history
         commits        = lambda {|origin| clear_navigable_name(leaving_origin, origin) unless from_history }
-        error_document = lambda {|at|
+        error_document = lambda {|at, coop_switch = false|
           commits.(nil)
-          commit_error_document(at)
+          commit_error_document(at, coop_switch: coop_switch)
         }
         referrer_policy ||= main_document_referrer_policy if referer
         req_body = body&.b
@@ -12618,7 +12631,7 @@ module Capybara
             commits.(initiator && url_origin(initiator))
             self.page_url = url.to_s
             record_response(*ABOUT_BLANK_RESPONSE)
-            return boot_response_into_ctx('')
+            return boot_response_into_ctx('', inherited_coop: page_local_scheme_policy(from_history))
           # A `blob:` URL's GET, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
           # the one above, which a traversal or a reload replays here. (A redirect to one is followed to none:
@@ -12631,10 +12644,11 @@ module Capybara
             given = blob[:type].to_s
             load, type = Native.navigation_load(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
             return download_in_place(url, {'content-type' => given}, [blob[:bytes].to_s]) if load == 'download'
-            return boot_inline_document(url, 200, {'content-type' => given}, commits) if load == 'inline'
+            inherited = page_local_scheme_policy(from_history)
+            return boot_inline_document(url, 200, {'content-type' => given}, commits, inherited_coop: inherited) if load == 'inline'
 
             commits.(url_origin(url.to_s.sub(/\Ablob:/i, '')))
-            return boot_blob_document(url, blob[:bytes], given.empty? ? type : given, flushed: true)
+            return boot_blob_document(url, blob[:bytes], given.empty? ? type : given, flushed: true, inherited_coop: inherited)
           # A `data:` URL's response its own (Fetch "scheme fetch"): a download where it makes no document; else its
           # document, of a new opaque origin — a document's refused before it began (above) — and a malformed one a network
           # error (navigation_fetch.rs `data_navigation`).
@@ -12684,14 +12698,14 @@ module Capybara
           target = fetch.target
           case hop.command
           when 'fail'
-            return error_document.(target)
+            return error_document.(target, fetch.coop_switch?)
           when 'hand_off', 'no_content'
             return navigation_made_no_document(target)
           # A response that downloads makes no document: a window stays at the one it has (`download_in_place`).
           when 'download'
             return download_in_place(target, hop.headers, hop.rack_body || [hop.document])
           when 'inline'
-            return boot_inline_document(target, hop.status, hop.headers, commits, client_id: hop.client_id)
+            return boot_inline_document(target, hop.status, hop.headers, commits, client_id: hop.client_id, coop_switch: fetch.coop_switch?)
           end
 
           self.page_url = target
@@ -12764,11 +12778,12 @@ module Capybara
       # an empty `text/html` document at the response's URL, of a new opaque origin, and of no policy its response sets — no
       # Content-Security-Policy, Referrer-Policy, Refresh or opener policy (a new policy container); the response recorded as
       # it came. (`commits` the navigation's, which clears the navigable's name by the origin it leaves.)
-      private def boot_inline_document(url, status, headers, commits, client_id: nil)
+      # (…`coop_switch` and `inherited_coop` as `boot_response_into_ctx`'s)
+      private def boot_inline_document(url, status, headers, commits, client_id: nil, coop_switch: false, inherited_coop: nil)
         commits.(nil)
         self.page_url = url.to_s
         record_response(status, headers)
-        boot_response_into_ctx('', opaque_origin: true, inline: true, client_id: client_id)
+        boot_response_into_ctx('', opaque_origin: true, coop_switch: coop_switch, inherited_coop: inherited_coop, inline: true, client_id: client_id)
       end
       private def download_in_place(url, headers, body)
         save_downloaded_response(url, headers, body)
@@ -12800,33 +12815,40 @@ module Capybara
       private def document_traversable(realm) = realm.to_i.zero? ? @session_history : traversable_history(@runtime.frame_realm_tree(realm)[4])
       # …the origin of that document and of its top-level one: what the opener policy of the second is read by.
       private def top_level_origins(realm) = [document_origin(realm).to_s, document_origin(@runtime.top_level_realm(realm)).to_s]
-      # The facts of the document of realm `realm` a navigation of its top-level traversable leaves that its responses'
-      # opener policies are enforced against (navigation_fetch.rs `response`, HTML "enforce a response's opener policy"),
-      # asked only where a policy but "unsafe-none" is in play: its origin, whether it is its initial about:blank, and its
-      # navigable's popup sandboxing flag set (realm_location.rs `pageSandbox` of no Content-Security-Policy).
-      private def coop_facts(realm)
-        [
-          document_origin(realm).to_s,
-          @runtime.realm_call(realm, '__csimInitialAboutBlank') == true,
-          @runtime.realm_call(realm, '__csimNavigationSandbox', nil).to_i
-        ]
+      # …the opener policy a document of no headers that document makes takes (coop.rs `inherited`), none of no such document.
+      private def inherited_opener_policy(realm)
+        creator = realm && document_traversable(realm)
+        creator ? creator.inherited_opener_policy { top_level_origins(realm) } : 'unsafe-none'
       end
-      # The page's document committed, of opener policy `coop` — the one place every commit goes through (a response's, an
-      # about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context group is left
-      # for a new one where needed: its navigation's enforcement result's switch, the one its responses made (`due`,
-      # navigation_fetch.rs `CoopEnforcement`), or, one no hop enforced, of no policy, judged here (session_history.rs
-      # `opener_policy_switch`). A group of the page's next document's isolation: HTML's "cross-origin isolation mode" is
-      # a group's, set only as one is made for a document "same-origin-plus-COEP" — every document here in a secure
-      # context, as `isSecureContext` says (a real browser's http://www.example.com would not be; its http://127.0.0.1
-      # would). Not modelled: a cross-origin frame's own `allow="cross-origin-isolated"` permission (it shares the
-      # top-level document's here), nor a service worker's own COEP (it is never isolated here).
-      private def commit_coop(coop, due)
-        due = @session_history.opener_policy_switch { coop_facts(0).first(2) } if due.nil?
-        if due
-          leave_browsing_context_group
-          @runtime.cross_origin_isolated = coop == 'same-origin-plus-COEP'
-        end
-        @session_history.opener_policy = coop
+      # …the one the page's own takes: a replay's the one its entry kept; else that of the document that made the navigation,
+      # which its entry keeps for one (`from_document`, none of the user's).
+      private def page_local_scheme_policy(from_history)
+        id = @session_history.active(0)
+        return @session_history.text(id, :opener_policy) || 'unsafe-none' if from_history
+
+        inherited_opener_policy(@download_source).tap {|policy| @session_history.update(id, {opener_policy: policy}) if id }
+      end
+      # The facts of the document of realm `realm` a navigation of its top-level traversable leaves that its responses'
+      # opener policies are enforced against, asked only where a policy but "unsafe-none" is in play: its origin and whether it
+      # is its initial about:blank (session_history.rs `commit_opener_policy`) — and for each response as it comes
+      # (navigation_fetch.rs `response`, HTML "enforce a response's opener policy") its navigable's popup sandboxing flag set
+      # (realm_location.rs `pageSandbox` of no Content-Security-Policy).
+      private def coop_leaving_facts(realm) = [document_origin(realm).to_s, @runtime.realm_call(realm, '__csimInitialAboutBlank') == true]
+      private def coop_facts(realm) = [*coop_leaving_facts(realm), @runtime.realm_call(realm, '__csimNavigationSandbox', nil).to_i]
+      # The page's document committed, of opener policy `coop` and origin `origin` — the one place every commit goes through
+      # (a response's, an about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context
+      # group is left for a new one where needed (session_history.rs `commit_opener_policy`), `carried` what its navigation's
+      # enforcement result needed (navigation_fetch.rs `CoopEnforcement`), and the next document as cross-origin isolated as
+      # that makes it — every document here in a secure context, as `isSecureContext` says (a real browser's
+      # http://www.example.com would not be; its http://127.0.0.1 would). Not modelled: a cross-origin frame's own
+      # `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service worker's own COEP
+      # (it is never isolated here).
+      private def commit_coop(coop, origin, carried)
+        switch, isolated = @session_history.commit_opener_policy(coop, origin.to_s, carried == true) { coop_leaving_facts(0) }
+        return unless switch
+
+        leave_browsing_context_group
+        @runtime.cross_origin_isolated = isolated
       end
       # The page's browsing context group left for a new one (HTML "obtain a browsing context to use for a navigation
       # response"): the next document a new browsing context's, of a group of its own — named anew, which its realms are
@@ -12849,12 +12871,13 @@ module Capybara
       # (e.g. Avo's `redirect_to main_app.hey_path` → static view). Kept
       # small (~10 retry intervals) so failing-assertion paths don't pay
       # for the wait.
-      # (…`coop_switch` the enforcement result's of the navigation whose response it is — whether its browsing context group
-      # is to be left — none for a document no response enforced made: `commit_coop`)
+      # (…`coop_switch` the enforcement result's of the navigation whose response it is, whether its browsing context group
+      # is to be left: `commit_coop` — `inherited_coop` the opener policy of a document of no headers that takes one, its
+      # response's otherwise: session_history.rs `inherited_opener_policy`)
       # (…`content_type` the type its body said where it did — MIME Sniffing's computed one — over the response's)
       # (…`inline` an inline content document's: `boot_inline_document`)
       # (…`client_id` the reserved client id of the navigation whose response it is: `run_navigation_fetch`)
-      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: nil, content_type: nil, inline: false, client_id: nil)
+      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: false, inherited_coop: nil, content_type: nil, inline: false, client_id: nil)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -12885,7 +12908,11 @@ module Capybara
         ctype = content_type || ctype
         # (…its opener policy, what a navigation of the page after is judged by — the page's browsing context group left for
         # a new one where it needs, and what that makes it cross-origin isolated: `commit_coop`)
-        commit_coop(opener_policy, coop_switch) unless initial
+        unless initial
+          # (…a blob's origin its URL's, as its policy is judged, though its viewer's document for inline content is opaque)
+          response_origin = opaque_origin && !(inline && inherited_coop) ? 'null' : (about_blank_url?(page_url) ? @creator&.fetch(:origin) : url_origin(page_url.to_s.sub(/\Ablob:/i, '')))
+          commit_coop(inherited_coop || opener_policy, response_origin, coop_switch)
+        end
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
         # (…its time origin now, as `Date` reads it: the wall clock's, as its server's `Time.now` is — not where the last
@@ -13387,10 +13414,11 @@ module Capybara
       # the URL moves even though nothing loaded.
       # (…its origin a new opaque one, whatever its URL's: HTML "determine the origin" for a navigation params' error —
       # Chrome and Firefox measured: a window of the failed URL's origin finds it by no name)
-      def commit_error_document(url)
+      # (…`coop_switch` what its navigation's responses needed, which its opener policy of none adds to: `commit_coop`)
+      def commit_error_document(url, coop_switch: false)
         self.page_url = url
         record_response(0, {'content-type' => 'text/html'})
-        boot_response_into_ctx('', opaque_origin: true)
+        boot_response_into_ctx('', opaque_origin: true, coop_switch: coop_switch)
       end
       # Whether `url` is an HTTP(S) URL — one a fetch goes over the network for, and the only kind a redirect is followed to.
       def http_url?(url) = url.to_s.match?(%r{\Ahttps?://}i)

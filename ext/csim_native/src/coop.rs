@@ -81,23 +81,36 @@ pub(crate) fn switch_needed(initial_about_blank: bool, document_origin: &str, do
     !matching(document, document_origin, response, response_origin)
 }
 
-// …of a response of no policy — every one made of no headers: an about:blank document's, a `blob:` or `data:` URL's — the
-// host asked the facts of the document it leaves (its origin, whether it is its initial about:blank) only for one of a
-// policy. HTML "create navigation params by fetching" enforces these as it does any response, "obtain an opener policy"
-// of none of the headers it reads saying otherwise. Chrome and Firefox differ (measured 2026-11-06): an about:blank or
-// `blob:` document there inherits its initiator's policy and stays, as the open whatwg/html#5198 would have it, whose
-// answer would change this one step.
-pub(crate) fn switch_for_no_policy<E>(document: Value, facts: impl FnOnce() -> Result<(String, bool), E>) -> Result<bool, E> {
-    if document == Value::UnsafeNone {
-        return Ok(false);
-    }
-    let (document_origin, initial) = facts()?;
-    Ok(switch_needed(initial, &document_origin, document, "null", Value::UnsafeNone))
+// What a document committing at a top-level traversable makes of its browsing context group: whether it leaves it — `carried`,
+// the switch its navigation's enforcement result needed, or else its own policy `response` against the document it replaces,
+// the host asked that one's facts (its origin, whether it is its initial about:blank) only where a policy is in play — and,
+// leaving, whether the group it is made for is cross-origin isolated: HTML's "cross-origin isolation mode" is a group's, set
+// as one is made for a document "same-origin-plus-COEP". Every commit comes through here: a response's, whose judging again
+// agrees with what its hops found (values matching hop to hop match end to end), and a document no hop enforced — an
+// about:blank's, a `blob:` or `data:` URL's, an error document's.
+pub(crate) fn commit_verdict<E>(document: Value, response: Value, response_origin: &str, carried: bool, facts: impl FnOnce() -> Result<(String, bool), E>) -> Result<(bool, bool), E> {
+    let switch = carried
+        || (document != Value::UnsafeNone || response != Value::UnsafeNone) && {
+            let (document_origin, initial) = facts()?;
+            switch_needed(initial, &document_origin, document, response_origin, response)
+        };
+    Ok((switch, response == Value::SameOriginPlusCoep))
 }
 
-// The opener policy a new window's initial about:blank takes of its creator (HTML "create a new browsing context and
-// document"): that of its creator's top-level document, where the creator's origin (`facts`, with that document's) is
+// The opener policy a document of no headers takes of the document that made it: a new window's initial about:blank of its
+// creator (HTML "create a new browsing context and document"), and an about:blank or `blob:` document of its navigation's
+// initiator: that of its top-level document, where the origin of the one that made it (`facts`, with that document's) is
 // that one's, an opaque one being no other's — none otherwise.
+//
+// HTML's text gives the second none ("create navigation params by fetching" enforces it as any response, "obtain an opener
+// policy" finding no header), and that is a known gap, not a rule. The policy container's definition reads "Move other
+// policies into the policy container", which these documents inherit; whatwg/html#5198 has been open since 2019 on just
+// this, annevk: "`about:blank` and `blob:` remain for popups. I think we should inherit for them as we do normally",
+// ParisMeuleman: "inherit from the source document top level document if they are both same-origin, unsafe-none otherwise",
+// annevk: "Yeah that sounds reasonable", nobody against. The non-tentative WPTs html/cross-origin-opener-policy/
+// blob-popup, coep-blob-popup, navigate-to-aboutblank and navigate-top-to-aboutblank hold it, and Chrome and Firefox agree
+// (Firefox alone keeps the group under a cross-origin initiator, where #5198 and the WPT say none). A `data:` URL inherits
+// nothing: annevk on #5198, "always ensure that it's a fresh browsing context group".
 pub(crate) fn inherited<E>(top_level: Value, facts: impl FnOnce() -> Result<(String, String), E>) -> Result<Value, E> {
     if top_level == Value::UnsafeNone {
         return Ok(top_level);
@@ -149,16 +162,21 @@ mod tests {
     }
 
     #[test]
-    fn a_response_of_no_policy_switches_from_any_document_of_one_but_an_initial_about_blank_s_allowing_popups() {
+    fn a_commit_leaves_its_group_where_its_hops_said_or_its_own_policy_does_not_match() {
         use Value::*;
-        let facts = |initial| move || Ok::<_, ()>(("http://a.test".to_owned(), initial));
-        assert_eq!(switch_for_no_policy(UnsafeNone, || Err(())), Ok(false));
-        assert_eq!(switch_for_no_policy(SameOrigin, facts(false)), Ok(true));
-        assert_eq!(switch_for_no_policy(SameOriginPlusCoep, facts(false)), Ok(true));
-        assert_eq!(switch_for_no_policy(SameOriginAllowPopups, facts(false)), Ok(true));
-        assert_eq!(switch_for_no_policy(SameOrigin, facts(true)), Ok(true));
-        assert_eq!(switch_for_no_policy(SameOriginAllowPopups, facts(true)), Ok(false));
-        assert_eq!(switch_for_no_policy(NoopenerAllowPopups, facts(true)), Ok(false));
+        let (a, b) = ("http://a.test", "http://b.test");
+        let facts = |initial| move || Ok::<_, ()>((a.to_owned(), initial));
+        // (…no policy on either side: nothing asked)
+        assert_eq!(commit_verdict(UnsafeNone, UnsafeNone, a, false, || Err(())), Ok((false, false)));
+        // (…a document of no headers, its policy none: an error document's, a `data:` URL's)
+        assert_eq!(commit_verdict(SameOrigin, UnsafeNone, "null", false, facts(false)), Ok((true, false)));
+        assert_eq!(commit_verdict(SameOriginAllowPopups, UnsafeNone, "null", false, facts(true)), Ok((false, false)));
+        // (…about:blank's or a blob's, inheriting)
+        assert_eq!(commit_verdict(SameOriginPlusCoep, SameOriginPlusCoep, a, false, facts(false)), Ok((false, true)));
+        assert_eq!(commit_verdict(SameOrigin, SameOrigin, b, false, facts(false)), Ok((true, false)));
+        // (…what the hops needed stands, nothing asked)
+        assert_eq!(commit_verdict(UnsafeNone, UnsafeNone, a, true, || Err(())), Ok((true, false)));
+        assert_eq!(commit_verdict(UnsafeNone, SameOriginPlusCoep, a, true, || Err(())), Ok((true, true)));
     }
 
     fn origins(a: &str, b: &str) -> impl FnOnce() -> Result<(String, String), ()> {

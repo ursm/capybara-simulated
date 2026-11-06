@@ -33,7 +33,7 @@ struct Entry {
 
 // The text fields of an entry's `Data`: the origin, Referer and referrer policy its request was sent with, and its
 // document's referrer.
-const TEXT_FIELDS: [&str; 4] = ["origin", "referer", "referrer_policy", "referrer"];
+const TEXT_FIELDS: [&str; 5] = ["origin", "referer", "referrer_policy", "referrer", "opener_policy"];
 
 // What a replay of an entry sends and restores: how it was reached — a POST's body and content type, the origin, Referer
 // and referrer policy its request was sent with (HTML's document state), whether its cookies were cross-site (which a
@@ -48,7 +48,7 @@ pub(crate) type Post = (Arc<[u8]>, Option<String>);
 struct Data {
     post: Option<Post>,
     // (…by `TEXT_FIELDS`)
-    texts: [Option<String>; 4],
+    texts: [Option<String>; 5],
     cross_site: Option<bool>,
     name: Option<Vec<u16>>,
     state: Option<Arc<[u8]>>,
@@ -264,7 +264,9 @@ struct Traversable {
     passed: Vec<String>,
     // The opener policy of the document its top-level navigable is at (HTML Document's "opener policy", which only a
     // top-level one's is ever read): what its next navigation's responses are enforced against (navigation_fetch.rs
-    // `CoopEnforcement`), and a window's initial about:blank takes of its creator (coop.rs `inherited`).
+    // `CoopEnforcement`), and a document of no headers takes of it (coop.rs `inherited`). A traversal to such a document
+    // or its reload finds the one it took in its entry (`TEXT_FIELDS`), as HTML's "history policy container" keeps a policy
+    // container for a local scheme.
     opener_policy: crate::coop::Value,
 }
 
@@ -1262,20 +1264,24 @@ impl SessionHistory {
     fn set_opener_policy(&self, name: String) {
         self.lock().opener_policy = crate::coop::Value::named(&name);
     }
-    // #opener_policy_switch { [origin, initial about:blank] } -> whether a navigation of it to a response of no policy — one
-    // no hop enforced: an about:blank document's, a `blob:` or `data:` URL's — needs a browsing context group switch
-    // (coop.rs `switch_for_no_policy`), the block giving the facts of the document it leaves.
-    fn opener_policy_switch(ruby: &magnus::Ruby, rb_self: &Self) -> Result<bool, magnus::Error> {
-        let document = rb_self.lock().opener_policy;
-        crate::coop::switch_for_no_policy(document, || ruby.yield_value(ruby.qnil()))
+    // #commit_opener_policy(name, response origin, carried) { [origin, initial about:blank] } -> [switch, isolated]: the
+    // document a navigation of it makes, of that policy, is its document's from here on, and what that does to its browsing
+    // context group (coop.rs `commit_verdict`), the block giving the facts of the document it leaves.
+    fn commit_opener_policy(ruby: &magnus::Ruby, rb_self: &Self, name: String, response_origin: String, carried: bool) -> Result<(bool, bool), magnus::Error> {
+        let (document, response) = (rb_self.lock().opener_policy, crate::coop::Value::named(&name));
+        let verdict = crate::coop::commit_verdict(document, response, &response_origin, carried, || ruby.yield_value(ruby.qnil()))?;
+        rb_self.lock().opener_policy = response;
+        Ok(verdict)
     }
-    // #inherit_opener_policy(creator) { [origin, top-level origin] }: its initial about:blank made by a document of top-level
-    // traversable `creator`, the policy it takes of that one (coop.rs `inherited`) — the block giving that document's facts.
-    fn inherit_opener_policy(ruby: &magnus::Ruby, rb_self: &Self, creator: &Self) -> Result<(), magnus::Error> {
-        let top_level = creator.lock().opener_policy;
-        let inherited = crate::coop::inherited(top_level, || ruby.yield_value(ruby.qnil()))?;
-        rb_self.lock().opener_policy = inherited;
-        Ok(())
+    // #inherited_opener_policy { [origin, top-level origin] } -> the name of the policy a document of no headers that a document
+    // of it makes takes (coop.rs `inherited`), the block giving that document's facts.
+    fn inherited_opener_policy(ruby: &magnus::Ruby, rb_self: &Self) -> Result<&'static str, magnus::Error> {
+        let top_level = rb_self.lock().opener_policy;
+        Ok(crate::coop::inherited(top_level, || ruby.yield_value(ruby.qnil()))?.name())
+    }
+    // #entry_at_step(step) -> the id of the top-level entry at `step`, what a traversal to it reads before it is applied.
+    fn entry_at_step(&self, step: i64) -> Option<u64> {
+        self.lock().state.entries.iter().rfind(|e| e.step == step).map(|e| e.id)
     }
     // #opener_policy_isolates? { [origin, top-level origin] } -> whether a window a document of it opens is opened without
     // its opener (coop.rs `isolates_opener`), the block giving that document's facts.
@@ -1421,8 +1427,9 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("by_web_content=", method!(SessionHistory::set_by_web_content, 1))?;
     class.define_method("popup_sandbox=", method!(SessionHistory::set_popup_sandbox, 1))?;
     class.define_method("opener_policy=", method!(SessionHistory::set_opener_policy, 1))?;
-    class.define_method("opener_policy_switch", method!(SessionHistory::opener_policy_switch, 0))?;
-    class.define_method("inherit_opener_policy", method!(SessionHistory::inherit_opener_policy, 1))?;
+    class.define_method("commit_opener_policy", method!(SessionHistory::commit_opener_policy, 3))?;
+    class.define_method("inherited_opener_policy", method!(SessionHistory::inherited_opener_policy, 0))?;
+    class.define_method("entry_at_step", method!(SessionHistory::entry_at_step, 1))?;
     class.define_method("opener_policy_isolates?", method!(SessionHistory::opener_policy_isolates, 0))?;
     class.define_method("session_storage=", method!(SessionHistory::set_session_storage, 1))?;
     class.define_method("session_storage", method!(SessionHistory::session_storage, 0))?;
@@ -1767,7 +1774,7 @@ mod tests {
     #[test]
     fn an_entry_of_the_same_document_shares_what_it_was_reached_by() {
         let h = history();
-        let reached = Data { texts: [None, Some("/r".into()), None, None], cross_site: Some(true), post: Some((Arc::from(&b"q=1"[..]), None)), ..Default::default() };
+        let reached = Data { texts: [None, Some("/r".into()), None, None, None], cross_site: Some(true), post: Some((Arc::from(&b"q=1"[..]), None)), ..Default::default() };
         h.push(TOP, TOP, "/a".into(), false, reached);
         let pushed = h.push(TOP, TOP, "/b".into(), true, Data::default()).unwrap();
         let other = h.push(TOP, TOP, "/c".into(), false, Data::default()).unwrap();
@@ -1883,7 +1890,7 @@ mod tests {
     #[test]
     fn a_saved_history_keeps_the_data_it_had() {
         let h = history();
-        let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None], ..Default::default() }).unwrap();
+        let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None, None], ..Default::default() }).unwrap();
         h.save(0);
         Arc::make_mut(&mut h.lock().state.entry_mut(a).unwrap().data).texts[1] = Some("/changed".into());
         assert!(h.restore(0));
@@ -2231,7 +2238,7 @@ fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         match how.as_str() {
             "push" | "replace" => {
                 // (…its document state's navigable target name the window's as its document begins: HTML keeps it there)
-                let data = Data { post, texts: [None, referrer, None, None], name: Some(name), ..Data::default() };
+                let data = Data { post, texts: [None, referrer, None, None, None], name: Some(name), ..Data::default() };
                 let replace = how == "replace" && !t.state.entries.is_empty();
                 t.commit(TOP, 0, &url, false, replace, data);
                 None

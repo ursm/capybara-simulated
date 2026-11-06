@@ -182,98 +182,217 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(false) }
   end
 
-  # (…a response of no headers is a response of no policy all the same — HTML "create navigation params by fetching" enforces
-  # an about:blank document's, a `blob:` URL's and a `data:` URL's too — which a window's document of a policy cannot be in the
-  # group of: `popup` staying in it by its policy being the opener's, of its origin)
-  context 'a pop-up of its opener\'s policy going to a document of none' do
-    def stays
-      window = popup('http://a.test/framed')
-      expect(session.evaluate_script('w.closed')).to be(false)
-      window
+  # A document's navigation committed: `w.location` at `url`, or `w` closed — what a switch makes of it — never a fixed wait.
+  def await_window(script = 'true')
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+    until session.evaluate_script(script)
+      raise "never: #{script}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+      session.has_css?('#never', wait: 0.02)
+    end
+  end
+  def blob_url(global, html, type = 'text/html') = "#{global}.URL.createObjectURL(new #{global}.Blob([#{html.to_json}], {type: #{type.to_json}}))"
+  def window_at(prefix) = "w.closed || w.location.href.startsWith(#{prefix.to_json})"
+
+  # An about:blank or `blob:` document inherits its initiator's top-level document's policy where that initiator is of its
+  # origin (coop.rs `inherited`: whatwg/html#5198; WPT html/cross-origin-opener-policy/blob-popup, coep-blob-popup,
+  # navigate-to-aboutblank, navigate-top-to-aboutblank; Chrome and Firefox measured 2026-11-06), and keeps its group.
+  context 'a document of no headers, inheriting' do
+    it 'keeps a pop-up of a policy in its group for about:blank' do
+      session.visit('http://a.test/framed')
+      popup('http://a.test/framed')
+      session.execute_script("w.location = 'about:blank'")
+      await_window(window_at('about:blank'))
+      expect(session.evaluate_script('[w.closed, w.opener === window, w.origin]')).to eq([false, true, 'http://a.test'])
+      expect(session.driver.window_browsers.size).to eq(1)
     end
 
-    it 'leaves its group for about:blank' do
+    it 'keeps a pop-up of a policy in its group for a blob: URL' do
       session.visit('http://a.test/framed')
-      window = stays
+      popup('http://a.test/framed')
+      session.execute_script("w.location = #{blob_url('w', '<p id=blob>blob</p>')}")
+      await_window(window_at('blob:'))
+      expect(session.evaluate_script('[w.closed, w.opener === window, w.document.getElementById("blob").textContent]')).to eq([false, true, 'blob'])
+    end
+
+    # (…a pop-up's initial about:blank its creator's policy, its blob: or about:blank the same, as WPT blob-popup holds)
+    it 'opens a blob: URL in the group of a page of a policy, isolated as it is' do
+      session.visit('http://a.test/coi')
+      session.execute_script("window.w = open(#{blob_url('window', '<p id=blob>blob</p>')})")
+      await_window(window_at('blob:'))
+      expect(session.evaluate_script('[w.closed, w.crossOriginIsolated, w.opener === window]')).to eq([false, true, true])
+      expect(session.driver.window_browsers.size).to eq(1)
+    end
+
+    it 'keeps an initial about:blank navigated to about:blank in its group' do
+      session.visit('http://a.test/framed')
+      session.window_opened_by { session.execute_script("window.w = open('')") }
       session.execute_script("w.location = 'about:blank'")
-      session.has_css?('#none', wait: 0.2)
-      expect(session.evaluate_script('w.closed')).to be(true)
-      session.within_window(window) do
-        expect(session.evaluate_script('[location.href, origin, opener === null]')).to eq(['about:blank', 'http://a.test', true])
-      end
+      session.has_css?('#none', wait: 0.1)
+      expect(session.evaluate_script('[w.closed, w.opener === window]')).to eq([false, true])
+    end
+
+    # (…the document keeps it: its next navigation judged against that, a response of the same policy staying and one of
+    # none leaving)
+    it 'keeps the policy it inherited for its next navigation' do
+      session.visit('http://a.test/framed')
+      popup('http://a.test/framed')
+      session.execute_script("w.location = 'about:blank'")
+      await_window(window_at('about:blank'))
+      session.execute_script("w.location = 'http://a.test/framed'")
+      await_window(window_at('http://a.test/framed'))
+      expect(session.evaluate_script('[w.closed, w.opener === window]')).to eq([false, true])
+      session.execute_script("w.location = 'about:blank'")
+      await_window(window_at('about:blank'))
+      session.execute_script("w.location = 'http://a.test/plain'")
+      await_window('w.closed')
       expect(session.driver.window_browsers.size).to eq(2)
     end
 
-    it 'leaves its group for a blob: URL' do
-      session.visit('http://a.test/framed')
-      window = stays
-      session.execute_script("w.location = w.URL.createObjectURL(new w.Blob(['<p id=blob>blob</p>'], {type: 'text/html'}))")
-      session.has_css?('#none', wait: 0.2)
-      expect(session.evaluate_script('w.closed')).to be(true)
-      session.within_window(window) do
-        expect(session).to have_css('#blob')
-        expect(session.evaluate_script('[location.protocol, origin, opener === null]')).to eq(['blob:', 'http://a.test', true])
-      end
-    end
-
-    # (…a `data:` URL the user's alone at a top-level navigable: a document's refused)
-    it 'leaves its group for a data: URL the user visits' do
-      session.visit('http://a.test/framed')
-      window = stays
-      session.within_window(window) do
-        session.visit('data:text/html,<p id=data>data</p>')
-        expect(session).to have_css('#data')
-        expect(session.evaluate_script('[origin, opener === null]')).to eq(['null', true])
-      end
-      expect(session.evaluate_script('w.closed')).to be(true)
-    end
-
-    # (…a pop-up's initial about:blank its creator's policy, as HTML "create a new browsing context and document" says)
-    it 'leaves its group from its initial about:blank' do
-      session.visit('http://a.test/framed')
-      window = session.window_opened_by { session.execute_script("window.w = open('')") }
-      session.execute_script("w.location = w.URL.createObjectURL(new w.Blob(['<p id=blob>blob</p>'], {type: 'text/html'}))")
-      session.has_css?('#none', wait: 0.2)
-      expect(session.evaluate_script('w.closed')).to be(true)
-      session.within_window(window) { expect(session).to have_css('#blob') }
-    end
-
-    # (…where a same-origin-allow-popups creator's keeps it: the popup check)
-    it 'keeps its group from its initial about:blank under same-origin-allow-popups' do
-      session.visit('http://a.test/popups')
-      session.window_opened_by { session.execute_script("window.w = open('')") }
-      session.execute_script("w.location = w.URL.createObjectURL(new w.Blob(['<p id=blob>blob</p>'], {type: 'text/html'}))")
-      session.has_css?('#none', wait: 0.2)
-      expect(session.evaluate_script('[w.closed, w.document.getElementById("blob").textContent]')).to eq([false, 'blob'])
-    end
-
-    it 'stays in its group where neither has a policy' do
-      session.visit('http://a.test/plain')
-      window = popup('http://a.test/plain')
-      session.execute_script("w.location = 'about:blank'")
-      session.has_css?('#none', wait: 0.2)
-      expect(session.evaluate_script('w.closed')).to be(false)
-      session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(false) }
-    end
-
-    # (…its next navigation judged against the document it shows now, not the one before it: the policy is that one's)
-    it 'judges its next navigation against the document it shows' do
+    # (…a reload and a traversal finding it in the entry: HTML's history policy container)
+    it 'takes it again on a reload and a traversal' do
       session.visit('http://a.test/framed')
       popup('http://a.test/framed')
-      session.execute_script("w.location = 'http://a.test/framed'")
-      session.has_css?('#none', wait: 0.2)
+      session.execute_script("w.location = 'about:blank'")
+      await_window(window_at('about:blank'))
+      session.execute_script('w.location.reload()')
+      session.has_css?('#none', wait: 0.1)
       expect(session.evaluate_script('w.closed')).to be(false)
+      session.execute_script("w.location = 'http://a.test/framed'")
+      await_window(window_at('http://a.test/framed'))
+      session.execute_script('w.history.back()')
+      await_window(window_at('about:blank'))
+      expect(session.evaluate_script('w.closed')).to be(false)
+    end
+
+    it 'keeps a page of a policy, isolated, for about:blank, the windows it opened its' do
+      session.visit('http://a.test/coi')
+      window = popup('http://a.test/coi')
+      session.execute_script("location = 'about:blank'")
+      await_window("location.href === 'about:blank'")
+      expect(session.evaluate_script('[crossOriginIsolated, typeof SharedArrayBuffer, origin]')).to eq([true, 'function', 'http://a.test'])
+      session.within_window(window) { expect(session.evaluate_script('[opener === null, opener.closed]')).to eq([false, false]) }
+    end
+
+    it 'keeps a page of a policy, isolated, for a blob: URL of its own' do
+      session.visit('http://a.test/coi')
+      session.execute_script("location = #{blob_url('window', '<p id=blob>blob</p>')}")
+      expect(session).to have_css('#blob')
+      expect(session.evaluate_script('[crossOriginIsolated, origin]')).to eq([true, 'http://a.test'])
+      expect(session.driver.window_browsers.size).to eq(1)
+    end
+
+    # (…an initiator of another origin than its top-level document's gives none: a switch. Chrome and WPT
+    # navigate-top-to-aboutblank; Firefox keeps the group)
+    it 'leaves the group for about:blank from a frame of another origin' do
+      session.visit('http://a.test/framed')
+      window = popup('http://a.test/framed')
+      session.within_frame('fr') { session.execute_script("top.location = 'about:blank'") }
+      await_window("location.href === 'about:blank'")
+      session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(true) }
+    end
+
+    # (…a blob PDF its viewer's inline content, of an opaque origin, in the group)
+    it 'makes a blob PDF its viewer\'s document in the group' do
+      session.visit('http://a.test/framed')
+      popup('http://a.test/framed')
+      session.execute_script("w.location = #{blob_url('w', '%PDF-1.7', 'application/pdf')}")
+      await_window(window_at('blob:'))
+      expect(session.evaluate_script('[w.closed, w.origin, w.document.contentType, w.document.body.textContent]')).to eq([false, 'null', 'text/html', ''])
+    end
+
+    # (…none of it where neither has a policy)
+    it 'stays in the group where neither has a policy' do
+      session.visit('http://a.test/plain')
+      popup('http://a.test/plain')
+      session.execute_script("w.location = 'about:blank'")
+      await_window(window_at('about:blank'))
+      expect(session.evaluate_script('[w.closed, w.opener === window]')).to eq([false, true])
     end
   end
 
-  # (…the cross-origin isolation mode a group's, set as one is made: a page that leaves an isolated group for a document of
-  # none is isolated no more, about:blank's the same as any)
-  it 'makes a page that leaves an isolated group for about:blank no longer isolated' do
-    session.visit('http://a.test/coi')
-    expect(session.evaluate_script('crossOriginIsolated')).to be(true)
-    session.execute_script("location = 'about:blank'")
-    session.has_css?('#none', wait: 0.2)
-    expect(session.evaluate_script('[location.href, crossOriginIsolated, typeof SharedArrayBuffer]')).to eq(['about:blank', false, 'undefined'])
+  # (…a `data:` URL inherits nothing: annevk on whatwg/html#5198, "always ensure that it's a fresh browsing context group")
+  it 'leaves the group for a data: URL the user visits, of its origin or a PDF' do
+    session.visit('http://a.test/framed')
+    window = popup('http://a.test/framed')
+    session.within_window(window) do
+      session.visit('data:text/html,<p id=data>data</p>')
+      expect(session).to have_css('#data')
+      expect(session.evaluate_script('[origin, opener === null]')).to eq(['null', true])
+    end
+    expect(session.evaluate_script('w.closed')).to be(true)
+  end
+
+  # (…the history a switching window keeps: a switch replaces the browsing context, not the traversable, so what the
+  # navigation is goes on being it. Chrome and Firefox: 2 for a replace, 3 for an assign, a traversal keeping the length and
+  # its forward entry, a reload both, measured 2026-11-06)
+  context 'a window leaving its group' do
+    let(:flip) { {} }
+    let(:session) {
+      policies = self.policies
+      flip     = self.flip
+      simulated_session(lambda {|env|
+        path    = env['PATH_INFO']
+        headers = {'content-type' => 'text/html'}.merge(policies.fetch(path, {}))
+        headers.merge!(policies['/framed']) if path == '/flip' && !flip[:on]
+        [200, headers, ["<!doctype html><meta charset=utf-8><title>#{path}</title><p id=p>#{path}</p>"]]
+      })
+    }
+
+    def so_popup(url)
+      session.visit('http://a.test/framed')
+      popup(url).tap { expect(session.evaluate_script('w.closed')).to be(false) }
+    end
+
+    it 'keeps its entries for a location.replace' do
+      window = so_popup('http://a.test/flip')
+      session.execute_script("w.history.pushState({}, '', '/flip?1'); w.location.replace('http://a.test/plain')")
+      await_window('w.closed')
+      session.within_window(window) do
+        expect(session).to have_css('#p', text: '/plain')
+        expect(session.evaluate_script('history.length')).to eq(2)
+      end
+    end
+
+    it 'adds an entry for an assignment' do
+      window = so_popup('http://a.test/flip')
+      session.execute_script("w.history.pushState({}, '', '/flip?1'); w.location = 'http://a.test/plain'")
+      await_window('w.closed')
+      session.within_window(window) do
+        expect(session).to have_css('#p', text: '/plain')
+        expect(session.evaluate_script('history.length')).to eq(3)
+      end
+    end
+
+    it 'goes to its entry for a traversal, its forward entry kept' do
+      window = so_popup('http://a.test/flip')
+      session.execute_script("w.location = 'http://a.test/framed'")
+      await_window(window_at('http://a.test/framed'))
+      flip[:on] = true
+      session.execute_script('w.history.back()')
+      await_window('w.closed')
+      session.within_window(window) do
+        expect(session).to have_css('#p', text: '/flip')
+        expect(session.evaluate_script('history.length')).to eq(2)
+        session.go_forward
+        expect(session).to have_css('#p', text: '/framed')
+      end
+    end
+
+    it 'keeps its entries for a reload' do
+      window = so_popup('http://a.test/flip')
+      session.execute_script("w.history.pushState({}, '', '/flip?1'); w.history.pushState({}, '', '/flip?2'); w.history.back()")
+      await_window("w.location.search === '?1'")
+      flip[:on] = true
+      session.execute_script('w.location.reload()')
+      await_window('w.closed')
+      session.within_window(window) do
+        expect(session).to have_css('#p', text: '/flip')
+        expect(session.evaluate_script('[location.search, history.length]')).to eq(['?1', 3])
+        session.go_forward
+        expect(session.evaluate_script('location.search')).to eq('?2')
+      end
+    end
   end
 
   # (…a session's next test begins of no policy, whatever the last left)
@@ -283,7 +402,7 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     session.visit('http://a.test/plain')
     window = popup('http://a.test/plain')
     session.execute_script("location = 'about:blank'")
-    session.has_css?('#none', wait: 0.2)
+    await_window("location.href === 'about:blank'")
     session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(false) }
   end
 

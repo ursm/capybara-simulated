@@ -143,24 +143,30 @@ struct CoopEnforcement {
 }
 
 impl CoopEnforcement {
-    // The response at `url` of opener policy `response` and Content-Security-Policy `csp`, enforced: false — a network
-    // error — for one of a policy but "unsafe-none" to a navigable sandboxed, by its popup sandboxing flags or that
-    // policy's `sandbox` (HTML "create navigation params by fetching" step 12.3, finalSandboxFlags); else the switch
-    // judged against what it follows by coop.rs `switch_needed` (HTML "check if COOP values require a browsing context
-    // group switch", the popup check where the document is its initial about:blank), and the next judged against this
-    // one. (…the host asked nothing where both are "unsafe-none", which match: every hop of a page that sets none)
+    // The response at `url` of opener policy `response` and Content-Security-Policy `csp`, enforced: the switch judged
+    // against what it follows by coop.rs `switch_needed` (HTML "check if COOP values require a browsing context group
+    // switch", the popup check where the document is its initial about:blank), the next judged against this one; and then
+    // false — a network error, the switch it needed standing — for one of a policy but "unsafe-none" to a navigable
+    // sandboxed, by its popup sandboxing flags or that policy's `sandbox` (HTML "create navigation params by fetching":
+    // enforce, then "If finalSandboxFlags is not empty and responseCOOP's value is not "unsafe-none""; responseOrigin
+    // determined with those flags, so opaque under the sandboxed origin browsing context flag). (…the host asked nothing
+    // where both are "unsafe-none", which match: every hop of a page that sets none)
     fn enforce<E>(&mut self, response: Coop, csp: Option<&str>, url: &str, facts: impl FnOnce() -> Result<(String, bool, u32), E>) -> Result<bool, E> {
-        let origin = http_origin(url).unwrap_or_default();
+        let mut origin = http_origin(url).unwrap_or_default();
         if self.coop != Coop::UnsafeNone || response != Coop::UnsafeNone {
             if self.facts.is_none() {
                 self.facts = Some(facts()?);
             }
             let (document_origin, initial, popup) = self.facts.clone().unwrap_or_default();
-            if response != Coop::UnsafeNone && popup | crate::sandbox::sandboxing(csp, None) != 0 {
-                return Ok(false);
+            let sandbox = popup | crate::sandbox::sandboxing(csp, None);
+            if sandbox & crate::sandbox::ORIGIN != 0 {
+                "null".clone_into(&mut origin);
             }
             let from = self.origin.get_or_insert(document_origin);
             self.switch |= crate::coop::switch_needed(initial, from, self.coop, &origin, response);
+            if response != Coop::UnsafeNone && sandbox != 0 {
+                return Ok(false);
+            }
         }
         self.coop = response;
         self.origin = Some(origin);
