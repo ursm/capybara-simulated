@@ -157,12 +157,11 @@ fn canvas_measure_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 struct TextDraw<'s> {
     bitmap: v8::Local<'s, v8::Value>,
     size: [f64; 2],
-    p3: bool,
     paint: Vec<f64>,
     pixels: v8::Local<'s, v8::Value>,
 }
 
-// __dom.canvasDrawText(state, w, h, p3, text, x, y, maxWidth, paint, pixels, face, inheritedRtl, rootFontSize):
+// __dom.canvasDrawText(state, w, h, text, x, y, maxWidth, paint, pixels, face, inheritedRtl, rootFontSize):
 // `fillText()` / `strokeText()` on the context's `w` × `h` bitmap (`canvasBitmap`) — `paint` as `canvasDraw` takes it,
 // the fill style's or the stroke style's — the line placed at (x, y) through the CTM by `textAlign` and `textBaseline`,
 // condensed to `maxWidth` (one given that is not above 0 drawing nothing, undefined none), spaced a character at a time
@@ -170,18 +169,17 @@ struct TextDraw<'s> {
 fn canvas_draw_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
     let size = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
-    let p3 = args.get(3).is_true();
-    let text = prepared(&args.get(4).to_rust_string_lossy(scope));
-    let [x, y] = [5, 6].map(|i| args.get(i).number_value(scope).unwrap_or(f64::NAN));
-    let max_width = (!args.get(7).is_undefined()).then(|| args.get(7).number_value(scope).unwrap_or(f64::NAN));
+    let text = prepared(&args.get(3).to_rust_string_lossy(scope));
+    let [x, y] = [4, 5].map(|i| args.get(i).number_value(scope).unwrap_or(f64::NAN));
+    let max_width = (!args.get(6).is_undefined()).then(|| args.get(6).number_value(scope).unwrap_or(f64::NAN));
     if text.is_empty() || !x.is_finite() || !y.is_finite() || max_width.is_some_and(|m| !(m > 0.0)) {
         return;
     }
-    let given = v8::Local::new(scope, args.get(9));
-    let (paint, pixels) = crate::canvas::paint_arg(scope, h, args.get(8), given);
-    let s = setting_args(scope, &args, h, 10);
+    let given = v8::Local::new(scope, args.get(8));
+    let (paint, pixels) = crate::canvas::paint_arg(scope, h, args.get(7), given);
+    let s = setting_args(scope, &args, h, 9);
     let bitmap = h.bitmap(scope);
-    let draw = TextDraw { bitmap, size, p3, paint, pixels };
+    let draw = TextDraw { bitmap, size, paint, pixels };
     if (s.letter != 0.0 || s.word != 0.0) && spaced(scope, h, &draw, &s, &text, x, y, max_width) {
         return;
     }
@@ -215,7 +213,7 @@ fn draw_line(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, d: &TextDr
         Some(mk) => (vec![2.0, mk.width as f64, mk.height as f64, mk.x as f64, mk.y as f64], mk.bytes),
         None => (vec![2.0, 1.0, 1.0, 0.0, 0.0], vec![0]),
     };
-    crate::canvas::draw(scope, h, d.bitmap, d.size, d.p3, false, &shape, &mask, &d.paint, d.pixels);
+    crate::canvas::draw(scope, h, d.bitmap, d.size, false, &shape, &mask, &d.paint, d.pixels);
 }
 
 // A spaced line drawn a character at a time, each at the pen position the previous one's advance plus the spacing

@@ -96,4 +96,29 @@ RSpec.describe 'Canvas context bindings' do
       %w[alpha colorSpace colorType desynchronized willReadFrequently]
     ])
   end
+
+  # The settings are the context's for good: a resize and `reset()` put back its bitmap and its drawing state, nothing
+  # of what getContext was given (HTML "set bitmap dimensions" / "reset the rendering context to its default state").
+  # Each getContextAttributes() answers a new dictionary, whose members are the page's to change.
+  it 'keeps its settings through a resize and a reset' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const settings = {alpha: false, colorSpace: 'display-p3', desynchronized: true, willReadFrequently: true};
+        const expected = (ctx) => JSON.stringify(ctx.getContextAttributes());
+        const ctx = document.createElement('canvas').getContext('2d', settings);
+        const off = new OffscreenCanvas(4, 4).getContext('2d', settings);
+        const before = expected(ctx);
+        ctx.fillStyle = 'red';
+        ctx.canvas.width = 4;
+        const resized = [expected(ctx), ctx.fillStyle, ctx.getImageData(0, 0, 1, 1).colorSpace];
+        ctx.reset();
+        off.canvas.height = 2;
+        const first = ctx.getContextAttributes();
+        first.colorSpace = 'srgb';
+        return [before, resized, expected(ctx), expected(off), ctx.getImageData(0, 0, 1, 1).colorSpace, off.getImageData(0, 0, 1, 1).colorSpace];
+      })()
+    JS
+    attributes = '{"alpha":false,"colorSpace":"display-p3","colorType":"unorm8","desynchronized":true,"willReadFrequently":true}'
+    expect(got).to eq([attributes, [attributes, '#000000', 'display-p3'], attributes, attributes, 'display-p3', 'display-p3'])
+  end
 end

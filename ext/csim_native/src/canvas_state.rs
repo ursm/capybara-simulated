@@ -125,6 +125,37 @@ pub(crate) struct Font {
     pub(crate) family: String,
 }
 
+// The settings a context was made with (CanvasRenderingContext2DSettings, its binding's to convert), which nothing
+// changes afterwards: not `reset()`, and not a resize, which reset its bitmap and its drawing state alone.
+const COLOR_SPACES: [&str; 4] = ["srgb", "srgb-linear", "display-p3", "display-p3-linear"];
+const COLOR_TYPES: [&str; 2] = ["unorm8", "float16"];
+const DISPLAY_P3: u8 = 2;
+struct Settings {
+    alpha: bool,
+    color_space: u8,
+    color_type: u8,
+    desynchronized: bool,
+    will_read_frequently: bool,
+}
+
+impl Settings {
+    // The converted dictionary's members, each keyword one of its enum's.
+    fn of(scope: &mut v8::PinScope<'_, '_>, dictionary: v8::Local<'_, v8::Value>) -> Settings {
+        let object = v8::Local::<v8::Object>::try_from(dictionary).ok();
+        let mut flag = |name: &str| object.and_then(|o| crate::dom::member(scope, o, name)).is_some_and(|v| v.is_true());
+        let (alpha, desynchronized, will_read_frequently) = (flag("alpha"), flag("desynchronized"), flag("willReadFrequently"));
+        let mut keyword = |name: &str, list: &[&str]| {
+            let given = object.and_then(|o| crate::dom::member(scope, o, name)).map(|v| v.to_rust_string_lossy(scope));
+            given.and_then(|k| list.iter().position(|c| *c == k)).unwrap_or(0) as u8
+        };
+        let (color_space, color_type) = (keyword("colorSpace", &COLOR_SPACES), keyword("colorType", &COLOR_TYPES));
+        Settings { alpha, color_space, color_type, desynchronized, will_read_frequently }
+    }
+    fn color_space(&self) -> &'static str {
+        COLOR_SPACES[self.color_space as usize]
+    }
+}
+
 // The state but the objects it traces.
 #[derive(Clone)]
 pub(crate) struct State {
@@ -210,6 +241,7 @@ pub(crate) const STROKE: usize = 1;
 pub(crate) const CLIP: usize = 2;
 
 pub(crate) struct CanvasStateHandle {
+    settings: Settings,
     state: RefCell<State>,
     refs: [UnsafeCell<v8::TracedReference<v8::Object>>; 3],
     // The states `save()` pushed, each with whether it has objects — those it has three a state in one array on V8's
@@ -244,6 +276,10 @@ unsafe impl GarbageCollected for CanvasStateHandle {
 impl CanvasStateHandle {
     pub(crate) fn state(&self) -> std::cell::Ref<'_, State> {
         self.state.borrow()
+    }
+    // Whether its bitmap holds Display P3 values.
+    pub(crate) fn display_p3(&self) -> bool {
+        self.settings.color_space == DISPLAY_P3
     }
     // Its bitmap (`canvasBitmap`), what an operation draws into — undefined for none, which it draws nothing into.
     pub(crate) fn bitmap<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
@@ -318,8 +354,8 @@ impl CanvasStateHandle {
     }
 }
 
-// The constructor a context's state object is made with (`__dom.CanvasStateBase`): branded, a wrapper of a fresh
-// handle in the default state.
+// The constructor a context's state object is made with (`new __dom.CanvasStateBase(settings)`, a converted
+// CanvasRenderingContext2DSettings): branded, a wrapper of a fresh handle in the default state.
 fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if args.new_target().is_undefined() {
         return;
@@ -328,6 +364,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
     let handle = CanvasStateHandle {
+        settings: Settings::of(scope, args.get(0)),
         state: RefCell::new(State::default()),
         refs: [(); 3].map(|_| UnsafeCell::new(v8::TracedReference::empty())),
         stack: RefCell::new(Vec::new()),
@@ -387,6 +424,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     if let (Some(base), Some(name)) = (base_function(scope), v8::String::new(scope, "CanvasStateBase")) {
         ns.set(scope, name.into(), base.into());
     }
+    crate::dom::register(scope, ns, "canvasColorSpace", canvas_color_space, context_id);
+    crate::dom::register(scope, ns, "canvasContextAttributes", canvas_context_attributes, context_id);
     crate::dom::register(scope, ns, "canvasGet", canvas_get, context_id);
     crate::dom::register(scope, ns, "canvasSet", canvas_set, context_id);
     crate::dom::register(scope, ns, "canvasStack", canvas_stack, context_id);
@@ -424,6 +463,32 @@ fn handle<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>)
 
 fn string<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
     v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
+
+// __dom.canvasColorSpace(state) -> the PredefinedColorSpace its bitmap holds values in.
+fn canvas_color_space(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = handle(scope, args.get(0)) else { return };
+    rv.set(string(scope, h.settings.color_space()));
+}
+
+// __dom.canvasContextAttributes(state) -> `getContextAttributes()`: a new dictionary of its settings, its members in
+// their name's order, own data properties whatever setters a page put on `Object.prototype`.
+fn canvas_context_attributes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = handle(scope, args.get(0)) else { return };
+    let s = &h.settings;
+    let members: [(&str, v8::Local<'_, v8::Value>); 5] = [
+        ("alpha", v8::Boolean::new(scope, s.alpha).into()),
+        ("colorSpace", string(scope, s.color_space())),
+        ("colorType", string(scope, COLOR_TYPES[s.color_type as usize])),
+        ("desynchronized", v8::Boolean::new(scope, s.desynchronized).into()),
+        ("willReadFrequently", v8::Boolean::new(scope, s.will_read_frequently).into()),
+    ];
+    let attributes = v8::Object::new(scope);
+    for (name, value) in members {
+        let name = v8::String::new(scope, name).expect("a short string");
+        attributes.create_data_property(scope, name.into(), value);
+    }
+    rv.set(attributes.into());
 }
 
 // __dom.canvasGet(state, attribute) -> the attribute's value (its code: `GLOBAL_ALPHA` …): a number, a boolean, a
