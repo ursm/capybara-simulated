@@ -75,9 +75,12 @@ impl Lifecycle {
     fn update_readiness(&mut self, ready: u32) -> bool {
         std::mem::replace(&mut self.ready, ready) != ready
     }
-    // HTML "abort a parser", where its parser is active: whether it was.
-    pub(crate) fn abort_parser(&mut self) -> bool {
-        if self.ready != READY_LOADING {
+    // HTML "abort a parser", where its parser is active: whether it was. A navigation of its document's aborts the parse
+    // alone (as it is planned, from a script the parse runs); `stop()` also what "the end" has left of it, up to its load
+    // (Chrome and Firefox: none after a `stop()` in a DOMContentLoaded handler). Its readiness is the bindings' to step on,
+    // firing `readystatechange` (`docAbortStep`): as the abort itself for `stop()`, as the parse leaves off for a navigation.
+    pub(crate) fn abort_parser(&mut self, to_its_load: bool) -> bool {
+        if self.aborted || self.load_fired || !(self.ready == READY_LOADING || (to_its_load && self.ready == READY_INTERACTIVE)) {
             return false;
         }
         self.aborted = true;
@@ -119,6 +122,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "docFinishLoading", finish_loading, context_id);
     crate::dom::register(scope, ns, "docCompletelyLoaded", completely_loaded, context_id);
     crate::dom::register(scope, ns, "docAbortParser", abort_parser_op, context_id);
+    crate::dom::register(scope, ns, "docParserAborted", parser_aborted, context_id);
+    crate::dom::register(scope, ns, "docAbortStep", abort_step, context_id);
     crate::dom::register(scope, ns, "docCompleteInitial", complete_initial, context_id);
 }
 
@@ -269,7 +274,21 @@ fn finish_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // "abort a document", `stop()`'s.
 fn abort_parser_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    rv.set_bool(lifecycle_of(scope, doc).abort_parser());
+    rv.set_bool(lifecycle_of(scope, doc).abort_parser(true));
+}
+// __dom.docParserAborted(docNid) -> whether the document's active parser was aborted: HTML's flag, which the document open
+// and write steps return at, and what the parse leaves off at, "the end" none.
+fn parser_aborted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(lifecycle_of(scope, doc).aborted);
+}
+// __dom.docAbortStep(docNid) -> whether HTML "abort a parser" moved the aborted document's readiness on, to `interactive`
+// and then to `complete` (each time a `readystatechange` to fire), false where it is there.
+fn abort_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let lc = lifecycle_of(scope, doc);
+    let next = if lc.ready == READY_LOADING { READY_INTERACTIVE } else { READY_COMPLETE };
+    rv.set_bool(lc.aborted && lc.update_readiness(next));
 }
 // __dom.docCompletelyLoaded(docNid) -> whether the document is completely loaded — before it is, a navigation it plans
 // replaces its session history entry, and what waits for it waits.
@@ -322,9 +341,9 @@ mod tests {
     #[test]
     fn only_an_active_parser_is_aborted() {
         let mut lc = Lifecycle::default();
-        assert!(!lc.abort_parser());
+        assert!(!lc.abort_parser(false));
         lc.begin(1);
-        assert!(lc.abort_parser());
+        assert!(lc.abort_parser(false));
         assert!(lc.aborted);
         lc.begin(2);
         assert!(!lc.aborted);

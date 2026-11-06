@@ -567,8 +567,7 @@ RSpec.describe 'a frame navigation as tasks' do
     expect(log).to include('viaF=1:script', 'final:child?viaF=1')
   end
 
-  # …nor a reload: "reload pending" and a step on the traversal queue, its ongoing navigation "traversal" as it applies, no
-  # navigation ID. Firefox reloads, Chrome stays at the document opened.
+  # …nor a reload (Firefox reloads, Chrome stays at the document opened; "reload pending" and a step on the traversal queue).
   it 'goes on with a reload of a frame whose document is opened' do
     uh = %(<title>u</title><script>top.L.push("uh"); window.go = () => { location.reload(); document.open(); document.write("<title>opened</title>"); document.close() }</script>)
     log = log_of(<<~JS, attrs: 'src="/uh"', pages: {'/uh' => uh})
@@ -616,37 +615,120 @@ RSpec.describe 'a frame navigation as tasks' do
     expect(log.last).to eq('final:child?old')
   end
 
-  # …a form's, once its task has begun it; still planned it is none yet — HTML "plan to navigate" — where Chrome and Firefox
-  # cancel that too.
-  it "stops a form's navigation its task began, not one still planned" do
-    later = log_of(<<~JS)
-      document.getElementById('fm').submit();
-      setTimeout(() => f.contentWindow.stop(), 0);
-      setTimeout(() => L.push('final:' + U(f)), 200);
-    JS
-    expect(later.last).to eq('final:child?old')
-    planned = log_of(<<~JS)
-      document.getElementById('fm').submit();
-      f.contentWindow.stop();
-      setTimeout(() => L.push('final:' + U(f)), 200);
-    JS
-    expect(planned.last).to eq('final:child?viaF=1')
+  # …a form's, planned or begun, and a reload, as Chrome and Firefox do, where the text leaves it to inference: `old:bu` at
+  # most, `final:…?old`. (A document's opening stops only a navigation ID, and there they part: above.)
+  {
+    "a form's, begun"   => "document.getElementById('fm').submit(); setTimeout(() => f.contentWindow.stop(), 0);",
+    "a form's, planned" => "document.getElementById('fm').submit(); f.contentWindow.stop();",
+    'a reload'          => 'f.contentWindow.location.reload(); f.contentWindow.stop();'
+  }.each do |what, run|
+    it "stops #{what} with the frame's window's stop()" do
+      log = log_of(<<~JS)
+        #{run}
+        setTimeout(() => L.push('final:' + U(f)), 200);
+      JS
+      expect(log).to eq(%w[final:child?old])
+    end
   end
 
-  # …not a descendant's by its parent's `stop()`, which aborts its document only, HTML "abort a document and its
-  # descendants" — nor a reload, no navigation ID. Chrome and Firefox stop both.
-  it "goes on with a frame's navigation by its parent's stop(), and with a reload by its own" do
+  # …a form the frame's own document submitted: `final:…?old`.
+  it "stops a form of the frame's document with its stop()" do
     log = log_of(<<~JS)
-      f.src = '/child?new';
-      window.stop();
+      const d = f.contentDocument;
+      d.body.innerHTML = '<form action="/child"><input name="b" value="1"></form>';
+      d.forms[0].submit();
+      f.contentWindow.stop();
       setTimeout(() => L.push('final:' + U(f)), 200);
     JS
-    expect(log.last).to eq('final:child?new')
+    expect(log).to eq(%w[final:child?old])
+  end
+
+  # …a frame's by its parent's: "any instances of the fetch algorithm in the context of document", a parent's `src` request's
+  # client the parent — and Chrome and Firefox stop them all, its `location`'s, its own script's, a reload, a form, and a
+  # frame not built yet, which stays at its initial about:blank.
+  {
+    'a src'              => "f.src = '/child?new';",
+    'a location'         => "f.contentWindow.location.href = '/child?new';",
+    "the frame's own"    => "f.contentWindow.eval('location.href = \"/child?new\"');",
+    'a reload'           => 'f.contentWindow.location.reload();',
+    'a form'             => "document.getElementById('fm').submit();"
+  }.each do |what, run|
+    it "stops #{what} of a frame with its parent's stop()" do
+      log = log_of(<<~JS)
+        #{run}
+        window.stop();
+        setTimeout(() => L.push('final:' + U(f)), 200);
+      JS
+      expect(log.last).to eq('final:child?old')
+      expect(log).not_to include('new:script', 'old:script', 'viaF=1:script')
+    end
+  end
+
+  it "leaves a frame just inserted at its initial about:blank with its parent's stop()" do
     log = log_of(<<~JS)
-      f.contentWindow.location.reload();
-      f.contentWindow.stop();
+      const g = document.createElement('iframe');
+      g.src = '/child?new';
+      document.body.appendChild(g);
+      window.stop();
+      setTimeout(() => L.push('g:' + g.contentWindow.location.href), 100);
     JS
-    expect(log).to include('old:script')
+    expect(log).to eq(%w[g:about:blank])
+  end
+
+  it "stops a frame's frame's navigation with the page's stop()" do
+    log = log_of(<<~'JS')
+      f.srcdoc = '<iframe id="g" src="/child?g0"></iframe>';
+      setTimeout(() => {
+        L.length = 0;
+        const g = f.contentDocument.getElementById('g');
+        g.src = '/child?g1';
+        window.stop();
+        setTimeout(() => L.push('g:' + g.contentDocument.URL.replace(/^.*\//, '')), 100);
+      }, 100);
+    JS
+    expect(log).not_to include('g1:script')
+    expect(log.last).to eq('g:child?g0')
+  end
+
+  # A reload a document's opening does not stop goes to the URL `reload()` found: HTML appends its traversal steps then, and
+  # the entry they apply to is still the old one, whatever the document's URL becomes. Firefox: `final:?old`; Chrome stays at the
+  # document opened. It recursed into the page at the URL `open()` adopted.
+  it 'reloads the URL reload() found, not one the opening adopted' do
+    log = log_of(<<~JS)
+      const w = f.contentWindow;
+      w.location.reload();
+      w.document.open();
+      w.document.write('<title>opened</title>');
+      w.document.close();
+      setTimeout(() => L.push('final:' + w.location.search), 200);
+    JS
+    expect(log).to eq(%w[old:script old:load old:t0 final:?old])
+  end
+
+  # …at the top level, Chrome and Firefox alike stop it.
+  it "stays at the document the page's reload is followed by opening" do
+    n = 0
+    s = simulated_session(->(_env) {
+      n += 1
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><title>p</title><script>onload = () => setTimeout(() => { location.reload(); document.open(); document.write("<title>opened</title>"); document.close() }, 0)</script>']]
+    })
+    s.visit '/'
+    expect(s).to have_title('opened', wait: 5)
+    expect(n).to eq(1)
+  end
+
+  # `stop()` of a page: its `reload()` (Chrome and Firefox: `n1 stayed`), a form.
+  ['location.reload()', 'document.forms[0].submit()'].each do |run|
+    it "stops the page's #{run}" do
+      n = 0
+      s = simulated_session(->(_env) {
+        n += 1
+        [200, {'content-type' => 'text/html'}, [%(<!DOCTYPE html><meta charset="utf-8"><title>p</title><form action="/f"></form><script>onload = () => setTimeout(() => { #{run}; stop(); setTimeout(() => { document.title = "stayed" }, 100) }, 0)</script>)]]
+      })
+      s.visit '/'
+      expect(s).to have_title('stayed', wait: 5)
+      expect(n).to eq(1)
+    end
   end
 
   # …a top-level document's location navigation. Chrome and Firefox stay.
@@ -692,14 +774,119 @@ RSpec.describe 'a frame navigation as tasks' do
     expect(log).to include('x-load:4:200')
   end
 
-  # …and its parser's: the rest of its input thrown away, no `load` — its own or its container's. Chrome and Firefox: `a b`,
-  # nothing after the script that stopped it.
+  # …and its parser's: HTML "abort a parser": what is left of its input thrown away, its readiness `interactive` and `complete`,
+  # no `load`, its own or its container's. Chrome and Firefox: `a b` (Chrome `a:loading rs:complete b:complete`, Firefox with
+  # `rs:interactive` first, and a DOMContentLoaded: the text has none).
   it 'aborts the parser of a document whose script stops it' do
     log = log_of(<<~'JS')
       f.onload = () => L.push('P-load');
-      f.srcdoc = '<script>top.L.push("a"); stop(); top.L.push("b");<\/script><p>a</p><script>top.L.push("c")<\/script>';
+      f.srcdoc = '<script>document.addEventListener("readystatechange", () => top.L.push(document.readyState)); addEventListener("DOMContentLoaded", () => top.L.push("dcl")); top.L.push("a"); stop(); top.L.push("b:" + document.readyState);<\/script><p>a</p><script>top.L.push("c")<\/script>';
     JS
-    expect(log.last(2)).to eq(%w[a b])
+    expect(log.drop_while {|e| e != 'a' }).to eq(%w[a interactive complete b:complete])
+  end
+
+  def page_log(body)
+    s = session('/' => <<~HTML, '/d.js' => "L.push('defer-ran')", '/a.js' => "L.push('async-ran')")
+      <title>x</title><pre id="out"></pre><script>
+        const L = window.L = [];
+        function done() {
+          let o = document.getElementById('out');
+          if (!o) { o = document.createElement('pre'); o.id = 'out'; document.documentElement.append(o); }
+          o.textContent = L.join(' ');
+          document.title = 'done';
+        }
+        setTimeout(done, 300);
+      </script>#{body}
+    HTML
+    s.visit '/'
+    expect(s).to have_title('done', wait: 10)
+    s.find('#out', visible: :all).text(:all).split(' ')
+  end
+
+  # …the page's, which a poll of its readiness sees `complete`: Chrome and Firefox `t:complete:false`.
+  it "aborts the page's parser with its stop()" do
+    log = page_log(<<~HTML)
+      <script>
+        stop();
+        L.push('b:' + document.readyState);
+        setTimeout(() => L.push('t:' + document.readyState + ':' + !!document.getElementById('after')), 100);
+        addEventListener('load', () => L.push('load'));
+      </script><h1 id="after">after</h1><script>L.push('script-after')</script>
+    HTML
+    expect(log).to eq(%w[b:complete t:complete:false])
+  end
+
+  # HTML's document open and write steps return where the active parser was aborted. Chrome and Firefox: `openret:true`, the
+  # document kept; `write:false later:false:true`.
+  it 'refuses a document whose parser was aborted to open() and write()' do
+    log = page_log(<<~HTML)
+      <script>
+        stop();
+        document.write('<h2 id="w">w</h2>');
+        L.push('write:' + !!document.getElementById('w'));
+        setTimeout(() => {
+          const r = document.open();
+          document.write('<h3 id="z">z</h3>');
+          L.push('later:' + (r === document) + ':' + !!document.getElementById('z') + ':' + !!document.getElementById('out'));
+        }, 50);
+      </script>
+    HTML
+    expect(log).to eq(%w[write:false later:true:false:true])
+  end
+
+  # Its `defer` and `async` scripts cancelled: Chrome and Firefox run neither (Firefox fires DOMContentLoaded: the text has none).
+  it "runs no defer or async script of a document stopped as it parses" do
+    log = page_log(<<~HTML)
+      <script defer src="/d.js"></script><script async src="/a.js"></script>
+      <script>addEventListener('DOMContentLoaded', () => L.push('dcl')); addEventListener('load', () => L.push('load')); stop(); L.push('stopped')</script>
+    HTML
+    expect(log).to eq(%w[stopped])
+  end
+
+  # A `stop()` in a DOMContentLoaded handler aborts what "the end" has left: Chrome and Firefox `stopped:complete ierr
+  # rs:complete:true`, no `load`.
+  it 'stops the load of a document from its DOMContentLoaded handler, and fails the image it was waiting for' do
+    log = page_log(<<~HTML)
+      <script>
+        addEventListener('load', () => L.push('load'));
+        addEventListener('DOMContentLoaded', () => {
+          const i = new Image();
+          i.src = '/d.js';
+          i.onerror = () => L.push('ierr');
+          i.onload = () => L.push('iload');
+          document.body.append(i);
+          stop();
+          L.push('stopped:' + document.readyState);
+          setTimeout(() => L.push('rs:' + document.readyState + ':' + i.complete), 100);
+        });
+      </script>
+    HTML
+    expect(log).to eq(%w[stopped:complete ierr rs:complete:true])
+  end
+
+  # An image's fetch aborted is complete, its `error` on a task. Chrome and Firefox: `c:false ie c2:true`.
+  it "makes an image complete with the frame's stop()" do
+    log = log_of(<<~JS)
+      const d = f.contentDocument, i = d.createElement('img');
+      i.onload = () => L.push('il');
+      i.onerror = () => L.push('ie');
+      i.src = '/child?img';
+      d.body.append(i);
+      f.contentWindow.stop();
+      L.push('c:' + i.complete);
+      setTimeout(() => L.push('c2:' + i.complete), 100);
+    JS
+    expect(log).to eq(%w[c:false ie c2:true])
+  end
+
+  # A navigation planned as a document parses aborts its parser, for good where it makes no document: Chrome and Firefox `c
+  # Pload rs:complete:false`, the parse going no further.
+  it "leaves a frame's document whose location is a 204 aborted at its script" do
+    log = log_of(<<~'JS', attrs: '', pages: {'/a204' => '<script>top.L.push("c"); location.href = "/n204"</script><script>top.L.push("c-after")</script><p id="rest">rest</p>', '/n204' => :no_content})
+      f.src = '/a204';
+      setTimeout(() => L.push('rs:' + f.contentDocument.readyState + ':' + !!f.contentDocument.getElementById('rest')), 200);
+    JS
+    expect(log).to eq(%w[c rs:complete:false])
   end
 
   # A `javascript:` URL's navigation aborts the one under way: HTML "navigate" sets the ongoing navigation before it branches
@@ -790,6 +977,111 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(s).to have_title('done', wait: 20)
       expect(s.find('#out', visible: :all).text(:all)).to eq(trail)
     end
+  end
+
+  # A reload at a traversed srcdoc entry loads its markup again, not the `src` attribute. Chrome `reload:about:srcdoc`; its
+  # document empty with the attribute gone, as above.
+  it 'reloads a traversed srcdoc entry from its markup' do
+    s = session(
+      '/child' => child_log,
+      '/'      => <<~HTML
+        <title>page</title><iframe id="f" src="/child?a"></iframe><pre id="out"></pre><script>
+          window.L = [];
+          const f = document.getElementById('f');
+          const P = (ms) => new Promise((r) => setTimeout(r, ms));
+          const at = () => f.contentWindow.location.href.replace(/^.*\\//, '') + ':' + f.contentDocument.title;
+          onload = async () => {
+            await P(50);
+            f.removeAttribute('src');
+            f.srcdoc = '<title>SD</title>';
+            await P(100);
+            f.removeAttribute('srcdoc');
+            f.src = '/child?b';
+            await P(100);
+            history.back();
+            await P(100);
+            const back = at();
+            f.contentWindow.location.reload();
+            await P(100);
+            document.getElementById('out').textContent = back + ' ' + at();
+            document.title = 'done';
+          };
+        </script>
+      HTML
+    )
+    s.visit '/'
+    expect(s).to have_title('done', wait: 10)
+    expect(s.find('#out', visible: :all).text(:all)).to eq('about:srcdoc:SD about:srcdoc:SD')
+  end
+
+  # …and a fragment of a srcdoc entry its traversal keeps. Chrome: `b1:about:srcdoc#h`, `b2:about:srcdoc`.
+  it "keeps the fragment of a srcdoc entry on a traversal to it" do
+    s = session(
+      '/child' => child_log,
+      '/'      => <<~HTML
+        <title>page</title><iframe id="f" src="/child?a"></iframe><pre id="out"></pre><script>
+          window.L = [];
+          const f = document.getElementById('f');
+          const P = (ms) => new Promise((r) => setTimeout(r, ms));
+          const at = () => f.contentWindow.location.href.replace(/^.*\\//, '');
+          onload = async () => {
+            await P(50);
+            f.removeAttribute('src');
+            f.srcdoc = '<title>SD</title>';
+            await P(100);
+            f.contentWindow.location.hash = '#h';
+            await P(50);
+            f.removeAttribute('srcdoc');
+            f.src = '/child?z';
+            await P(100);
+            const R = [];
+            history.back(); await P(100); R.push(at());
+            history.back(); await P(100); R.push(at());
+            document.getElementById('out').textContent = R.join(' ');
+            document.title = 'done';
+          };
+        </script>
+      HTML
+    )
+    s.visit '/'
+    expect(s).to have_title('done', wait: 10)
+    expect(s.find('#out', visible: :all).text(:all)).to eq('about:srcdoc#h about:srcdoc')
+  end
+
+  # An entered frame goes back to a data: entry, by the driver's `go_back` and by the page's `history.back()`, the scope
+  # following it: it reached the network with a data: URL, which raised.
+  ['go_back', 'execute_script'].each do |how|
+    it "traverses an entered frame to a data: entry by #{how}" do
+      s = session('/' => '<iframe id="f" src="/x?0"></iframe>', '/x' => '<h1>X</h1>')
+      s.visit '/'
+      s.evaluate_script('frames[0].document.title')
+      s.execute_script(%(document.getElementById('f').src = 'data:text/html,<h1>DATA</h1>'))
+      s.within_frame('f') { expect(s.find('h1').text).to eq('DATA') }
+      s.execute_script("document.getElementById('f').src = '/x?2'")
+      s.within_frame('f') do
+        expect(s.find('h1').text).to eq('X')
+        how == 'go_back' ? s.go_back : s.execute_script('history.back()')
+        expect(s).to have_css('h1', text: 'DATA')
+      end
+    end
+  end
+
+  # What a frame's aborted requests would deliver is cancelled as `stop()` runs, its abort queued in turn: the tasks already
+  # queued keep their order. Chrome `Ft0-before Pt0-before Fx:0 Ft0-after Pt0-after`.
+  it "keeps the order of a frame's tasks across its parent's stop()" do
+    log = log_of(<<~JS)
+      const w = f.contentWindow;
+      w.setTimeout(() => L.push('Ft0-before'), 0);
+      setTimeout(() => L.push('Pt0-before'), 0);
+      const x = new w.XMLHttpRequest();
+      x.open('GET', '/child?1');
+      x.onloadend = () => L.push('Fx:' + x.status);
+      x.send();
+      window.stop();
+      w.setTimeout(() => L.push('Ft0-after'), 0);
+      setTimeout(() => L.push('Pt0-after'), 0);
+    JS
+    expect(log).to eq(%w[Ft0-before Pt0-before Fx:0 Ft0-after Pt0-after])
   end
 
   it 'traverses an entered frame to a srcdoc entry, the scope following it' do

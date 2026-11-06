@@ -862,17 +862,38 @@ fn take_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.stopOwnLoading() -> whether a top-level document's location navigation was planned, let go now: HTML "stop loading"
-// its navigable where its unload counter is 0 (a frame's are its container's: frame_navigation.rs `stopFrameLoading`) — not
-// a reload's, a traversal's, nor a form's plan, whose navigation has not begun.
+// __dom.stopOwnLoading(byStop) -> whether a top-level document had a navigation of it planned, let go now: HTML "stop loading"
+// its navigable where its unload counter is 0 (a frame's are its container's: frame_navigation.rs `stop_frame`) — its
+// location's, a link's, its reload (Chrome and Firefox, `document.open()` and `stop()` alike), and `stop()` (`byStop`) a form's
+// still planned too, as they do; not a traversal's.
 fn stop_own_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let by_stop = args.get(0).is_true();
     let cid = realm_id(scope, &args);
     let top = realm(scope, cid);
     if top.unloading(cid) {
         return rv.set_bool(false);
     }
     begin_navigation_of(top, cid, None);
-    rv.set_bool(plan(scope, &args).own.location.take().is_some());
+    let plan = plan(scope, &args);
+    let mut stopped = plan.own.location.take().is_some();
+    stopped |= plan.navigation.take().is_some();
+    stopped |= plan.own.reload.take().is_some();
+    if by_stop {
+        stopped |= plan.submission.take().is_some();
+        stopped |= plan.own.submission.take().is_some();
+    }
+    rv.set_bool(stopped);
+}
+// The submission frame realm `realm`'s document made that the host routes let go: `stop()` of its navigable. Whether it had one.
+pub(crate) fn drop_routed(arena: &mut crate::dom::RealmArena, realm: i32) -> bool {
+    let routed = &mut arena.routed_submissions.entries;
+    let count = routed.len();
+    routed.retain(|e| e.source != realm);
+    let dropped = routed.len() != count;
+    if let Some(state) = arena.enter_known(realm) {
+        state.navigation_plan.submission = None;
+    }
+    dropped
 }
 // __dom.ownPlanned() -> which of a location navigation (1), a reload (2) and a frame's submission (4) is planned, 0 for
 // none — and whether the host plans a navigation of a frame (8: frame_navigation.rs `HostNavigation`) or routes a

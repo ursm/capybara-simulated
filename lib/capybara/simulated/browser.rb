@@ -11313,9 +11313,11 @@ module Capybara
       # due after it to run after it — none for the flush of a page being left, whose plans go with it unless it stays
       # (`flush_outgoing_page_init`), nor of the settle a navigation being taken commits with, whose document's next
       # navigation the drain after it takes: a frame reloading itself as it loads nests no deeper. Whether it took any.
-      # …the navigation turn run where one is queued, which a task queued keeps the driver stepping for: none on an idle page.
+      # …the navigation turn run where one was queued since it was last asked (`navigation_turn_queued=`, told by the bindings
+      # as they queue one): no call into the isolate on a drain of a page with none.
+      attr_writer :navigation_turn_queued
       private def run_navigation_turn
-        @runtime.run_navigation_turn(SETTLE_MAX_ITER_TASKS) if @timers_active
+        @navigation_turn_queued = @runtime.run_navigation_turn(SETTLE_MAX_ITER_TASKS) if @navigation_turn_queued
       end
       def take_frame_navigations_due
         return false if @flushing_outgoing_page || @taking_frame_navigations
@@ -11346,7 +11348,7 @@ module Capybara
       # navigation turn, behind the tasks queued before it.
       def consume_pending_frame_reload
         reloads = @runtime.call('__csimTakeFrameNavigations', 'reload')
-        reloads.each do |realm_id|
+        reloads.each do |realm_id, reload_url|
           parent    = @runtime.frame_realm_parent(realm_id)
           container = frame_container_handle(realm_id, parent)
           invalidate_find_cache
@@ -11356,9 +11358,10 @@ module Capybara
           # `iframe.contentWindow.location.reload()`, empty href, or a realm torn
           # down between flag and drain) re-navigate the owning iframe by realm id
           # JS-side, reusing the retained content so blob bytes survive a revoke.
+          # (…of the URL its document was at as `reload()` was called, whatever a `document.open()` did to it since)
           entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-          url   = entry && @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimLocationHref').to_s : ''
-          cur   = current_frame_history_entry(realm_id)
+          url   = entry && @runtime.frame_realm_alive?(realm_id) ? reload_url.to_s : ''
+          cur   = current_frame_history_entry(realm_id)&.merge(url: reload_url)
           if entry && cur && cur[:body]
             navigate_frame_post(cur[:url], cur[:body], cur[:content_type], entry: entry, referrer: realm_referrer_initiator(realm_id), is_reload: true, initiator: realm_id)
           elsif entry && !url.empty?
@@ -11375,7 +11378,7 @@ module Capybara
             reload_frame_to_entry(realm_id, cur, is_reload: true, is_history: false)
           else
             # (…by the realm whose document holds its container: a nested frame's, its parent frame's)
-            frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimReloadFrameByRealm', realm_id)
+            frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimReloadFrameByRealm', realm_id, reload_url)
           end
         rescue StandardError => e
           log_console('warn', "frame self-reload failed: #{e.message}")
@@ -11640,8 +11643,11 @@ module Capybara
           entered = @frame_stack.find {|e| e[:realm_id] == realm_id }
           return unless prompt_to_unload_frame(realm_id)
 
-          return reload_current_frame_realm(url, srcdoc, 'text/html', entry: entered) if entered && srcdoc
-          return navigate_frame(url, entry: entered, is_history: true, record: false, initiator: realm_id) if entered
+          if entered
+            # (…a data: URL's the response it holds, of an opaque origin, its scope following it)
+            _, type, body = Native.data_navigation(url) unless srcdoc
+            return reload_current_frame_realm(url, srcdoc || body.to_s, srcdoc ? 'text/html' : (type || 'text/html'), entry: entered, doc_origin: (srcdoc ? nil : 'null'))
+          end
 
           return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, nil, true, srcdoc)
         end

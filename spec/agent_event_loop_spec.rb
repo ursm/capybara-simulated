@@ -34,11 +34,11 @@ RSpec.describe 'the event loop of a page and its frames' do
         onload = () => {
           const fw = document.getElementById('f').contentWindow;
           const gw = fw.document.getElementById('g').contentWindow;
-          const at = () => Math.round(performance.now() - window.base);
+          const at = () => Math.round(document.timeline.currentTime - window.base);
           const T = (w, ms, tag) => w.setTimeout(() => log.push(tag + '@' + at()), ms);
           const R = (w, tag) => w.requestAnimationFrame(() => log.push(tag + '-raf'));
           setTimeout(() => {
-            window.base = performance.now();
+            window.base = document.timeline.currentTime;
             T(window, 60, 'P60'); T(fw, 50, 'F50'); T(gw, 40, 'G40'); T(fw, 70, 'F70');
             T(window, 45, 'P45'); T(gw, 55, 'G55');
             T(window, 0, 'P0'); T(fw, 0, 'F0'); T(gw, 0, 'G0');
@@ -49,11 +49,10 @@ RSpec.describe 'the event loop of a page and its frames' do
       </script>
     HTML
     expect(log.map {|e| e.split('@').first }).to eq(%w[P0 F0 G0 P-raf F-raf G-raf G40 P45 F50 G55 P60 F70])
-    # (…each at its time on `performance.now()`, which counts the scripts' real time as well as the virtual clock: within
-    # a few ms, more on a loaded machine; the order above is what the event loop owes)
+    # (…each at its time on the timeline, the virtual clock's, which no script's real time moves)
     timed(log.reject {|e| e.end_with?('-raf') }).each do |tag, at|
       due = tag[1..].to_i
-      expect(at).to be_between(due, due + 10), "#{tag} ran at #{at}"
+      expect(at).to be_between(due, due + 1), "#{tag} ran at #{at}"
     end
   end
 
@@ -100,18 +99,18 @@ RSpec.describe 'the event loop of a page and its frames' do
         const src = URL.createObjectURL(new Blob(["onmessage = (e) => setTimeout(() => postMessage(e.data), e.data[1]);"], {type: 'text/javascript'}));
         onload = () => {
           const fw = document.getElementById('f').contentWindow;
-          const at = () => Math.round(performance.now() - window.base);
+          const at = () => Math.round(document.timeline.currentTime - window.base);
           const w = new Worker(src), wf = new fw.Worker(src);
           w.onmessage = wf.onmessage = (e) => { if (window.base) log.push(e.data[0] + '@' + at()); };
           w.postMessage(['warm', 0]); wf.postMessage(['warm', 0]);
           setTimeout(() => {
-            window.base = performance.now();
+            window.base = document.timeline.currentTime;
             w.postMessage(['W45', 45]);
             fw.setTimeout(() => log.push('F40@' + at()), 40);
             setTimeout(() => log.push('P50@' + at()), 50);
             setTimeout(() => {
               log.push('|');
-              window.base = performance.now();
+              window.base = document.timeline.currentTime;
               wf.postMessage(['WF45', 45]);
               setTimeout(() => log.push('P40@' + at()), 40);
               setTimeout(() => log.push('P50@' + at()), 50);
@@ -125,13 +124,15 @@ RSpec.describe 'the event loop of a page and its frames' do
     expect(log.map {|e| e.split('@').first }).to eq(%w[F40 W45 P50 | P40 WF45 P50 F52])
     # (…a worker's message at the time its sender's `Date` read as it posted, its scripts' real time among it — which the
     # page's clock is held at from then: what runs at or after it a few ms more on a loaded machine, 48 for 45 and 54 for
-    # 50 in a full suite's run — and any of them the scripts' real time before it)
+    # 50 in a full suite's run; what runs before it to the ms, on the timeline, the virtual clock's)
+    lifted = false
     log.each do |entry|
-      next if entry == '|'
+      next lifted = false if entry == '|'
 
       tag, at = entry.split('@')
+      lifted ||= tag.start_with?('W')
       due = tag[/\d+/].to_i
-      expect(at.to_i).to be_between(due, due + 10), "#{tag} ran at #{at}"
+      expect(at.to_i).to be_between(due, due + (lifted ? 10 : 1)), "#{tag} ran at #{at}"
     end
   end
 
@@ -272,9 +273,9 @@ RSpec.describe 'the event loop of a page and its frames' do
             function step() {
               depth++;
               if (depth === 8) {
-                const a = performance.now();
-                fw.T0(() => log.push('F', '+' + Math.round(performance.now() - a)));
-                setTimeout(() => log.push('P', '+' + Math.round(performance.now() - a)), 0);
+                const a = document.timeline.currentTime;
+                fw.T0(() => log.push('F', '+' + Math.round(document.timeline.currentTime - a)));
+                setTimeout(() => log.push('P', '+' + Math.round(document.timeline.currentTime - a)), 0);
               }
               if (depth < 10) setTimeout(step, 0); else setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 100);
             }
@@ -283,9 +284,7 @@ RSpec.describe 'the event loop of a page and its frames' do
         };
       </script>
     HTML
-    # (…in `performance.now()`, which counts the scripts' real time as well: 4 and a little)
-    expect(log.values_at(0, 2)).to eq(%w[F P])
-    expect(log.values_at(1, 3).map(&:to_i)).to all(be_between(4, 14))
+    expect(log).to eq(%w[F +4 P +4])
   end
 
   # A frame's time origin is when its document was made — an initial about:blank one's as the frame was inserted — not

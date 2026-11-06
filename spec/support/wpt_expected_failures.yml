@@ -2893,7 +2893,6 @@ html/browsers/browsing-the-web/navigating-across-documents/failure-check-sequenc
 - CSP check precedes COEP check - COEP header first
 - CSP check precedes COEP check - CSP header first
 - CSP check precedes X-Frame-Options check
-html/browsers/browsing-the-web/navigating-across-documents/form-submit-and-window-stop.html: HARNESS_ERROR
 html/browsers/browsing-the-web/navigating-across-documents/grandparent_location_aboutsrcdoc.sub.window.js:
 - "[harness] ERROR"
 - cross-origin grandparent sets location in same-doc navigation
@@ -5947,9 +5946,6 @@ html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correc
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correct-order-remove-readd-ref.html"
 html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic.html:
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic-ref.html"
-html/webappapis/dynamic-markup-insertion/closing-the-input-stream/load-event-after-location-set-during-write.window.js:
-- Setting location from document.write() call should not trigger load event until
-  that load completes
 html/webappapis/dynamic-markup-insertion/document-write/iframe_005.html:
 - document.write external script into iframe write back into parent
 html/webappapis/dynamic-markup-insertion/document-write/module-dynamic-import.html:
@@ -6000,8 +5996,6 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-refresh-
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-while-navigating.window.js:
 - document.open() aborts documents that are navigating through iframe loading (image
   loading)
-html/webappapis/dynamic-markup-insertion/opening-the-input-stream/aborted-parser.window.js:
-- async document.open() after parser is aborted
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/bailout-exception-vs-return-origin.sub.window.js:
 - "[harness] TIMEOUT"
 - document.open should throw a SecurityError with cross-origin document even when

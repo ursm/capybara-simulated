@@ -508,11 +508,13 @@ module Capybara
       end
 
       # …the event loop's navigation turn run, where one is queued (timers.js `queueNavigationTurn`), with what is due before
-      # it, no clock advance: none from inside a call of the host's into the window, which a step must not nest in.
+      # it, no clock advance: none from inside a call of the host's into the window, which a step must not nest in. Whether
+      # one is queued still.
       def run_navigation_turn(max_iter)
-        return if @call_depth.to_i.positive? || @stepping
+        return true if @call_depth.to_i.positive? || @stepping
 
         run_loop_step(0, max_iter) if ctx.call('__csimNavigationTurnQueued') == true
+        ctx.call('__csimNavigationTurnQueued') == true
       end
 
       # …the window's tasks due by `at`, a time its clock has passed — a page's timers a window that waited on a worker in

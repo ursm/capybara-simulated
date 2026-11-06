@@ -116,16 +116,40 @@ impl RealmArena {
     }
 }
 
-// __dom.imageFetchesStop() — the calling realm's document's image fetches aborted (HTML "abort a document", as "stop loading"
-// it does): their responses, when they come, load into nothing, and delay its load no more.
-fn fetches_stop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.imageFetchesStop() -> the images of the calling realm's document whose fetches its abort cancelled (HTML "abort a
+// document") — `[element, load]` each, their responses, when they come, loading into nothing, delaying its load no more —
+// each a network error: `imageFetchAborted` on the task that says so.
+fn fetches_stop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    crate::dom::dom(scope).arena.forget_image_fetches_of(cid);
+    let arena = &mut crate::dom::dom(scope).arena;
+    let mut stopped: Vec<(NodeId, u32)> = arena.image_fetches.values().filter(|f| f.realm == cid).map(|f| (f.node, f.load)).collect();
+    stopped.extend(arena.image_arrivals.iter().filter(|a| a.0 == cid).map(|a| (a.1, a.2)));
+    arena.forget_image_fetches_of(cid);
+    let items: Vec<v8::Local<v8::Value>> = stopped.iter().map(|&(node, load)| {
+        let pair = [v8::Number::new(scope, node.to_f64()).into(), v8::Integer::new_from_unsigned(scope, load).into()];
+        v8::Array::new_with_elements(scope, &pair).into()
+    }).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.imageFetchAborted(nid, load) -> whether load `load` of the image is its current one still, its request now broken and
+// complete, its `error` to fire (Chrome fires it wherever; Firefox where the image is script-inserted, none elsewhere).
+fn fetch_aborted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let load = args.get(1).uint32_value(scope).unwrap_or(0);
+    let arena = &mut crate::dom::dom(scope).arena;
+    if !arena.image_load_current(id, load) {
+        return rv.set_bool(false);
+    }
+    let r = arena.image_mut(id);
+    r.complete = true;
+    r.broken = true;
+    rv.set_bool(true);
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "imageLoadBegin", load_begin, context_id);
     crate::dom::register(scope, ns, "imageFetchesStop", fetches_stop, context_id);
+    crate::dom::register(scope, ns, "imageFetchAborted", fetch_aborted, context_id);
     crate::dom::register(scope, ns, "imageLoadClear", load_clear, context_id);
     crate::dom::register(scope, ns, "imageInfo", info, context_id);
     crate::dom::register(scope, ns, "imageUrl", url, context_id);

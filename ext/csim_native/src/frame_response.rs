@@ -172,7 +172,7 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
     // result's document keeps its initial one's — and the base URL an about: one inherits from its creator, this
     // realm's document.
     let href = if !carried && srcdoc {
-        "about:srcdoc".to_owned()
+        format!("about:srcdoc{}", arena.frame_srcdoc_fragment(container))
     } else if !carried && (r.url.is_empty() || r.javascript.is_some()) {
         "about:blank".to_owned()
     } else {
