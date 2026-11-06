@@ -312,7 +312,12 @@ const INTERFACES = [
   }],
   ['uievents', 'FocusEvent', { event: {} }],
   ['pointerevents', 'MouseEvent', {
-    event: { steps: ['layerX', 'layerY', 'pageX', 'pageY', 'offsetX', 'offsetY'], slots: { x: 'clientX', y: 'clientY' }, init: [], initialized: true }
+    event: {
+      steps: ['layerX', 'layerY', 'pageX', 'pageY', 'offsetX', 'offsetY'],
+      slots: { x: 'clientX', y: 'clientY' },
+      init: ['screenX', 'screenY', 'clientX', 'clientY'],
+      initialized: true
+    }
   }],
   ['pointerevents', 'WheelEvent', { event: {}, omitMembers: { momentum: 'a draft of Pointer Events neither Chrome nor Firefox has' } }],
   ['uievents', 'TextEvent', { event: { initialized: true } }],
@@ -771,14 +776,9 @@ for (const [spec, text] of Object.entries(EDITORS_DRAFT_ADDITIONS)) all[spec] = 
 // word for word, with the draft it is from; each member takes the other's place. One @webref/idl has come to agree with is
 // an error (below), and the entry goes.
 const EDITORS_DRAFT_REDEFINITIONS = {
-  // https://drafts.csswg.org/cssom-view/#extensions-to-the-mouseevent-interface: of Pointer Events' `long`s
+  // https://drafts.csswg.org/cssom-view/#extensions-to-the-mouseevent-interface: of Pointer Events' `long`s, as Chrome and
+  // Firefox convert them (a non-finite one a TypeError; what the attributes then answer: events.js `MouseEvent`)
   'cssom-view-ed': `
-    partial interface MouseEvent {
-      readonly attribute double screenX;
-      readonly attribute double screenY;
-      readonly attribute double clientX;
-      readonly attribute double clientY;
-    };
     partial dictionary MouseEventInit {
       double screenX = 0.0;
       double screenY = 0.0;
@@ -817,7 +817,7 @@ for (const spec of Object.keys(EDITORS_DRAFT_ADDITIONS)) {
 
 for (const [spec, text] of Object.entries(EDITORS_DRAFT_REDEFINITIONS)) {
   for (const d of parseIdl(text)) {
-    const { members } = definitions.get(d.name) && d.type === 'interface' ? definitions.get(d.name) : dictionaries.get(d.name);
+    const { members } = dictionaries.get(d.name);
     for (const m of d.members) {
       const at = members.findIndex((o) => o.name === m.name);
       if (at === -1 || typeName(members[at].idlType) === typeName(m.idlType)) throw new Error(`${d.name}.${m.name}: nothing for ${spec} to redefine now — remove it from EDITORS_DRAFT_REDEFINITIONS`);

@@ -10,7 +10,7 @@ require_relative 'support/session_teardown'
 RSpec.describe 'Event bindings on a hostile page' do
   let(:session) do
     simulated_session(lambda {|_env|
-      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><div id=a><span id=b></span></div><button id=button>b</button><input id=field name=field><div id=source draggable=true>s</div><script>window.shadowChild = document.body.appendChild(document.createElement("div")).attachShadow({mode: "open"}).appendChild(document.createElement("i"));</script>']]
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><div id=a><span id=b></span></div><button id=button>b</button><input id=field name=field><div id=source draggable=true>s</div><a id=fractional href=#x style="position:absolute;left:0.25px;top:80.5px;width:97.8125px;height:15.5px">f</a><script>window.coordinates = []; for (const type of ["mousedown", "mouseup", "mousemove", "click", "dblclick", "contextmenu", "auxclick", "pointerdown", "pointermove", "pointerup", "dragstart", "drop", "dragend"]) document.addEventListener(type, (e) => { if (e.target.id === "fractional" || e.target.id === "source") window.coordinates.push([e.type, e.clientX, e.clientY, e.screenX, e.screenY].join(" ")); }, true);window.shadowChild = document.body.appendChild(document.createElement("div")).attachShadow({mode: "open"}).appendChild(document.createElement("i"));</script>']]
     })
   end
 
@@ -39,9 +39,12 @@ RSpec.describe 'Event bindings on a hostile page' do
       el.dispatchEvent(new Event('y', {bubbles: true}));
       el.dispatchEvent(new Event('y', {bubbles: true}));
       out.order = order;
+      el.dispatchEvent(new Event('no node listens to this', {bubbles: true}));
       const inner = shadowChild;
       inner.addEventListener('z', (e) => { out.shadowPath = e.composedPath().length; });
       inner.dispatchEvent(new Event('z', {bubbles: true, composed: true}));
+      window.addEventListener('w', () => {}, {once: true});
+      document.addEventListener('d', () => {}, {once: true});
       const target = new EventTarget();
       target.addEventListener('t', (e) => { out.flatPath = e.composedPath().length; });
       target.dispatchEvent(new Event('t'));
@@ -246,24 +249,51 @@ RSpec.describe 'Event bindings on a hostile page' do
     JS
   end
 
-  # (…CSSOM View's `double`s: a non-finite one a TypeError — Chrome's and Firefox's too — a fractional one kept, where both
-  # floor a MouseEvent's and keep a PointerEvent's: the draft's IDL makes no such difference)
-  it "converts a mouse event's coordinates as doubles" do
-    expect(session.evaluate_script(<<~JS)).to eq(['TypeError', 'TypeError', 1.5, 1.5, 2.5])
+  # (…the init's members `double`s, a non-finite one a TypeError; each attribute floored, but a PointerEvent's that is none
+  # of the three types Pointer Events keeps to `long`s: Chrome's and Firefox's, the two drafts disagreeing)
+  it "floors a mouse event's coordinates, and keeps a pointer event's" do
+    expect(session.evaluate_script(<<~JS)).to eq(['TypeError', 'TypeError', 1, -2, 2, -3, 1, 1, 2, 1.5, -1.5, 1, 1, 1, 1])
       (() => {
         const outcome = (f) => { try { return f(); } catch (e) { return e.constructor.name; } };
+        const init = document.createEvent('MouseEvent');
+        init.initMouseEvent('a', true, true, null, 0, 0, 0, 1.5);
+        const mouse = new MouseEvent('x', {clientX: 1.5, clientY: -1.5, screenX: 2.5, screenY: -2.5});
         return [
           outcome(() => new MouseEvent('x', {clientX: NaN})),
           outcome(() => new MouseEvent('x', {screenY: Infinity})),
-          new MouseEvent('x', {clientX: 1.5}).clientX,
+          mouse.clientX,
+          mouse.clientY,
+          mouse.screenX,
+          mouse.screenY,
+          mouse.x,
+          new DragEvent('x', {clientX: 1.5}).clientX,
+          new WheelEvent('x', {screenY: 2.5}).screenY,
           new PointerEvent('x', {clientX: 1.5}).x,
-          new WheelEvent('x', {screenY: 2.5}).screenY
+          new PointerEvent('pointerdown', {screenY: -1.5}).screenY,
+          new PointerEvent('click', {clientX: 1.5}).clientX,
+          new PointerEvent('auxclick', {clientX: 1.5}).clientX,
+          new PointerEvent('contextmenu', {clientX: 1.5}).clientX,
+          init.clientX
         ];
       })()
     JS
   end
 
-  # (…the doubled blank list of a dispatch's path, so a tree as deep as this is no list kept per depth)
+  # (…what every suite missed: the driver's own point, WebDriver's floored centre, on a box of a fractional width)
+  it "clicks at a whole pixel, whatever an element's box measures" do
+    session.visit '/fractional'
+    session.find('#fractional').click
+    session.find('#fractional').right_click
+    session.find('#fractional').double_click
+    session.find('#fractional').hover
+    session.find('#source').drag_to(session.find('#fractional'))
+    seen = session.evaluate_script('window.coordinates')
+    expect(seen).not_to be_empty
+    expect(seen.grep_v(/\A[a-z]+ -?\d+ -?\d+ -?\d+ -?\d+\z/)).to eq([])
+    expect(session.evaluate_script('document.getElementById("fractional").getBoundingClientRect().width % 1')).to be > 0
+  end
+
+  # (…a dispatch's blank lists, however many depths: kept up to one per short length, and one past them doubled)
   it 'keeps one blank list, however many depths a shadow dispatch has been at' do
     expect(session.evaluate_script(<<~JS)).to eq(4 + 600)
       (() => {

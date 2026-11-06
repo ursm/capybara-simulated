@@ -1849,8 +1849,10 @@ module Capybara
           rect = dom_call('__csimPointerRect', handle)
           base_x = rect['x'].to_f + (center ? rect['width'].to_f  / 2.0 : 0.0)
           base_y = rect['y'].to_f + (center ? rect['height'].to_f / 2.0 : 0.0)
-          out['clientX'] = base_x + opts[:x].to_f
-          out['clientY'] = base_y + opts[:y].to_f
+          # (WebDriver's in-view centre point, floored: "Let x be floor((left + right) ÷ 2.0)" — no driver's click is at a
+          # fraction of a pixel)
+          out['clientX'] = (base_x + opts[:x].to_f).floor
+          out['clientY'] = (base_y + opts[:y].to_f).floor
         end
         out
       end
