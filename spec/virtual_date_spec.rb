@@ -227,6 +227,35 @@ RSpec.describe 'the virtual clock’s Date' do
     expect(skew.call('window')).to be_within(5).of(0)
   end
 
+  # …and a frame reads the offset of the realm that made it, not the page's: after a `travel_back`, one added to a pop-up
+  # that took the real clock reads real, and one added to the opener, still travelled, reads travelled.
+  it "reads a frame's clock as the realm that made it does" do
+    day = 86_400
+    s = simulated_session(lambda {|env|
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{env['PATH_INFO']}"]]
+    })
+    skew = ->(win) { s.evaluate_script("#{win}.Date.now()") / 1000.0 - Process.clock_gettime(Process::CLOCK_REALTIME) }
+    frozen = Time.now + day
+    allow(Time).to receive(:now).and_return(frozen)
+    s.visit '/opener'
+    allow(Time).to receive(:now).and_call_original
+    s.execute_script("window.w = open('/popup')")
+    poll_until { s.evaluate_script("w.document.body?.textContent == '/popup'") }
+    s.execute_script(<<~JS)
+      for (const win of [window, w]) {
+        const f = win.document.createElement('iframe');
+        f.srcdoc = '<p>f';
+        win.document.body.append(f);
+      }
+    JS
+    poll_until { s.evaluate_script("!!frames[0]?.document.querySelector('p') && !!w.frames[0]?.document.querySelector('p')") }
+
+    expect(skew.call('w')).to be_within(5).of(0)
+    expect(skew.call('w.frames[0]')).to be_within(5).of(0)
+    expect(skew.call('window')).to be_within(5).of(day)
+    expect(skew.call('frames[0]')).to be_within(5).of(day)
+  end
+
   # …and on that one clock a frame's timer falls due: one its parent's task sets in it, at whatever offset in the
   # parent's step, runs its timeout after on the frame's `Date` and `performance.now()` alike, never before (HTML timer
   # initialization) — the frame scheduled on its own clock a step behind the parent's while reading the parent's, and a

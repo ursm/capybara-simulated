@@ -69,8 +69,9 @@ impl AgentTime {
 // moved value — so client-side date math (Discourse's `moment()` calls in admin-dashboard-tab.js → `last 30 days`
 // window, freshly-typed `created_at`) would diverge from what the server just sent. Fixed with the origin, as HR-Time
 // fixes a global's time origin as the global is made: read as the host boots a window's document (`clockEpochSet`), a
-// frame's its main realm's (`state_of`), a pop-up's what the host says as its document loads (`timeTravelSet`: its
-// opener's, unless the host's clock has moved since — Browser#window_travel_offset_ms), a worker's its maker's. Never read
+// frame's the realm's that made it, its parent (`timeTravelFrom`), a pop-up's what the host says as its document loads
+// (`timeTravelSet`: its opener's, unless the host's clock has moved since — Browser#window_travel_offset_ms), a worker's
+// its maker's. Never read
 // again for a live realm — under a frozen `Time.now` the offset shrinks with real time, and a pop-up's load that read it
 // again moved its opener's `performance.timeOrigin` back a second mid-life; a `travel_back` reaches the next document
 // loaded. (Frames and pop-ups read the real clock, a day behind the page under `travel_to(1.day.from_now)`, when only
@@ -287,6 +288,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "clockWorkerRealm", clock_worker_realm, context_id);
     register(scope, ns, "timeTravel", time_travel, context_id);
     register(scope, ns, "timeTravelSet", time_travel_set, context_id);
+    register(scope, ns, "timeTravelFrom", time_travel_from, context_id);
     register(scope, ns, "agentWait", agent_wait, context_id);
     register(scope, ns, "agentIdle", agent_idle, context_id);
     register(scope, ns, "agentShift", agent_shift, context_id);
@@ -531,6 +533,19 @@ fn time_travel_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let script = d.agent_time.now(Instant::now());
     if let Some(origin) = state_of(&mut d.arena, cid, script).time_origin.as_mut() {
         origin.travel = ms;
+    }
+}
+
+// __dom.timeTravelFrom(realm) — the calling realm's time origin holds the host's offset realm `realm`'s does: a frame's its
+// parent's, as it is made, a frame of a pop-up that took an offset of its own reading the pop-up's and not the page's.
+fn time_travel_from(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let from = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let d = dom(scope);
+    let script = d.agent_time.now(Instant::now());
+    let Some(travel) = d.arena.realm_state(from).and_then(|s| s.time_origin).map(|o| o.travel) else { return };
+    if let Some(origin) = state_of(&mut d.arena, cid, script).time_origin.as_mut() {
+        origin.travel = travel;
     }
 }
 

@@ -1330,6 +1330,8 @@ module Capybara
         # depth is one more than this one's)
         loading_frame_realms[realm.id] = realm           # (…its URL asked for while it loads: loading_frame_realm_url)
         seed_realm_bridge(realm, window_group(parent_id))
+        # (…the host's clock's offset its parent's time origin holds: agent_clock.rs `TimeOrigin`)
+        realm.call('__csimTimeTravelFrom', parent_id.to_i)
         # Wire `parent` / `top` to the realm that owns this iframe (its context
         # id passed from `__csimFrameWindow`), BEFORE the frame's scripts run —
         # `top` propagates up the chain (the main realm's `top` is itself). A
