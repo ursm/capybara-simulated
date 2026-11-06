@@ -207,8 +207,31 @@ fn composite(buf: &mut [u8], i: usize, col: Rgb, a: f64, op: Op) {
 }
 
 // ── colour spaces ──
-// sRGB and Display P3 share sRGB's transfer function, so a conversion is: expand, a 3×3 matrix on linear RGB (D65),
-// compress. A P3 colour outside sRGB's gamut is clipped into it, as a browser reads a wide colour back as sRGB.
+// The four a bitmap can hold, by their index in canvas_state.rs `COLOR_SPACES`: sRGB and Display P3 — which share sRGB's
+// transfer function — and each one's linear counterpart, with none. A conversion is: expand, a 3×3 matrix on linear RGB
+// (D65), compress. A P3 colour outside sRGB's gamut is clipped into it, as a browser reads a wide colour back as sRGB.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct Space {
+    p3: bool,
+    linear: bool,
+}
+const SRGB: Space = Space { p3: false, linear: false };
+impl Space {
+    pub(crate) fn of_code(code: u8) -> Space {
+        Space { p3: code >= 2, linear: code & 1 == 1 }
+    }
+    pub(crate) fn of_name(name: &str) -> Space {
+        let (base, linear) = name.strip_suffix("-linear").map_or((name, false), |b| (b, true));
+        Space { p3: base == "display-p3", linear }
+    }
+    // Its encoded counterpart: what an image file or an ImageBitmap, which keep no linear values, hold of it.
+    pub(crate) fn encoded(self) -> Space {
+        Space { linear: false, ..self }
+    }
+    pub(crate) fn is_p3(self) -> bool {
+        self.p3
+    }
+}
 const SRGB_TO_P3: [f64; 9] = [0.82246197, 0.17753803, 0.0, 0.03319420, 0.96680580, 0.0, 0.01708263, 0.07239744, 0.91051993];
 const P3_TO_SRGB: [f64; 9] = [1.22494018, -0.22494018, 0.0, -0.04205695, 1.04205695, 0.0, -0.01963755, -0.07863605, 1.09827360];
 fn eotf(c: f64) -> f64 {
@@ -217,29 +240,36 @@ fn eotf(c: f64) -> f64 {
 fn oetf(c: f64) -> f64 {
     if c <= 0.0031308 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
 }
-// The matrix from one space to the other (`p3` naming each side), None where they are the same.
-fn matrix(from_p3: bool, to_p3: bool) -> Option<&'static [f64; 9]> {
-    match (from_p3, to_p3) {
+// The matrix from one space's primaries to the other's, None where they are the same.
+fn matrix(from: Space, to: Space) -> Option<&'static [f64; 9]> {
+    match (from.p3, to.p3) {
         (false, true) => Some(&SRGB_TO_P3),
         (true, false) => Some(&P3_TO_SRGB),
         _ => None,
     }
 }
-// Whole bytes converted by `m`.
-fn convert_bytes(m: &[f64; 9], r: u8, g: u8, b: u8) -> [f64; 3] {
-    let (r, g, b) = (eotf(unit(r)), eotf(unit(g)), eotf(unit(b)));
-    let lin = [m[0] * r + m[1] * g + m[2] * b, m[3] * r + m[4] * g + m[5] * b, m[6] * r + m[7] * g + m[8] * b];
-    lin.map(|c| js_round(oetf(clamp01(c)) * 255.0))
+// Whole bytes converted.
+fn convert_bytes(from: Space, to: Space, bytes: [u8; 3]) -> [f64; 3] {
+    let lin = bytes.map(|c| if from.linear { unit(c) } else { eotf(unit(c)) });
+    let [r, g, b] = lin;
+    let lin = matrix(from, to).map_or(lin, |m| [m[0] * r + m[1] * g + m[2] * b, m[3] * r + m[4] * g + m[5] * b, m[6] * r + m[7] * g + m[8] * b]);
+    lin.map(|c| js_round(if to.linear { clamp01(c) } else { oetf(clamp01(c)) } * 255.0))
 }
-fn convert_rgb(m: Option<&[f64; 9]>, c: Rgb) -> Rgb {
-    let Some(m) = m else { return c };
-    let [r, g, b] = convert_bytes(m, byte(c.r), byte(c.g), byte(c.b));
+// A CSS colour (sRGB, as the state keeps one) in the space a bitmap holds: "converted to the context's color space".
+fn in_space(to: Space, c: Rgb) -> Rgb {
+    if to == SRGB {
+        return c;
+    }
+    let [r, g, b] = convert_bytes(SRGB, to, [byte(c.r), byte(c.g), byte(c.b)]);
     Rgb { r, g, b }
 }
-// An RGBA buffer converted in place.
-fn convert_buffer(m: &[f64; 9], data: &mut [u8]) {
+// An RGBA buffer converted in place, its alpha untouched.
+pub(crate) fn convert_buffer(from: Space, to: Space, data: &mut [u8]) {
+    if from == to {
+        return;
+    }
     for px in data.chunks_exact_mut(4) {
-        let [r, g, b] = convert_bytes(m, px[0], px[1], px[2]);
+        let [r, g, b] = convert_bytes(from, to, [px[0], px[1], px[2]]);
         px[0] = byte(r);
         px[1] = byte(g);
         px[2] = byte(b);
@@ -467,8 +497,8 @@ enum Paint<'a> {
     Solid { col: Rgb, a: f64 },
     // clearRect: what it covers cleared, an edge in proportion.
     Clear,
-    // A gradient: its stops, sorted; its colours are sRGB, converted by `to` per sample.
-    Gradient { kind: Gradient, stops: Vec<Stop>, to: Option<&'static [f64; 9]> },
+    // A gradient: its stops, sorted, in the bitmap's space, where it interpolates them.
+    Gradient { kind: Gradient, stops: Vec<Stop> },
     // A pattern's tile, in the bitmap's space already, tiled on the axes it repeats; sampled through `inv` (its own
     // transform, inverted).
     Pattern { px: Cow<'a, [u8]>, w: usize, h: usize, rep_x: bool, rep_y: bool, inv: Matrix },
@@ -563,11 +593,7 @@ impl Paint<'_> {
         match self {
             Paint::Solid { col, a } => Some((*col, *a)),
             Paint::Clear => None,
-            Paint::Gradient { kind, stops, to } => {
-                let t = gradient_t(kind, ux, uy)?;
-                let (c, a) = stop_colour(stops, t);
-                Some((convert_rgb(*to, c), a))
-            }
+            Paint::Gradient { kind, stops } => Some(stop_colour(stops, gradient_t(kind, ux, uy)?)),
             &Paint::Pattern { ref px, w, h, rep_x, rep_y, inv } => {
                 let (x, y) = apply(&inv, ux, uy);
                 let (ix, iy) = (floor(x), floor(y));
@@ -884,16 +910,22 @@ pub(crate) fn throw_oom(scope: &mut v8::PinScope<'_, '_>) {
     }
 }
 
-// The stops of a flat `[count, offset, r, g, b, a, …]`, and what follows them.
-fn stops_of(flat: &[f64]) -> Vec<Stop> {
+// The stops of a flat `[count, offset, r, g, b, a, …]`, "the color specified for that stop, converted to the context's
+// color space".
+fn stops_of(flat: &[f64], to: Space) -> Vec<Stop> {
     let n = flat.first().map_or(0, |&n| n as usize);
-    flat.get(1..1 + 5 * n).unwrap_or(&[]).chunks_exact(5).map(|s| Stop { offset: s[0], r: s[1], g: s[2], b: s[3], a: s[4] }).collect()
+    let stop = |s: &[f64]| {
+        let Rgb { r, g, b } = in_space(to, Rgb { r: s[1], g: s[2], b: s[3] });
+        Stop { offset: s[0], r, g, b, a: s[4] }
+    };
+    flat.get(1..1 + 5 * n).unwrap_or(&[]).chunks_exact(5).map(stop).collect()
 }
 
 // The paint of a drawing op, flat: `[0, r, g, b, a]` a solid sRGB colour; `[1]` clearRect; `[2, x0, y0, x1, y1, …stops]`
 // linear, `[3, x0, y0, r0, x1, y1, r1, …stops]` radial, `[4, angle, x, y, …stops]` conic, stops `[count, offset, r, g, b,
-// a, …]` sRGB; `[5, w, h, repeatX, repeatY, p3, …matrix]` the pattern tile `pixels` in its colour space and under its own
-// transform; `[6, w, h, p3, sx, sy, sw, sh, dx, dy, dw, dh, smoothing]` drawImage of `pixels`.
+// a, …]` sRGB; `[5, w, h, repeatX, repeatY, space, …matrix]` the pattern tile `pixels` in its colour space and under its own
+// transform; `[6, w, h, space, sx, sy, sw, sh, dx, dy, dw, dh, smoothing]` drawImage of `pixels`, a pattern's and an image's
+// `space` the colour space of their pixels (`Space::of_code`).
 const CLEAR: [f64; 1] = [1.0];
 const FOCUS_RING_PAINT: [f64; 5] = [0.0, 0.0, 0.0, 0.0, 1.0];
 
@@ -993,7 +1025,7 @@ pub(crate) fn draw(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, plai
         Err(Oom) => return throw_oom(scope),
     };
     let [cw, ch] = h.size();
-    let p3 = h.display_p3();
+    let own = Space::of_code(h.color_space_code());
     // (…copied out of the state: none of its strings or its dash list, on an op a draw loop makes by the thousand)
     let (ctm, alpha, composite, shadow_color, shadow_a, shadow_blur, shadow_offset) = {
         let s = h.state();
@@ -1006,21 +1038,21 @@ pub(crate) fn draw(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, plai
     if !ctm.iter().all(|v| v.is_finite()) {
         return;
     }
-    let to = matrix(false, p3);
     let written = bytes_span(bitmap);
     let clip = clip_object.and_then(|c| bytes_read(c.into(), written));
     // (…a pattern's or an image's pixels, copied where they share the bitmap's bytes or need converting)
-    let pixels = |convert: Option<&[f64; 9]>| {
+    let pixels = |space: f64| {
         let mut px = bytes_read(pixels, written).unwrap_or_default();
-        if let Some(m) = convert {
-            convert_buffer(m, px.to_mut());
+        let from = Space::of_code(space as u8);
+        if from != own {
+            convert_buffer(from, own, px.to_mut());
         }
         px
     };
     let Some((&kind, p)) = paint.split_first() else { return };
     let paint = match kind as i32 {
         0 if p.len() >= 4 => {
-            let col = convert_rgb(to, Rgb { r: p[0], g: p[1], b: p[2] });
+            let col = in_space(own, Rgb { r: p[0], g: p[1], b: p[2] });
             // (…a transparent one paints nothing, but under a whole-canvas operator, where it clears)
             if clamp01(p[3] * alpha) <= 0.0 && !op.whole_canvas() {
                 return;
@@ -1041,16 +1073,16 @@ pub(crate) fn draw(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, plai
                 4 if p.len() >= 3 => (Gradient::Conic { a0: p[0], x: p[1], y: p[2] }, &p[3..]),
                 _ => return,
             };
-            let stops = stops_of(rest);
+            let stops = stops_of(rest, own);
             // (…no stops, or a linear one of zero length, paints nothing)
             if stops.is_empty() || matches!(kind, Gradient::Linear { len2, .. } if len2 == 0.0) {
                 return;
             }
-            Paint::Gradient { kind, stops, to }
+            Paint::Gradient { kind, stops }
         }
         5 if p.len() >= 11 => {
             let (w, h) = (p[0] as usize, p[1] as usize);
-            let px = pixels(matrix(p[4] != 0.0, p3));
+            let px = pixels(p[4]);
             if w == 0 || h == 0 || px.len() < w * h * 4 {
                 return;
             }
@@ -1062,7 +1094,7 @@ pub(crate) fn draw(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, plai
             if iw == 0 || ih == 0 || !p[3..11].iter().all(|v| v.is_finite()) {
                 return;
             }
-            let px = pixels(matrix(p[2] != 0.0, p3));
+            let px = pixels(p[2]);
             if px.len() < iw * ih * 4 {
                 return;
             }
@@ -1084,7 +1116,7 @@ pub(crate) fn draw(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, plai
         return;
     }
     let shadow = (shadow_a > 0.0 && (shadow_blur > 0.0 || shadow_offset.0 != 0.0 || shadow_offset.1 != 0.0)).then(|| Shadow {
-        col: convert_rgb(to, Rgb { r: f64::from(shadow_color[0]), g: f64::from(shadow_color[1]), b: f64::from(shadow_color[2]) }),
+        col: in_space(own, Rgb { r: f64::from(shadow_color[0]), g: f64::from(shadow_color[1]), b: f64::from(shadow_color[2]) }),
         a: shadow_a,
         offset: (js_round(shadow_offset.0), js_round(shadow_offset.1)),
         radius: blur_radius(shadow_blur),
@@ -1206,37 +1238,11 @@ fn pixels_float16(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(crate::webcrypto::array_buffer(scope, halves));
 }
 
-// __dom.canvasConvert(pixels, from, to): an RGBA buffer converted in place from one PredefinedColorSpace to another —
-// "srgb" and "display-p3" by the matrix between them (a wide colour clipped into sRGB, as a browser reads one back), each
-// one's linear counterpart ("srgb-linear", "display-p3-linear") through the sRGB transfer function both share, decoded
-// to its base space first and encoded from it last; its alpha untouched, nothing done where they match.
+// __dom.canvasConvert(pixels, from, to): an RGBA buffer converted in place from one PredefinedColorSpace to another.
 fn canvas_convert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (from, to) = (args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
     if let Some(data) = bytes_mut(args.get(0)) {
-        convert_spaces(data, &from, &to);
-    }
-}
-pub(crate) fn convert_spaces(data: &mut [u8], from: &str, to: &str) {
-    if from == to {
-        return;
-    }
-    let (from_base, from_linear) = from.strip_suffix("-linear").map_or((from, false), |b| (b, true));
-    let (to_base, to_linear) = to.strip_suffix("-linear").map_or((to, false), |b| (b, true));
-    let transfer = |data: &mut [u8], f: fn(f64) -> f64| {
-        for px in data.chunks_exact_mut(4) {
-            for c in &mut px[..3] {
-                *c = byte(f(unit(*c)) * 255.0);
-            }
-        }
-    };
-    if from_linear {
-        transfer(data, oetf);
-    }
-    if let Some(m) = matrix(from_base == "display-p3", to_base == "display-p3") {
-        convert_buffer(m, data);
-    }
-    if to_linear {
-        transfer(data, eotf);
+        convert_buffer(Space::of_name(&from), Space::of_name(&to), data);
     }
 }
 
@@ -1330,13 +1336,13 @@ fn canvas_put_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
         Ok(None) => return,
         Err(Oom) => return throw_oom(scope),
     };
-    let from = args.get(3).to_rust_string_lossy(scope);
+    let (from, own) = (Space::of_name(&args.get(3).to_rust_string_lossy(scope)), Space::of_code(h.color_space_code()));
     let Some(mut px) = bytes_read(args.get(1), bytes_span(bitmap)) else { return };
     if args.get(2).is_true() {
         px = Cow::Owned(unorm8(&px));
     }
-    if from != h.color_space() {
-        convert_spaces(px.to_mut(), &from, h.color_space());
+    if from != own {
+        convert_buffer(from, own, px.to_mut());
     }
     let Some(dst) = bytes_mut(bitmap) else { return };
     let [cw, ch] = h.size().map(|v| v as i64);
@@ -1478,6 +1484,30 @@ mod tests {
         let mut px = [255, 0, 100, 255, 255, 0, 100, 0, 200, 100, 0, 51];
         over_black(&mut px);
         assert_eq!(px, [255, 0, 100, 255, 0, 0, 0, 255, 40, 20, 0, 255]);
+    }
+
+    // A linear space has no transfer function: a CSS gray of 128 is 55 in `srgb-linear` and in `display-p3-linear`, whose
+    // primaries leave a gray a gray; a conversion and its inverse come back; one between a space and itself does nothing.
+    #[test]
+    fn converts_between_the_four_spaces() {
+        let (srgb, linear, p3, p3_linear) = (Space::of_code(0), Space::of_code(1), Space::of_code(2), Space::of_code(3));
+        assert_eq!(Space::of_name("display-p3-linear"), p3_linear);
+        assert_eq!(p3_linear.encoded(), p3);
+        assert_eq!(convert_bytes(srgb, linear, [128, 128, 128]), [55.0, 55.0, 55.0]);
+        assert_eq!(convert_bytes(srgb, p3_linear, [128, 128, 128]), [55.0, 55.0, 55.0]);
+        assert_eq!(convert_bytes(linear, srgb, [55, 55, 55]), [128.0, 128.0, 128.0]);
+        assert_eq!(convert_bytes(srgb, p3, [128, 128, 128]), [128.0, 128.0, 128.0]);
+        let mut px = [255, 0, 0, 7];
+        convert_buffer(srgb, p3, &mut px);
+        assert_ne!(px, [255, 0, 0, 7]);
+        assert_eq!(px[3], 7);
+        let mut same = [1, 2, 3, 4];
+        convert_buffer(linear, linear, &mut same);
+        assert_eq!(same, [1, 2, 3, 4]);
+        // (…a colour on the way to a bitmap: none for sRGB's)
+        let c = Rgb { r: 128.0, g: 0.0, b: 0.0 };
+        assert_eq!(in_space(srgb, c).r, 128.0);
+        assert_eq!(in_space(linear, c).r, 55.0);
     }
 
     #[test]

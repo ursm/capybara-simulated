@@ -422,6 +422,52 @@ RSpec.describe 'Canvas context bindings' do
     )
   end
 
+  # HTML's drawing model: "Convert the image A to the context's color space." "The color space for CSS colors is defined in
+  # CSS Color", and a gradient's stops are "converted to the context's color space", between which they "must be linearly
+  # interpolated in the context's color space". So a gray of 128 is stored as 55 in a linear bitmap, by every colour path
+  # (Chrome: fill 55, as srgb 128; blending there 155; drawn into an sRGB canvas 205; Firefox has no linear context).
+  it 'stores the colours it is given in a linear colour space as such' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const fresh = (colorSpace = 'srgb-linear') => new OffscreenCanvas(8, 8).getContext('2d', {colorSpace});
+      const px = (g, settings) => [...g.getImageData(1, 1, 1, 1, settings).data];
+      const gray = 'rgb(128,128,128)';
+      (async () => {
+        const out = {};
+        { const g = fresh(); g.fillStyle = gray; g.fillRect(0, 0, 8, 8); out.fill = px(g); out.asSrgb = px(g, {colorSpace: 'srgb'});
+          g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(0, 0, 8, 8); out.blend = px(g);
+          const into = new OffscreenCanvas(8, 8).getContext('2d'); into.drawImage(g.canvas, 0, 0); out.intoSrgb = px(into);
+          const tile = new OffscreenCanvas(8, 8).getContext('2d'); tile.fillStyle = tile.createPattern(g.canvas, 'repeat'); tile.fillRect(0, 0, 8, 8); out.patternIntoSrgb = px(tile);
+          const made = new OffscreenCanvas(8, 8).getContext('2d'); made.drawImage(await createImageBitmap(g.canvas), 0, 0); out.bitmapIntoSrgb = px(made); }
+        { const g = fresh(); g.strokeStyle = gray; g.lineWidth = 20; g.strokeRect(1, 1, 2, 2); out.stroke = px(g); }
+        { const g = fresh(); g.shadowColor = gray; g.shadowOffsetX = 100; g.fillRect(-100, 0, 100, 8); out.shadow = px(g); }
+        { const g = fresh(); const s = g.createLinearGradient(0, 0, 8, 0); s.addColorStop(0, gray); s.addColorStop(1, gray); g.fillStyle = s; g.fillRect(0, 0, 8, 8); out.gradient = px(g); }
+        { const g = fresh(); const s = g.createLinearGradient(0, 0, 8, 0); s.addColorStop(0, '#000'); s.addColorStop(1, '#fff'); g.fillStyle = s; g.fillRect(0, 0, 8, 8);
+          out.interpolated = [...g.getImageData(4, 1, 1, 1).data][0]; }
+        { const g = fresh(); g.fillStyle = gray; g.font = '40px sans-serif'; g.textBaseline = 'middle'; g.fillText('\\u2588', -4, 4); out.text = px(g); }
+        { const s = new OffscreenCanvas(8, 8).getContext('2d'); s.fillStyle = gray; s.fillRect(0, 0, 8, 8);
+          const g = fresh(); g.drawImage(s.canvas, 0, 0); out.image = px(g);
+          const t = fresh(); t.fillStyle = t.createPattern(s.canvas, 'repeat'); t.fillRect(0, 0, 8, 8); out.pattern = px(t); }
+        { const g = fresh('display-p3-linear'); g.fillStyle = gray; g.fillRect(0, 0, 8, 8); out.p3Linear = px(g); }
+        { const o = new OffscreenCanvas(8, 8), g = o.getContext('2d', {colorSpace: 'srgb-linear'}); g.fillStyle = gray; g.fillRect(0, 0, 8, 8);
+          const t = new OffscreenCanvas(8, 8).getContext('2d'); t.drawImage(o.transferToImageBitmap(), 0, 0); out.transferred = px(t); }
+        { const c = document.createElement('canvas'), g = c.getContext('2d', {colorSpace: 'srgb-linear'}); g.fillStyle = gray; g.fillRect(0, 0, 8, 8);
+          out.file = c.toDataURL(); }
+        done(out);
+      })();
+    JS
+    file = got.delete('file')
+    decoded = Capybara::Simulated::Native.decode_image(file.split(',', 2).last.unpack1('m'), 0, 0)
+    expect(decoded['bytes'].bytes.first(4)).to eq([128, 128, 128, 255])
+    expect(got).to eq(
+      'fill' => [55, 55, 55, 255], 'asSrgb' => [128, 128, 128, 255], 'blend' => [155, 155, 155, 255],
+      'intoSrgb' => [205, 205, 205, 255], 'patternIntoSrgb' => [205, 205, 205, 255], 'bitmapIntoSrgb' => [205, 205, 205, 255],
+      'stroke' => [55, 55, 55, 255], 'shadow' => [55, 55, 55, 255], 'gradient' => [55, 55, 55, 255], 'interpolated' => 143,
+      'text' => [55, 55, 55, 255], 'image' => [55, 55, 55, 255], 'pattern' => [55, 55, 55, 255],
+      'p3Linear' => [55, 55, 55, 255], 'transferred' => [128, 128, 128, 255]
+    )
+  end
+
   # What the engine allocates for a page is V8's to count as it allocates: a loop of dead bitmaps is collected as it goes.
   # Stores made in Rust and attached later put no pressure on the heap, and 4 GB of dead `getImageData` peaked at the 4 GB.
   it 'leaves dead pixels for the collector as they churn', if: File.exist?('/proc/self/clear_refs') do

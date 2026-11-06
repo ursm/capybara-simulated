@@ -4,7 +4,7 @@
 // `<video>` — the bindings classify the object, the engine judges it from what each holds (image_bitmaps.rs,
 // canvas_state.rs, offscreen_canvas.rs, image_requests.rs, media.rs).
 
-use crate::canvas::{bitmap_pixels, bytes_mut, bytes_read, bytes_span, convert_spaces, draw, throw_oom, unorm8, Oom, Shape};
+use crate::canvas::{bitmap_pixels, bytes_mut, bytes_read, bytes_span, convert_buffer, draw, throw_oom, unorm8, Oom, Shape, Space};
 use crate::canvas_path::Path;
 use crate::canvas_state::CanvasStateHandle;
 use crate::dom::{dom, register};
@@ -93,25 +93,28 @@ fn judge(scope: &mut v8::PinScope<'_, '_>, kind: u32, source: v8::Local<'_, v8::
 }
 
 // What a source judged usable has to read: its pixels (null for a blank one), its Display P3 rendering (null for none) and
-// whether the first are Display P3 values.
+// the colour space of the first (canvas_state.rs `COLOR_SPACES`).
+const SRGB: u8 = 0;
+const DISPLAY_P3: u8 = 2;
 fn views_of<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     kind: u32,
     source: v8::Local<'_, v8::Value>,
     context: v8::Local<'_, v8::Value>,
-) -> (v8::Local<'s, v8::Value>, v8::Local<'s, v8::Value>, bool) {
+) -> (v8::Local<'s, v8::Value>, v8::Local<'s, v8::Value>, u8) {
     let null: v8::Local<'s, v8::Value> = v8::null(scope).into();
+    let tagged = |(pixels, wide, display_p3): (v8::Local<'s, v8::Value>, v8::Local<'s, v8::Value>, bool)| (pixels, wide, if display_p3 { DISPLAY_P3 } else { SRGB });
     match kind {
-        BITMAP => crate::image_bitmaps::source_pixels(scope, source),
-        CANVAS | OFFSCREEN => crate::canvas_state::handle(scope, context).map(|c| (c.bitmap(scope), null, c.display_p3())),
-        IMAGE => nid_of(scope, source).and_then(|id| crate::image_requests::source_pixels(scope, id)),
-        _ => nid_of(scope, source).and_then(|id| dom(scope).arena.video_frames.get(&id).cloned()).map(|frame| (frame.view(scope), null, false)),
+        BITMAP => crate::image_bitmaps::source_pixels(scope, source).map(tagged),
+        CANVAS | OFFSCREEN => crate::canvas_state::handle(scope, context).map(|c| (c.bitmap(scope), null, c.color_space_code())),
+        IMAGE => nid_of(scope, source).and_then(|id| crate::image_requests::source_pixels(scope, id)).map(tagged),
+        _ => nid_of(scope, source).and_then(|id| dom(scope).arena.video_frames.get(&id).cloned()).map(|frame| (frame.view(scope), null, SRGB)),
     }
-    .unwrap_or((null, null, false))
+    .unwrap_or((null, null, SRGB))
 }
 
-// The pixels a canvas in `target`'s colour space reads of a source judged usable, and whether they are Display P3 values:
-// its own, or, for a wide-profile source and a Display P3 canvas, its Display P3 rendering, whose wide colours survive —
+// The pixels a canvas in `target`'s colour space reads of a source judged usable, and their colour space: its own, or, for
+// a wide-profile source and a canvas of Display P3's primaries, its Display P3 rendering, whose wide colours survive —
 // transparent black, a buffer of their own, for a blank one.
 fn pixels_of<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -120,13 +123,13 @@ fn pixels_of<'s>(
     source: v8::Local<'_, v8::Value>,
     context: v8::Local<'_, v8::Value>,
     judged: &Judged,
-) -> Result<(v8::Local<'s, v8::Value>, bool), Oom> {
+) -> Result<(v8::Local<'s, v8::Value>, u8), Oom> {
     if judged.blank {
         let [w, h] = judged.size.map(|v| v as usize);
-        return Ok((crate::dom::zeroed_clamped_array(scope, w * h * 4).ok_or(Oom)?, false));
+        return Ok((crate::dom::zeroed_clamped_array(scope, w * h * 4).ok_or(Oom)?, SRGB));
     }
-    let (pixels, wide, display_p3) = views_of(scope, kind, source, context);
-    Ok(if target.display_p3() && !wide.is_null() { (wide, true) } else { (pixels, display_p3) })
+    let (pixels, wide, space) = views_of(scope, kind, source, context);
+    Ok(if Space::of_code(target.color_space_code()).is_p3() && !wide.is_null() { (wide, DISPLAY_P3) } else { (pixels, space) })
 }
 
 // HTML "establish the source and destination rectangles": `given` the drawImage arguments (sx, sy, sw, sh, dx, dy, dw, dh)
@@ -184,7 +187,7 @@ fn canvas_draw_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     if sw == 0.0 || sh == 0.0 {
         return;
     }
-    let (pixels, p3) = match pixels_of(scope, h, kind, source, context, &judged) {
+    let (pixels, space) = match pixels_of(scope, h, kind, source, context, &judged) {
         Ok(found) => found,
         Err(Oom) => return throw_oom(scope),
     };
@@ -193,7 +196,7 @@ fn canvas_draw_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         (s.m, s.smoothing)
     };
     let [iw, ih] = judged.size.map(f64::from);
-    let paint = [6.0, iw, ih, f64::from(u8::from(p3)), sx, sy, sw, sh, dx, dy, dw, dh, f64::from(u8::from(smoothing))];
+    let paint = [6.0, iw, ih, f64::from(space), sx, sy, sw, sh, dx, dy, dw, dh, f64::from(u8::from(smoothing))];
     draw(scope, h, false, &Shape::Rings { rings: Path::rect(m, [dx, dy, dw, dh]).fill_rings(), even_odd: false }, &paint, pixels);
     if judged.tainted {
         h.taint();
@@ -228,9 +231,9 @@ fn canvas_create_pattern(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
         return rv.set_uint32(judged.verdict);
     }
     let Ok(repetition) = u32::try_from(args.get(6).int32_value(scope).unwrap_or(-1)) else { return rv.set_uint32(BAD_REPETITION) };
-    let Ok((pixels, p3)) = pixels_of(scope, h, kind, source, context, &judged) else { return throw_oom(scope) };
+    let Ok((pixels, space)) = pixels_of(scope, h, kind, source, context, &judged) else { return throw_oom(scope) };
     let Some(tile) = copy_of(scope, pixels) else { return throw_oom(scope) };
-    crate::canvas_paint::init_pattern(scope, args.get(0), args.get(1), tile, judged.size.map(f64::from), repetition, p3, judged.tainted);
+    crate::canvas_paint::init_pattern(scope, args.get(0), args.get(1), tile, judged.size.map(f64::from), repetition, space, judged.tainted);
     rv.set_uint32(GOOD);
 }
 
@@ -345,7 +348,10 @@ fn image_bitmap_of_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     if judged.verdict != GOOD {
         return rv.set_uint32(judged.verdict);
     }
-    let (pixels, wide, display_p3) = views_of(scope, kind, source, context);
+    let (pixels, wide, space) = views_of(scope, kind, source, context);
+    // (…an ImageBitmap keeps no linear values: a linear canvas's encoded)
+    let (space, encoded) = (Space::of_code(space), Space::of_code(space).encoded());
+    let display_p3 = encoded.is_p3();
     let null = v8::null(scope).into();
     if judged.blank {
         let [w, h] = judged.size.map(|v| v as usize);
@@ -356,7 +362,11 @@ fn image_bitmap_of_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         return rv.set_uint32(BAD);
     }
     let orientation = if kind == IMAGE && steps.flip { nid_of(scope, source).map_or(0, |id| dom(scope).arena.image_orientation(id)) } else { 0 };
-    let p = if orientation > 1 {
+    let p = if space != encoded {
+        let mut px = bytes_read(pixels, None).unwrap_or_default().into_owned();
+        convert_buffer(space, encoded, &mut px);
+        Pixels { source: Source::Owned(px), size: judged.size, wide, display_p3, tainted: judged.tainted }
+    } else if orientation > 1 {
         let px = bytes_read(pixels, None).unwrap_or_default();
         let Some((px, size)) = crate::image_decode::unoriented(&px, judged.size, orientation) else { return rv.set_uint32(BAD) };
         Pixels { source: Source::Owned(px), size, wide: null, display_p3, tainted: judged.tainted }
@@ -401,16 +411,16 @@ fn image_bitmap_of_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     }
     let Some(px) = bytes_read(args.get(1), None) else { return rv.set_uint32(BAD) };
     let mut own = args.get(2).is_true().then(|| unorm8(&px));
-    let space = args.get(3).to_rust_string_lossy(scope);
-    let encoded = space.strip_suffix("-linear").unwrap_or(&space);
+    let space = Space::of_name(&args.get(3).to_rust_string_lossy(scope));
+    let encoded = space.encoded();
     if encoded != space {
-        convert_spaces(own.get_or_insert_with(|| px.to_vec()), &space, encoded);
+        convert_buffer(space, encoded, own.get_or_insert_with(|| px.to_vec()));
     }
     let size = [4, 5].map(|i| args.get(i).uint32_value(scope).unwrap_or(0));
     let wide = v8::null(scope).into();
     let view = v8::Local::new(scope, args.get(1));
     let source = own.map_or(Source::View(view), Source::Owned);
-    let p = Pixels { source, size, wide, display_p3: encoded == "display-p3", tainted: false };
+    let p = Pixels { source, size, wide, display_p3: encoded.is_p3(), tainted: false };
     hand_back(scope, &steps, p, &mut rv);
 }
 

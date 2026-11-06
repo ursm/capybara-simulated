@@ -129,7 +129,6 @@ pub(crate) struct Font {
 // changes afterwards: not `reset()`, and not a resize, which reset its bitmap and its drawing state alone.
 const COLOR_SPACES: [&str; 4] = ["srgb", "srgb-linear", "display-p3", "display-p3-linear"];
 const COLOR_TYPES: [&str; 2] = ["unorm8", "float16"];
-const DISPLAY_P3: u8 = 2;
 struct Settings {
     alpha: bool,
     color_space: u8,
@@ -291,12 +290,9 @@ impl CanvasStateHandle {
     pub(crate) fn origin_clean(&self) -> bool {
         self.origin_clean.get()
     }
-    pub(crate) fn color_space(&self) -> &'static str {
-        self.settings.color_space()
-    }
-    // Whether its bitmap holds Display P3 values.
-    pub(crate) fn display_p3(&self) -> bool {
-        self.settings.color_space == DISPLAY_P3
+    // The colour space its bitmap holds, by its index in `COLOR_SPACES` (canvas.rs `Space::of_code`).
+    pub(crate) fn color_space_code(&self) -> u8 {
+        self.settings.color_space
     }
     // Whether its bitmap has an alpha channel: none has it fixed at opaque.
     pub(crate) fn alpha(&self) -> bool {
@@ -504,7 +500,7 @@ fn canvas_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     if bitmap.is_undefined() { rv.set_null() } else { rv.set(bitmap) }
 }
 // __dom.canvasTakeBitmap(state) -> the context's bitmap, which it has none of from now on (`transferToImageBitmap`), or
-// null where it had none.
+// null where it had none: in its encoded colour space, as an ImageBitmap keeps no linear values.
 fn canvas_take_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return rv.set_null() };
     let bitmap = h.bitmap(scope);
@@ -513,6 +509,10 @@ fn canvas_take_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     }
     // SAFETY: the main thread writes the reference.
     unsafe { (*h.bitmap.get()).reset(scope, None) };
+    let space = crate::canvas::Space::of_code(h.settings.color_space);
+    if let Some(pixels) = crate::canvas::bytes_mut(bitmap) {
+        crate::canvas::convert_buffer(space, space.encoded(), pixels);
+    }
     rv.set(bitmap);
 }
 // __dom.canvasResize(state, width, height): HTML's "set bitmap dimensions": the context reset to its default state, its

@@ -41943,10 +41943,6 @@ html/canvas/element/wide-gamut-canvas/2d.color.space.p3.strokeText.html:
 - name: Test if strokeText can be used with a solid display-p3 color
   reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
     subsystem we don't model (rule 1); the sRGB path is fully covered.
-html/canvas/element/wide-gamut-canvas/2d.color.space.srgb-linear.html:
-- name: test getImageData color conversion with a srgb-linear uint8 canvas
-  reason: Wide-gamut / non-sRGB canvas colour (display-p3, srgb-linear) — a colour-management
-    subsystem we don't model (rule 1); the sRGB path is fully covered.
 html/dom/aria-attribute-reflection-enumerated.tentative.html:
 - name: 'div.ariaAtomic (<div aria-atomic>): IDL set to " \0\x01\x02\x03\x04\x05\x06\x07
     \b\t\n\v\f\r\x0e\x0f \x10\x11\x12\x13\x14\x15\x16\x17 \x18\x19\x1a\x1b\x1c\x1d\x1e\x1f  foo

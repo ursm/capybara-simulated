@@ -94,18 +94,24 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.encodeImage(pixels, width, height, type, quality, colorSpace) -> `[mime, bytes]`: the bitmap (`pixels` RGBA,
-// a Uint8ClampedArray, in `colorSpace`: 'srgb' or 'display-p3') serialised as `type` asks (`encode`), the type it was
-// written as, and its bytes; undefined where it could not be (too few pixels for its size, or a size the format
-// cannot hold).
+// a Uint8ClampedArray, in the PredefinedColorSpace `colorSpace`) serialised as `type` asks (`encode`), a linear one's in its
+// encoded counterpart — a file's profile says sRGB or Display P3 — the type it was written as, and its bytes; undefined
+// where it could not be (too few pixels for its size, or a size the format cannot hold).
 fn encode_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [w, h] = [1, 2].map(|k| args.get(k).uint32_value(scope).unwrap_or(0));
     let format = Format::of(&args.get(3).to_rust_string_lossy(scope));
     let quality = args.get(4).number_value(scope).unwrap_or(f64::NAN);
-    let p3 = args.get(5).to_rust_string_lossy(scope) == "display-p3";
+    let space = crate::canvas::Space::of_name(&args.get(5).to_rust_string_lossy(scope));
     let Some(pixels) = crate::canvas::bytes_read(args.get(0), None) else { return };
     let need = (w as usize).checked_mul(h as usize).and_then(|n| n.checked_mul(4));
     let Some(rgba) = need.and_then(|n| pixels.get(..n)) else { return };
-    let Some(bytes) = encode(rgba, w, h, format, quality, p3) else { return };
+    let mut encoded = None;
+    if space != space.encoded() {
+        let mut px = rgba.to_vec();
+        crate::canvas::convert_buffer(space, space.encoded(), &mut px);
+        encoded = Some(px);
+    }
+    let Some(bytes) = encode(encoded.as_deref().unwrap_or(rgba), w, h, format, quality, space.is_p3()) else { return };
     let mime = v8::String::new(scope, format.mime()).expect("a short string").into();
     let bytes = crate::dom::u8_array(scope, bytes);
     rv.set(v8::Array::new_with_elements(scope, &[mime, bytes]).into());
