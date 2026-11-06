@@ -5096,7 +5096,7 @@ module Capybara
         # non-owning thread SEGVs (V8 isolates are thread-
         # bound).
         # A service worker runs the bytes its job fetched and byte-checked (`sw_body`:
-        # sw_registration_update_fetch) — exactly those, not a re-fetch that could hit the HTTP cache or a newer server
+        # sw_update_fetch) — exactly those, not a re-fetch that could hit the HTTP cache or a newer server
         # response. The import PROBE results ride along as its script resource map (`sw_imports`: importScripts consume
         # them instead of re-fetching — a 404 the byte-check saw stays a 404).
         body = if service && sw_body
@@ -5144,10 +5144,6 @@ module Capybara
         # call must not block anything else in the browser.
         # `url`: the worker's own URL — its script's, after redirects — which a nested worker's script fetch is judged against.
         record = {thread: nil, inbox: inbox, took: {}, answered: {}, answering: {}, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, cluster_key: cluster_key, isolated: !service && isolated == true, rt: nil, rt_lock: Mutex.new, ticked: Thread::Queue.new}
-        # The Update algorithm byte-checks a new fetch against the running version's
-        # script (+ its recorded imports — sw_note_import fills that map as the worker
-        # evaluates). SW scripts are small; only service workers pay the retention.
-        record[:script_body] = body if service
         # (…the window's virtual time it was made at — `new Worker()`'s, else the window's last step's — which its clock
         # starts from, and at which it is due: a booting worker runs its script before the window steps past it)
         record[:origin]        = at ? at.to_f : @runtime.clock
@@ -5166,8 +5162,6 @@ module Capybara
                                  elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin] - @clock_epoch_at.to_f
                                  end
         record[:next_timer_at] = record[:origin]
-        # (…and its type, which the destination of the imports the Update probes is of)
-        record[:module] = script_type.to_s == 'module' if service
         # (…a shared worker's constructor URL, name and storage key, what another SharedWorker connects to it by, its type,
         # which that one's must be, and its owners: the realms connected to it, which it is discarded with the last of)
         if shared
@@ -5193,7 +5187,8 @@ module Capybara
         end
         # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
         # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
-        Native.sw_worker_new(@sw_partition, handle, site.to_s, target, worker_type(script_type)) if service
+        # (…its bytes the first of its script resource map, which an update is byte-checked against: sw_registry.rs)
+        Native.sw_worker_new(@sw_partition, handle, site.to_s, target, worker_type(script_type), body.to_s) if service
         workers_store(handle, record)
         thread = Thread.new do
           Thread.current.report_on_exception = false
@@ -6137,13 +6132,13 @@ module Capybara
       # …and run (`__csim_swRunJob`).
       def sw_run_job(id) = sw_run(Native.sw_run_job(@sw_partition, id.to_i))
 
-      # …its script fetched and byte-checked (sw_registration_update_fetch), and a changed one's worker spawned, the job
+      # …its script fetched and byte-checked (sw_update_fetch), and a changed one's worker spawned, the job
       # waiting for its evaluation (sw_job_evaluated).
       private def sw_fetch_job(id)
-        scope, script_url, update_via_cache, script_type, creator_key, against, site = Native.sw_job(@sw_partition, id)
+        scope, script_url, update_via_cache, script_type, creator_key, site = Native.sw_job(@sw_partition, id)
         return unless scope
 
-        fetched = sw_registration_update_fetch(scope, site, script_url, against, update_via_cache)
+        fetched = sw_update_fetch(Native::ServiceWorkerUpdate.new(@sw_partition, id), script_url)
         spawn, cmds = Native.sw_job_fetched(@sw_partition, id, fetched['error'], !!fetched['changed'])
         sw_run(cmds)
         return unless spawn
@@ -6662,88 +6657,52 @@ module Capybara
       # on a dead registration, so the host must not synthesize a default here).
       def sw_scope_update_via_cache(scope, site) = Native.sw_update_via_cache(@sw_partition, site.to_s, scope.to_s)
 
-      # A SERVICE worker's importScripts, recorded on its worker registry entry
-      # (URL → bytes) so the Update algorithm can byte-check the imports when the main
-      # script came back identical. Called from the WORKER's thread (host fns run on
-      # their caller) — the same cross-thread registry-write pattern the SW hooks use.
-      def sw_note_import(handle, url, body)
-        # Copy-on-write: this can run on the WORKER's thread (a late importScripts /
-        # module-graph fetch) while the main thread's Update probe iterates the map
-        # (sw_registration_update_fetch) — an in-place insert there raises "can't add
-        # a new key into hash during iteration".
-        (w = @workers[handle.to_i]) && w[:sw_imports] = (w[:sw_imports] || {}).merge(url.to_s => body.to_s)
-        nil
-      end
+      # A SERVICE worker's importScripts and module graph, noted as it evaluates in its script resource map (sw_registry.rs
+      # `ScriptResources`), which an update is byte-checked against. Called from the WORKER's thread: host fns run on their
+      # caller, and the registry is behind its lock.
+      def sw_note_import(handle, url, body) = Native.sw_note_import(@sw_partition, handle.to_i, url.to_s, body.to_s)
 
-      # The Update algorithm's fetch + byte-check ("Soft Update" core): re-fetch the MAIN
-      # script — through the HTTP cache only in 'all' mode, else revalidating (no-cache) —
-      # and, when it comes back byte-identical, each recorded IMPORTED script ('none'
-      # bypasses the cache; 'imports'/'all' read it). ANY difference ⇒ a new version
-      # installs, of the main bytes fetched and the imports probed (`body`, `imports`). Failure classes map to
-      # update()'s rejections: 'redirect' (a SW script fetch must not redirect) and
-      # 'network' are TypeErrors, 'mime' a SecurityError.
-      # `uvc_override` carries a register() call's OWN mode before it is committed — a
-      # failing register must leave the stored mode untouched ("updateViaCache is not
-      # updated if register() rejects"), so the fetch reads the override, and the job
-      # stores it only once its worker evaluated.
-      private def sw_registration_update_fetch(scope, site, script_url, newest_handle, uvc_override = nil)
-        uvc = uvc_override || sw_scope_update_via_cache(scope, site) || 'imports'
-        # The MAIN script request carries `Service-Worker: script` (Update algorithm —
-        # servers gate SW scripts on it); imported scripts must NOT (service-worker-header).
-        # (…its request of destination "serviceworker", mode "same-origin": the Update algorithm's — the job's client of
-        # the script's origin, which a registration's scope and script are)
-        res = rack_fetch('GET', script_url.to_s, '', {'Service-Worker' => 'script'}, 'manual', 'same-origin', cache_mode: uvc == 'all' ? 'default' : 'no-cache',
-                                                                                                             client_origin: url_origin(script_url.to_s).to_s, dest: 'serviceworker')
-        return {'error' => 'network'} unless resource_loaded?(res)
-        return {'error' => 'redirect'} if res['redirect_loc'] || res['redirect_status']
-        return {'error' => 'network'} unless (200..299).cover?(res['status'].to_i)
-        ct = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
-        return {'error' => 'mime'} unless js_mime_type?(ct)
-        # (…and the scope one the script may control: its directory, or the path its Service-Worker-Allowed names)
-        # (…a header given more than once combined, as `response_hash` hands every one over)
-        allowed = (res['headers'] || {}).find {|k, _| k.to_s.casecmp('service-worker-allowed').zero? }&.last
-        case Native.service_worker_max_scope(scope.to_s, script_url.to_s, allowed)
-        when 'network' then return {'error' => 'network'}
-        when 'scope'   then return {'error' => 'scope'}
-        end
+      # The requests of SW "Update", which `fetch` decides (service_worker.rs `ServiceWorkerUpdate`): the MAIN script, carrying
+      # `Service-Worker: script` — servers gate SW scripts on it; imported scripts must NOT (service-worker-header) — of
+      # destination "serviceworker", mode "same-origin", the job's client of the script's origin, which a registration's
+      # scope and script are; and, where it comes back byte-identical, each imported script the newest worker noted. Any
+      # difference and a new version installs, of the main bytes fetched and the imports probed (`body`, `imports`). A
+      # failure's class maps to update()'s rejection.
+      private def sw_update_fetch(fetch, script_url)
+        res = rack_fetch('GET', script_url.to_s, '', {'Service-Worker' => 'script'}, 'manual', 'same-origin', cache_mode: fetch.cache_mode, client_origin: url_origin(script_url.to_s).to_s, dest: 'serviceworker') || {}
+        error = fetch.script_response(
+          resource_loaded?(res) ? true : false,
+          res['redirect_loc'] || res['redirect_status'] ? true : false,
+          res['status'].to_i,
+          response_field(res, 'content-type'),
+          # (…a header given more than once combined, as `response_hash` hands every one over)
+          response_field(res, 'service-worker-allowed'),
+          res['body'].to_s
+        )
+        return {'error' => error} if error
 
-        w       = @workers[newest_handle.to_i]
-        body    = res['body'].to_s
-        changed = w.nil? || body.b != w[:script_body].to_s.b
-        probed  = {}
-        unless changed
-          import_mode = uvc == 'none' ? 'no-cache' : 'default'
-          # (…each import a script's for a classic worker — importScripts' — and of the worker's destination, a CORS
-          # request, for a module one's graph)
-          import_cors, import_dest = w[:module] ? ['cors', 'serviceworker'] : [nil, 'script']
-          (w[:sw_imports] || {}).each do |u, b|
-            r2 = rack_fetch('GET', u, '', {}, 'follow', import_cors, cache_mode: import_mode, client_url: script_url.to_s, dest: import_dest)
-            ok = resource_loaded?(r2) && (200..299).cover?(r2['status'].to_i)
-            # The probe results ARE the new version's script resource map (Chrome
-            # fetches each script ONCE during Update and the new worker runs from
-            # those responses): a 404 seen here must be the 404 its importScripts
-            # sees, not a lucky re-fetch (update-import-scripts "missing the other").
-            # The body crosses into the isolate via JSON.generate — a rack body is
-            # BINARY-tagged and a non-UTF-8 one would raise there, failing the update
-            # a real browser runs with replacement characters.
-            # (…its tainting kept, for the new version's import to mute an opaque one's errors as the first did)
-            probed[u] = if ok
-              {'status' => r2['status'], 'type' => r2['type'], 'tainted' => r2['tainted'], 'headers' => r2['headers'], 'body' => RuntimeShared.utf8_text(r2['body'].to_s.dup)}
-            else
-              {'status' => 404, 'headers' => {}, 'body' => ''}
-            end
-            nb = ok ? r2['body'].to_s : nil
-            # A FAILING import re-fetch is "no change" for that import (update-import-
-            # scripts "treat 404 on imported scripts as no change") — the update must
-            # not install a broken version off a transient import failure.
-            next if nb.nil? || nb.b == b.b
-
-            changed = true
-            break
+        probed = {}
+        while (import = fetch.next_import)
+          url, cache_mode, cors, dest = import
+          r = rack_fetch('GET', url, '', {}, 'follow', cors, cache_mode: cache_mode, client_url: script_url.to_s, dest: dest) || {}
+          ok = resource_loaded?(r) && (200..299).cover?(r['status'].to_i)
+          fetch.import_response(ok ? true : false, r['status'].to_i, response_field(r, 'content-type'), r['body'].to_s)
+          # The probe results ARE the new version's script resource map (Chrome fetches each script ONCE during Update and
+          # the new worker runs from those responses): a 404 seen here must be the 404 its importScripts sees, not a lucky
+          # re-fetch (update-import-scripts "missing the other"). The body crosses into the isolate via JSON.generate — a
+          # rack body is BINARY-tagged and a non-UTF-8 one would raise there, failing the update a real browser runs with
+          # replacement characters. (…its tainting kept, for the new version's import to mute an opaque one's errors as the
+          # first did)
+          probed[url] = if ok
+            {'status' => r['status'], 'type' => r['type'], 'tainted' => r['tainted'], 'headers' => r['headers'], 'body' => RuntimeShared.utf8_text(r['body'].to_s.dup)}
+          else
+            {'status' => 404, 'headers' => {}, 'body' => ''}
           end
         end
-        changed ? {'changed' => true, 'body' => body, 'imports' => (probed if probed.any?)} : {'changed' => false}
+        fetch.changed? ? {'changed' => true, 'body' => res['body'].to_s, 'imports' => (probed if probed.any?)} : {'changed' => false}
       end
+      # A response's header `name`, as `rack_fetch` hands them over.
+      private def response_field(response, name) = (response['headers'] || {}).find {|k, _| k.to_s.casecmp(name).zero? }&.last&.to_s
 
       # Whether a Content-Type is a JavaScript MIME type's ("fetch a classic worker script" requires one; a service worker
       # script with any other fails with a SecurityError) — the engine's (script.rs), the type extracted as Fetch does.
@@ -9782,7 +9741,7 @@ module Capybara
                 if rec
                   raise "module import failed: #{abs} (#{rec['status']})" unless (200..299).cover?(rec['status'].to_i)
 
-                  ct   = (rec['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
+                  ct    = response_field(rec, 'content-type')
                   body2 = rec['body'].to_s
                 else
                   # (…of the worker's destination, a module script's CORS request: HTML's fetch of a module worker script graph)
@@ -9790,7 +9749,7 @@ module Capybara
                                                                          dest: 'serviceworker')
                   raise "module import failed: #{abs}" unless resource_loaded?(r) && (200..299).cover?(r['status'].to_i)
 
-                  ct   = (r['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
+                  ct    = response_field(r, 'content-type')
                   body2 = r['body'].to_s
                 end
                 # Strict (unlike classic importScripts' allHostsLocal-gated check, the

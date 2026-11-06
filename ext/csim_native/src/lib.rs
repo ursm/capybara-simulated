@@ -360,14 +360,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_subresource_usable", magnus::function!(fetch_rules::sw_subresource_usable_for_ruby, 5))?;
     native.define_module_function("subresource_plan_fields", magnus::function!(subresource_plan::fields_for_ruby, 1))?;
     native.define_module_function("service_worker_start_register", magnus::function!(service_worker::start_register_for_ruby, 4))?;
-    native.define_module_function("service_worker_max_scope", magnus::function!(service_worker::max_scope_for_ruby, 3))?;
+    service_worker::define(native, ruby)?;
     // A session's service worker registrations (sw_registry.rs).
     native.define_module_function("sw_partition_new", magnus::function!(sw_registry::partition_new_for_ruby, 0))?;
     native.define_module_function("sw_clear", magnus::function!(sw_registry::clear_for_ruby, 1))?;
     native.define_module_function("sw_any", magnus::function!(sw_registry::any_for_ruby, 1))?;
     native.define_module_function("sw_registrations", magnus::function!(sw_registry::registrations_for_ruby, 1))?;
     native.define_module_function("sw_versions", magnus::function!(sw_registry::versions_for_ruby, 2))?;
-    native.define_module_function("sw_worker_new", magnus::function!(sw_registry::worker_new_for_ruby, 5))?;
+    native.define_module_function("sw_worker_new", magnus::function!(sw_registry::worker_new_for_ruby, 6))?;
+    native.define_module_function("sw_note_import", magnus::function!(sw_registry::note_import_for_ruby, 4))?;
     native.define_module_function("sw_worker", magnus::function!(sw_registry::worker_for_ruby, 2))?;
     native.define_module_function("sw_set_worker_state", magnus::function!(sw_registry::set_worker_state_for_ruby, 3))?;
     native.define_module_function("sw_set_worker_flag", magnus::function!(sw_registry::set_worker_flag_for_ruby, 4))?;

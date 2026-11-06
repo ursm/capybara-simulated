@@ -54,20 +54,257 @@ pub(crate) fn scope_allowed(scope: &str, script: &str, service_worker_allowed: O
     max.is_some_and(|max| scope.pathname().starts_with(max.pathname()))
 }
 
-// …for the host, which fetches the script: "ok", "scope" (a SecurityError) — or "network" where the header is more than
-// one value ("extracting header list values" fails: a network error). `service_worker_allowed` the combined value.
-pub(crate) fn max_scope_for_ruby(scope: String, script: String, service_worker_allowed: Option<String>) -> &'static str {
-    let values = service_worker_allowed.as_deref().map(crate::headers::decode_split);
+// …of a response whose `Service-Worker-Allowed` is `service_worker_allowed`, combined: none where it passes, else why: "scope"
+// (a SecurityError), or "network" where the header is more than one value ("extracting header list values" fails).
+fn max_scope_failure(scope: &str, script: &str, service_worker_allowed: Option<&str>) -> Option<&'static str> {
+    let values = service_worker_allowed.map(crate::headers::decode_split);
     if values.as_ref().is_some_and(|v| v.len() > 1) {
-        return "network";
+        return Some("network");
     }
     let allowed = values.as_ref().and_then(|v| v.first()).map(String::as_str);
-    if scope_allowed(&scope, &script, allowed) { "ok" } else { "scope" }
+    (!scope_allowed(scope, script, allowed)).then_some("scope")
+}
+
+// A service worker's script resource map (SW "script resource map"), as far as an update is judged by it: the bytes of its
+// main script and of each script it imported, by URL, in the order it first imported them. A worker's isolate writes the
+// imports from its own thread as it evaluates (`sw_note_import`) while a job on the main thread may read them: they are
+// the registry's, behind its lock, a job taking its copy of them as it begins.
+#[derive(Clone, Default)]
+pub(crate) struct ScriptResources {
+    pub(crate) script: Vec<u8>,
+    pub(crate) imports: Vec<(String, Vec<u8>)>,
+}
+
+impl ScriptResources {
+    pub(crate) fn note_import(&mut self, url: String, body: Vec<u8>) {
+        match self.imports.iter_mut().find(|(u, _)| *u == url) {
+            Some((_, kept)) => *kept = body,
+            None => self.imports.push((url, body)),
+        }
+    }
+}
+
+// What a job's fetch of its script knows beside the host's responses: SW "Update", the fetch hook and its byte check.
+pub(crate) struct UpdateCheck {
+    pub(crate) scope: String,
+    pub(crate) script_url: String,
+    // The registration's update via cache mode, or the Register job's own, not stored until its worker evaluates.
+    pub(crate) update_via_cache: String,
+    pub(crate) module: bool,
+    // The newest worker's map, where that runs this script under this type — none otherwise, which is an update already.
+    pub(crate) newest: Option<ScriptResources>,
+}
+
+// The verdict the host hands on: `hasUpdatedResources`, and how far through the newest worker's imports it has probed.
+struct UpdateProgress {
+    changed: bool,
+    next: usize,
+}
+
+impl UpdateCheck {
+    // The request's cache mode: "no-cache" unless the mode is "all" — the hook's for the main script. (`registration is
+    // stale` not modelled: a test's session never gets 24 h old by its wall clock)
+    fn script_cache_mode(&self) -> &'static str {
+        if self.update_via_cache == "all" { "default" } else { "no-cache" }
+    }
+    // …an import's: "no-cache" where the mode is "none". A classic worker's a `script` request; a module worker's graph is of
+    // its worker's destination, a CORS request (HTML "fetch a module worker script graph").
+    fn import_request(&self) -> (&'static str, Option<&'static str>, &'static str) {
+        let cache = if self.update_via_cache == "none" { "no-cache" } else { "default" };
+        if self.module { (cache, Some("cors"), "serviceworker") } else { (cache, None, "script") }
+    }
+    // The main script's response: none where it stands, else what is wrong with it, in the hook's order: "network" (a
+    // response that never came, or of a status not ok), "redirect" (its redirect mode "error"), "mime" (no JavaScript MIME
+    // type: a SecurityError), then the max scope's. Its body then decides `hasUpdatedResources` unless no worker to compare.
+    fn script_response(&self, response: &ScriptResponse<'_>) -> Result<bool, &'static str> {
+        if !response.loaded {
+            return Err("network");
+        }
+        if response.redirected {
+            return Err("redirect");
+        }
+        if !(200..300).contains(&response.status) {
+            return Err("network");
+        }
+        if !response.content_type.is_some_and(crate::script::javascript_content) {
+            return Err("mime");
+        }
+        if let Some(failure) = max_scope_failure(&self.scope, &self.script_url, response.service_worker_allowed) {
+            return Err(failure);
+        }
+        Ok(self.newest.as_ref().is_none_or(|newest| newest.script != response.body))
+    }
+    // The imports the byte check goes over, from the one numbered `from`: each of the newest worker's but its main script
+    // ("If importUrl is url, then continue") — every one of them, the loop not stopping at the first that differs, "to
+    // populate the cache" (SW's note): the new version runs from the responses this got.
+    fn import_at(&self, from: usize) -> Option<(usize, &(String, Vec<u8>))> {
+        let imports = &self.newest.as_ref()?.imports;
+        imports.iter().enumerate().skip(from).find(|(_, (url, _))| *url != self.script_url)
+    }
+    // Whether the response to import `stored` is a bad import script response, which the check ignores: one that never came,
+    // of a status not ok, or of no JavaScript MIME type; and whether, a good one, its bytes differ.
+    fn import_differs(stored: &[u8], response: &ScriptResponse<'_>) -> bool {
+        let good = response.loaded && (200..300).contains(&response.status) && response.content_type.is_some_and(crate::script::javascript_content);
+        good && stored != response.body
+    }
+}
+
+// A response as the check reads it, the host's facts of it.
+struct ScriptResponse<'a> {
+    loaded: bool,
+    redirected: bool,
+    status: u32,
+    content_type: Option<&'a str>,
+    service_worker_allowed: Option<&'a str>,
+    body: &'a [u8],
+}
+
+// Native::ServiceWorkerUpdate — a job's fetch of its worker's script, as the host makes it (browser.rb `sw_update_fetch`):
+// what to request, what each response makes of it; the host's the requests themselves.
+#[magnus::wrap(class = "Capybara::Simulated::Native::ServiceWorkerUpdate", free_immediately)]
+pub(crate) struct ServiceWorkerUpdate {
+    check: UpdateCheck,
+    progress: std::cell::RefCell<UpdateProgress>,
+}
+
+impl ServiceWorkerUpdate {
+    // ServiceWorkerUpdate.new(partition, job) -> its fetch; an error for a job that is gone, which the host just read.
+    fn new(ruby: &magnus::Ruby, partition: u64, job: u32) -> Result<Self, magnus::Error> {
+        let check = crate::sw_registry::update_check(partition, job).ok_or_else(|| magnus::Error::new(ruby.exception_arg_error(), "no such job"))?;
+        Ok(ServiceWorkerUpdate { check, progress: std::cell::RefCell::new(UpdateProgress { changed: false, next: 0 }) })
+    }
+    // #cache_mode -> the main script's request's.
+    fn cache_mode(&self) -> &'static str {
+        self.check.script_cache_mode()
+    }
+    // #script_response(loaded, redirected, status, content type, Service-Worker-Allowed, body) -> nil where the job goes on, else
+    // the failure's class ('network', 'redirect' — TypeErrors — 'mime', 'scope' — SecurityErrors).
+    fn script_response(&self, loaded: bool, redirected: bool, status: u32, content_type: Option<String>, allowed: Option<String>, body: magnus::RString) -> Option<&'static str> {
+        let body = crate::fetch_rules::ruby_bytes(body);
+        let response = ScriptResponse { loaded, redirected, status, content_type: content_type.as_deref(), service_worker_allowed: allowed.as_deref(), body: &body };
+        match self.check.script_response(&response) {
+            Ok(changed) => {
+                self.progress.borrow_mut().changed = changed;
+                None
+            }
+            Err(failure) => Some(failure),
+        }
+    }
+    // #next_import -> the next import to probe, `[URL, cache mode, CORS mode, destination]` — nil when none is left, and for an
+    // update its main script's bytes already made.
+    fn next_import(&self) -> Option<(String, &'static str, Option<&'static str>, &'static str)> {
+        let mut progress = self.progress.borrow_mut();
+        if progress.changed && progress.next == 0 {
+            return None;
+        }
+        let (at, (url, _)) = self.check.import_at(progress.next)?;
+        progress.next = at + 1;
+        let (cache, cors, dest) = self.check.import_request();
+        Some((url.clone(), cache, cors, dest))
+    }
+    // #import_response(loaded, status, content type, body): the response to the import `next_import` gave, whose bytes may
+    // make it an update.
+    fn import_response(&self, loaded: bool, status: u32, content_type: Option<String>, body: magnus::RString) {
+        let mut progress = self.progress.borrow_mut();
+        let Some((_, stored)) = progress.next.checked_sub(1).and_then(|at| self.check.newest.as_ref()?.imports.get(at)) else { return };
+        let body = crate::fetch_rules::ruby_bytes(body);
+        let response = ScriptResponse { loaded, redirected: false, status, content_type: content_type.as_deref(), service_worker_allowed: None, body: &body };
+        progress.changed |= UpdateCheck::import_differs(stored, &response);
+    }
+    // #changed? -> SW's `hasUpdatedResources`.
+    fn changed(&self) -> bool {
+        self.progress.borrow().changed
+    }
+}
+
+pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {
+    use magnus::{function, method, Module, Object};
+    let class = native.define_class("ServiceWorkerUpdate", ruby.class_object())?;
+    class.define_singleton_method("new", function!(ServiceWorkerUpdate::new, 2))?;
+    class.define_method("cache_mode", method!(ServiceWorkerUpdate::cache_mode, 0))?;
+    class.define_method("script_response", method!(ServiceWorkerUpdate::script_response, 6))?;
+    class.define_method("next_import", method!(ServiceWorkerUpdate::next_import, 0))?;
+    class.define_method("import_response", method!(ServiceWorkerUpdate::import_response, 4))?;
+    class.define_method("changed?", method!(ServiceWorkerUpdate::changed, 0))?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check(mode: &str, module: bool, newest: Option<ScriptResources>) -> UpdateCheck {
+        UpdateCheck { scope: "https://a.test/app/".into(), script_url: "https://a.test/app/sw.js".into(), update_via_cache: mode.into(), module, newest }
+    }
+    fn js<'a>(status: u32, body: &'a [u8]) -> ScriptResponse<'a> {
+        ScriptResponse { loaded: true, redirected: false, status, content_type: Some("text/javascript"), service_worker_allowed: None, body }
+    }
+    fn resources() -> ScriptResources {
+        let mut map = ScriptResources { script: b"main".to_vec(), imports: Vec::new() };
+        map.note_import("https://a.test/a.js".into(), b"a".to_vec());
+        map.note_import("https://a.test/app/sw.js".into(), b"main".to_vec());
+        map.note_import("https://a.test/b.js".into(), b"b".to_vec());
+        map
+    }
+
+    #[test]
+    fn a_script_s_response_fails_in_the_hook_s_order() {
+        let c = check("imports", false, None);
+        assert_eq!(c.script_response(&ScriptResponse { loaded: false, ..js(200, b"") }), Err("network"));
+        assert_eq!(c.script_response(&ScriptResponse { redirected: true, ..js(302, b"") }), Err("redirect"));
+        assert_eq!(c.script_response(&ScriptResponse { content_type: Some("text/html"), ..js(404, b"") }), Err("network"));
+        assert_eq!(c.script_response(&ScriptResponse { content_type: Some("text/html"), ..js(200, b"") }), Err("mime"));
+        assert_eq!(c.script_response(&ScriptResponse { content_type: None, ..js(200, b"") }), Err("mime"));
+        let outside = UpdateCheck { scope: "https://a.test/other/".into(), ..check("imports", false, None) };
+        assert_eq!(outside.script_response(&js(200, b"")), Err("scope"));
+        assert_eq!(outside.script_response(&ScriptResponse { service_worker_allowed: Some("/"), ..js(200, b"") }), Ok(true));
+        assert_eq!(outside.script_response(&ScriptResponse { service_worker_allowed: Some("/a, /b"), ..js(200, b"") }), Err("network"));
+    }
+
+    #[test]
+    fn a_script_is_an_update_where_no_worker_runs_it_or_its_bytes_differ() {
+        assert_eq!(check("imports", false, None).script_response(&js(200, b"main")), Ok(true));
+        assert_eq!(check("imports", false, Some(resources())).script_response(&js(200, b"main")), Ok(false));
+        assert_eq!(check("imports", false, Some(resources())).script_response(&js(200, b"main2")), Ok(true));
+    }
+
+    #[test]
+    fn the_cache_modes_are_the_update_via_cache_mode_s() {
+        assert_eq!(check("all", false, None).script_cache_mode(), "default");
+        assert_eq!(check("imports", false, None).script_cache_mode(), "no-cache");
+        assert_eq!(check("none", false, None).script_cache_mode(), "no-cache");
+        assert_eq!(check("all", false, None).import_request(), ("default", None, "script"));
+        assert_eq!(check("none", false, None).import_request(), ("no-cache", None, "script"));
+        assert_eq!(check("imports", true, None).import_request(), ("default", Some("cors"), "serviceworker"));
+    }
+
+    #[test]
+    fn the_byte_check_goes_over_every_import_but_the_main_script() {
+        let c = check("imports", false, Some(resources()));
+        let (at, (url, _)) = c.import_at(0).unwrap();
+        assert_eq!((at, url.as_str()), (0, "https://a.test/a.js"));
+        let (at, (url, _)) = c.import_at(1).unwrap();
+        assert_eq!((at, url.as_str()), (2, "https://a.test/b.js"));
+        assert!(c.import_at(3).is_none());
+        assert!(check("imports", false, None).import_at(0).is_none());
+    }
+
+    #[test]
+    fn a_bad_import_script_response_is_no_change() {
+        assert!(!UpdateCheck::import_differs(b"a", &js(200, b"a")));
+        assert!(UpdateCheck::import_differs(b"a", &js(200, b"a2")));
+        assert!(!UpdateCheck::import_differs(b"a", &js(404, b"a2")));
+        assert!(!UpdateCheck::import_differs(b"a", &ScriptResponse { loaded: false, ..js(200, b"a2") }));
+        assert!(!UpdateCheck::import_differs(b"a", &ScriptResponse { content_type: Some("text/html"), ..js(200, b"a2") }));
+    }
+
+    #[test]
+    fn an_import_noted_again_keeps_its_place_with_its_last_bytes() {
+        let mut map = resources();
+        map.note_import("https://a.test/a.js".into(), b"a2".to_vec());
+        assert_eq!(map.imports[0], ("https://a.test/a.js".to_owned(), b"a2".to_vec()));
+        assert_eq!(map.imports.len(), 3);
+    }
 
     #[test]
     fn starts_a_register_from_its_urls() {
@@ -96,9 +333,9 @@ mod tests {
         assert!(scope_allowed("https://a.test/w/allowed-path-with-parent", script, Some("../allowed-path-with-parent")));
         assert!(!scope_allowed("https://a.test/w/resources/x", script, Some("https://b.test/")));
         assert_eq!(crate::headers::decode_split("/a, \"/b,c\" ,/d"), ["/a", "\"/b,c\"", "/d"]);
-        assert_eq!(max_scope_for_ruby("https://a.test/".into(), script.into(), Some("/x, /".into())), "network");
-        assert_eq!(max_scope_for_ruby("https://a.test/".into(), script.into(), Some("/".into())), "ok");
-        assert_eq!(max_scope_for_ruby("https://a.test/".into(), script.into(), None), "scope");
+        assert_eq!(max_scope_failure("https://a.test/", script, Some("/x, /")), Some("network"));
+        assert_eq!(max_scope_failure("https://a.test/", script, Some("/")), None);
+        assert_eq!(max_scope_failure("https://a.test/", script, None), Some("scope"));
     }
 }
 

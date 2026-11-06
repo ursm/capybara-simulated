@@ -518,7 +518,10 @@ fn run_classic_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 // Capybara::Simulated::Native.javascript_content(content_type) -> whether a response's `Content-Type` (Fetch "extract a
 // MIME type") is a JavaScript MIME type, for the host's worker and service worker scripts.
 pub(crate) fn javascript_content_for_ruby(content_type: String) -> bool {
-    crate::mime::extract(&content_type).is_some_and(|m| is_javascript_mime(&m.essence))
+    javascript_content(&content_type)
+}
+pub(crate) fn javascript_content(content_type: &str) -> bool {
+    crate::mime::extract(content_type).is_some_and(|m| is_javascript_mime(&m.essence))
 }
 // Whether a module script's response may be one of its `kind` — the destination its module type fetches with (HTML
 // "fetch a single module script"): a JSON module's (`json`) a JSON MIME type (`application/json`, `text/json`, any
