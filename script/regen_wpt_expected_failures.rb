@@ -87,7 +87,9 @@ PAGEHIDE_OF_INITIAL_ABOUT_BLANK =
   'Document\'s page showing to true") and in "reactivate", neither of which an initial about:blank goes through; its ' \
   '`unload` fires. The text is not withdrawn, and no open whatwg/html issue proposes changing it (searched "pagehide", ' \
   '"page showing", "initial about:blank pagehide" on 2026-10-31). Chrome and Firefox fire it (measured 2026-10-31); the ' \
-  'user ruled for the text over them. Re-check when the test or the text changes.'
+  'user ruled for the text over them. The same text, kept, decides a document replaced before its `load` by a ' \
+  '`javascript:` URL its parse or its DOMContentLoaded set: no `pagehide`, where both browsers fire one. Re-check when the ' \
+  'test or the text changes.'
 
 # In-scope files whose failures are the driver following the spec's CURRENT text where the test asserts otherwise, and
 # the text is not withdrawn — so no earned out-of-scope (CLAUDE.md rule 1, case 3, needs a withdrawn text), but no

@@ -3546,8 +3546,16 @@ module Capybara
 
         tick_real_time(step_ms: ms, drain: false)
       end
-      # Whether the app is answering a request on this thread (`app_call`).
-      def self.in_app_call? = Thread.current[:csim_app_calls].to_i.positive?
+      # Whether the app is answering a request of `driver`'s session on this thread — its body read too, which an app streams
+      # as it goes (`in_app_call`). A thread's, not a fiber's: an app's sleep in a fiber of its own is the app's all the same.
+      def self.in_app_call?(driver) = Thread.current.thread_variable_get(:csim_app_calls)&.include?(driver)
+      private def in_app_call
+        calls = Thread.current.thread_variable_get(:csim_app_calls)
+        Thread.current.thread_variable_set(:csim_app_calls, [*calls, @driver])
+        yield
+      ensure
+        Thread.current.thread_variable_set(:csim_app_calls, calls)
+      end
 
       # Re-sync the Ruby-side timer mirror with a freshly-rebuilt JS
       # context. Clear `@timers_active` and the `@polling_grace` grace
@@ -10909,8 +10917,10 @@ module Capybara
       # strings to the JS engine for big assets like jquery.js.
       def read_rack_body(body)
         buf = +''
-        body.each {|chunk| buf << chunk.to_s } if body.respond_to?(:each)
-        close_rack_body(body)
+        in_app_call {
+          body.each {|chunk| buf << chunk.to_s } if body.respond_to?(:each)
+          close_rack_body(body)
+        }
         buf
       end
       # …and one let go unread (Rack: a body that responds to `close` is closed once its caller is done with it).
@@ -10960,7 +10970,7 @@ module Capybara
       def consume_pending_location
         url, replace, initiator_realm, source, policy, activated, blob, ongoing, document = @runtime.call('__csimTakeLocation')
         return unless url
-        return in_top_context { commit_javascript_document(url, document, ongoing.to_i) } if document
+        return in_top_context { commit_javascript_document(url, document) } if document
 
         # The page's `location` navigates the page, whichever realm's script set it — a frame's own is its container's to
         # navigate (location.js `dispatchNav`), an entered one's too — each judged against the document it navigates, by
@@ -10981,15 +10991,17 @@ module Capybara
       # (Chrome keeps the last, Firefox none), its classic history state none (Chrome keeps it, Firefox none), and no service
       # worker's client: "reserved environment: null", no fetch for Handle Fetch to set one (Chrome and Firefox: no controller).
       JAVASCRIPT_DOCUMENT_ENTRY_KEEPS = %i[referer referrer_policy referrer origin cross_site opener_policy].freeze
-      private def commit_javascript_document(url, markup, ongoing)
+      private def commit_javascript_document(url, markup)
         invalidate_find_cache
         # (…a traversal its script asked for goes on after it, the session history's queue not the document's: both browsers
         # make the document, then traverse)
         @session_history.stash_queued
-        # (…what is due on the page run first, as before any navigation: `flush_outgoing_page_init`; a navigation of its the
-        # one that goes on, which ends this one)
+        # (…what is due on the page run first, as before any navigation: `flush_outgoing_page_init`. The text asks no more of
+        # the ongoing navigation as it finalizes this one, step 2 being behind it — both browsers end on it, a `void` or another
+        # `javascript:` URL's begun after it — but where a task of the flush began a location navigation, the one the navigable
+        # goes on to, which this one's document would only have stood in front of.)
         flush_outgoing_page_init if @timers_active
-        return restore_flushed_nav_intents unless @session_history.navigation_ongoing?(0, ongoing)
+        return restore_flushed_nav_intents if @runtime.call('__csimFlushedLocation')
 
         if (id = @session_history.active(0))
           record_history({url: url}.merge(@session_history.entry(id).slice(*JAVASCRIPT_DOCUMENT_ENTRY_KEEPS)), replace: true)
@@ -11095,8 +11107,8 @@ module Capybara
             next run_queued_before_reload(realm_id, plan[0]) if kind == 'queued'
             # (…a traversal that keeps the window's document, moving a frame of it, applied as the page's frames' are)
             next traverse_window_navigables(realm_id, *plan) if kind == 'traverse_navigables'
-            # (…a `javascript:` URL's document, its URL, the navigation it is and its markup: `planJavascriptDocument`)
-            next commit_window_javascript_document(realm_id, *plan.values_at(0, 7, 8)) if kind == 'javascript'
+            # (…a `javascript:` URL's document, its URL and its markup: `planJavascriptDocument`)
+            next commit_window_javascript_document(realm_id, *plan.values_at(0, 8)) if kind == 'javascript'
 
             navigate_window_realm(realm_id, kind, plan)
           rescue StandardError => e
@@ -11193,13 +11205,13 @@ module Capybara
         if body.nil? && (http_url?(url) || failed)
           by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
           by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
-          awaited = history&.ongoing_navigation(0)
+          awaited = history && navigation_mark(history, realm_id)
           resp = unless failed
             frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, coop_realm: realm_id, **by)
           end
           return if resp && resp['no_document']
           # (…none where a navigation begun as the response was awaited ended it: `navigate_top_level`)
-          return if history && history.ongoing_navigation(0) != awaited
+          return if history && navigation_mark(history, realm_id) != awaited
 
           # (…a network error an error document at the URL it failed at, of a new opaque origin, as the page's is:
           # `commit_error_document`)
@@ -11289,11 +11301,11 @@ module Capybara
         @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
       end
       # The document a `javascript:` URL's string result makes of window realm `realm_id` (`commit_javascript_document`, the
-      # page's), `ongoing` the navigation it is. (…an about:blank one's origins and base URL the document's: `window_about_blank`)
-      private def commit_window_javascript_document(realm_id, url, ongoing, markup)
+      # page's). (…an about:blank one's origins and base URL the document's: `window_about_blank`)
+      private def commit_window_javascript_document(realm_id, url, markup)
         invalidate_find_cache
         history = window_history(realm_id)
-        return unless history&.navigation_ongoing?(0, ongoing.to_i)
+        return unless history
 
         given   = @runtime.window_realm_meta[realm_id]&.fetch(:response, nil) || ABOUT_BLANK_RESPONSE
         headers = javascript_document_headers(realm_id, url, given[1])
@@ -12744,7 +12756,7 @@ module Capybara
           # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
           # `event.request.headers` alike)
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
-          awaited = @session_history.ongoing_navigation(0)
+          awaited = navigation_mark(@session_history, 0)
           hop = run_navigation_fetch(
             fetch,
             body:         req_body,
@@ -12772,8 +12784,10 @@ module Capybara
           target = fetch.target
           # (…none where a navigation begun as the response was awaited ended it, whose own plan the page then takes: HTML
           # "navigate", "this will abort other ongoing navigations" — a timer's `location` with the app taking its time)
-          unless @session_history.ongoing_navigation(0) == awaited
-            hop.rack_body.close if hop.rack_body.respond_to?(:close)
+          # (…its body read first, which an app may take its time over too)
+          document = hop.document || read_rack_body(hop.rack_body) unless NO_DOCUMENT_COMMANDS.include?(hop.command)
+          unless navigation_mark(@session_history, 0) == awaited
+            close_rack_body(hop.rack_body) unless document
             restore_navigation_history
             @session_history.forget(0)
             superseded = true
@@ -12799,7 +12813,7 @@ module Capybara
           # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
           # `$(document).on(...)` delegates) — snapshot warmup keeps the
           # rebuild itself cheap; app-bundle re-eval dominates.
-          boot_response_into_ctx(hop.document || read_rack_body(hop.rack_body), coop_switch: fetch.coop_switch?, content_type: hop.document_type, client_id: hop.client_id)
+          boot_response_into_ctx(document, coop_switch: fetch.coop_switch?, content_type: hop.document_type, client_id: hop.client_id)
         ensure
           @navigating = prior_navigating
           note_url_changes
@@ -12808,6 +12822,14 @@ module Capybara
           restore_flushed_nav_intents
           drain_pending_navigation if superseded
         end
+      end
+      # What a navigation's last hop may say that makes no document of a response to read.
+      NO_DOCUMENT_COMMANDS = %w[fail hand_off no_content download inline].freeze
+      # What says a navigation of the top-level document of realm `realm` began as a response was awaited, against the mark
+      # taken before it: its number (`ongoing_navigation`), and what is planned that no number records yet (a reload, a form's:
+      # navigation_plan.rs `navigationAwaited`), which the driver's own visit found planned or not as it began.
+      private def navigation_mark(history, realm)
+        [history.ongoing_navigation(0), @runtime.realm_call(realm, '__csimNavigationAwaited')]
       end
       # The origin of the page's document a navigation leaves — a window's of no entry yet its initial about:blank's, its
       # creator's (`inherit_creator`; one it does not know, a `noopener` window's, kept: `clear_navigable_name`) — none
@@ -13554,19 +13576,18 @@ module Capybara
       # next request — and lets go of the body the app gave before it ends. The session's cancellation alone: the app's
       # own `Timeout.timeout` (Rack::Timeout, a client library's) still interrupts it.
       def app_call(env, deferring: false)
-        Thread.current[:csim_app_calls] = Thread.current[:csim_app_calls].to_i + 1
-        return @app.call(env) unless deferring
+        return in_app_call { @app.call(env) } unless deferring
 
-        Thread.handle_interrupt(EventSourceCancelled => :never) {
-          response = @app.call(env)
-          response[2].close if Thread.pending_interrupt?(EventSourceCancelled) && response[2].respond_to?(:close)
-          # (…and kept where the reader finds it, which a cancel before the response reaches it — while it is framed —
-          # would otherwise leave open)
-          Thread.current[:csim_event_stream_app_body] = response[2]
-          response
+        in_app_call {
+          Thread.handle_interrupt(EventSourceCancelled => :never) {
+            response = @app.call(env)
+            response[2].close if Thread.pending_interrupt?(EventSourceCancelled) && response[2].respond_to?(:close)
+            # (…and kept where the reader finds it, which a cancel before the response reaches it — while it is framed —
+            # would otherwise leave open)
+            Thread.current[:csim_event_stream_app_body] = response[2]
+            response
+          }
         }
-      ensure
-        Thread.current[:csim_app_calls] -= 1
       end
 
       # A body that ended before its Content-Length did: the bytes that came, and then a network error.

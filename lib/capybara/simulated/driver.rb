@@ -33,12 +33,15 @@ module Capybara
           # thread-safe. An idle Driver's clock moves all the same — the
           # time slept passes for its page's `Date` — a step with nothing
           # due, so the broadcast is cheap.
-          # (…the app's own, called on this thread in the middle of a fetch of the driver's, no test's pacing:
-          # Browser#server_slept_ms)
-          ms     = (seconds.to_f * 1000).to_i
-          server = Capybara::Simulated::Browser.in_app_call?
+          # (…the app's own, called on this thread in the middle of a fetch of that driver's, no test's pacing:
+          # Browser#server_slept_ms; to another session's it is any time passing)
+          ms = (seconds.to_f * 1000).to_i
           Capybara::Simulated::Driver.each_live_on_thread(Thread.current) {|d|
-            server ? d.browser.server_slept_ms(ms) : d.browser.advance_virtual_clock_ms(ms)
+            if Capybara::Simulated::Browser.in_app_call?(d)
+              d.browser.server_slept_ms(ms)
+            else
+              d.browser.advance_virtual_clock_ms(ms)
+            end
           }
         end
         n

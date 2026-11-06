@@ -18,7 +18,14 @@ RSpec.describe 'a server that takes its time' do
     simulated_session(lambda {|env|
       log << env['PATH_INFO']
       sleep(0.3) if env['PATH_INFO'].start_with?('/slow')
-      type = env['PATH_INFO'].end_with?('.js') ? 'text/javascript' : 'text/html'
+      Fiber.new { sleep(0.3) }.resume if env['PATH_INFO'] == '/fiber'
+      if env['PATH_INFO'] == '/streamed'
+        next [200, {'content-type' => 'text/html'}, Enumerator.new {|y|
+          sleep(0.3)
+          y << '<!DOCTYPE html><title>/streamed</title>'
+        }]
+      end
+      type = env['PATH_INFO'].match?(/\.m?js\z/) ? 'text/javascript' : 'text/html'
       body = type == 'text/html' ? "<!DOCTYPE html><meta charset=utf-8><title>#{env['PATH_INFO']}</title><script>sessionStorage.L = (sessionStorage.L || '') + '#{env['PATH_INFO']} ';</script><body>#{env['PATH_INFO']}" : ''
       [200, {'content-type' => type}, [body]]
     })
@@ -43,6 +50,42 @@ RSpec.describe 'a server that takes its time' do
       expect(read('document.title')).to eq('J')
       expect(read('sessionStorage.L')).to end_with('/a J ')
       expect(read('location.pathname')).to eq('/a')
+    end
+
+    # (…"apply the reload history step" sets the ongoing navigation to "traversal": both browsers reload, staying.)
+    it 'reloads where a timer asked for it as the response was awaited' do
+      go('/a')
+      run("sessionStorage.removeItem('L'); location = '/slow'; setTimeout(() => { location.reload(); }, 30)")
+      expect(poll_until { read('sessionStorage.L').to_s.include?('/a') }).to be(true)
+      settle
+      expect(read('location.pathname')).to eq('/a')
+      expect(read('sessionStorage.L')).not_to include('/slow')
+    end
+
+    it 'goes where a form a timer submitted goes, as the response was awaited' do
+      go('/a')
+      run("location = '/slow'; setTimeout(() => { const f = document.createElement('form'); f.action = '/form'; document.body.append(f); f.submit(); }, 30)")
+      expect(poll_until { read('location.pathname') == '/form' }).to be(true)
+      settle
+      expect(read('location.pathname')).to eq('/form')
+    end
+
+    # (…a streaming body's, read after the app returned: both browsers `/other`, its own document.)
+    it 'goes to a navigation a timer began as the body was read' do
+      go('/a')
+      run("location = '/streamed'; setTimeout(() => { location = '/other'; }, 30)")
+      expect(poll_until { read('location.pathname') == '/other' }).to be(true)
+      settle
+      expect(read('document.title')).to eq('/other')
+    end
+
+    # (…a sleep in a fiber of the app's its own all the same.)
+    it 'goes to a navigation a timer began as a fiber of the app slept' do
+      go('/a')
+      run("location = '/fiber'; setTimeout(() => { location = '/other'; }, 30)")
+      expect(poll_until { read('location.pathname') == '/other' }).to be(true)
+      settle
+      expect(read('document.title')).to eq('/other')
     end
 
     it 'runs the page meanwhile, a timer due before the response' do
@@ -87,6 +130,33 @@ RSpec.describe 'a server that takes its time' do
     def settle = session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 400))')
 
     it_behaves_like 'a top-level navigable'
+  end
+
+  # (…"list of scripts that will execute in order as soon as possible": a fetch that runs the event loop runs none after it inside it.)
+  it 'runs dynamic scripts of async false in order through a module whose fetch takes its time' do
+    session.visit('/a')
+    session.execute_script(<<~JS)
+      window.L = [];
+      for (const [type, src] of [['module', '/slow1.mjs'], ['', '/order2.js'], ['module', '/order3.mjs'], ['', '/order4.js']]) {
+        const s = document.createElement('script');
+        s.type = type;
+        s.src = src;
+        s.async = false;
+        s.onload = () => L.push(src);
+        document.head.append(s);
+      }
+    JS
+    expect(poll_until { session.evaluate_script('L.length') == 4 }).to be(true)
+    expect(session.evaluate_script('L')).to eq(['/slow1.mjs', '/order2.js', '/order3.mjs', '/order4.js'])
+  end
+
+  # (…a session the fetch is none of: its time passes as any does, and what its timer planned is taken.)
+  it "takes what another session's timer planned as this session's server slept" do
+    other = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><title>#{env['PATH_INFO']}</title>"]] })
+    other.visit('/start')
+    other.execute_script("setTimeout(() => { location = '/moved'; }, 100)")
+    session.visit('/slow-visit')
+    expect(other.current_url).to end_with('/moved')
   end
 
   it 'still paces a test: its own sleep runs what comes due' do

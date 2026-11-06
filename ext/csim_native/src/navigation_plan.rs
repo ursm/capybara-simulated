@@ -328,6 +328,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "submissionRoute", submission_route, context_id);
     register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
+    register(scope, ns, "navigationAwaited", navigation_awaited, context_id);
+    register(scope, ns, "flushedLocation", flushed_location, context_id);
     register(scope, ns, "stopOwnLoading", stop_own_loading, context_id);
     register(scope, ns, "flushBegin", flush_begin, context_id);
     register(scope, ns, "flushEnd", flush_end, context_id);
@@ -526,7 +528,11 @@ fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     }
     let (submission, reload) = (plan.own.submission.take(), plan.own.reload.take());
     plan.navigation = plan.navigation.take().filter(|n| n.opens_window);
-    plan.own = Own { submission, reload, ..Own::default() };
+    // (…not a `javascript:` URL's document planned already, whose navigation is past its step 2: "navigate to a javascript: URL"
+    // finalizes it with no more asked of the ongoing navigation — both browsers end on the first, a `void` or another's after it)
+    let location = plan.own.location.take().filter(|l| l.document.is_some());
+    let planned = if location.is_some() { plan.own.planned } else { 0 };
+    plan.own = Own { submission, reload, location, planned, ..Own::default() };
     rv.set_double(begin_navigation_of(arena, cid, None) as f64);
 }
 // __dom.navigationBegun() — a navigation of the calling realm's navigable planned elsewhere than in its plan (a frame's,
@@ -945,6 +951,20 @@ fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let document = own.location.as_ref().is_some_and(|l| l.document.is_some());
     let bits = u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1) | (u32::from(own.submission.is_some()) << 2) | (u32::from(document) << 5);
     rv.set_uint32(bits | frames);
+}
+// __dom.navigationAwaited() -> whether the calling realm's document has planned what will navigate it once the host takes it, which
+// no ongoing navigation of its records yet: a reload (HTML "apply the reload history step" sets it to "traversal"), a form's
+// submission or a hyperlink's of its own navigable. What a fetch under way is ended by as well as by its number
+// (browser.rb `navigation_mark`).
+fn navigation_awaited(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let plan = plan(scope, &args);
+    rv.set_bool(plan.own.reload.is_some() || plan.own.submission.is_some() || plan.submission.is_some() || plan.navigation.as_ref().is_some_and(|n| !n.opens_window));
+}
+// __dom.flushedLocation() -> whether the tasks of the flush just over planned a location navigation of the calling realm's
+// document (`flushEnd`): what goes on after a `javascript:` URL's document, in its place here (browser.rb
+// `commit_javascript_document`).
+fn flushed_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(plan(scope, &args).flushed.as_ref().is_some_and(|own| own.location.as_ref().is_some_and(|l| l.document.is_none())));
 }
 // __dom.flushBegin(): the tasks due before a navigation of the page about to run — what it planned kept apart, so they
 // plan anew, and what each window `window.open` made in this isolate planned, and the host of its frames (they run on

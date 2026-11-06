@@ -95,6 +95,18 @@ RSpec.describe 'a top-level javascript: URL' do
       expect(poll_until { read('document.title') == 'K2' }).to be(true)
     end
 
+    # (…its evaluation behind it, the text asks nothing more: both browsers end on it.)
+    it 'makes the document though a timer then set a void javascript: URL or another' do
+      go('/target')
+      run(%q(location.href = "javascript:'<title>K1</title>'"; setTimeout(() => { location.href = 'javascript:void 0'; }, 0)))
+      expect(poll_until { read('document.title') == 'K1' }).to be(true)
+      go('/target')
+      run(%q(location.href = "javascript:'<title>K2</title>'"; setTimeout(() => { location.href = "javascript:'<title>K3</title>'"; }, 0)))
+      expect(poll_until { read('document.title') == 'K2' }).to be(true)
+      session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 30))')
+      expect(read('document.title')).to eq('K2')
+    end
+
     it 'ends the navigation under way, whose document it makes instead' do
       go('/target')
       run("location.href = '/planned'; location.href = #{markup.inspect}")
