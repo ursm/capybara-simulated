@@ -140,6 +140,8 @@ struct CoopEnforcement {
     origin: Option<String>,
     facts: Option<(String, bool, u32)>,
     switch: bool,
+    // Whether its session has the loopback stand-in, which a response's context is judged by (url_ops.rs).
+    stand_in: bool,
 }
 
 impl CoopEnforcement {
@@ -288,6 +290,7 @@ impl NavigationFetch {
             origin: None,
             facts: None,
             switch: false,
+            stand_in: crate::session_history::loopback_stand_in_of(id),
         });
         Ok(NavigationFetch {
             origin: judged_origin,
@@ -359,7 +362,7 @@ impl NavigationFetch {
     // The top-level site a service worker registration that may answer a hop to `target` is matched in — none where no
     // worker may: no registration, or an HTTPS URL its navigable may not be controlled at (an insecure ancestor). (…an
     // http one is let through whatever the ancestors: a scope prefix-matches its client URL, so an https registration
-    // never controls it, and the driver's plain-http world — the app suites' http://www.example.com — is secure by fiat)
+    // never controls it)
     fn sw_site(&self, target: &str) -> Option<String> {
         let (secure, site) = self.sw.as_ref()?;
         if !*secure && target.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://")) {
@@ -456,7 +459,7 @@ impl NavigationFetch {
         let mut slot = self.coop.borrow_mut();
         let Some(result) = slot.as_mut() else { return Ok(true) };
         let target = self.st.borrow().chain.target.clone();
-        result.enforce(fields.opener_policy(&target), fields.csp.as_deref(), &target, || ruby.yield_value(ruby.qnil()))
+        result.enforce(fields.opener_policy(&target, result.stand_in), fields.csp.as_deref(), &target, || ruby.yield_value(ruby.qnil()))
     }
 
     // What a redirect response of the hop makes of the navigation, its Location fields `locations`, its
@@ -657,7 +660,7 @@ mod tests {
 
     #[test]
     fn each_response_s_opener_policy_is_enforced_against_the_one_before_it() {
-        let fresh = |coop: Coop| CoopEnforcement { coop, origin: None, facts: None, switch: false };
+        let fresh = |coop: Coop| CoopEnforcement { coop, origin: None, facts: None, switch: false, stand_in: false };
         let facts = |sandbox: u32| move || Ok::<_, ()>(("http://a.test".to_owned(), false, sandbox));
         // (…none asked of the document where every policy is "unsafe-none")
         let mut none = fresh(Coop::UnsafeNone);

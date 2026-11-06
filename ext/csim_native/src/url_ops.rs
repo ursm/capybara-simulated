@@ -128,20 +128,16 @@ pub(crate) fn potentially_trustworthy_url(url: &str) -> bool {
 }
 // The origin the driver visits at by default stands for the loopback one a user's browser would be at, the app's own server
 // on 127.0.0.1 (browser.rb `Browser.default_host`), which is potentially trustworthy where the stand-in is not. Only as a
-// context's secure or not: what its own requests and cookies are is judged by the URL it has. Process-wide, as the Capybara
-// configuration that chose it is.
+// context's secure or not: what its own requests and cookies are is judged by the URL it has. A session's to say, of its
+// traversables (session_history.rs `loopback_stand_in`).
 const LOOPBACK_STAND_IN: &str = "http://www.example.com";
-static STANDS_IN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub(crate) fn set_loopback_stand_in(on: bool) {
-    STANDS_IN.store(on, std::sync::atomic::Ordering::Relaxed);
-}
 fn stands_for_loopback(url: &str) -> bool {
-    STANDS_IN.load(std::sync::atomic::Ordering::Relaxed) && ada_url::Url::parse(url, None).is_ok_and(|parsed| parsed.origin() == LOOPBACK_STAND_IN)
+    ada_url::Url::parse(url, None).is_ok_and(|parsed| parsed.origin() == LOOPBACK_STAND_IN)
 }
 // HTML "secure context" (§8.1.3.5) of a window's environment, by its top-level creation URL: none of a `data:` one, one
-// of a URL potentially trustworthy.
-pub(crate) fn secure_top_level(url: &str) -> bool {
-    !url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) && (potentially_trustworthy_url(url) || stands_for_loopback(url))
+// of a URL potentially trustworthy, `stand_in` where the session has the stand-in.
+pub(crate) fn secure_top_level(url: &str, stand_in: bool) -> bool {
+    !url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) && (potentially_trustworthy_url(url) || stand_in && stands_for_loopback(url))
 }
 pub(crate) fn potentially_trustworthy_for_ruby(origin: String) -> bool {
     potentially_trustworthy(&origin)
@@ -761,8 +757,9 @@ mod tests {
         ] {
             assert_eq!(potentially_trustworthy(origin), trusted, "{origin}");
         }
-        assert!(secure_top_level("https://a.test/x") && secure_top_level("about:blank") && secure_top_level("http://localhost/"));
-        assert!(!secure_top_level("data:text/html,x") && !secure_top_level("http://www.example.com/"));
+        assert!(secure_top_level("https://a.test/x", false) && secure_top_level("about:blank", false) && secure_top_level("http://localhost/", false));
+        assert!(secure_top_level("http://www.example.com/x", true) && !secure_top_level("http://a.test/", true) && !secure_top_level("data:text/html,x", true));
+        assert!(!secure_top_level("data:text/html,x", false) && !secure_top_level("http://www.example.com/", false));
     }
 
     #[test]

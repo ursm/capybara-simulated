@@ -272,7 +272,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // A URL's parts as the URL Standard's parser makes them, the page's own (url_ops.rs).
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;
     // …and whether an origin is potentially trustworthy (Secure Contexts §3.1).
-    native.define_module_function("loopback_stand_in=", magnus::function!(url_ops::set_loopback_stand_in, 1))?;
     native.define_module_function("potentially_trustworthy_origin", magnus::function!(url_ops::potentially_trustworthy_for_ruby, 1))?;
     // A `data:` URL's MIME type and body, by Fetch's data: URL processor, the page's too (data_url.rs).
     native.define_module_function("data_url", magnus::function!(data_url::process_for_ruby, 1))?;
@@ -340,7 +339,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("message_length", magnus::function!(headers::message_length_for_ruby, 1))?;
     native.define_module_function("link_noopener", magnus::function!(token_list::noopener_for_ruby, 2))?;
     native.define_module_function("site", magnus::function!(realm_location::site_for_ruby, 1))?;
-    native.define_module_function("document_params", magnus::function!(response_headers::document_params, 2))?;
+    native.define_module_function("document_params", magnus::function!(response_headers::document_params, 3))?;
     native.define_module_function("header_map", magnus::function!(response_headers::header_map_for_ruby, 1))?;
     native.define_module_function("location_fields", magnus::function!(response_headers::location_fields_for_ruby, 1))?;
     native.define_module_function("redirect_locations", magnus::function!(response_headers::redirect_locations_for_ruby, 2))?;

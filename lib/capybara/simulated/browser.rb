@@ -298,7 +298,8 @@ module Capybara
         # nil override (a stand-alone Browser) falls back to the live env check.
         @all_hosts_local              = @all_hosts_local_override.nil? ? (ENV['CSIM_LOCAL_ALL_HOSTS'] == '1') : @all_hosts_local_override
         # (…a session that serves every host at the URL it asks for has no stand-in)
-        Native.loopback_stand_in = self.class.default_host_stands_in? && !@all_hosts_local
+        @loopback_stand_in            = self.class.default_host_stands_in? && !@all_hosts_local
+        @session_history.loopback_stand_in = @loopback_stand_in
         # Handle IDs are per-Context integer sequences: a handle from
         # a pre-rebuild context could collide with a fresh node's id
         # in the new context. Node captures this on construction;
@@ -11141,7 +11142,7 @@ module Capybara
           # (…its entry's resource the POST that made it — none where a redirect made it a GET: a 301, 302 or 303's; a 307
           # or 308 keeps it, Fetch "HTTP-redirect fetch")
           post = nil if resp['method'] == 'GET'
-          ctype, csp, referrer_policy, refresh, opener_policy = Native.document_params(headers, resp['url'] || url.to_s)
+          ctype, csp, referrer_policy, refresh, opener_policy = Native.document_params(headers, resp['url'] || url.to_s, @loopback_stand_in)
           ctype     = resp['document_type'] || ctype
           body, url = document_payload(resp['body_bytes'] || resp['body']), resp['url'] || url
           ctype   ||= 'text/html'
@@ -11959,7 +11960,7 @@ module Capybara
         tag_frame_entry_post(realm_id, req_body, content_type, origin_null ? 'null' : url_origin(origin_url)) if fetch.request_method == 'POST'
         # (…and what the caller's document state gives it — a traversal's form state and history state — none where a
         # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
-        ctype, csp, document_policy, refresh = Native.document_params(hop.headers, '')
+        ctype, csp, document_policy, refresh = Native.document_params(hop.headers, '', false)
         ctype = hop.document_type || ctype
         response = {client_id: hop.client_id, csp: csp, referrer: fetch.referrer, referrer_policy: document_policy, refresh: refresh}
         response.update(commit) unless fetch.redirected?
@@ -12891,7 +12892,7 @@ module Capybara
         drop_document_websockets
         # (…what its response makes it: its content type, its policy container's CSP and referrer policy, its declarative
         # refresh, its opener policy — response_headers.rs `document_params`)
-        ctype, csp, referrer_policy, refresh, opener_policy = inline ? ['text/html', nil, nil, nil, 'unsafe-none'] : Native.document_params(@last_response_headers, page_url.to_s)
+        ctype, csp, referrer_policy, refresh, opener_policy = inline ? ['text/html', nil, nil, nil, 'unsafe-none'] : Native.document_params(@last_response_headers, page_url.to_s, @loopback_stand_in)
         ctype = content_type || ctype
         # (…its opener policy, what a navigation of the page after is judged by — the page's browsing context group left for
         # a new one where it needs, and what that makes it cross-origin isolated: `commit_coop`)

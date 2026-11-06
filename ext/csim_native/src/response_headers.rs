@@ -208,24 +208,24 @@ impl ResponseFields {
     }
 
     // The opener policy of the document it would make at `url` (coop.rs `obtain`), of the secure context that URL is or is not.
-    pub(crate) fn opener_policy(&self, url: &str) -> crate::coop::Value {
-        crate::coop::obtain(self.coop.as_deref(), self.coep.as_deref(), crate::url_ops::secure_top_level(url))
+    pub(crate) fn opener_policy(&self, url: &str, stand_in: bool) -> crate::coop::Value {
+        crate::coop::obtain(self.coop.as_deref(), self.coep.as_deref(), crate::url_ops::secure_top_level(url, stand_in))
     }
 }
 
-// Native.document_params(headers, url) -> [content type, Content-Security-Policy, referrer policy, Refresh, opener policy]:
+// Native.document_params(headers, url, stand_in) -> [content type, Content-Security-Policy, referrer policy, Refresh, opener policy]:
 // what the document a response of header map `headers` (nil none) makes at `url` is made with (HTML "create and initialize a
 // Document object": its MIME type and charset, its policy container's CSP list and referrer policy, its declarative
 // refresh; and "obtain an opener policy") — nil each it has none of (a content type none where it is empty), the opener
 // policy by its name (coop.rs).
-pub(crate) fn document_params(ruby: &Ruby, headers: Option<Value>, url: String) -> Result<RArray, Error> {
+pub(crate) fn document_params(ruby: &Ruby, headers: Option<Value>, url: String, stand_in: bool) -> Result<RArray, Error> {
     let fields = ResponseFields::read(headers)?;
     let out = ruby.ary_new_capa(5);
     out.push(fields.content_type.clone().filter(|t| !t.is_empty()))?;
     out.push(fields.csp.clone())?;
     out.push(fields.referrer_policy)?;
     out.push(fields.refresh.clone())?;
-    out.push(fields.opener_policy(&url).name())?;
+    out.push(fields.opener_policy(&url, stand_in).name())?;
     Ok(out)
 }
 

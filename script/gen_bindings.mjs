@@ -784,8 +784,8 @@ for (const spec of Object.keys(EDITORS_DRAFT_ADDITIONS)) {
 // [CEReactions]: the custom element reactions its steps enqueue run as it returns — an element queue pushed as it
 // begins and popped as it returns (`withCEReactions`: webidl.js `ceEnter` / `ceLeave`). [Reflect]: the implementation reflects
 // the content attribute. [SameObject] / [NewObject]: what the implementation returns. [Exposed]: the global the
-// interface object is put on — and, of a member, whether its interface's has it at all (membersOf). [SecureContext]: exposed, every realm here being a secure context
-// (`isSecureContext`, platform-globals.js). The rest the generator makes as Web IDL says.
+// interface object is put on — and, of a member, whether its interface's has it at all (membersOf). [SecureContext]: exposed in every realm for now,
+// whatever `isSecureContext` says (platform-globals.js): its gating is backlog. The rest the generator makes as Web IDL says.
 const HANDLED = {
   // ([Serializable] / [Transferable]: the structured clone's to honour — platform-globals.js `cloneInto` — no member's;
   // [LegacyWindowAlias]: the Window's other names for the interface object, its implementation's to put there;

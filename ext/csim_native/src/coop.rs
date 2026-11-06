@@ -104,12 +104,13 @@ fn string(input: &str) -> Option<&str> {
     None
 }
 
-// A byte sequence's body, after its opening colon: base64, its length a multiple of four, padded only at its end.
+// A byte sequence's body, after its opening colon: base64, padded only at its end, of no more than two, and a length no base64
+// can't have. Unpadded is fine: RFC 9651, "parsers SHOULD NOT fail when "=" padding is not present".
 fn byte_sequence(input: &str) -> Option<&str> {
     let end = input.find(':')?;
     let body = &input[..end];
     let data = body.trim_end_matches('=');
-    let valid = body.len() % 4 == 0 && body.len() - data.len() <= 2 && data.chars().all(|c| c.is_ascii_alphanumeric() || "+/".contains(c));
+    let valid = data.len() % 4 != 1 && body.len() - data.len() <= 2 && data.chars().all(|c| c.is_ascii_alphanumeric() || "+/".contains(c));
     valid.then(|| &input[end + 1..])
 }
 
@@ -256,6 +257,7 @@ mod tests {
         assert_eq!(of(Some(" same-origin "), None), Value::SameOrigin);
         assert_eq!(of(Some("same-origin;foo=bar;baz;n=1.5;b=?1;t=tok;y=:AA==:"), None), Value::SameOrigin);
         // (…RFC 9651's Date and Display String, its limits on a number at their edges)
+        assert_eq!(of(Some("same-origin; a=:QQ:; b=:QUE:; c=:QQ==:"), None), Value::SameOrigin);
         assert_eq!(of(Some("same-origin; a=@1; b=%\"x%c3%a9\"; c=123456789012.123; d=-123456789012345"), None), Value::SameOrigin);
     }
 
@@ -283,6 +285,7 @@ mod tests {
             "same-origin; a=1.",
             "same-origin; a=:A:",
             "same-origin; a=:A===:",
+            "same-origin; a=:Q===:",
             "same-origin; a=@1.5",
             "same-origin; a=%\"%FF\"",
             "same-origin; a=%\"%c3\"",

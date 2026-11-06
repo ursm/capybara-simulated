@@ -268,6 +268,11 @@ struct Traversable {
     // or its reload finds the one it took in its entry (`TEXT_FIELDS`), as HTML's "history policy container" keeps a policy
     // container for a local scheme.
     opener_policy: crate::coop::Value,
+    // The top-level creation URL of its initial about:blank where a creator made it, that creator's (HTML "create a new browsing
+    // context and document"), let go of as its first document commits (`commit_opener_policy`), whose own URL it is from then on.
+    creation_url: Option<String>,
+    // Whether its session counts the driver's default host as the loopback origin it stands for (url_ops.rs).
+    loopback_stand_in: bool,
 }
 
 impl Drop for Traversable {
@@ -1260,6 +1265,16 @@ impl SessionHistory {
     pub(crate) fn set_popup_sandbox(&self, flags: u32) {
         self.lock().popup_sandbox = flags;
     }
+    // #loopback_stand_in = on (`loopback_stand_in`).
+    fn set_loopback_stand_in(&self, on: bool) {
+        self.lock().loopback_stand_in = on;
+    }
+    // A window's as its opener makes it: the creation URL its initial about:blank takes, and its session's stand-in.
+    pub(crate) fn set_made_by(&self, creation_url: Option<String>, stand_in: bool) {
+        let mut t = self.lock();
+        t.creation_url = creation_url;
+        t.loopback_stand_in = stand_in;
+    }
     // #opener_policy = name: the opener policy of the document it now shows, by its name (coop.rs), as that one commits.
     fn set_opener_policy(&self, name: String) {
         self.lock().opener_policy = crate::coop::Value::named(&name);
@@ -1270,7 +1285,9 @@ impl SessionHistory {
     fn commit_opener_policy(ruby: &magnus::Ruby, rb_self: &Self, name: String, response_origin: String, carried: bool) -> Result<(bool, bool), magnus::Error> {
         let (document, response) = (rb_self.lock().opener_policy, crate::coop::Value::named(&name));
         let verdict = crate::coop::commit_verdict(document, response, &response_origin, carried, || ruby.yield_value(ruby.qnil()))?;
-        rb_self.lock().opener_policy = response;
+        let mut t = rb_self.lock();
+        t.opener_policy = response;
+        t.creation_url = None;
         Ok(verdict)
     }
     // #inherited_opener_policy { [origin, top-level origin] } -> the name of the policy a document of no headers that a document
@@ -1428,6 +1445,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("by_web_content=", method!(SessionHistory::set_by_web_content, 1))?;
     class.define_method("popup_sandbox=", method!(SessionHistory::set_popup_sandbox, 1))?;
     class.define_method("opener_policy=", method!(SessionHistory::set_opener_policy, 1))?;
+    class.define_method("loopback_stand_in=", method!(SessionHistory::set_loopback_stand_in, 1))?;
     class.define_method("commit_opener_policy", method!(SessionHistory::commit_opener_policy, 3))?;
     class.define_method("inherited_opener_policy", method!(SessionHistory::inherited_opener_policy, 0))?;
     class.define_method("entry_at_step", method!(SessionHistory::entry_at_step, 1))?;
@@ -1916,6 +1934,14 @@ pub(crate) fn set_name_of(id: u64, name: &[u16]) {
 // The opener policy of the document top-level traversable `id` is at (`opener_policy`), none for one gone.
 pub(crate) fn opener_policy_of(id: u64) -> crate::coop::Value {
     histories().1.get(&id).and_then(Weak::upgrade).map_or(crate::coop::Value::UnsafeNone, |t| lock(&t).opener_policy)
+}
+
+// …and whether its session has the loopback stand-in (`loopback_stand_in`), and its creation URL where a creator gave it one.
+pub(crate) fn loopback_stand_in_of(id: u64) -> bool {
+    histories().1.get(&id).and_then(Weak::upgrade).is_some_and(|t| lock(&t).loopback_stand_in)
+}
+pub(crate) fn creation_url_of(id: u64) -> Option<String> {
+    histories().1.get(&id).and_then(Weak::upgrade).and_then(|t| lock(&t).creation_url.clone())
 }
 
 // Whether top-level traversable `id` closed: its page's browsing context discarded, which no opener of another window

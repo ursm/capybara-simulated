@@ -631,13 +631,15 @@ impl RealmArena {
     // session storage" of a new auxiliary browsing context — `window.open`'s, never a noopener one, which is no window
     // of this isolate)
     pub(crate) fn set_stepped_window(&mut self, realm: i32, on: bool, opener: Option<i32>, key: i32) {
-        let (opener_storage, popup) = match opener {
+        let (opener_storage, popup, creation_url) = match opener {
             Some(opener) if on && !self.navigables.window_histories.contains_key(&key) => (
                 crate::session_history::session_storage_of(self, opener),
                 self.realm_state(opener).map_or(0, |s| crate::sandbox::popup_flags(s.location.sandbox)),
+                self.top_level_creation_url(opener),
             ),
-            _ => (0, 0),
+            _ => (0, 0, None),
         };
+        let stand_in = crate::session_history::loopback_stand_in_of(self.navigables.history);
         let nav = &mut self.navigables;
         nav.windows.retain(|&w| w != realm);
         if on {
@@ -649,6 +651,7 @@ impl RealmArena {
             nav.window_histories.entry(key).or_insert_with(|| {
                 let history = crate::session_history::SessionHistory::copying(opener_storage);
                 history.set_popup_sandbox(popup);
+                history.set_made_by(creation_url, stand_in);
                 history
             });
             // (…as it was first made: a navigation of the window keeps it, whatever of the realm it names is gone since)
@@ -1277,10 +1280,16 @@ impl RealmArena {
         }
         None
     }
-    // Whether realm `realm`'s environment is a secure context (HTML "is a secure context"), by its top-level traversable's
-    // document's URL (`url_ops::secure_top_level`).
+    // Whether realm `realm`'s environment is a secure context (HTML "is a secure context"), by its top-level creation URL
+    // (`url_ops::secure_top_level`).
     pub(crate) fn secure_context(&self, realm: i32) -> bool {
-        self.realm_state(self.top_level_realm(realm)).is_some_and(|s| crate::url_ops::secure_top_level(s.location.href()))
+        let id = crate::session_history::traversable_id_of(self, self.top_level_realm(realm));
+        self.top_level_creation_url(realm).is_some_and(|url| crate::url_ops::secure_top_level(&url, crate::session_history::loopback_stand_in_of(id)))
+    }
+    // …that URL: the one its top-level traversable's document is at, or, its initial about:blank, its creator's.
+    fn top_level_creation_url(&self, realm: i32) -> Option<String> {
+        let top = self.top_level_realm(realm);
+        crate::session_history::creation_url_of(crate::session_history::traversable_id_of(self, top)).or_else(|| self.realm_state(top).map(|s| s.location.href().to_owned()))
     }
     // Whether a service worker may control a navigation of the navigable `container` frames — realm `realm`'s own where
     // none: where the environment it makes is a secure context (HTML §8.1.3.5, its top-level creation URL's — the top-

@@ -44,6 +44,35 @@ RSpec.describe 'a secure context' do
     end
   end
 
+  # (…a pop-up's initial about:blank its creator's top-level creation URL, HTML "create a new browsing context and document";
+  # Chrome and Firefox alike. Its first document's own after)
+  it 'takes a pop-up\'s initial about:blank as its creator\'s, its first document as its own', :every_host_local do
+    session.visit('http://a.test/')
+    session.execute_script("window.w = open('')")
+    expect(session.evaluate_script('[w.location.href, w.isSecureContext]')).to eq(['about:blank', false])
+    session.execute_script("window.f = w.document.body.appendChild(w.document.createElement('iframe'))")
+    expect(session.evaluate_script('f.contentWindow.isSecureContext')).to be(false)
+    session.visit('https://a.test/')
+    session.execute_script("window.w = open('')")
+    expect(session.evaluate_script('w.isSecureContext')).to be(true)
+    session.execute_script("window.h = open('http://a.test/frame')")
+    session.within_window(session.windows.last) do
+      expect(session).to have_css('p')
+      expect(session.evaluate_script('isSecureContext')).to be(false)
+    end
+  end
+
+  # (…a session's own, whatever another of the process was made as since: a new session of every host, or the reverse)
+  it 'keeps the stand-in a session was made with, another session made since' do
+    session.visit('/')
+    other = EveryHostLocal.within { simulated_session(app).tap {|s| s.visit('http://www.example.com/') } }
+    expect(other.evaluate_script('isSecureContext')).to be(false)
+    session.visit('/frame')
+    expect(session.evaluate_script('isSecureContext')).to be(true)
+    session.visit('/')
+    expect(session.evaluate_script('crossOriginIsolated')).to be(true)
+  end
+
   # (…no stand-in where a suite names the same host itself)
   it 'is not `http://www.example.com` where `app_host` names it' do
     previous = Capybara.app_host
