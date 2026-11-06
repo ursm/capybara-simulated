@@ -454,6 +454,36 @@ RSpec.describe 'a frame navigation as tasks' do
     expect(log.grep(/\Ah|ret/)).to eq(%w[h0=1 ret=1 h1=2 h2=2])
   end
 
+  # The driver waits for a chain of them, each `load` navigating on, however the steps fall: every one comes before a wait
+  # gives up (it stopped at the first where the plan woke nothing).
+  it 'keeps the driver waiting through a chain of location navigations' do
+    s = session(
+      '/'  => <<~HTML,
+        <title>p</title><script>
+          let n = 0;
+          const frames_ = [];
+          for (let i = 0; i < 4; i++) {
+            const f = document.createElement('iframe');
+            f.src = '/a?0';
+            f.addEventListener('load', () => {
+              if (f.dataset.go !== '1') return;
+              if (++n === 16) document.title = 'done';
+              if (f.contentWindow.location.search !== '?3') f.contentWindow.location.href = '/a?' + (+f.contentWindow.location.search.slice(1) + 1);
+            });
+            frames_.push(f);
+            document.documentElement.appendChild(f);
+          }
+          window.go = () => { for (const f of frames_) { f.dataset.go = '1'; f.contentWindow.location.href = '/a?0'; } };
+        </script>
+      HTML
+      '/a' => '<p>a</p>'
+    )
+    s.visit '/'
+    s.evaluate_script('document.querySelectorAll("iframe")[3].contentDocument.URL')
+    s.execute_script('go()')
+    expect(s).to have_title('done', wait: 10)
+  end
+
   # The driver's own wait: a frame entered right after a navigation of it begins is at the next document, its `src` set
   # or a link followed, by a script or by the user.
   it 'enters the document a queued location navigation goes to' do

@@ -10989,6 +10989,7 @@ module Capybara
       # What the page's own plan holds (navigation_plan.rs `ownPlanned`): a location navigation, a reload, a frame's
       # submission to it — and whether the host plans a navigation of a frame.
       OWN_LOCATION = 1
+      FRAMES_PLANNED = 8 | 16
       private def own_planned = @runtime.call('__csimOwnPlanned').to_i
       # The navigation of the page its `location` planned, taken: its URL, whether it replaces the current entry, the
       # document that began it where that is another's than the page's with the Referer it sends, its source's
@@ -11323,6 +11324,9 @@ module Capybara
         ensure
           @taking_frame_navigations = false
         end
+        # (…what the documents they made planned meanwhile, due already — the settle's step ran its turn — another turn's: the
+        # driver waits for it, as it does for any task)
+        @runtime.call('__csimQueueNavigationTurn') if own_planned.anybits?(FRAMES_PLANNED)
         true
       end
       # A reload's history step unloads the document by a task HTML "apply the history step" queues (step 12) on its event
