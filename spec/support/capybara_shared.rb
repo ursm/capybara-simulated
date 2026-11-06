@@ -191,11 +191,13 @@ RSpec.configure do |config|
   config.around(:each, :capybara_skip) do |example|
     Capybara::SpecHelper.reset!
     saved = Capybara.save_path
+    downloads = ENV.delete('CSIM_DOWNLOADS_DIR')
     Dir.mktmpdir('csim-capybara-') do |dir|
       Capybara.save_path = dir
       Dir.chdir(dir) { example.run }
     end
   ensure
+    ENV['CSIM_DOWNLOADS_DIR'] = downloads
     Capybara.save_path = saved
     Capybara.app = nil
     Capybara.default_selector = :css
