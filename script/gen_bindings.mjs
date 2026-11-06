@@ -38,6 +38,11 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // name, an operation `'method'`, an attribute what of it is exposed (`'get'`, `'set'`, `'get set'`, the table's
 // [[NeedsGet]] / [[NeedsSet]]) — emitted as `CROSS_ORIGIN_<NAME>_PROPERTIES`, a Set of the names, and
 // `CROSS_ORIGIN_<NAME>_KINDS`, each one's kind (platform-globals.js, the WindowProxy and the Location of another origin).
+// `event`: an event interface, whose class the binding makes too (`eventInterface`: `define<Name>(Parent, impl)`), its
+// attributes slots of its state that its init fills — but what `event` says otherwise. `steps`: attributes whose getter and
+// setter steps the implementation's (`impl.get_x(state)`), no slot of theirs filled. `slots`: attributes that read another's
+// slot, by the slot. `init`: attributes `impl.init(state, init)` fills instead, as the object is made — and it may fill
+// any other state of the event's: [] for that alone.
 // GlobalEventHandlers' touch handlers, which a desktop with no touch screen — headless Chrome's and Firefox's, measured —
 // exposes on no object: feature detection reads them (flatpickr binds `touchstart` instead of `mousedown` where
 // `window.ontouchstart` is defined).
@@ -293,21 +298,31 @@ const INTERFACES = [
     }
   }],
   ['dom', 'EventTarget', { install: true, omit: { observable: 'when: Observables are not implemented' } }],
-  ['dom', 'Event', { install: true }],
-  ['dom', 'CustomEvent', { install: true }],
-  ['uievents', 'UIEvent', { install: true, omit: { 'input-device-capabilities': 'sourceCapabilities: InputDeviceCapabilities is not implemented (a WICG proposal; Firefox has none)' } }],
-  ['uievents', 'FocusEvent', { install: true }],
-  ['pointerevents', 'MouseEvent', { install: true }],
-  ['pointerevents', 'WheelEvent', { install: true, omitMembers: { momentum: 'a draft of Pointer Events neither Chrome nor Firefox has' } }],
-  ['uievents', 'TextEvent', { install: true }],
-  ['uievents', 'InputEvent', { install: true }],
-  ['uievents', 'KeyboardEvent', { install: true }],
-  ['uievents', 'CompositionEvent', { install: true }],
-  ['pointerevents', 'PointerEvent', { install: true }],
+  ['dom', 'Event', {
+    event: {
+      steps: ['cancelBubble', 'returnValue'],
+      slots: { srcElement: 'target', defaultPrevented: 'canceled', timeStamp: 'ts' }
+    }
+  }],
+  ['dom', 'CustomEvent', { event: {} }],
+  ['uievents', 'UIEvent', {
+    event: { steps: ['which'] },
+    omit: { 'input-device-capabilities': 'sourceCapabilities: InputDeviceCapabilities is not implemented (a WICG proposal; Firefox has none)' }
+  }],
+  ['uievents', 'FocusEvent', { event: {} }],
+  ['pointerevents', 'MouseEvent', {
+    event: { steps: ['layerX', 'layerY', 'pageX', 'pageY', 'offsetX', 'offsetY'], slots: { x: 'clientX', y: 'clientY' }, init: [] }
+  }],
+  ['pointerevents', 'WheelEvent', { event: {}, omitMembers: { momentum: 'a draft of Pointer Events neither Chrome nor Firefox has' } }],
+  ['uievents', 'TextEvent', { event: {} }],
+  ['uievents', 'InputEvent', { event: { init: [] } }],
+  ['uievents', 'KeyboardEvent', { event: { init: [] } }],
+  ['uievents', 'CompositionEvent', { event: {} }],
+  ['pointerevents', 'PointerEvent', { event: { init: ['tiltX', 'tiltY', 'altitudeAngle', 'azimuthAngle'] } }],
   ['touch-events', 'Touch', { install: true }],
   ['touch-events', 'TouchList'],
   ['touch-events', 'TouchEvent', {
-    install: true,
+    event: { init: ['touches', 'targetTouches', 'changedTouches'] },
     namedProperties: 'none: getModifierState is the plain operation Chrome and Firefox have, no named property of the event'
   }],
   ['html', 'DataTransfer', { install: true }],
@@ -383,27 +398,27 @@ const INTERFACES = [
   ['html', 'BroadcastChannel', { install: true }],
   ['html', 'EventSource', { install: true }],
   ['websockets', 'WebSocket', { install: true }],
-  ['html', 'DragEvent', { install: true }],
-  ['html', 'PopStateEvent', { install: true }],
-  ['html', 'HashChangeEvent', { install: true }],
-  ['html', 'PageTransitionEvent', { install: true }],
-  ['html', 'BeforeUnloadEvent', { install: true }],
-  ['html', 'ErrorEvent', { install: true }],
-  ['html', 'PromiseRejectionEvent', { install: true }],
-  ['html', 'SubmitEvent', { install: true }],
-  ['html', 'FormDataEvent', { install: true }],
-  ['html', 'ToggleEvent', { install: true }],
-  ['html', 'CommandEvent', { install: true }],
-  ['html', 'StorageEvent', { install: true }],
-  ['html', 'MessageEvent', { install: true }],
-  ['xhr', 'ProgressEvent', { install: true }],
-  ['websockets', 'CloseEvent', { install: true }],
-  ['css-animations', 'AnimationEvent', { install: true }],
-  ['css-transitions', 'TransitionEvent', { install: true }],
-  ['web-animations-2', 'AnimationPlaybackEvent', { install: true }],
-  ['clipboard-apis', 'ClipboardEvent', { install: true }],
-  ['cssom-view', 'MediaQueryListEvent', { install: true }],
-  ['IndexedDB', 'IDBVersionChangeEvent', { install: true }],
+  ['html', 'DragEvent', { event: {} }],
+  ['html', 'PopStateEvent', { event: {} }],
+  ['html', 'HashChangeEvent', { event: {} }],
+  ['html', 'PageTransitionEvent', { event: {} }],
+  ['html', 'BeforeUnloadEvent', { event: {} }],
+  ['html', 'ErrorEvent', { event: {} }],
+  ['html', 'PromiseRejectionEvent', { event: {} }],
+  ['html', 'SubmitEvent', { event: {} }],
+  ['html', 'FormDataEvent', { event: {} }],
+  ['html', 'ToggleEvent', { event: { steps: ['source'], init: [] } }],
+  ['html', 'CommandEvent', { event: { steps: ['source'], init: [] } }],
+  ['html', 'StorageEvent', { event: {} }],
+  ['html', 'MessageEvent', { event: {} }],
+  ['xhr', 'ProgressEvent', { event: {} }],
+  ['websockets', 'CloseEvent', { event: {} }],
+  ['css-animations', 'AnimationEvent', { event: {} }],
+  ['css-transitions', 'TransitionEvent', { event: {} }],
+  ['web-animations-2', 'AnimationPlaybackEvent', { event: {} }],
+  ['clipboard-apis', 'ClipboardEvent', { event: {} }],
+  ['cssom-view', 'MediaQueryListEvent', { event: {} }],
+  ['IndexedDB', 'IDBVersionChangeEvent', { event: {} }],
   ['IndexedDB', 'IDBRequest', { install: true }],
   ['IndexedDB', 'IDBOpenDBRequest', { install: true }],
   ['IndexedDB', 'IDBFactory', { install: true }],
@@ -418,12 +433,12 @@ const INTERFACES = [
   ['html', 'DOMStringList'],
   ['html', 'Location', { install: true, crossOrigin: { href: 'set', replace: 'method' } }],
   ['html', 'History', { install: true }],
-  ['css-font-loading', 'FontFaceSetLoadEvent', { install: true }],
-  ['gamepad', 'GamepadEvent', { install: true }],
+  ['css-font-loading', 'FontFaceSetLoadEvent', { event: {} }],
+  ['gamepad', 'GamepadEvent', { event: {} }],
   ['orientation-event', 'DeviceMotionEventAcceleration'],
   ['orientation-event', 'DeviceMotionEventRotationRate'],
-  ['orientation-event', 'DeviceMotionEvent', { install: true }],
-  ['orientation-event', 'DeviceOrientationEvent', { install: true }],
+  ['orientation-event', 'DeviceMotionEvent', { event: { init: ['acceleration', 'accelerationIncludingGravity', 'rotationRate'] } }],
+  ['orientation-event', 'DeviceOrientationEvent', { event: {} }],
   ['webidl', 'DOMException', { install: true }],
   ['webidl', 'QuotaExceededError', { install: true }],
   ['dom', 'DOMImplementation', { install: true }],
@@ -485,10 +500,10 @@ const INTERFACES = [
     }
   }],
   ['service-workers', 'Clients', { install: true }],
-  ['service-workers', 'ExtendableEvent', { install: true }],
-  ['service-workers', 'ExtendableMessageEvent', { install: true }],
-  ['service-workers', 'FetchEvent', { install: true }],
-  ['service-workers', 'InstallEvent', { install: true }],
+  ['service-workers', 'ExtendableEvent', { event: { init: [] } }],
+  ['service-workers', 'ExtendableMessageEvent', { event: {} }],
+  ['service-workers', 'FetchEvent', { event: { steps: ['handled'], init: ['preloadResponse'] } }],
+  ['service-workers', 'InstallEvent', { event: {} }],
   ['web-animations', 'AnimationTimeline', {
     install: true,
     omitMembers: { play: 'AnimationTimeline.play(): a level-2 shorthand no engine ships (Chrome and Firefox have none)' }
@@ -704,7 +719,7 @@ const REFLECTION = [
 ];
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'Dictionary', 'EMPTY_DICTIONARY', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'Dictionary', 'EMPTY_DICTIONARY', 'convertedList', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -1010,7 +1025,7 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     // observable array's setter given them, which its implementation's backing list is set to)
     const each = conversion(t.idlType[0], 'x', where, checks);
     const c = `toSequence(${expr}, (x) => ${each}, ${failure(where)})`;
-    const value = t.generic === 'FrozenArray' ? `Object.freeze(${c})` : c;
+    const value = t.generic === 'FrozenArray' ? `freeze(${c})` : c;
     return t.nullable ? `(${nullish(expr)} ? null : ${value})` : value;
   }
   if (t.generic === 'record') {
@@ -1224,6 +1239,15 @@ for (const key of Object.keys(OMITTED_DICTIONARY_MEMBERS)) {
   if (!members.some((m) => m.name === member)) throw new Error(`${key}: no dictionary has it now — remove it from OMITTED_DICTIONARY_MEMBERS`);
 }
 
+// A dictionary's own members: its partials' among them — but one whose type is of an API no implementation here answers,
+// every one of a union's, which is no member here: `{trigger: x}` ignored, as in a browser without Animation Triggers;
+// `{sanitizer: x}`, without the Sanitizer API.
+function dictionaryMembers(d) {
+  const absent = (t) => (t.union ? t.idlType.every(absent) : ABSENT_INTERFACES.has(t.idlType) || ABSENT_TYPES.has(t.idlType));
+  return [...d.members, ...(additions.get(d.name) || []).flatMap((a) => a.def.members)]
+    .filter((m) => !absent(m.idlType) && !Object.hasOwn(OMITTED_DICTIONARY_MEMBERS, `${d.name}.${m.name}`));
+}
+
 // A dictionary's conversion (Web IDL §3.2.17): a function of its own, written once beside the interfaces — undefined
 // or null an empty dictionary, any other non-object a TypeError; each member, its inherited dictionaries' first and
 // each's (its partials' included) in lexicographic order, got from the object, converted, or its default where it is
@@ -1248,13 +1272,7 @@ function dictionaryConverter(name, after = null) {
   const head = lines.length;
   lines.push(`  const dict = new Dictionary();`);
   for (const d of chain) {
-    // (…its partials' members among its own — but one whose type is of an API no implementation here answers, every one
-    // of a union's, which is no member here: `{trigger: x}` ignored, as in a browser without Animation Triggers;
-    // `{sanitizer: x}`, without the Sanitizer API)
-    const absent = (t) => (t.union ? t.idlType.every(absent) : ABSENT_INTERFACES.has(t.idlType) || ABSENT_TYPES.has(t.idlType));
-    const members = [...d.members, ...(additions.get(d.name) || []).flatMap((a) => a.def.members)]
-      .filter((m) => !absent(m.idlType) && !Object.hasOwn(OMITTED_DICTIONARY_MEMBERS, `${d.name}.${m.name}`));
-    for (const m of members.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    for (const m of dictionaryMembers(d).sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const where = { dictionary: d.name, member: m.name };
       lines.push(`  {`);
       lines.push(`    const x = ${nullish('v')} ? undefined : v.${m.name};`);
@@ -1364,7 +1382,7 @@ function crossOriginTable(name, members, table) {
 
 function generateInterface(def, options = {}) {
   const name = def.name;
-  if (def.inheritance && !options.install) throw new Error(`${name}: an inherited interface is not generated yet`);
+  if (def.inheritance && !options.install && !options.event) throw new Error(`${name}: an inherited interface is not generated yet`);
   const members = [], constants = [], body = [], statics = [], unforgeables = [], checks = new Set(), unscopables = [], handlers = [], preamble = [];
   // (…`this` checked: by its brand where the binding makes the object, by the test its class registered where it is
   // installed on that class)
@@ -1373,6 +1391,7 @@ function generateInterface(def, options = {}) {
   // promise's rejection)
   const selfCheck = (prefix) => {
     const message = prefix ? `, ${JSON.stringify(prefix)}` : '';
+    if (options.event) return `thisOf(this, '${name}'${message})`;
     return options.install ? `thisIs(this ?? globalThis, IS_SELF${message})` : `thisOf(this ?? globalThis, KEY${message})`;
   };
   const self = selfCheck();
@@ -1458,8 +1477,12 @@ function generateInterface(def, options = {}) {
       // (…[LegacyLenientThis] only an event handler's here, whose accessors the installing class's are)
       if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientThis')) throw new Error(`${label}: a [LegacyLenientThis] attribute is not generated yet`);
       const reflection = options.install ? reflectionOf(name, m, { iface: name, member: m.name }) : null;
+      // (…an event's its slot, but where its steps are the implementation's)
+      const slot = options.event && !options.event.steps?.includes(m.name) ? options.event.slots?.[m.name] ?? m.name : null;
       // (…a promise-typed one's exception its promise's rejection, as its getter steps say)
-      const getter = reflection?.get ? `const self = ${self}; return ${reflection.get};` : `return ${getImpl}(${self});`;
+      const getter = slot ? `return ${self}.${slot};`
+        : reflection?.get ? `const self = ${self}; return ${reflection.get};`
+        : `return ${getImpl}(${self});`;
       out.push(`    get ${key}() { ${promiseOf(m) ? rejecting(getter) : getter} }`);
       const forwards = (m.extAttrs || []).find((e) => e.name === 'PutForwards');
       if (forwards) {
@@ -1482,6 +1505,8 @@ function generateInterface(def, options = {}) {
         const value = `enumValue(v, ${JSON.stringify(enums.get(m.idlType.idlType))}, ${failure({ iface: name, member: m.name })})`;
         const v = m.idlType.nullable ? `${nullish('v')} ? null : ${value}` : value;
         out.push(`    set ${key}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) { ${withCEReactions(m, `${setImpl}(self, value);`)} } }`);
+      } else if (!m.readonly && slot) {
+        out.push(`    set ${key}(v) { ${self}.${slot} = ${conversion(m.idlType, 'v', { iface: name, member: m.name }, checks)}; }`);
       } else if (!m.readonly && reflection) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
         out.push(`    set ${key}(v) { const self = ${self}; v = ${v}; ${withCEReactions(m, `${reflection.set};`)} }`);
@@ -1499,7 +1524,7 @@ function generateInterface(def, options = {}) {
       if (namedProperty && !m.name) continue;
       if (m.special === 'static') {
         // (…a static operation the interface object's own, of no object: `DeviceMotionEvent.requestPermission()`)
-        if (!options.install) throw new Error(`${label}: a static operation of an interface the binding makes is not generated yet`);
+        if (!options.install && !options.event) throw new Error(`${label}: a static operation of an interface the binding makes is not generated yet`);
         if (statics.some((line) => line.startsWith(`    ${m.name}(`))) continue;
         // (…its implementation `static_<name>` where an object's member has the name: Response's json())
         const shared = memberList.some((o) => o.name === m.name && o.special !== 'static');
@@ -1556,7 +1581,8 @@ function generateInterface(def, options = {}) {
       const group = memberList.filter((o) => o.type === 'operation' && o.name === m.name && o.special !== 'static');
       // (…[LegacyUnforgeable] an own property of each object, as an attribute's: Location's assign / replace / reload)
       const out = (m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable') ? unforgeables : body;
-      out.push(`    ${group.length > 1 ? overloadedOperation(name, group, checks, selfCheck) : operation(name, m, checks, selfCheck)}`);
+      const steps = options.event && /^init[A-Z]/.test(m.name) ? eventInitSteps(def, m, memberList) : undefined;
+      out.push(`    ${group.length > 1 ? overloadedOperation(name, group, checks, selfCheck) : operation(name, m, checks, selfCheck, m.name, steps)}`);
       continue;
     }
     throw new Error(`${label}: a ${m.type} member is not generated yet`);
@@ -1568,6 +1594,7 @@ function generateInterface(def, options = {}) {
     throw new Error(`${name}: an indexed getter with no integer-typed \`length\` is not generated yet`);
   }
   if (stringifier && stringifier !== 'toString') stringifierOut.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
+  if (options.event) return eventInterface(def, options.event, { memberList, body, statics, unforgeables, checks, constants, constructors });
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
   if (options.install) {
     // (…an indexed getter the implementation's exotic object answers — `indexedProperties`, NamedNodeMap's Proxy — its
@@ -1698,6 +1725,112 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   return lines.join('\n');
 }
 
+// An event interface: its class, `extends` the class of the interface it inherits, its members in it, enumerable; its
+// arguments converted by position — no array to make per event, none whose iterator a page has replaced to walk — and
+// handed up with PLATFORM, which the engine makes an event with too (`new X(PLATFORM, type, init)`, its init unconverted, as
+// the steps give it — all there is of an interface with no constructor). Its state one record, every interface's of the
+// event in one (event-state.js, whose `EventState` the root's is), which a member reads: an attribute one slot read, no
+// call of an implementation. Each interface adds to it its brand, which tells its objects apart, and each attribute what
+// its init's member of the name gave — a FrozenArray a frozen copy of the sequence.
+function eventInterface(def, { init, slots = {}, steps = [] }, { memberList, body, statics, unforgeables, checks, constants, constructors }) {
+  const name = def.name;
+  if (constructors.length > 1) throw new Error(`${name}: an overloaded event constructor is not generated yet`);
+  const [ctor] = constructors;
+  if (ctor && ctor.arguments.length !== 2) throw new Error(`${name}: an event constructor of other than a type and an init is not generated yet`);
+  const required = ctor ? ctor.arguments.filter((a) => !a.optional).length : 0;
+  const converted = ctor ? convertArguments(name, ctor, checks, () => null) : [];
+  const given = new Map();
+  for (let d = ctor && dictionaries.get(ctor.arguments[1].idlType.idlType); d; d = d.inheritance && dictionaries.get(d.inheritance)) {
+    for (const m of dictionaryMembers(d)) given.set(m.name, m);
+  }
+  // (…any string type another's: InputEvent's `data` a USVString, its init's a DOMString; and nullable or not, whose
+  // init then may give null: GamepadEvent's)
+  const typeOfSlot = (t) => typeName(t).replace(/^FrozenArray</, 'sequence<').replace(/\b(?:USVString|CSSOMString)\b/g, 'DOMString').replace(/\?$/, '');
+  const filled = (a) => {
+    const member = given.get(a.name);
+    if (ctor && !member) throw new Error(`${name}.${a.name}: its init has no such member — \`event\` says what it is`);
+    if (member && typeOfSlot(member.idlType) !== typeOfSlot(a.idlType)) {
+      throw new Error(`${name}.${a.name}: a ${typeName(a.idlType)} its init gives as a ${typeName(member.idlType)} — \`event\` says what it is`);
+    }
+    return `      state.${a.name} = ${a.idlType.generic === 'FrozenArray' ? `frozenCopy(init.${a.name})` : `init.${a.name}`};`;
+  };
+  const lines = [`// interface ${name}${def.inheritance ? ` : ${def.inheritance}` : ''} (${def.spec}), an event`];
+  lines.push(`export function define${name}(${def.inheritance ? 'Parent, ' : ''}impl) {`);
+  for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
+  if (unforgeables.length) lines.push(`  class Unforgeables {`, ...unforgeables, `  }`, `  const defineUnforgeables = unforgeableMembers(Unforgeables.prototype);`);
+  lines.push(`  class ${name}${def.inheritance ? ' extends Parent' : ''} {`);
+  lines.push(`    constructor(type, init, platformInit) {`);
+  if (ctor) {
+    const message = `Failed to construct '${name}': ${required} argument${required === 1 ? '' : 's'} required, but only `;
+    lines.push(`      if (type === PLATFORM) {`);
+    lines.push(`        type = init;`);
+    lines.push(`        init = platformInit;`);
+    lines.push(`      } else {`);
+    lines.push(`        if (arguments.length < ${required}) throw new TypeError(${JSON.stringify(message)} + arguments.length + ' present.');`);
+    lines.push(`        type = ${converted[0]};`);
+    lines.push(`        init = ${converted[1]};`);
+    lines.push(`      }`);
+  } else {
+    // (…no constructor: the platform's alone, a script's `new` none)
+    lines.push(`      constructedBy(PLATFORM, type, '${name}');`);
+    lines.push(`      type = init;`);
+    lines.push(`      init = platformInit;`);
+  }
+  if (def.inheritance) {
+    lines.push(`      super(PLATFORM, type, init);`);
+    lines.push(`      const state = slotsOf(this, 'Event');`);
+    lines.push(`      state.${name} = true;`);
+    for (const a of memberList) {
+      if (a.type === 'attribute' && !steps.includes(a.name) && !(a.name in slots) && !init?.includes(a.name)) lines.push(filled(a));
+    }
+    if (init) lines.push(`      impl.init(state, init);`);
+  } else {
+    lines.push(`      makeSlots(this, 'Event', new EventState(type, init));`);
+  }
+  if (unforgeables.length) lines.push(`      defineUnforgeables(this);`);
+  lines.push(`    }`);
+  lines.push(...body);
+  lines.push(`  }`);
+  lines.push(`  registerInterface('${name}', (o) => slotsOf(o, '${name}') !== undefined);`);
+  const isUnforgeable = (m) => (m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable');
+  const onPrototype = memberList.filter((m) => (m.type === 'attribute' || m.type === 'operation') && m.name && m.special !== 'static' && !isUnforgeable(m));
+  lines.push(`  enumerable(${name}.prototype, ${JSON.stringify([...new Set(onPrototype.map((m) => m.name))])});`);
+  if (statics.length) lines.push(`  class Statics {`, ...statics, `  }`, `  installMembers(${name}, Statics.prototype);`);
+  if (constants.length) {
+    const list = JSON.stringify(constants.map(([n]) => n));
+    const values = `[${constants.map(([, v]) => v).join(', ')}]`;
+    lines.push(`  defineConstants(${name}, ${list}, ${values});`);
+    lines.push(`  defineConstants(${name}.prototype, ${list}, ${values});`);
+  }
+  lines.push(`  defineLength(${name}, ${required});`);
+  lines.push(`  defineClassString(${name}.prototype, '${name}');`);
+  lines.push(`  return ${name};`);
+  lines.push(`}`);
+  return lines.join('\n');
+}
+
+// An event's legacy `init…` operation, as DOM's `initEvent` and each like it are: its arguments converted; nothing
+// mid-dispatch; else the event initialized (its type and two flags its first three arguments) and each other argument
+// the attribute of its name, on it or an interface it inherits.
+function eventInitSteps(def, m, memberList) {
+  const attributeOf = (argument) => {
+    const attribute = argument.name.replace(/Arg$/, '');
+    for (let d = def; d; d = d.inheritance && definitions.get(d.inheritance)) {
+      const o = interfaceOptions(d.name);
+      const found = (d === def ? memberList : membersOf(d, o.omit, o.omitMembers)).find((a) => a.type === 'attribute' && a.name === attribute);
+      if (found) return found;
+    }
+    throw new Error(`${def.name}.${m.name}: its argument ${argument.name} names no attribute`);
+  };
+  return (converted) => {
+    const stores = m.arguments.slice(3).map((argument, i) => {
+      const a = attributeOf(argument);
+      return ` self.${a.name} = ${a.idlType.generic === 'FrozenArray' ? `frozenCopy(a${i + 3})` : `a${i + 3}`};`;
+    });
+    return `const ${converted.map((value, i) => `a${i} = ${value}`).join(', ')}; if (self.dispatchFlag) return; initEventSteps(self, a0, a1, a2);${stores.join('')}`;
+  };
+}
+
 // An installed interface's constructor arguments, converted as Web IDL's constructor steps would (Chrome's messages):
 // the hand-written class's constructor calls `convert<Name>Arguments(arguments)` for them.
 function constructorArguments(name, m) {
@@ -1740,7 +1873,7 @@ const EVENT_HANDLER_TYPES = new Set(['EventHandler', 'OnErrorEventHandler', 'OnB
 // generated code names something of its own by it (`self`, `impl`, a conversion it calls, … — CSSMathSum's
 // constructor takes `args`).
 const RESERVED = new Set([
-  'self', 'impl', 'KEY', 'PLATFORM', 'x', 'v', 'callback', 'args', ...RUNTIME, ...REFLECTION,
+  'self', 'impl', 'KEY', 'PLATFORM', 'x', 'v', 'callback', 'args', 'EventState', 'initEventSteps', ...RUNTIME, ...REFLECTION,
   'arguments', 'eval', 'implements', 'interface', 'let', 'package', 'private', 'protected', 'public', 'static', 'yield',
   'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'enum',
   'export', 'extends', 'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null',
@@ -1758,8 +1891,9 @@ function withCEReactions(m, steps) {
 }
 
 // An operation: its required arguments its parameters (so its `length` is their count, Web IDL §3.7.7), the optional
-// ones read from `arguments`, a variadic one the rest — each converted, and handed to the implementation.
-function operation(iface, m, checks, selfCheck, implName = m.name) {
+// ones read from `arguments`, a variadic one the rest — each converted, and handed to the implementation (or to `steps`,
+// the binding's own).
+function operation(iface, m, checks, selfCheck, implName = m.name, steps = (converted) => withCEReactions(m, `return impl.${implName}(${['self', ...converted].join(', ')});`)) {
   const args = m.arguments;
   const requiredCount = args.filter((a) => !a.optional && !a.variadic).length;
   if (args.some((a, i) => (a.optional || a.variadic) && i < requiredCount)) throw new Error(`${iface}.${m.name}: a required argument after an optional one`);
@@ -1769,9 +1903,8 @@ function operation(iface, m, checks, selfCheck, implName = m.name) {
   const converted = convertArguments(iface, m, checks, (a) => ((a.variadic && rest) || (!a.optional && !a.variadic) ? argName(a) : null));
   // (…`this` checked first, then the arguments counted — Web IDL's order, as Chrome's)
   const check = requiredCount ? `required(arguments, ${requiredCount}, '${m.name}', '${iface}'); ` : '';
-  const call = withCEReactions(m, `return impl.${implName}(${['self', ...converted].join(', ')});`);
-  const steps = `const self = ${selfCheck(promiseOf(m) && `Failed to execute '${m.name}' on '${iface}': `)}; ${check}${call}`;
-  return `${m.name}(${params}) { ${promiseOf(m) ? rejecting(steps) : steps} }`;
+  const body = `const self = ${selfCheck(promiseOf(m) && `Failed to execute '${m.name}' on '${iface}': `)}; ${check}${steps(converted)}`;
+  return `${m.name}(${params}) { ${promiseOf(m) ? rejecting(body) : body} }`;
 }
 
 // Whether an operation returns a promise — which every exception its steps throw rejects instead, `this` and argument
@@ -1786,7 +1919,7 @@ function convertArguments(iface, m, checks, named, source = 'arguments') {
   return m.arguments.map((a, i) => {
     const where = { iface, member: m.name, index: i };
     const expr = named(a) ?? (a.variadic ? `restOf(${source}, ${i})` : `${source}[${i}]`);
-    if (a.variadic) return `${expr}.map((x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
+    if (a.variadic) return `convertedList(${expr}, (x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
     if (a.optional) {
       if (dictionaries.has(a.idlType.idlType) || a.default?.type === 'dictionary') return conversion(a.idlType, expr, where, checks, a.extAttrs);
       const missing = a.default ? defaultValue(a.default, `${iface}.${m.name}(${a.name})`) : 'undefined';
@@ -2108,6 +2241,7 @@ ${wrap(RUNTIME)}
 import {
 ${wrap(REFLECTION)}
 } from '../reflect.js';
+import { EventState, initEventSteps } from '../event-state.js';
 
 ${Object.entries(REFLECT_ENUM_SETS).map(([name, keywords]) => `export const REFLECT_KEYWORDS_${name} = ${keywordTable(keywords)};`).join('\n')}
 
