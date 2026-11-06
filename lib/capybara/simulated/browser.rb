@@ -3730,11 +3730,6 @@ module Capybara
           @image_load_flights.clear
           @image_load_pending = 0
         end
-        Native.cookie_jar_clear(@cookie_jar)
-        Native.http_auth_clear(@auth_cache)
-        Native.storage_clear(@local_storage)
-        Native.session_partition_clear(@session_partition)
-        Native.storage_clear(@session_storage)
         @sticky_headers.clear
         # The driver-side resize buffer has to clear too — without
         # this the previous test's `driver.resize(425, …)` leaks into
@@ -3779,6 +3774,12 @@ module Capybara
         reset_hijacked_fetches
         reset_workers
         reset_websockets
+        # (…what they read and write, once none of them is left to)
+        Native.cookie_jar_clear(@cookie_jar)
+        Native.http_auth_clear(@auth_cache)
+        Native.storage_clear(@local_storage)
+        Native.session_partition_clear(@session_partition)
+        Native.storage_clear(@session_storage)
         # (…and the isolate's BroadcastChannel queue, with the realms the rebuild drops: `forgetRealmObjects`)
         @broadcast_inbox.clear
         # Free any zero-copy transfer backing stores that went unimported
@@ -10654,7 +10655,9 @@ module Capybara
           return chain_response(out, plan, tainted)
         end
       rescue StandardError => e
-        warn "[capybara-simulated] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
+        if e.is_a?(RaisedByApp) then e.tell_driver
+        else warn "[capybara-simulated] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
+        end
         nil
       end
 
@@ -13584,6 +13587,19 @@ module Capybara
             response
           }
         }
+      rescue StandardError => e
+        unless e.frozen?
+          e.extend(RaisedByApp)
+          e.csim_driver = @driver
+        end
+        raise
+      end
+      # What the app raised, as it goes up through a fetch — told from what the driver raises for a redirect or a body: what
+      # makes a network error of it tells the driver (`Driver#app_raised`), whose next call raises it.
+      module RaisedByApp
+        attr_accessor :csim_driver
+
+        def tell_driver = csim_driver&.app_raised(self)
       end
 
       # A body that ended before its Content-Length did: the bytes that came, and then a network error.

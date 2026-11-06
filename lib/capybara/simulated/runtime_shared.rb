@@ -208,8 +208,11 @@ module Capybara
       def self.safe_call
         yield
       rescue StandardError => e
-        warn "[capybara-simulated] host fn error: #{e.class}: #{e.message[0, 200]}"
-        warn "  at #{e.backtrace&.first(4)&.join("\n  at ")}" if ENV['CSIM_HOSTFN_TRACE'] == '1'
+        if e.is_a?(Browser::RaisedByApp) then e.tell_driver
+        else
+          warn "[capybara-simulated] host fn error: #{e.class}: #{e.message[0, 200]}"
+          warn "  at #{e.backtrace&.first(4)&.join("\n  at ")}" if ENV['CSIM_HOSTFN_TRACE'] == '1'
+        end
         nil
       end
 

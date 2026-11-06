@@ -11,6 +11,15 @@ require_relative 'support/poll_until'
 RSpec.describe 'XHR event phases' do
   include PollUntil
 
+  # (…`/boom` a request's network error, what the page sees: the session's raising it is app_error_spec.rb's)
+  around do |example|
+    raising = Capybara.raise_server_errors
+    Capybara.raise_server_errors = false
+    example.run
+  ensure
+    Capybara.raise_server_errors = raising
+  end
+
   let(:app) {
     lambda do |env|
       raise 'boom' if env['PATH_INFO'] == '/boom'

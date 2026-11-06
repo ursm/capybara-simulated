@@ -246,6 +246,7 @@ module Capybara
 
       def browser     = @browser
       def check_stale
+        driver.raise_app_error!
         # Handle integers are per-realm. If the browser is no longer switched
         # to this node's frame (block exited, or a different frame entered),
         # routing its handle through `dom_call` would hit the wrong realm's

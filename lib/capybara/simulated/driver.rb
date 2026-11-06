@@ -226,6 +226,26 @@ module Capybara
       end
 
       def needs_server?       = false
+
+      # An exception of the app's that a fetch made a network error of, for the page: as a browser run has it, whose server
+      # records what the app raises (Capybara::Server::Middleware) and whose session raises it at its next step
+      # (`Session#raise_server_error!`), as `Capybara.server_errors` and `Capybara.raise_server_errors` say — the first
+      # kept, from any thread: a service worker's fetch is its worker's.
+      def app_raised(error)
+        @app_error ||= error if ::Capybara.server_errors.any? {|kind| error.is_a?(kind) }
+      end
+
+      def raise_app_error!
+        error = @app_error or return
+        @app_error = nil
+        return unless ::Capybara.raise_server_errors
+
+        begin
+          raise ::Capybara::CapybaraError, 'Your application server raised an error - It has been raised in your test code because Capybara.raise_server_errors == true'
+        rescue ::Capybara::CapybaraError => cause
+          raise error, cause: cause
+        end
+      end
       def javascript_enabled? = true
 
       # Playwright-driver compatibility shim. Discourse's system-spec
@@ -377,11 +397,20 @@ module Capybara
       # between event-loop frames without perturbing the clock.
       def peek_script(expr) = current_browser.peek_script(expr)
 
-      def visit(path)          = current_browser.visit(path)
-      def refresh              = current_browser.refresh
+      def visit(path)
+        raise_app_error!
+        current_browser.visit(path)
+      end
+
+      def refresh
+        raise_app_error!
+        current_browser.refresh
+      end
+
       def reset!
         reset_windows!
         browser.reset!
+        raise_app_error!
       end
 
       # Start the next fetches from a cold HTTP cache. `reset!` keeps what a persistent
@@ -466,20 +495,35 @@ module Capybara
       # Has this driver been permanently dropped? (A `reset!` between examples does NOT set this —
       # that rebuilds the page on a live runtime.)
       def disposed? = @disposed == true
-      def go_back              = current_browser.go_back
-      def go_forward           = current_browser.go_forward
+      def go_back
+        raise_app_error!
+        current_browser.go_back
+      end
+
+      def go_forward
+        raise_app_error!
+        current_browser.go_forward
+      end
+
       def current_url          = current_browser.current_url || ''
-      def html                 = current_browser.html
+
+      def html
+        raise_app_error!
+        current_browser.html
+      end
+
       def title                = current_browser.title
       def status_code          = current_browser.status_code
       def response_headers     = current_browser.response_headers
       def header(name, value)  = current_browser.set_header(name, value)
 
       def find_xpath(query, **_)
+        raise_app_error!
         current_browser.find_xpath(query).map {|id| Node.new(self, id) }
       end
 
       def find_css(query, **_)
+        raise_app_error!
         current_browser.find_css(query).map {|id| Node.new(self, id) }
       end
 
@@ -942,6 +986,7 @@ module Capybara
       end
 
       def evaluate_script(script, *args)
+        raise_app_error!
         unwrap(current_browser.evaluate_script(script, args))
       end
 
@@ -952,11 +997,13 @@ module Capybara
       # filter recurses into until it stack-overflows) doesn't blow
       # up on the way back.
       def execute_script(script, *args)
+        raise_app_error!
         current_browser.execute_script(script, args)
         nil
       end
 
       def evaluate_async_script(script, *args)
+        raise_app_error!
         unwrap(current_browser.evaluate_async_script(script, args))
       end
 
