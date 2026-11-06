@@ -707,6 +707,32 @@ RSpec.describe 'WebAuthn bindings' do
     end
   end
 
+  # A `data:` frame's declared origin is opaque, matching no origin, its own either, for all both serialize to "null": a
+  # bare `allow` delegates nothing to it (Firefox alike, measured; Chrome's document never answered), and `*` gets as far as
+  # §5.1.4.1's opaque origin.
+  it 'declares no origin for a data: frame' do
+    session = simulated_session(app)
+    session.visit 'http://rp.example.test/'
+    session.driver.browser.webauthn.add_virtual_authenticator({})
+    out = run(session, <<~JS)
+      const inner = `<!doctype html><meta charset="utf-8"><script>
+        navigator.credentials.get({publicKey: {challenge: new Uint8Array(1)}}).then(() => 'none', (e) => e.name + ': ' + e.message).then((m) => parent.postMessage(m, '*'));
+      <\\/script>`;
+      const asked = (allow) => new Promise((resolve) => {
+        const frame = document.createElement('iframe');
+        addEventListener('message', (e) => { if (e.source === frame.contentWindow) resolve(e.data); });
+        frame.allow = allow;
+        frame.src = 'data:text/html,' + encodeURIComponent(inner);
+        document.body.append(frame);
+      });
+      return [await asked('publickey-credentials-get'), await asked('publickey-credentials-get *')];
+    JS
+    expect(out).to eq([
+      "NotAllowedError: The 'publickey-credentials-get' feature is not enabled in this document.",
+      'NotAllowedError: The origin is opaque.'
+    ])
+  end
+
   # An RP ID is a valid domain string (§4; URL's strict domain parser), and HTML "is a registrable domain suffix of or is
   # equal to" compares what it parses to: capitals pass, and stay as given (Chrome and Firefox both say SecurityError,
   # measured: the rule is explicit), where a percent sign and a tab are no such string (both browsers alike), nor an

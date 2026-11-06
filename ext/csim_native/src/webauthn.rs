@@ -192,13 +192,14 @@ fn ccd_string(text: &str) -> String {
 // ── Permissions Policy, as a frame's container declares it (§5.9) ────────────────────────────────────────────────────
 // A container's declared origin (Permissions Policy "declared origin"): none, opaque, for a sandboxed document or
 // `sandbox` attribute without `allow-same-origin`; its document's origin (`parent`) for `srcdoc`, no `src` or one that
-// does not parse; else the origin of its `src`, relative to its document (`base`).
+// does not parse; else the origin of its `src`, relative to its document (`base`) — none for a `data:` URL's, as an
+// opaque origin matches no other, though both serialize to "null".
 fn declared_origin(parent: &str, sandbox: Option<&str>, srcdoc: bool, src: Option<&str>, base: &str) -> Option<String> {
     if parent == "null" || crate::sandbox::opaque_origin(None, sandbox) {
         return None;
     }
     let parsed = src.filter(|_| !srcdoc).and_then(|src| ada_url::Url::parse(src, Some(base)).ok());
-    Some(parsed.map_or_else(|| parent.to_owned(), |url| url.origin().to_owned()))
+    Some(parsed.map_or_else(|| parent.to_owned(), |url| url.origin().to_owned())).filter(|origin| origin != "null")
 }
 // What an iframe's `allow` attribute says of `feature` for a document of origin `own` in it: none where it does not name
 // it. Its allowlist — `'src'` where it gives none — is `*`, `'self'` (the container document's origin, `parent`), `'src'`
@@ -1533,6 +1534,7 @@ mod tests {
         assert_eq!(declared(Some("allow-scripts"), false, None), None);
         assert_eq!(declared(Some("allow-same-origin"), false, None).as_deref(), Some("https://a.test"));
         assert_eq!(declared_origin("null", None, false, None, ""), None);
+        assert_eq!(declared(None, false, Some("data:text/html,x")), None);
     }
 
     #[test]
