@@ -1608,10 +1608,10 @@ mod tests {
     #[test]
     fn rows_are_held_to_what_a_box_touches() {
         let mut buf = vec![0u8; 4 * 3 * 4];
-        let rows: Vec<usize> = pixel_rows(&mut buf, 4, 3, Some([0.5, 1.0, 2.0, 2.0])).map(<[u8]>::len).collect();
+        let rows: Vec<usize> = pixel_rows(&mut buf, 4, 3, Some([0.5, 1.0, 2.0, 2.0])).map(|row| row.len()).collect();
         assert_eq!(rows, vec![8]);
         assert_eq!(pixel_rows(&mut buf, 4, 3, None).count(), 3);
-        assert_eq!(pixel_rows(&mut buf, 4, 3, Some([-9.0, -9.0, 99.0, 99.0])).map(<[u8]>::len).sum::<usize>(), 48);
+        assert_eq!(pixel_rows(&mut buf, 4, 3, Some([-9.0, -9.0, 99.0, 99.0])).map(|row| row.len()).sum::<usize>(), 48);
         assert_eq!(pixel_rows(&mut buf, 4, 3, Some([9.0, 9.0, 99.0, 99.0])).count(), 0);
         assert_eq!(pixel_rows(&mut buf, 4, 3, Some([f64::NAN, 0.0, f64::NAN, 1.0])).count(), 1);
     }
