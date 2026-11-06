@@ -306,6 +306,8 @@ impl RealmArena {
         match nav.containers.get(&cid) {
             Some(container) => nav.children.get(container).filter(|c| c.realm == Some(cid)).map_or(&[][..], |c| &c.name).into(),
             None if cid == 0 && nav.history != 0 => crate::session_history::name_of(nav.history).unwrap_or_default().into(),
+            // (…a window discarded has no navigable: HTML's `name` getter, the empty string)
+            None if nav.lost.contains(&cid) => (&[][..]).into(),
             None => nav.top_names.get(&cid).map_or(&[][..], Vec::as_slice).into(),
         }
     }

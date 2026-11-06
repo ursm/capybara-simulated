@@ -543,7 +543,11 @@ module Capybara
         opener = false if opener && url.to_s.start_with?('blob:') && source && cross_partition_blob?(url, source, activation_realm.to_i)
         # (…and none from a document of another origin than its top-level one's under a same-origin opener policy: HTML
         # "the rules for choosing a navigable", Browser#opener_policy_isolates?)
-        opener = false if opener && source&.opener_policy_isolates?(activation_realm.to_i)
+        # (…"Set noopener to true. Set name to "_blank"": a window of no name)
+        if opener && source&.opener_policy_isolates?(activation_realm.to_i)
+          opener = false
+          name   = ''
+        end
         # (…the window's own navigation carrying whether its opener had it: the source snapshot's — its plan's, where a
         # hyperlink or a form planned it, else taken as it opens)
         # (…the driver's own window had it, of no opener; one a document opened consumes its window's, which one of

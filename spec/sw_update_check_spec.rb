@@ -90,7 +90,13 @@ RSpec.describe 'a service worker update', :every_host_local do
     expect(requests['/sw.js'].size).to eq(3)
     script('/a.js', 'self.a = 2;')
     expect(update).to be(true)
-    session.has_css?('#none', wait: 0.1)
+    # (…its new version evaluated, its install reached: nothing of it fetched that the map held)
+    session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const w = reg.installing || reg.waiting;
+      if (w.state !== 'installing') done();
+      else w.addEventListener('statechange', () => done());
+    JS
     expect(requests['/sw.js'].size).to eq(4)
   end
 

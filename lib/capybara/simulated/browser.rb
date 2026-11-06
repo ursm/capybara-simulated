@@ -8225,7 +8225,8 @@ module Capybara
       # Referer its request sent and its policy, and its origin, `null` an error document's — a new opaque one — its
       # Content-Security-Policy and Refresh the response headers' own, as the page's commit reads them).
       # (…`traversable` the window's, kept across the switch: its session history and its session storage this one's)
-      # (…`made[:blob]` the blob a `blob:` URL's document is made of, its type its document's: `boot_blob_document`; an
+      # (…`made[:content_type]` the type it is made as, which its body may have said: mime.rs `load`; `made[:blob]` the blob a
+      # `blob:` URL's document is made of, its type its document's: `boot_blob_document`; an
       # about:blank one's its initiator's origin and base URL, as the page's takes them: `navigate_top_level`. `made[:entry]`
       # what the navigation does to the session history: `navigate_window_realm`)
       def adopt_navigation_response(url, response, body, made, traversable: nil)
@@ -8253,7 +8254,7 @@ module Capybara
         inherit_creator(origin: made[:doc_origin], base: made[:about_base]) if about_blank_url?(url)
         self.page_url = url.to_s
         record_response(*response)
-        boot_response_into_ctx(body.to_s, opaque_origin: made[:doc_origin] == 'null', coop_switch: true, client_id: made[:client_id])
+        boot_response_into_ctx(body.to_s, opaque_origin: made[:doc_origin] == 'null', coop_switch: true, content_type: made[:content_type], client_id: made[:client_id])
       end
 
 
@@ -11134,7 +11135,7 @@ module Capybara
           # (…its entry's resource the POST that made it — none where a redirect made it a GET: a 301, 302 or 303's; a 307
           # or 308 keeps it, Fetch "HTTP-redirect fetch")
           post = nil if resp['method'] == 'GET'
-          ctype, csp, referrer_policy, refresh, opener_policy = Native.document_params(headers)
+          ctype, csp, referrer_policy, refresh, opener_policy = Native.document_params(headers, resp['url'] || url.to_s)
           ctype     = resp['document_type'] || ctype
           body, url = document_payload(resp['body_bytes'] || resp['body']), resp['url'] || url
           ctype   ||= 'text/html'
@@ -11175,7 +11176,7 @@ module Capybara
         response_origin = blob ? url_origin(url.to_s.sub(/\Ablob:/i, '')) : made[:doc_origin] || url_origin(url)
         switch, = history&.commit_opener_policy(opener_policy || 'unsafe-none', response_origin.to_s, switch == true) { coop_leaving_facts(realm_id) }
         if switch && @driver.respond_to?(:move_window_to_new_group)
-          moved = made.merge(entry: entry, blob: blob && blob.merge(type: ctype))
+          moved = made.merge(entry: entry, content_type: ctype, blob: blob && blob.merge(type: ctype))
           return @driver.move_window_to_new_group(self, realm_id, url, response || [200, {'content-type' => ctype.to_s}], body, moved)
         end
         # (…the window's initial about:blank's realm the one a document of its origin is loaded into, its Window kept — and
@@ -11952,7 +11953,7 @@ module Capybara
         tag_frame_entry_post(realm_id, req_body, content_type, origin_null ? 'null' : url_origin(origin_url)) if fetch.request_method == 'POST'
         # (…and what the caller's document state gives it — a traversal's form state and history state — none where a
         # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
-        ctype, csp, document_policy, refresh = Native.document_params(hop.headers)
+        ctype, csp, document_policy, refresh = Native.document_params(hop.headers, '')
         ctype = hop.document_type || ctype
         response = {client_id: hop.client_id, csp: csp, referrer: fetch.referrer, referrer_policy: document_policy, refresh: refresh}
         response.update(commit) unless fetch.redirected?
@@ -12810,10 +12811,9 @@ module Capybara
       # (a response's, an about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context
       # group is left for a new one where needed (session_history.rs `commit_opener_policy`), `carried` what its navigation's
       # enforcement result needed (navigation_fetch.rs `CoopEnforcement`), and the next document as cross-origin isolated as
-      # that makes it — every document here in a secure context, as `isSecureContext` says (a real browser's
-      # http://www.example.com would not be; its http://127.0.0.1 would). Not modelled: a cross-origin frame's own
-      # `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service worker's own COEP
-      # (it is never isolated here).
+      # that makes it. (…a response in a context not secure of no policy: coop.rs `obtain`, though `isSecureContext` answers true
+      # everywhere here) Not modelled: a cross-origin frame's own `allow="cross-origin-isolated"` permission (it shares the
+      # top-level document's here), nor a service worker's own COEP (it is never isolated here).
       private def commit_coop(coop, origin, carried)
         switch, isolated = @session_history.commit_opener_policy(coop, origin.to_s, carried == true) { coop_leaving_facts(0) }
         return unless switch
@@ -12825,7 +12825,10 @@ module Capybara
       # response"): the next document a new browsing context's, of a group of its own — named anew, which its realms are
       # made in — and the windows the documents before it opened none of its: their `opener` null (navigables.rs
       # `forget_page_openings`), of the group the page leaves, which they keep (v8_runtime.rb `window_group`).
+      # (…its document state's target name none: Chrome and Firefox, of the same origin too; HTML's own rule is of another
+      # origin's, WPT coep-navigate-popup and coop-navigated-popup of both)
       private def leave_browsing_context_group
+        @session_history.clear_name
         @runtime.call('__csimForgetPageOpenings')
         @runtime.page_left_group!
         @browsing_context_group = "g#{object_id}.#{@group_seq = @group_seq.to_i + 1}"
@@ -12875,7 +12878,7 @@ module Capybara
         drop_document_websockets
         # (…what its response makes it: its content type, its policy container's CSP and referrer policy, its declarative
         # refresh, its opener policy — response_headers.rs `document_params`)
-        ctype, csp, referrer_policy, refresh, opener_policy = inline ? ['text/html', nil, nil, nil, 'unsafe-none'] : Native.document_params(@last_response_headers)
+        ctype, csp, referrer_policy, refresh, opener_policy = inline ? ['text/html', nil, nil, nil, 'unsafe-none'] : Native.document_params(@last_response_headers, page_url.to_s)
         ctype = content_type || ctype
         # (…its opener policy, what a navigation of the page after is judged by — the page's browsing context group left for
         # a new one where it needs, and what that makes it cross-origin isolated: `commit_coop`)

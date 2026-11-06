@@ -456,7 +456,7 @@ impl NavigationFetch {
         let mut slot = self.coop.borrow_mut();
         let Some(result) = slot.as_mut() else { return Ok(true) };
         let target = self.st.borrow().chain.target.clone();
-        result.enforce(fields.opener_policy(), fields.csp.as_deref(), &target, || ruby.yield_value(ruby.qnil()))
+        result.enforce(fields.opener_policy(&target), fields.csp.as_deref(), &target, || ruby.yield_value(ruby.qnil()))
     }
 
     // What a redirect response of the hop makes of the navigation, its Location fields `locations`, its

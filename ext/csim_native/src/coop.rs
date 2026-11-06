@@ -36,18 +36,84 @@ impl Value {
     }
 }
 
-// The token a structured header item's value is (RFC 9651), its parameters let go — none for anything else.
+// The token a structured header item's value is (RFC 9651 "get a structured field value", item), none for anything else,
+// parameters that do not parse among it: Chrome and Firefox alike take `same-origin;` and a repeated header for no policy
+// (WPT header-parsing-failures, header-parsing-repeated).
 fn token(header: &str) -> Option<&str> {
-    let item = header.split(';').next()?.trim_matches([' ', '\t']);
-    let mut chars = item.chars();
-    let first = chars.next()?;
-    ((first.is_ascii_alphabetic() || first == '*') && chars.all(|c| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~:/".contains(c))).then_some(item)
+    const TOKEN_CHARS: &str = "!#$%&'*+-.^_`|~:/";
+    let is_token = |c: char| c.is_ascii_alphanumeric() || TOKEN_CHARS.contains(c);
+    let item = header.trim_matches(' ');
+    let first = item.chars().next()?;
+    if !first.is_ascii_alphabetic() && first != '*' {
+        return None;
+    }
+    let end = item.find(|c| !is_token(c)).unwrap_or(item.len());
+    let (value, mut rest) = item.split_at(end);
+    while !rest.is_empty() {
+        rest = rest.strip_prefix(';')?.trim_start_matches(' ');
+        rest = parameter(rest)?;
+    }
+    Some(value)
 }
 
-// HTML "obtain an opener policy" given a response's `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy`
-// (every document here in a secure context): "same-origin" with an embedder policy compatible with cross-origin
-// isolation (`require-corp`, `credentialless`) "same-origin-plus-COEP", an unknown value "unsafe-none".
-pub(crate) fn obtain(coop: Option<&str>, coep: Option<&str>) -> Value {
+// …one parameter off `input`, what is left of it: a key, and a bare item where it has `=`.
+fn parameter(input: &str) -> Option<&str> {
+    let first = input.chars().next()?;
+    if !first.is_ascii_lowercase() && first != '*' {
+        return None;
+    }
+    let end = input.find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || "_-.*".contains(c))).unwrap_or(input.len());
+    match input[end..].strip_prefix('=') {
+        Some(value) => bare_item(value),
+        None => Some(&input[end..]),
+    }
+}
+
+// …a bare item off `input`, what is left of it: a string, a byte sequence, a boolean, a number or a token.
+fn bare_item(input: &str) -> Option<&str> {
+    let first = input.chars().next()?;
+    match first {
+        '"' => {
+            let mut chars = input.char_indices().skip(1);
+            while let Some((at, c)) = chars.next() {
+                match c {
+                    '"' => return Some(&input[at + 1..]),
+                    '\\' => {
+                        chars.next().filter(|(_, c)| matches!(c, '"' | '\\'))?;
+                    }
+                    ' '..='~' => {}
+                    _ => return None,
+                }
+            }
+            None
+        }
+        ':' => {
+            let body = &input[1..];
+            let end = body.find(':')?;
+            body[..end].chars().all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c)).then(|| &body[end + 1..])
+        }
+        '?' => input[1..].strip_prefix(['0', '1']),
+        '-' | '0'..='9' => {
+            let body = input.strip_prefix('-').unwrap_or(input);
+            let end = body.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(body.len());
+            (end > 0 && body[..end].matches('.').count() <= 1 && !body[..end].ends_with('.')).then(|| &body[end..])
+        }
+        c if c.is_ascii_alphabetic() || c == '*' => {
+            let end = input.find(|c: char| !(c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~:/".contains(c))).unwrap_or(input.len());
+            Some(&input[end..])
+        }
+        _ => None,
+    }
+}
+
+// HTML "obtain an opener policy" given a response's `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` and
+// whether its reserved environment is a secure context (none in one that is not): "same-origin" with an embedder policy
+// compatible with cross-origin isolation (`require-corp`, `credentialless`) "same-origin-plus-COEP", an unknown value
+// "unsafe-none".
+pub(crate) fn obtain(coop: Option<&str>, coep: Option<&str>, secure: bool) -> Value {
+    if !secure {
+        return Value::UnsafeNone;
+    }
     let compatible = matches!(coep.and_then(token), Some("require-corp" | "credentialless"));
     match coop.and_then(token) {
         Some("same-origin") if compatible => Value::SameOriginPlusCoep,
@@ -136,12 +202,42 @@ mod tests {
 
     #[test]
     fn a_response_s_policy_is_its_header_s_token_made_plus_coep_by_a_compatible_embedder_policy() {
-        assert_eq!(obtain(Some("same-origin"), Some("require-corp")), Value::SameOriginPlusCoep);
-        assert_eq!(obtain(Some("same-origin; report-to=\"x\""), Some("credentialless")), Value::SameOriginPlusCoep);
-        assert_eq!(obtain(Some("same-origin"), Some("unsafe-none")), Value::SameOrigin);
-        assert_eq!(obtain(Some("same-origin-allow-popups"), None), Value::SameOriginAllowPopups);
-        assert_eq!(obtain(Some("\"same-origin\""), None), Value::UnsafeNone);
-        assert_eq!(obtain(None, Some("require-corp")), Value::UnsafeNone);
+        let of = |coop, coep| obtain(coop, coep, true);
+        assert_eq!(of(Some("same-origin"), Some("require-corp")), Value::SameOriginPlusCoep);
+        assert_eq!(of(Some("same-origin; report-to=\"x\""), Some("credentialless")), Value::SameOriginPlusCoep);
+        assert_eq!(of(Some("same-origin"), Some("unsafe-none")), Value::SameOrigin);
+        assert_eq!(of(Some("same-origin-allow-popups"), None), Value::SameOriginAllowPopups);
+        assert_eq!(of(None, Some("require-corp")), Value::UnsafeNone);
+        assert_eq!(of(Some(" same-origin "), None), Value::SameOrigin);
+        assert_eq!(of(Some("same-origin;foo=bar;baz;n=1.5;b=?1;t=tok;y=:AA==:"), None), Value::SameOrigin);
+    }
+
+    #[test]
+    fn a_header_that_is_no_structured_item_token_is_no_policy() {
+        for bad in [
+            "\"same-origin\"",
+            ":c2FtZS1vcmlnaW4=:",
+            "same-origin;",
+            "\u{b}same-origin\u{b}",
+            "\u{c}same-origin\u{c}",
+            "\rsame-origin\r",
+            "Same-origin",
+            "same-origin;\tfoo=bar",
+            "same-origin ;foo=bar",
+            "same-origin; foo=bar;",
+            "same-origin, same-origin",
+            "same-origin same-origin",
+            "same-origin; Foo=bar",
+            "same-origin; foo=",
+            "same-origin; foo=\"bar",
+        ] {
+            assert_eq!(obtain(Some(bad), None, true), Value::UnsafeNone, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn no_policy_in_a_context_not_secure() {
+        assert_eq!(obtain(Some("same-origin"), Some("require-corp"), false), Value::UnsafeNone);
     }
 
     #[test]

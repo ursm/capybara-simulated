@@ -339,7 +339,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("message_length", magnus::function!(headers::message_length_for_ruby, 1))?;
     native.define_module_function("link_noopener", magnus::function!(token_list::noopener_for_ruby, 2))?;
     native.define_module_function("site", magnus::function!(realm_location::site_for_ruby, 1))?;
-    native.define_module_function("document_params", magnus::function!(response_headers::document_params, 1))?;
+    native.define_module_function("document_params", magnus::function!(response_headers::document_params, 2))?;
     native.define_module_function("header_map", magnus::function!(response_headers::header_map_for_ruby, 1))?;
     native.define_module_function("location_fields", magnus::function!(response_headers::location_fields_for_ruby, 1))?;
     native.define_module_function("redirect_locations", magnus::function!(response_headers::redirect_locations_for_ruby, 2))?;

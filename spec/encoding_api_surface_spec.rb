@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # The WebIDL edges of TextDecoder / TextEncoder / URL / FormData, and a cross-origin WindowProxy's [[Set]] / [[Delete]]:
 # what Chrome throws or keeps, held here because no vendored WPT file asserts it.
@@ -135,10 +136,10 @@ RSpec.describe 'Encoding API surface' do
 
   # …and one whose top-level document is served COOP same-origin + COEP require-corp is: `crossOriginIsolated`, and its
   # SharedArrayBuffer — its frames' and its dedicated workers' too.
-  it 'is cross-origin isolated, SharedArrayBuffer and all, where its document is served COOP and COEP' do
+  it 'is cross-origin isolated, SharedArrayBuffer and all, where its document is served COOP and COEP', :every_host_local do
     headers = {'content-type' => 'text/html', 'cross-origin-opener-policy' => 'same-origin', 'cross-origin-embedder-policy' => 'require-corp'}
     isolated = simulated_session(->(env) { [200, headers, [env['PATH_INFO'] == '/' ? '<iframe src="/child"></iframe>' : '<p>child</p>']] })
-    isolated.visit '/'
+    isolated.visit 'https://www.example.com/'
     isolated.execute_script(<<~JS)
       window.got = null;
       const w = new Worker(URL.createObjectURL(new Blob(['postMessage([crossOriginIsolated, typeof SharedArrayBuffer])'], {type: 'text/javascript'})));
@@ -150,10 +151,10 @@ RSpec.describe 'Encoding API surface' do
 
   # An about:blank pop-up its opener keeps is in its browsing context group, cross-origin isolated as it is (its
   # creator's policy container; Chrome 154 too, measured) — and the session's next page, after a reset, is not.
-  it "isolates an about:blank pop-up as its opener, and forgets it at the session's reset" do
+  it "isolates an about:blank pop-up as its opener, and forgets it at the session's reset", :every_host_local do
     headers = {'content-type' => 'text/html', 'cross-origin-opener-policy' => 'same-origin', 'cross-origin-embedder-policy' => 'require-corp'}
     isolated = simulated_session(->(_env) { [200, headers, ['<p>isolated</p>']] })
-    isolated.visit '/'
+    isolated.visit 'https://www.example.com/'
     popup = isolated.window_opened_by { isolated.execute_script("window.open('about:blank', 'p')") }
     got = isolated.within_window(popup) { isolated.evaluate_script('[crossOriginIsolated, typeof SharedArrayBuffer]') }
     expect(got).to eq([true, 'function'])

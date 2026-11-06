@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # The structured clone (HTML §2.7), V8's own serializer (clone.rs) with the bindings saying what each platform object
 # serializes to: the JavaScript values with their cycles and shared references; a DOMException — any realm's — made
@@ -323,7 +324,7 @@ RSpec.describe 'Structured clone of platform objects' do
 
   # …keyed by ORIGIN in a cross-origin isolated group (HTML "obtain a similar-origin window agent"): a same-site frame of
   # another origin is another agent cluster there.
-  it 'keys the agent cluster by origin in a cross-origin isolated page' do
+  it 'keys the agent cluster by origin in a cross-origin isolated page', :every_host_local do
     isolated = {
       'cross-origin-opener-policy'   => 'same-origin',
       'cross-origin-embedder-policy' => 'require-corp',
@@ -346,7 +347,7 @@ RSpec.describe 'Structured clone of platform objects' do
       end
     end
     s = simulated_session(coi_app)
-    s.visit '/'
+    s.visit 'https://www.example.com/'
     expect(s.evaluate_script('crossOriginIsolated')).to be(true)
     s.execute_script(<<~JS)
       const m = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
@@ -359,7 +360,7 @@ RSpec.describe 'Structured clone of platform objects' do
 
   # …and so is a SharedArrayBuffer's memory, read back in the agent cluster it was serialized in alone (HTML
   # StructuredDeserialize: another's a DataCloneError, the message's `messageerror`).
-  it 'shares a SharedArrayBuffer with the agent cluster it was serialized in alone' do
+  it 'shares a SharedArrayBuffer with the agent cluster it was serialized in alone', :every_host_local do
     isolated = {
       'cross-origin-opener-policy'   => 'same-origin',
       'cross-origin-embedder-policy' => 'require-corp',
@@ -382,7 +383,7 @@ RSpec.describe 'Structured clone of platform objects' do
       end
     end
     s = simulated_session(coi_app)
-    s.visit '/'
+    s.visit 'https://www.example.com/'
     s.execute_script(<<~JS)
       window.sab = new SharedArrayBuffer(8);
       for (const id of ['same', 'sibling']) document.getElementById(id).contentWindow.postMessage(sab, '*');
