@@ -187,6 +187,13 @@ RSpec.describe 'a secure context' do
     end
   end
 
+  # (…none where it is none, Geolocation's permission denied: Chrome and Firefox on a LAN IP alike)
+  it 'denies geolocation where it is none, a watch removed with it', :every_host_local do
+    session.visit('http://a.test/')
+    expect(session.evaluate_async_script("navigator.geolocation.getCurrentPosition(() => arguments[0]('position'), (e) => arguments[0](e.code))")).to eq(1)
+    expect(session.evaluate_async_script("navigator.geolocation.watchPosition(() => arguments[0]('position'), (e) => arguments[0](e.code))")).to eq(1)
+  end
+
   # (…a secure context's to register, as a real 127.0.0.1's: no "universal server" asked for)
   it 'registers a service worker on the default host' do
     session.visit('/')

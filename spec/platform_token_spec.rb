@@ -130,6 +130,25 @@ RSpec.describe 'the platform\'s token for its own constructions' do
     expect(illegal).to eq([])
   end
 
+  # Web IDL's constructor steps read NewTarget's `prototype` once, as the object is made.
+  it 'reads NewTarget\'s `prototype` once', :every_host_local do
+    session.visit('https://a.test/')
+    counts = session.evaluate_script(<<~JS)
+      [
+        (t) => Reflect.construct(DOMException, ['m', 'NotFoundError'], t),
+        (t) => Reflect.construct(QuotaExceededError, ['m'], t),
+        (t) => Reflect.construct(Option, [], t)
+      ].map((make) => {
+        let reads = 0;
+        function NewTarget() {}
+        const target = new Proxy(NewTarget, { get(t, p, r) { if (p === 'prototype') reads++; return Reflect.get(t, p, r); } });
+        make(target);
+        return reads;
+      });
+    JS
+    expect(counts).to eq([1, 1, 1])
+  end
+
   it 'keeps a page\'s subclass of a flat interface a subclass', :every_host_local do
     session.visit('https://a.test/')
     expect(session.evaluate_script(<<~JS)).to eq([true, true, true, true, 'x', true])

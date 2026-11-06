@@ -48,7 +48,7 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // has one, stays the implementation's. `event`: an event interface, whose class the binding makes too (`eventInterface`:
 // `define<Name>(Parent, impl)`), its attributes slots of its state that its init fills — but what `event` says otherwise.
 // `steps`: attributes whose getter and setter steps the implementation's (`impl.get_x(state)`), no slot of theirs filled.
-// `slots`: attributes that read another's slot, by the slot. `init`: attributes `impl.init(state, init)` fills instead, as
+// `slots`, in `event`: attributes that read another's slot, by the slot. `init`: attributes `impl.init(state, init)` fills instead, as
 // the object is made — and it may fill
 // any other state of the event's: [] for that alone. `initialized`: its legacy `init…` operation goes on with
 // `impl.initialized(state)`, for what it resets that no argument names.
