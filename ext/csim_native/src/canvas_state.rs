@@ -3,7 +3,7 @@
 // its range as the spec has it — and the stack `save()` pushes it onto and `restore()` pops it off. A context's object
 // holds a handle on V8's C++ heap (`__dom.CanvasStateBase`, as a range's does: ranges.rs) that owns the state; the paint
 // objects of its fill and stroke styles — a gradient, a pattern, the same object reading back — and its clip mask are
-// references it traces, the current state's and each saved one's. Drawing reads it here (canvas.rs `canvas_draw`, the
+// references it traces, the current state's and each saved one's. Drawing reads it here (canvas.rs `draw`, the
 // shapes and paths of canvas_path.rs): the bindings pack none of it.
 
 use std::cell::{Cell, RefCell, UnsafeCell};

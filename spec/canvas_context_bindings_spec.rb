@@ -148,6 +148,19 @@ RSpec.describe 'Canvas context bindings' do
         const attr = canvas.getAttributeNode('width');
         attr.value = '5';
         out.push(covered(ctx, 5, 3));
+        attr.nodeValue = '6';
+        out.push(covered(ctx, 6, 3));
+        canvas.removeAttributeNode(attr);
+        out.push(blank(ctx), covered(ctx, 300, 3));
+        canvas.setAttributeNode(attr);
+        out.push(blank(ctx), covered(ctx, 6, 3));
+        canvas.attributes.removeNamedItem('width');
+        out.push(blank(ctx), covered(ctx, 300, 3));
+        canvas.attributes.setNamedItem(attr);
+        out.push(blank(ctx), covered(ctx, 6, 3));
+        canvas.toggleAttribute('width');
+        out.push(blank(ctx), covered(ctx, 300, 3));
+        canvas.width = 7;
         canvas.width = 0;
         ctx.fillRect(0, 0, 10, 10);
         ctx.fillStyle = 'red';
@@ -174,6 +187,12 @@ RSpec.describe 'Canvas context bindings' do
       0, [255, 0, 255, 0],
       [255, 0, 255, 0],
       [255, 0, 255, 0],
+      [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
+      0, [255, 0, 255, 0],
       0, '#000000', 0,
       [255, 0, 255, 0],
       0, [255, 0, 255, 0],
@@ -336,5 +355,37 @@ RSpec.describe 'Canvas context bindings' do
       img.src = 'http://other.test/a.png';
     JS
     expect(got).to eq(%w[IndexSizeError RangeError none IndexSizeError SecurityError])
+  end
+
+  # createImageBitmap, for an ImageData: "If IsDetachedBuffer(buffer) is true, then return a promise rejected with an
+  # "InvalidStateError" DOMException." — after its own arguments' refusals ("If either sw or sh is given and is 0, then
+  # return a promise rejected with a RangeError."; a resize of 0, an InvalidStateError) — and a bitmap of it its own
+  # pixels: a linear one's encoded, a float16 one's 8-bit, an array changed later not in it.
+  it 'takes an ImageData as createImageBitmap says' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const rejected = (p) => p.then(() => 'none', (e) => e.name);
+      const pixels = (bm) => {
+        const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+        ctx.drawImage(bm, 0, 0);
+        return [...ctx.getImageData(0, 0, 1, 1).data];
+      };
+      (async () => {
+        const gone = new ImageData(1, 1);
+        structuredClone(gone.data.buffer, {transfer: [gone.data.buffer]});
+        const live = new ImageData(new Uint8ClampedArray([1, 2, 3, 255]), 1, 1);
+        const kept = await createImageBitmap(live);
+        live.data[0] = 200;
+        done([
+          await rejected(createImageBitmap(gone)),
+          await rejected(createImageBitmap(gone, 0, 0, 0, 1)),
+          await rejected(createImageBitmap(gone, {resizeWidth: 0})),
+          pixels(kept),
+          pixels(await createImageBitmap(new ImageData(new Uint8ClampedArray([128, 0, 0, 255]), 1, 1, {colorSpace: 'srgb-linear'}))),
+          pixels(await createImageBitmap(new ImageData(new Float16Array([0.5, 0, 0, 1]), 1, 1, {pixelFormat: 'rgba-float16'})))
+        ]);
+      })();
+    JS
+    expect(got).to eq(['InvalidStateError', 'RangeError', 'InvalidStateError', [1, 2, 3, 255], [188, 0, 0, 255], [128, 0, 0, 255]])
   end
 end

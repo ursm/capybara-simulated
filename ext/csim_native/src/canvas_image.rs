@@ -4,7 +4,9 @@
 // `<video>` — the bindings classify the object, the engine judges it from what each holds (image_bitmaps.rs,
 // canvas_state.rs, offscreen_canvas.rs, image_requests.rs, media.rs).
 
-use crate::canvas::{bytes_read, draw, throw_oom, zeroed_bytes, Oom, Shape};
+use std::borrow::Cow;
+
+use crate::canvas::{bitmap_pixels, bytes_read, convert_spaces, draw, throw_oom, unorm8, zeroed_bytes, Oom, Shape};
 use crate::canvas_path::Path;
 use crate::canvas_state::CanvasStateHandle;
 use crate::dom::{dom, register};
@@ -92,6 +94,24 @@ fn judge(scope: &mut v8::PinScope<'_, '_>, kind: u32, source: v8::Local<'_, v8::
     }
 }
 
+// What a source judged usable has to read: its pixels (null for a blank one), its Display P3 rendering (null for none) and
+// whether the first are Display P3 values.
+fn views_of<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    kind: u32,
+    source: v8::Local<'_, v8::Value>,
+    context: v8::Local<'_, v8::Value>,
+) -> (v8::Local<'s, v8::Value>, v8::Local<'s, v8::Value>, bool) {
+    let null: v8::Local<'s, v8::Value> = v8::null(scope).into();
+    match kind {
+        BITMAP => crate::image_bitmaps::source_pixels(scope, source),
+        CANVAS | OFFSCREEN => crate::canvas_state::handle(scope, context).map(|c| (c.bitmap(scope), null, c.display_p3())),
+        IMAGE => nid_of(scope, source).and_then(|id| crate::image_requests::source_pixels(scope, id)),
+        _ => nid_of(scope, source).and_then(|id| dom(scope).arena.video_frames.get(&id).cloned()).map(|frame| (frame.view(scope), null, false)),
+    }
+    .unwrap_or((null, null, false))
+}
+
 // The pixels a canvas in `target`'s colour space reads of a source judged usable, and whether they are Display P3 values:
 // its own, or, for a wide-profile source and a Display P3 canvas, its Display P3 rendering, whose wide colours survive —
 // transparent black, a buffer of their own, for a blank one.
@@ -107,14 +127,7 @@ fn pixels_of<'s>(
         let [w, h] = judged.size.map(|v| v as usize);
         return Ok((crate::dom::u8_clamped_array(scope, zeroed_bytes(w * h * 4)?), false));
     }
-    let null: v8::Local<'s, v8::Value> = v8::null(scope).into();
-    let (pixels, wide, display_p3) = match kind {
-        BITMAP => crate::image_bitmaps::source_pixels(scope, source),
-        CANVAS | OFFSCREEN => crate::canvas_state::handle(scope, context).map(|c| (c.bitmap(scope), null, c.display_p3())),
-        IMAGE => nid_of(scope, source).and_then(|id| crate::image_requests::source_pixels(scope, id)),
-        _ => nid_of(scope, source).and_then(|id| dom(scope).arena.video_frames.get(&id).cloned()).map(|frame| (frame.view(scope), null, false)),
-    }
-    .unwrap_or((null, null, false));
+    let (pixels, wide, display_p3) = views_of(scope, kind, source, context);
     Ok(if target.display_p3() && !wide.is_null() { (wide, true) } else { (pixels, display_p3) })
 }
 
@@ -132,6 +145,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "canvasImageSource", canvas_image_source_op, context_id);
     register(scope, ns, "canvasDrawImage", canvas_draw_image, context_id);
     register(scope, ns, "canvasPatternTile", canvas_pattern_tile, context_id);
+    register(scope, ns, "imageBitmapOfSource", image_bitmap_of_source, context_id);
+    register(scope, ns, "imageBitmapOfBlob", image_bitmap_of_blob, context_id);
+    register(scope, ns, "imageBitmapOfImageData", image_bitmap_of_image_data, context_id);
 }
 
 // __dom.canvasImageSource(kind, source, contextState) -> [verdict, width, height, tainted, blank] of a source (`judge`).
@@ -202,7 +218,7 @@ fn canvas_draw_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 }
 
 // __dom.canvasPatternTile(paint, wrapper, state, kind, source, contextState, repetition): a pattern made of a source judged
-// usable (`canvasImageSource`) for the context `state`, its tile a copy of the pixels it reads now (`canvasPatternInit`): a
+// usable (`canvasImageSource`) for the context `state`, its tile a copy of the pixels it reads now (canvas_paint.rs `init_pattern`): a
 // later draw to a live source canvas does not change the pattern. A RangeError for a tile too large to hold.
 fn canvas_pattern_tile(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = crate::canvas_state::handle(scope, args.get(2)) else { return };
@@ -214,6 +230,164 @@ fn canvas_pattern_tile(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let tile = crate::dom::u8_clamped_array(scope, tile);
     let repetition = args.get(6).uint32_value(scope).unwrap_or(0);
     crate::canvas_paint::init_pattern(scope, args.get(0), args.get(1), tile, judged.size.map(f64::from), repetition, p3);
+}
+
+// ── createImageBitmap (HTML §8.10) ──
+// Why it refuses, past the source's verdicts (`BAD` its plain InvalidStateError, the rest usability's): a crop of no area
+// is a RangeError.
+const CROP_NO_AREA: u32 = 6;
+
+// What it was asked to do to the pixels: `[crop, sx, sy, sw, sh, resizeWidth, resizeHeight, flipY, colorSpaceConversion
+// is "none"]`, `crop` and the flags 0 or 1 and a resize size NaN when the options give none.
+struct Steps {
+    crop: Option<[f64; 4]>,
+    resize: [f64; 2],
+    flip: bool,
+    unmanaged: bool,
+}
+
+impl Steps {
+    fn of(g: &[f64]) -> Option<Steps> {
+        let &[crop, sx, sy, sw, sh, rw, rh, flip, unmanaged] = g else { return None };
+        Some(Steps { crop: (crop != 0.0).then_some([sx, sy, sw, sh]), resize: [rw, rh], flip: flip != 0.0, unmanaged: unmanaged != 0.0 })
+    }
+    // Its own steps first, whatever the source: "If either sw or sh is given and is 0, then return a promise rejected with
+    // a RangeError", "If either options's resizeWidth or options's resizeHeight is present and is 0, then return a
+    // promise rejected with an InvalidStateError".
+    fn refusal(&self) -> Option<u32> {
+        if self.crop.is_some_and(|[_, _, w, h]| w == 0.0 || h == 0.0) {
+            return Some(CROP_NO_AREA);
+        }
+        (self.resize[0] < 1.0 || self.resize[1] < 1.0).then_some(BAD)
+    }
+    fn transforms(&self) -> bool {
+        self.crop.is_some() || self.flip || !self.resize[0].is_nan() || !self.resize[1].is_nan()
+    }
+    // A Blob's decode shrinks to a resize of both sizes as it goes: with no crop or flip to do first, that is the resize.
+    fn fit(&self) -> Option<(u32, u32)> {
+        let [w, h] = self.resize;
+        (self.crop.is_none() && !self.flip && w >= 1.0 && h >= 1.0).then_some((w as u32, h as u32))
+    }
+    // The pixels cropped, resized and flipped (`bitmap_pixels`): their size, whether they are other pixels than the
+    // source's — none for a size too large to hold, which browsers too report an InvalidStateError (their max-texture
+    // limit). With nothing to do, the source's own where it hands them over, else a copy: a bitmap never aliases live pixels.
+    fn apply(&self, px: Cow<'_, [u8]>, size @ [w, h]: [u32; 2]) -> Option<(Vec<u8>, [u32; 2], bool)> {
+        if !self.transforms() {
+            return Some((px.into_owned(), size, false));
+        }
+        let [sx, sy, sw, sh] = self.crop.unwrap_or([0.0; 4]);
+        let geometry = [f64::from(w), f64::from(h), f64::from(u8::from(self.crop.is_some())), sx, sy, sw, sh, self.resize[0], self.resize[1], f64::from(u8::from(self.flip))];
+        let (out, ow, oh) = bitmap_pixels(&px, geometry)?;
+        let made = [ow as u32, oh as u32];
+        Some((out, made, self.crop.is_some() || self.flip || made != size))
+    }
+}
+
+// What an op hands back: why it refused, or `[pixels, width, height, pixelsP3 | null, displayP3, tainted]`, what the
+// bindings make the ImageBitmap of. `colorSpaceConversion: "none"` means the source's bytes are treated as unmanaged (sRGB,
+// no conversion downstream); otherwise a later draw converts from the colour space kept. The Display P3 rendering of a
+// wide-profile source is carried only by a bitmap of the same pixels: a crop, a resize or a flip would have to re-derive it.
+struct Pixels<'a, 's> {
+    px: Cow<'a, [u8]>,
+    size: [u32; 2],
+    wide: v8::Local<'s, v8::Value>,
+    display_p3: bool,
+    tainted: bool,
+}
+fn hand_back<'s>(scope: &mut v8::PinScope<'s, '_>, steps: &Steps, p: Pixels<'_, 's>, rv: &mut v8::ReturnValue<'_, v8::Value>) {
+    let Some((out, [w, h], transformed)) = steps.apply(p.px, p.size) else { return rv.set_uint32(BAD) };
+    let wide = if transformed || steps.unmanaged { v8::null(scope).into() } else { p.wide };
+    let items = [
+        crate::dom::u8_clamped_array(scope, out),
+        v8::Integer::new_from_unsigned(scope, w).into(),
+        v8::Integer::new_from_unsigned(scope, h).into(),
+        wide,
+        v8::Boolean::new(scope, p.display_p3 && !steps.unmanaged).into(),
+        v8::Boolean::new(scope, p.tainted).into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.imageBitmapOfSource(steps, kind, source, contextState) -> a bitmap of an image, a video, a canvas or an ImageBitmap
+// (`judge`): its verdict where that is not good — bad as much as failing — else its pixels, a canvas's its bitmap's snapshot,
+// transparent black where nothing was drawn. A flip is of the image as stored: "output must be flipped vertically,
+// disregarding any image orientation metadata of the source (such as EXIF metadata)".
+fn image_bitmap_of_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(steps) = Steps::of(&crate::dom::f64_arg(args.get(0))) else { return rv.set_uint32(BAD) };
+    if let Some(refusal) = steps.refusal() {
+        return rv.set_uint32(refusal);
+    }
+    let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    let (source, context) = (args.get(2), args.get(3));
+    let judged = judge(scope, kind, source, context);
+    if judged.verdict != GOOD {
+        return rv.set_uint32(judged.verdict);
+    }
+    let (pixels, wide, display_p3) = views_of(scope, kind, source, context);
+    let null = v8::null(scope).into();
+    if judged.blank {
+        let [w, h] = judged.size.map(|v| v as usize);
+        let Ok(px) = zeroed_bytes(w * h * 4) else { return rv.set_uint32(BAD) };
+        let p = Pixels { px: Cow::Owned(px), size: judged.size, wide: null, display_p3, tainted: judged.tainted };
+        return hand_back(scope, &steps, p, &mut rv);
+    }
+    let Some(px) = bytes_read(pixels, None) else { return rv.set_uint32(BAD) };
+    let orientation = if kind == IMAGE && steps.flip { nid_of(scope, source).map_or(0, |id| dom(scope).arena.image_orientation(id)) } else { 0 };
+    let p = if orientation > 1 {
+        let Some((px, size)) = crate::image_decode::unoriented(&px, judged.size, orientation) else { return rv.set_uint32(BAD) };
+        Pixels { px: Cow::Owned(px), size, wide: null, display_p3, tainted: judged.tainted }
+    } else {
+        Pixels { px, size: judged.size, wide, display_p3, tainted: judged.tainted }
+    };
+    hand_back(scope, &steps, p, &mut rv);
+}
+
+// __dom.imageBitmapOfBlob(steps, bytes) -> a bitmap of a Blob's bytes decoded: `BAD` for none or an undecodable one.
+fn image_bitmap_of_blob(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(steps) = Steps::of(&crate::dom::f64_arg(args.get(0))) else { return rv.set_uint32(BAD) };
+    if let Some(refusal) = steps.refusal() {
+        return rv.set_uint32(refusal);
+    }
+    let Some(bytes) = bytes_read(args.get(1), None) else { return rv.set_uint32(BAD) };
+    let decoded = std::panic::catch_unwind(|| crate::image_decode::decode(&bytes, steps.fit()));
+    let Ok(crate::image_decode::Decoded::Bitmap(b)) = decoded else { return rv.set_uint32(BAD) };
+    if b.rgba.is_empty() {
+        return rv.set_uint32(BAD);
+    }
+    let size = [b.width, b.height];
+    let null: v8::Local<'_, v8::Value> = v8::null(scope).into();
+    let p = if steps.flip && b.orientation > 1 {
+        let Some((px, size)) = crate::image_decode::unoriented(&b.rgba, size, b.orientation) else { return rv.set_uint32(BAD) };
+        Pixels { px: Cow::Owned(px), size, wide: null, display_p3: b.display_p3, tainted: false }
+    } else {
+        let wide = b.rgba_p3.map_or(null, |p| crate::dom::u8_clamped_array(scope, p));
+        Pixels { px: Cow::Owned(b.rgba), size, wide, display_p3: b.display_p3, tainted: false }
+    };
+    hand_back(scope, &steps, p, &mut rv);
+}
+
+// __dom.imageBitmapOfImageData(steps, data, float16, colorSpace, width, height) -> a bitmap of an ImageData's pixels — RGBA
+// bytes in a colour space a canvas holds, a linear one's converted to its encoded counterpart — `BAD` for one whose
+// array's buffer is detached: "If IsDetachedBuffer(buffer) is true, then return a promise rejected with an
+// "InvalidStateError" DOMException."
+fn image_bitmap_of_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(steps) = Steps::of(&crate::dom::f64_arg(args.get(0))) else { return rv.set_uint32(BAD) };
+    if let Some(refusal) = steps.refusal() {
+        return rv.set_uint32(refusal);
+    }
+    let Some(mut px) = bytes_read(args.get(1), None) else { return rv.set_uint32(BAD) };
+    if args.get(2).is_true() {
+        px = Cow::Owned(unorm8(&px));
+    }
+    let space = args.get(3).to_rust_string_lossy(scope);
+    let encoded = space.strip_suffix("-linear").unwrap_or(&space);
+    if encoded != space {
+        convert_spaces(px.to_mut(), &space, encoded);
+    }
+    let size = [4, 5].map(|i| args.get(i).uint32_value(scope).unwrap_or(0));
+    let wide = v8::null(scope).into();
+    let p = Pixels { px, size, wide, display_p3: encoded == "display-p3", tainted: false };
+    hand_back(scope, &steps, p, &mut rv);
 }
 
 #[cfg(test)]
@@ -243,5 +417,33 @@ mod tests {
         assert_eq!(image_rects([v(0.0), v(0.0), n, n, v(5.0), v(6.0), v(7.0), v(8.0)], [100, 50], [50, 25]), [0.0, 0.0, 100.0, 50.0, 5.0, 6.0, 7.0, 8.0]);
         let all = [v(1.0), v(2.0), v(3.0), v(4.0), v(5.0), v(6.0), v(7.0), v(8.0)];
         assert_eq!(image_rects(all, [100, 50], [50, 25]), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    }
+
+    // Its own refusals first (a crop of no area a RangeError's, a resize of none an InvalidStateError's), and what it does
+    // to the pixels: nothing asked, the source's own moved or copied; a resize to the size they have no other pixels.
+    #[test]
+    fn create_image_bitmap_steps() {
+        let of = |g: &[f64]| Steps::of(g).unwrap();
+        let none = f64::NAN;
+        assert!(Steps::of(&[0.0; 3]).is_none());
+        assert_eq!(of(&[1.0, 0.0, 0.0, 0.0, 1.0, none, none, 0.0, 0.0]).refusal(), Some(CROP_NO_AREA));
+        assert_eq!(of(&[1.0, 0.0, 0.0, 1.0, 0.0, 0.0, none, 0.0, 0.0]).refusal(), Some(CROP_NO_AREA));
+        assert_eq!(of(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, none, 0.0, 0.0]).refusal(), Some(BAD));
+        assert_eq!(of(&[0.0, 0.0, 0.0, 0.0, 0.0, none, 0.0, 0.0, 0.0]).refusal(), Some(BAD));
+        assert_eq!(of(&[1.0, 0.0, 0.0, -1.0, -1.0, 1.0, 1.0, 0.0, 0.0]).refusal(), None);
+
+        let px = [1u8, 2, 3, 4];
+        let plain = of(&[0.0, 0.0, 0.0, 0.0, 0.0, none, none, 0.0, 0.0]);
+        assert!(!plain.transforms());
+        assert_eq!(plain.fit(), None);
+        assert_eq!(plain.apply(Cow::Borrowed(&px), [1, 1]), Some((px.to_vec(), [1, 1], false)));
+        let same_size = of(&[0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]);
+        assert_eq!(same_size.fit(), Some((1, 1)));
+        assert_eq!(same_size.apply(Cow::Borrowed(&px), [1, 1]), Some((px.to_vec(), [1, 1], false)));
+        let flipped = of(&[0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]);
+        assert_eq!(flipped.fit(), None);
+        assert_eq!(flipped.apply(Cow::Borrowed(&px), [1, 1]), Some((px.to_vec(), [1, 1], true)));
+        // (…a size too large to hold)
+        assert_eq!(of(&[0.0, 0.0, 0.0, 0.0, 0.0, 65536.0, 65536.0, 0.0, 0.0]).apply(Cow::Borrowed(&px), [1, 1]), None);
     }
 }

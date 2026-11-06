@@ -15,7 +15,7 @@ const TAG: u16 = 5;
 // What marks an object as a paint's (its internal field 0).
 static BRAND: u8 = 0;
 
-// A paint's kind, by the code the rasterizer reads it as (canvas.rs `canvasDraw`'s paint).
+// A paint's kind, by the code the rasterizer reads it as (canvas.rs `draw`'s paint).
 const LINEAR: u32 = 2;
 const RADIAL: u32 = 3;
 const CONIC: u32 = 4;

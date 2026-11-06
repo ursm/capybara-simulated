@@ -862,11 +862,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasDrawPath", canvas_draw_path, context_id);
     crate::dom::register(scope, ns, "canvasClip", canvas_clip, context_id);
     crate::dom::register(scope, ns, "canvasConvert", canvas_convert, context_id);
-    crate::dom::register(scope, ns, "pixelsUnorm8", pixels_unorm8, context_id);
     crate::dom::register(scope, ns, "pixelsFloat16", pixels_float16, context_id);
     crate::dom::register(scope, ns, "canvasGetImageData", canvas_get_image_data, context_id);
     crate::dom::register(scope, ns, "canvasPutImageData", canvas_put_image_data, context_id);
-    crate::dom::register(scope, ns, "bitmapPixels", bitmap_pixels_op, context_id);
 }
 
 // The bytes of a `Uint8ClampedArray` / `Uint8Array`: where they lie, and how many there are (none for a detached one).
@@ -1158,10 +1156,6 @@ fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     h.set_object(scope, crate::canvas_state::CLIP, v8::Local::<v8::Object>::try_from(made).ok());
 }
 
-// __dom.canvasConvert(pixels, from, to): an RGBA buffer converted in place from one PredefinedColorSpace to another —
-// "srgb" and "display-p3" by the matrix between them (a wide colour clipped into sRGB, as a browser reads one back), each
-// one's linear counterpart ("srgb-linear", "display-p3-linear") through the sRGB transfer function both share, decoded
-// to its base space first and encoded from it last; its alpha untouched, nothing done where they match.
 // An ImageData's components between its two pixel formats (HTML §4.12.5.1.15): "rgba-float16" ones — IEEE half-precision,
 // as a Float16Array holds them (in the platform's byte order) — and "rgba-unorm8" ones, a byte each.
 // A half's value.
@@ -1206,14 +1200,8 @@ fn half_bits(value: f64) -> u16 {
 }
 // "rgba-float16" components, each scaled to a byte (`byte(v * 255)`): what `Uint8ClampedArray.from(data, (v) => v * 255)`
 // makes, at no call per component.
-fn unorm8(halves: &[u8]) -> Vec<u8> {
+pub(crate) fn unorm8(halves: &[u8]) -> Vec<u8> {
     halves.chunks_exact(2).map(|h| byte(half_value(u16::from_ne_bytes([h[0], h[1]])) * 255.0)).collect()
-}
-// __dom.pixelsUnorm8(float16Components) -> a new ArrayBuffer of them (`unorm8`).
-fn pixels_unorm8(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let halves = bytes_read(args.get(0), None).unwrap_or_default();
-    let bytes = unorm8(&halves);
-    rv.set(crate::webcrypto::array_buffer(scope, bytes));
 }
 // __dom.pixelsFloat16(bytes) -> a new ArrayBuffer of each byte over 255 as a half (`half_bits(v / 255)`) — what
 // `Float16Array.from(bytes, (v) => v / 255)` makes.
@@ -1223,13 +1211,17 @@ fn pixels_float16(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(crate::webcrypto::array_buffer(scope, halves));
 }
 
+// __dom.canvasConvert(pixels, from, to): an RGBA buffer converted in place from one PredefinedColorSpace to another —
+// "srgb" and "display-p3" by the matrix between them (a wide colour clipped into sRGB, as a browser reads one back), each
+// one's linear counterpart ("srgb-linear", "display-p3-linear") through the sRGB transfer function both share, decoded
+// to its base space first and encoded from it last; its alpha untouched, nothing done where they match.
 fn canvas_convert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (from, to) = (args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
     if let Some(data) = bytes_mut(args.get(0)) {
         convert_spaces(data, &from, &to);
     }
 }
-fn convert_spaces(data: &mut [u8], from: &str, to: &str) {
+pub(crate) fn convert_spaces(data: &mut [u8], from: &str, to: &str) {
     if from == to {
         return;
     }
@@ -1390,7 +1382,7 @@ const MAX_BITMAP_AREA: f64 = (1u64 << 27) as f64;
 // and `flipY` 0 or 1 and a resize size NaN when the options give none. The source rectangle's negative width or height
 // moves it rather than mirroring it; one resize size alone keeps the aspect ratio; the scaling is nearest-neighbour, what
 // falls outside the source transparent black. `None` when the output would be too large to hold.
-fn bitmap_pixels(src: &[u8], g: [f64; 10]) -> Option<(Vec<u8>, f64, f64)> {
+pub(crate) fn bitmap_pixels(src: &[u8], g: [f64; 10]) -> Option<(Vec<u8>, f64, f64)> {
     let [w, h, crop, mut sx, mut sy, mut sw, mut sh, rw, rh, flip] = g;
     if crop == 0.0 {
         (sx, sy, sw, sh) = (0.0, 0.0, w, h);
@@ -1418,22 +1410,6 @@ fn bitmap_pixels(src: &[u8], g: [f64; 10]) -> Option<(Vec<u8>, f64, f64)> {
         out = rows.concat();
     }
     Some((out, ow, oh))
-}
-
-// __dom.bitmapPixels(pixels, geometry) -> `{width, height, pixels}`, a new RGBA buffer: `bitmap_pixels`'s, null for one too
-// large to hold.
-fn bitmap_pixels_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let g = crate::dom::f64_arg(args.get(1)).to_vec();
-    let (Ok(g), Some(src)) = (<[f64; 10]>::try_from(g), bytes_read(args.get(0), None)) else { return rv.set_null() };
-    let Some((pixels, w, h)) = bitmap_pixels(&src, g) else { return rv.set_null() };
-    let obj = v8::Object::new(scope);
-    let (width, height) = (v8::Number::new(scope, w).into(), v8::Number::new(scope, h).into());
-    let pixels = crate::dom::u8_clamped_array(scope, pixels);
-    for (key, value) in [("width", width), ("height", height), ("pixels", pixels)] {
-        let key = v8::String::new(scope, key).expect("a short string");
-        obj.set(scope, key.into(), value);
-    }
-    rv.set(obj.into());
 }
 
 #[cfg(test)]

@@ -359,6 +359,10 @@ pub(crate) fn source_pixels<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) ->
     Some((b.srgb.view(scope), p3, b.display_p3))
 }
 impl RealmArena {
+    // The EXIF turn its decode applied, which `imageOrientation: "flipY"` undoes (1, or 0 for no image: none).
+    pub(crate) fn image_orientation(&self, id: NodeId) -> u8 {
+        self.image(id).map_or(0, |r| r.orientation)
+    }
     pub(crate) fn image_natural_size(&self, id: NodeId) -> [u32; 2] {
         let d = self.image_density(id);
         self.image(id).map_or([0, 0], |r| r.size.map(|v| (f64::from(v) / d).trunc() as u32))

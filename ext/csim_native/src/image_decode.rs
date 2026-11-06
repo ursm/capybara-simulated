@@ -387,34 +387,24 @@ impl Bitmap {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "decodeImage", decode_image, context_id);
-    crate::dom::register(scope, ns, "unorientImage", unorient_image, context_id);
 }
 
-// __dom.unorientImage(pixels, width, height, orientation) -> `{width, height, pixels}`: a decoded image (RGBA, a
-// Uint8ClampedArray) as it was before the EXIF `orientation` turned it (createImageBitmap's `imageOrientation:
-// "flipY"`, which disregards it) — the inverse turn, which is the same one but for the two quarter turns (6 and 8, each the other's).
-fn unorient_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [w, h, exif] = [1, 2, 3].map(|k| args.get(k).uint32_value(scope).unwrap_or(0));
+// A decoded image (RGBA) as it was before the EXIF `orientation` turned it (createImageBitmap's `imageOrientation:
+// "flipY"`, which disregards it): its pixels and size — the inverse turn, which is the same one but for the two quarter
+// turns (6 and 8, each the other's).
+pub(crate) fn unoriented(pixels: &[u8], [w, h]: [u32; 2], exif: u8) -> Option<(Vec<u8>, [u32; 2])> {
     let inverse = match exif {
         6 => 8,
         8 => 6,
-        n => n as u8,
+        n => n,
     };
-    let Some(orientation) = Orientation::from_exif(inverse) else { return };
-    let Some(pixels) = crate::canvas::bytes_read(args.get(0), None) else { return };
-    let need = (w as usize).checked_mul(h as usize).and_then(|n| n.checked_mul(4));
-    let Some(rgba) = need.and_then(|n| pixels.get(..n)).map(<[u8]>::to_vec) else { return };
-    let Some(img) = image::RgbaImage::from_raw(w, h, rgba) else { return };
+    let orientation = Orientation::from_exif(inverse)?;
+    let need = (w as usize).checked_mul(h as usize)?.checked_mul(4)?;
+    let img = image::RgbaImage::from_raw(w, h, pixels.get(..need)?.to_vec())?;
     let mut img = DynamicImage::ImageRgba8(img);
     img.apply_orientation(orientation);
-    let obj = v8::Object::new(scope);
-    let (width, height) = (v8::Integer::new_from_unsigned(scope, img.width()).into(), v8::Integer::new_from_unsigned(scope, img.height()).into());
-    let pixels = crate::dom::u8_clamped_array(scope, img.into_rgba8().into_raw());
-    for (key, value) in [("width", width), ("height", height), ("pixels", pixels)] {
-        let key = v8::String::new(scope, key).expect("a short string");
-        obj.set(scope, key.into(), value);
-    }
-    rv.set(obj.into());
+    let size = [img.width(), img.height()];
+    Some((img.into_rgba8().into_raw(), size))
 }
 
 // __dom.decodeImage(bytes, maxW, maxH) -> an encoded image (a Uint8Array) decoded on the page's own thread (`decode`;
