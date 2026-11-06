@@ -372,8 +372,8 @@ RSpec.describe 'WebAuthn bindings' do
   end
 
   # The refusals, every one a NotAllowedError but an excluded credential's and an unsupported type's (§5.1.3: a client
-  # hides why an authenticator refused): Chrome and Firefox alike, measured, where the Ruby this replaced said
-  # ConstraintError and NotSupportedError.
+  # hides why an authenticator refused), as Chrome's are, measured. (Firefox lets a request requiring user verification
+  # through an authenticator that has none, where §5.1.3 skips it.)
   it 'refuses what its authenticators cannot do, in the words the spec allows' do
     session = simulated_session(app)
     session.visit 'http://rp.example.test/'
@@ -483,12 +483,22 @@ RSpec.describe 'WebAuthn bindings' do
     handle   = webauthn.add_virtual_authenticator('hasResidentKey' => true)
     out = run(session, <<~JS)
       #{base64url}
-      const log = [];
       const controller = new AbortController();
       const aborted = navigator.credentials.create({...options(), signal: controller.signal});
       const during = navigator.credentials.get({publicKey: {challenge: new Uint8Array(1)}});
       controller.abort(new RangeError('stop'));
-      const resolvedFirst = await Promise.race([Promise.resolve('microtask'), navigator.credentials.get({mediation: 'silent', publicKey: {challenge: new Uint8Array(1), rpId: 'not.this.test'}})]);
+      const sameTick = [
+        navigator.credentials.create(options({rp: {name: 'x', id: 'not.this.test'}})),
+        navigator.credentials.get({publicKey: {challenge: new Uint8Array(1)}})
+      ];
+      const refusedInOrder = [await rejection(sameTick[0]), await rejection(sameTick[1])];
+      const silent = await navigator.credentials.get({mediation: 'silent', publicKey: {challenge: new Uint8Array(1), rpId: 'not.this.test'}});
+      const original = Promise;
+      globalThis.Promise = class Hijacked extends original {};
+      const unhijacked = navigator.credentials.get({mediation: 'silent', publicKey: {challenge: new Uint8Array(1)}});
+      globalThis.Promise = original;
+      const pageSawNoPromise = unhijacked.constructor.name !== 'Hijacked';
+      await unhijacked;
 
       const waiting = new AbortController();
       let settled = 'pending';
@@ -511,26 +521,47 @@ RSpec.describe 'WebAuthn bindings' do
       unfiltered.abort();
       const conditionalCreate = await rejection(navigator.credentials.create({...options(), mediation: 'conditional'}));
       return [
-        await aborted.then(() => 'none', (e) => e.name), await rejection(during), resolvedFirst, await navigator.credentials.get({mediation: 'silent', publicKey: {challenge: new Uint8Array(1)}}),
+        await aborted.then(() => 'none', (e) => e.name), await rejection(during), refusedInOrder, silent, pageSawNoPromise,
         whilePending, blocked, settled, chosen.id === made.id, filteredOut, conditionalCreate,
         await rejection(navigator.credentials.get({uiMode: 'immediate', publicKey: {challenge: new Uint8Array(1)}}))
       ];
     JS
-    expect(out).to eq(['RangeError', 'NotAllowedError', 'microtask', nil, 'pending', 'NotAllowedError', 'AbortError', true, 'pending', 'NotAllowedError', 'TypeError'])
+    expect(out).to eq(['RangeError', 'NotAllowedError', %w[SecurityError NotAllowedError], nil, true, 'pending', 'NotAllowedError', 'AbortError', true, 'pending', 'NotAllowedError', 'TypeError'])
     expect(webauthn.get_credentials(handle).size).to eq(2)
   end
 
-  # A frame of another origin: its client data says so, its create takes (and uses up) a user activation (§5.1.3 step 2;
+  # A frame of another origin: its `allow` attribute delegates the features or it may use neither (§5.9; Chrome and Firefox
+  # alike, measured), its client data says where it is, its create takes (and uses up) a user activation (§5.1.3 step 2;
   # Chrome's clientDataJSON the same, measured), and a frame removed is no document to ask (Chrome alike).
   it 'says where a request comes from', :every_host_local do
     pages = lambda {|env|
       framed = '<!doctype html><meta charset="utf-8"><body><button id="go">go</button>'
-      framing = '<!doctype html><meta charset="utf-8"><body><iframe id="f" src="http://b.rp.example.test/"></iframe>'
-      [200, {'content-type' => 'text/html'}, [env['SERVER_NAME'].start_with?('b.') ? framed : framing]]
+      framing = <<~HTML
+        <!doctype html><meta charset="utf-8"><body>
+        <iframe id="f" src="http://b.rp.example.test/" allow="publickey-credentials-create; publickey-credentials-get"></iframe>
+        <iframe id="plain" src="http://b.rp.example.test/"></iframe>
+        <iframe id="narrowed" src="/leaf" allow="publickey-credentials-get 'none'"></iframe>
+      HTML
+      [200, {'content-type' => 'text/html'}, [env['SERVER_NAME'].start_with?('b.') || env['PATH_INFO'] == '/leaf' ? framed : framing]]
     }
     session = simulated_session(pages)
     session.visit 'http://a.rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
+    session.within_frame('plain') do
+      out = run(session, <<~JS)
+        #{base64url}
+        return [await rejection(navigator.credentials.create(options())), await rejection(navigator.credentials.get({publicKey: {challenge: new Uint8Array(1)}}))];
+      JS
+      expect(out).to eq(%w[NotAllowedError NotAllowedError])
+    end
+    session.within_frame('narrowed') do
+      out = run(session, <<~JS)
+        #{base64url}
+        const made = await navigator.credentials.create(options());
+        return [typeof made.id, await rejection(navigator.credentials.get({publicKey: {challenge: new Uint8Array(1), allowCredentials: named(made)}}))];
+      JS
+      expect(out).to eq(['string', 'NotAllowedError'])
+    end
     session.within_frame('f') do
       out = run(session, <<~JS)
         #{base64url}

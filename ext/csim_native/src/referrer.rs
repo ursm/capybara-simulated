@@ -312,14 +312,14 @@ fn has_cross_site_ancestor(documents: &[Option<String>]) -> bool {
 // realm gone, which no request is judged by: closed rather than open. (…a sandboxed one's `null` too, of no site,
 // where §5.2.1 would take its URI's origin: WPT cookies/samesite sandbox-iframe-subresource / -nested expect a
 // sandboxed frame's requests cross-site, as browsers make them — the gate's reading, here)
-fn known_document(arena: &mut RealmArena, r: i32) -> Option<String> {
+pub(crate) fn known_document(arena: &mut RealmArena, r: i32) -> Option<String> {
     let arena = arena.enter_known(r)?;
     Some(arena.location.origin().to_owned())
 }
 // …the key realm `r`'s document's origin is matched by (realm_location.rs `origin_key`): a tuple origin's serialization,
 // an opaque one's token — the same in a document that inherited it (an about:blank one's of a sandboxed creator) and in
 // no other; None for a realm gone.
-fn known_origin_key(arena: &mut RealmArena, r: i32) -> Option<String> {
+pub(crate) fn known_origin_key(arena: &mut RealmArena, r: i32) -> Option<String> {
     let arena = arena.enter_known(r)?;
     Some(arena.location.origin_key(r))
 }

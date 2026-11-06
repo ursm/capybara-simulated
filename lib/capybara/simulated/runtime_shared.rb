@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-
-
 module Capybara
   module Simulated
     # The engine-facing constants and tables — JS asset paths, the

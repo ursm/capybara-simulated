@@ -183,6 +183,45 @@ fn ccd_string(text: &str) -> String {
     out
 }
 
+// ── Permissions Policy, as a frame's container declares it (§5.9) ────────────────────────────────────────────────────
+// What an iframe's `allow` attribute says of `feature` for a document of origin `own` in it: none where it does not name
+// it. Its allowlist — `'src'` where it gives none — is `*`, `'self'` (the container document's origin, `parent`), `'src'`
+// (the origin `src` declares, `declared`), `'none'` or origins.
+fn allow_attribute_grants(allow: &str, feature: &str, own: &str, parent: &str, declared: Option<&str>) -> Option<bool> {
+    let directive = allow.split(';').find(|directive| directive.split_ascii_whitespace().next() == Some(feature))?;
+    let mut members = directive.split_ascii_whitespace().skip(1).peekable();
+    if members.peek().is_none() {
+        return Some(declared == Some(own));
+    }
+    Some(members.any(|member| match member {
+        "*" => true,
+        "'self'" => own == parent,
+        "'src'" => declared == Some(own),
+        "'none'" => false,
+        origin => crate::referrer::http_origin(origin).as_deref() == Some(own),
+    }))
+}
+// Whether realm `realm`'s document "is allowed to use" `feature`, whose default allowlist is 'self': at each frame up to
+// the top-level document, the container's `allow` attribute where it names the feature, else the frame's being same
+// origin with its parent. (A `Permissions-Policy` response header, which no document's policy here is read from, is a
+// gap: only an attribute can narrow or delegate a feature.)
+fn allowed_to_use(arena: &mut crate::dom::RealmArena, realm: i32, feature: &str) -> bool {
+    let mut frame = realm;
+    while let Some(parent) = arena.parent_realm(frame) {
+        let keys = (crate::referrer::known_origin_key(arena, frame), crate::referrer::known_origin_key(arena, parent));
+        let origins = (crate::referrer::known_document(arena, frame), crate::referrer::known_document(arena, parent));
+        let (Some(own), Some(parent_origin)) = origins else { return false };
+        let container = arena.frame_container(parent, frame).and_then(|c| arena.get(c));
+        let declared = container.and_then(|c| c.plain_attr("src")).and_then(|src| ada_url::Url::parse(src, Some(&parent_origin)).ok()).map(|url| url.origin().to_owned());
+        let named = container.and_then(|c| c.plain_attr("allow")).and_then(|allow| allow_attribute_grants(allow, feature, &own, &parent_origin, declared.as_deref()));
+        if !named.unwrap_or(keys.0.is_some() && keys.0 == keys.1) {
+            return false;
+        }
+        frame = parent;
+    }
+    true
+}
+
 // ── A ceremony's options, snapshotted ───────────────────────────────────────────────────────────────────────────────
 // A PublicKeyCredentialDescriptor: its type (one no client knows it ignores, §5.8.3) and id.
 struct Descriptor {
@@ -423,8 +462,9 @@ fn attestation_object(formats: &[String], key: &SigningKey, authenticator_data: 
     cbor_bytes(&mut out, authenticator_data);
     out
 }
+// (…BS only with BE: "if and only if the credential is a multi-device credential and is currently backed up", §6.1)
 fn flags_of(user_verified: bool, backup_eligible: bool, backup_state: bool) -> u8 {
-    UP | if user_verified { UV } else { 0 } | if backup_eligible { BE } else { 0 } | if backup_state { BS } else { 0 }
+    UP | if user_verified { UV } else { 0 } | if backup_eligible { BE } else { 0 } | if backup_eligible && backup_state { BS } else { 0 }
 }
 
 // ── The authenticators' answers ─────────────────────────────────────────────────────────────────────────────────────
@@ -617,9 +657,8 @@ fn all_accepted_credentials(partition: u64, rp_id: &str, user_id: &[u8], accepte
 // Whether a user-verifying platform authenticator is available (§5.1.6), and one of it that makes passkeys (§5.8.7).
 fn platform_authenticators(partition: u64) -> (bool, bool) {
     let sessions = sessions();
-    let mut platform = sessions.get(&partition).into_iter().flat_map(|s| &s.authenticators).filter(|a| a.transport == "internal" && a.has_user_verification);
-    let uv = platform.next();
-    (uv.is_some(), uv.is_some_and(|a| a.has_resident_key) || platform.any(|a| a.has_resident_key))
+    let platform = || sessions.get(&partition).into_iter().flat_map(|s| &s.authenticators).filter(|a| a.transport == "internal" && a.has_user_verification);
+    (platform().next().is_some(), platform().any(|a| a.has_resident_key))
 }
 
 // ── The driver's commands (§11.3-11.9): text the host passes through, as JSON ───────────────────────────────────────
@@ -641,7 +680,8 @@ pub(crate) fn remove_authenticator_for_ruby(partition: u64, id: String) {
 fn command_bytes(text: &str) -> Option<Vec<u8>> {
     base64url_decode(&text.trim_end_matches('=').replace('+', "-").replace('/', "_"))
 }
-// A credential (§11.5's Credential Parameters), checked as its remote end steps do.
+// A credential (§11.5's Credential Parameters), refused where its remote end steps refuse one's id, RP ID, key or user
+// handle — but `isResidentCredential` and `signCount`, which they require, have defaults here (false, a counter from 0).
 fn command_credential(authenticator: &Authenticator, parameters: &Value) -> Result<Credential, String> {
     let text = |name: &str| parameters.get(name).and_then(Value::as_str);
     let binary = |name: &str| text(name).ok_or(format!("no {name}")).and_then(|t| command_bytes(t).ok_or(format!("{name} is not base64url")));
@@ -659,7 +699,7 @@ fn command_credential(authenticator: &Authenticator, parameters: &Value) -> Resu
     // (…a counter null is none; left out, one from zero)
     let counter = match parameters.get("signCount") {
         Some(Value::Null) => None,
-        Some(count) => Some(count.as_f64().filter(|n| (0.0..=u32::MAX as f64).contains(n)).ok_or("signCount is out of range")? as u32),
+        Some(count) => Some(count.as_f64().filter(|n| n.fract() == 0.0 && (0.0..=u32::MAX as f64).contains(n)).ok_or("signCount is no 32-bit unsigned integer")? as u32),
         None => Some(0),
     };
     let backup = |name: &str, default: bool| parameters.get(name).and_then(Value::as_bool).unwrap_or(default);
@@ -692,7 +732,7 @@ pub(crate) fn remove_credential_for_ruby(partition: u64, id: String, credential_
         authenticator.credentials.retain(|c| c.id != credential_id);
     }
 }
-// Its credentials (§11.6), as JSON; none for an authenticator no longer there.
+// Its credentials (§11.6, without their keys and backup properties), as JSON; none for an authenticator no longer there.
 pub(crate) fn credentials_for_ruby(partition: u64, id: String) -> String {
     let sessions = sessions();
     let credentials = sessions.get(&partition).and_then(|s| s.authenticators.iter().find(|a| a.id == id)).map_or(&[][..], |a| &a.credentials);
@@ -718,6 +758,7 @@ pub(crate) fn set_user_verified_for_ruby(partition: u64, id: String, verified: b
 
 // ── The bindings' ops ───────────────────────────────────────────────────────────────────────────────────────────────
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    register(scope, ns, "webauthnCheckPermission", check_permission_op, context_id);
     register(scope, ns, "webauthnBeginCreate", begin_create_op, context_id);
     register(scope, ns, "webauthnBeginGet", begin_get_op, context_id);
     register(scope, ns, "webauthnFinish", finish_op, context_id);
@@ -806,6 +847,15 @@ fn request_options(scope: &mut v8::PinScope<'_, '_>, pk: v8::Local<'_, v8::Objec
     }
 }
 
+// __dom.webauthnCheckPermission(feature): throws the NotAllowedError of a document not allowed to use it (Credential
+// Management §2.5.1, §2.5.4).
+fn check_permission_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let feature = args.get(0).to_rust_string_lossy(scope);
+    let realm = realm_id(scope, &args);
+    if !allowed_to_use(&mut crate::dom::dom(scope).arena, realm, &feature) {
+        throw(scope, Failure { name: "NotAllowedError", message: format!("The '{feature}' feature is not enabled in this document.") });
+    }
+}
 // __dom.webauthnBeginCreate(partition, publicKey, mediation) -> the request's number, or throws what its client steps
 // do. A cross-origin caller's user activation is consumed by it (§5.1.3 step 2), whatever comes of it after.
 fn begin_create_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -1012,10 +1062,10 @@ mod tests {
         session
     }
     fn create(session: &mut Session, options: CreationOptions) -> Outcome<Created> {
-        finish_create(session, &begin_create(options, &page()).map_err(|f| f)?)
+        finish_create(session, &begin_create(options, &page())?)
     }
     fn get(session: &mut Session, options: RequestOptions) -> Outcome<Asserted> {
-        finish_get(session, &begin_get(options, &page()).map_err(|f| f)?)
+        finish_get(session, &begin_get(options, &page())?)
     }
     fn name<T>(outcome: Outcome<T>) -> &'static str {
         outcome.err().map_or("ok", |f| f.name)
@@ -1165,6 +1215,11 @@ mod tests {
             let mut session = session(config);
             assert_eq!(name(create(&mut session, creation())), "NotAllowedError");
         }
+        let mut session = session(json!({}));
+        let id = create(&mut session, creation()).unwrap().id;
+        session.authenticators[0].is_user_consenting = false;
+        assert_eq!(name(get(&mut session, allow(&id))), "NotAllowedError");
+        assert_eq!(session.authenticators[0].credentials[0].counter, Some(0));
     }
 
     #[test]
@@ -1221,6 +1276,30 @@ mod tests {
         let backed = create(&mut session, CreationOptions { user_id: vec![2], ..creation() }).unwrap();
         assert_eq!(backed.authenticator_data[FLAGS_AT] & (BE | BS), BE | BS);
         assert_eq!(get(&mut session, allow(&backed.id)).unwrap().authenticator_data[FLAGS_AT] & (BE | BS), BE | BS);
+    }
+
+    #[test]
+    fn a_backup_state_needs_backup_eligibility() {
+        let mut session = session(json!({"defaultBackupState": true}));
+        assert_eq!(create(&mut session, creation()).unwrap().authenticator_data[FLAGS_AT] & (BE | BS), 0);
+    }
+
+    #[test]
+    fn an_allow_attribute_says_who_may_use_a_feature() {
+        const F: &str = "publickey-credentials-get";
+        let (own, parent) = ("https://b.test", "https://a.test");
+        let grants = |allow: &str, declared: Option<&str>| allow_attribute_grants(allow, F, own, parent, declared);
+        assert_eq!(grants("fullscreen", Some(own)), None);
+        assert_eq!(grants("publickey-credentials-getter", Some(own)), None);
+        assert_eq!(grants("publickey-credentials-get", Some(own)), Some(true));
+        assert_eq!(grants("publickey-credentials-get", Some("https://c.test")), Some(false));
+        assert_eq!(grants("fullscreen *; publickey-credentials-get *", None), Some(true));
+        assert_eq!(grants("publickey-credentials-get 'none'", Some(own)), Some(false));
+        assert_eq!(grants("publickey-credentials-get 'self'", Some(own)), Some(false));
+        assert_eq!(allow_attribute_grants("publickey-credentials-get 'self'", F, parent, parent, None), Some(true));
+        assert_eq!(grants("publickey-credentials-get 'src'", Some(own)), Some(true));
+        assert_eq!(grants("publickey-credentials-get https://c.test https://b.test", None), Some(true));
+        assert_eq!(grants("publickey-credentials-get https://c.test", None), Some(false));
     }
 
     #[test]
