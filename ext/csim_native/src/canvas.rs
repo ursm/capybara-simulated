@@ -262,22 +262,6 @@ fn zeroed<T: Copy>(n: usize, v: T) -> Result<Vec<T>, Oom> {
     out.resize(n, v);
     Ok(out)
 }
-// …`n` zero bytes, as a typed array gets them: from the allocator's zeroed pages, untouched until they are drawn on.
-pub(crate) fn zeroed_bytes(n: usize) -> Result<Vec<u8>, Oom> {
-    if n == 0 {
-        return Ok(Vec::new());
-    }
-    let layout = std::alloc::Layout::array::<u8>(n).map_err(|_| Oom)?;
-    // SAFETY: a layout of `n` > 0 bytes; on success the allocation is `n` initialized bytes, which the Vec takes over
-    // with that same layout.
-    unsafe {
-        let ptr = std::alloc::alloc_zeroed(layout);
-        if ptr.is_null() {
-            return Err(Oom);
-        }
-        Ok(Vec::from_raw_parts(ptr, n, n))
-    }
-}
 
 // ── the shape: each covered pixel and its coverage ──
 pub(crate) enum Shape<'a> {
@@ -868,14 +852,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // The bytes of a `Uint8ClampedArray` / `Uint8Array`: where they lie, and how many there are (none for a detached one).
-fn bytes_span(val: v8::Local<'_, v8::Value>) -> Option<(*mut u8, usize)> {
+pub(crate) fn bytes_span(val: v8::Local<'_, v8::Value>) -> Option<(*mut u8, usize)> {
     let view = v8::Local::<v8::ArrayBufferView>::try_from(val).ok()?;
     let (ptr, n) = (view.data() as *mut u8, view.byte_length());
     (n != 0 && !ptr.is_null()).then_some((ptr, n))
 }
 // …to write in place. An op takes at most ONE array so: every other it reads is `bytes_read`, which copies one that
 // shares its bytes.
-fn bytes_mut<'a>(val: v8::Local<'a, v8::Value>) -> Option<&'a mut [u8]> {
+pub(crate) fn bytes_mut<'a>(val: v8::Local<'a, v8::Value>) -> Option<&'a mut [u8]> {
     let (ptr, n) = bytes_span(val)?;
     // SAFETY: the view's own bytes past its offset, valid for the op (no JS runs while it holds them), and borrowed by
     // nothing else (`bytes_read` copies whatever overlaps them).
@@ -892,7 +876,7 @@ pub(crate) fn bytes_read<'a>(val: v8::Local<'a, v8::Value>, written: Option<(*mu
 }
 // Throw a RangeError for a buffer an op could not have (`Oom`).
 pub(crate) fn throw_oom(scope: &mut v8::PinScope<'_, '_>) {
-    if let Some(msg) = v8::String::new(scope, "the canvas is too large to draw on") {
+    if let Some(msg) = v8::String::new(scope, "the canvas's pixels are too large to hold") {
         let e = v8::Exception::range_error(scope, msg);
         scope.throw_exception(e);
     }
@@ -1137,7 +1121,8 @@ fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         let s = h.state();
         Path::of(&crate::dom::f64_arg(args.get(2)), s.m, baked).map_or_else(Default::default, |path| path.rings(how, &s))
     };
-    let Ok(mut mask) = zeroed_bytes(cw * ch) else { return throw_oom(scope) };
+    let Some(made) = crate::dom::zeroed_clamped_array(scope, cw * ch) else { return throw_oom(scope) };
+    let Some(mask) = bytes_mut(made) else { return };
     let covered = Shape::Rings { rings, even_odd }.cover(cw, ch, (0.0, 0.0), &mut |px, py, cov| {
         if cov >= 0.5 {
             mask[py * cw + px] = 1;
@@ -1152,7 +1137,6 @@ fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             *m &= o;
         }
     }
-    let made = crate::dom::u8_clamped_array(scope, mask);
     h.set_object(scope, crate::canvas_state::CLIP, v8::Local::<v8::Object>::try_from(made).ok());
 }
 
@@ -1305,13 +1289,13 @@ fn canvas_get_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
         return rv.set_uint32(refusal);
     }
     let [x, y, w, hgt] = normalized(rect).map(|v| v as i64);
-    let Ok(mut out) = zeroed_bytes((w * hgt * 4) as usize) else { return throw_oom(scope) };
+    let Some(made) = crate::dom::zeroed_clamped_array(scope, (w * hgt * 4) as usize) else { return throw_oom(scope) };
     let bitmap = h.bitmap(scope);
-    if let Some(bytes) = bytes_read(bitmap, None) {
+    if let (Some(bytes), Some(out)) = (bytes_read(bitmap, None), bytes_mut(made)) {
         let [cw, ch] = h.size().map(|v| v as i64);
-        copy_rect(&bytes, [cw, ch], [x, y, w, hgt], &mut out, [w, hgt], [0, 0]);
+        copy_rect(&bytes, [cw, ch], [x, y, w, hgt], out, [w, hgt], [0, 0]);
     }
-    rv.set(crate::dom::u8_clamped_array(scope, out));
+    rv.set(made);
 }
 
 // __dom.canvasPutImageData(state, data, float16, colorSpace, width, height, dx, dy, dirtyX, dirtyY, dirtyWidth,
@@ -1500,12 +1484,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn zeroed_bytes_are_zero() {
-        assert_eq!(zeroed_bytes(0).unwrap(), Vec::<u8>::new());
-        assert_eq!(zeroed_bytes(5).unwrap(), vec![0; 5]);
-        assert!(zeroed_bytes(usize::MAX).is_err());
-    }
 
     // A half: 1, a half, the largest, past it infinity, the least subnormal; ties to even; every byte over 255 back to
     // itself through a half, as a float16 ImageData keeps an 8-bit canvas's pixels.

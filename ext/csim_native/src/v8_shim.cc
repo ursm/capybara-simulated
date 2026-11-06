@@ -37,6 +37,14 @@ extern "C" const v8::Function* csim_bound_target(const v8::Function* f) {
   return *fn.As<v8::Function>();
 }
 
+// A new ArrayBuffer of `n` zero bytes, made as a script's typed array makes one (BackingStore::Allocate: the heap told of
+// them as they are allocated, and collecting for room where it has none, which a store made elsewhere and attached later
+// never does) — a handle of the current scope, or null where they cannot be had (ArrayBuffer::New aborts the process there).
+extern "C" const v8::ArrayBuffer* csim_array_buffer_maybe_new(v8::Isolate* isolate, size_t n) {
+  v8::Local<v8::ArrayBuffer> buffer;
+  return v8::ArrayBuffer::MaybeNew(isolate, n).ToLocal(&buffer) ? *buffer : nullptr;
+}
+
 // …an object of the template `t` HTML's [[IsHTMLDDA]] one (V8's undetectable: typeof "undefined", falsy, == null) and
 // callable, a call of it the function its internal field `ALL_CALL_FIELD` holds, of its first argument — the one
 // HTMLAllCollection's [[Call]] reads — and of no receiver (legacy.rs `allCollectionObject`: the object called is the

@@ -4,9 +4,7 @@
 // `<video>` — the bindings classify the object, the engine judges it from what each holds (image_bitmaps.rs,
 // canvas_state.rs, offscreen_canvas.rs, image_requests.rs, media.rs).
 
-use std::borrow::Cow;
-
-use crate::canvas::{bitmap_pixels, bytes_read, convert_spaces, draw, throw_oom, unorm8, zeroed_bytes, Oom, Shape};
+use crate::canvas::{bitmap_pixels, bytes_mut, bytes_read, bytes_span, convert_spaces, draw, throw_oom, unorm8, Oom, Shape};
 use crate::canvas_path::Path;
 use crate::canvas_state::CanvasStateHandle;
 use crate::dom::{dom, register};
@@ -125,7 +123,7 @@ fn pixels_of<'s>(
 ) -> Result<(v8::Local<'s, v8::Value>, bool), Oom> {
     if judged.blank {
         let [w, h] = judged.size.map(|v| v as usize);
-        return Ok((crate::dom::u8_clamped_array(scope, zeroed_bytes(w * h * 4)?), false));
+        return Ok((crate::dom::zeroed_clamped_array(scope, w * h * 4).ok_or(Oom)?, false));
     }
     let (pixels, wide, display_p3) = views_of(scope, kind, source, context);
     Ok(if target.display_p3() && !wide.is_null() { (wide, true) } else { (pixels, display_p3) })
@@ -205,6 +203,15 @@ fn canvas_draw_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // Why `canvasCreatePattern` makes none, past the source's verdicts: a repetition that is no keyword's a SyntaxError.
 const BAD_REPETITION: u32 = 6;
 
+// A new array of a view's bytes: made first, as the making can collect and a small array's bytes move with it.
+fn copy_of<'s>(scope: &mut v8::PinScope<'s, '_>, view: v8::Local<'_, v8::Value>) -> Option<v8::Local<'s, v8::Value>> {
+    let made = crate::dom::zeroed_clamped_array(scope, bytes_span(view).map_or(0, |(_, n)| n))?;
+    if let (Some(from), Some(to)) = (bytes_read(view, None), bytes_mut(made)) {
+        to.copy_from_slice(&from);
+    }
+    Some(made)
+}
+
 // __dom.canvasCreatePattern(paint, wrapper, state, kind, source, contextState, repetition) -> 0, or why it made no pattern:
 // `createPattern()`, the source as `judge` takes it, its repetition's code (`canvas_paint.rs` `REPEATS`), -1 for
 // none. HTML's steps, in their order: "Let usability be the result of checking the usability of image." — a failing one's
@@ -222,8 +229,7 @@ fn canvas_create_pattern(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
     let Ok(repetition) = u32::try_from(args.get(6).int32_value(scope).unwrap_or(-1)) else { return rv.set_uint32(BAD_REPETITION) };
     let Ok((pixels, p3)) = pixels_of(scope, h, kind, source, context, &judged) else { return throw_oom(scope) };
-    let tile = bytes_read(pixels, None).unwrap_or_default().into_owned();
-    let tile = crate::dom::u8_clamped_array(scope, tile);
+    let Some(tile) = copy_of(scope, pixels) else { return throw_oom(scope) };
     crate::canvas_paint::init_pattern(scope, args.get(0), args.get(1), tile, judged.size.map(f64::from), repetition, p3, judged.tainted);
     rv.set_uint32(GOOD);
 }
@@ -264,37 +270,57 @@ impl Steps {
         let [w, h] = self.resize;
         (self.crop.is_none() && !self.flip && w >= 1.0 && h >= 1.0).then_some((w as u32, h as u32))
     }
-    // The pixels cropped, resized and flipped (`bitmap_pixels`): their size, whether they are other pixels than the
-    // source's — none for a size too large to hold, which browsers too report an InvalidStateError (their max-texture
-    // limit). With nothing to do, the source's own where it hands them over, else a copy: a bitmap never aliases live pixels.
-    fn apply(&self, px: Cow<'_, [u8]>, size @ [w, h]: [u32; 2]) -> Option<(Vec<u8>, [u32; 2], bool)> {
-        if !self.transforms() {
-            return Some((px.into_owned(), size, false));
-        }
+    // The pixels cropped, resized and flipped (`bitmap_pixels`), their size, and whether they are other pixels than the
+    // source's — none for a size too large to hold, which browsers too report an InvalidStateError (their max-texture limit).
+    fn transformed(&self, px: &[u8], size @ [w, h]: [u32; 2]) -> Option<(Vec<u8>, [u32; 2], bool)> {
         let [sx, sy, sw, sh] = self.crop.unwrap_or([0.0; 4]);
         let geometry = [f64::from(w), f64::from(h), f64::from(u8::from(self.crop.is_some())), sx, sy, sw, sh, self.resize[0], self.resize[1], f64::from(u8::from(self.flip))];
-        let (out, ow, oh) = bitmap_pixels(&px, geometry)?;
+        let (out, ow, oh) = bitmap_pixels(px, geometry)?;
         let made = [ow as u32, oh as u32];
         Some((out, made, self.crop.is_some() || self.flip || made != size))
     }
+}
+
+// A bitmap's pixels, as a source has them: an array it keeps, a bitmap never aliasing live pixels; bytes of its own; none,
+// a blank source's, this many bytes of transparent black.
+enum Source<'s> {
+    View(v8::Local<'s, v8::Value>),
+    Owned(Vec<u8>),
+    Blank(usize),
 }
 
 // What an op hands back: why it refused, or `[pixels, width, height, pixelsP3 | null, displayP3, tainted]`, what the
 // bindings make the ImageBitmap of. `colorSpaceConversion: "none"` means the source's bytes are treated as unmanaged (sRGB,
 // no conversion downstream); otherwise a later draw converts from the colour space kept. The Display P3 rendering of a
 // wide-profile source is carried only by a bitmap of the same pixels: a crop, a resize or a flip would have to re-derive it.
-struct Pixels<'a, 's> {
-    px: Cow<'a, [u8]>,
+struct Pixels<'s> {
+    source: Source<'s>,
     size: [u32; 2],
     wide: v8::Local<'s, v8::Value>,
     display_p3: bool,
     tainted: bool,
 }
-fn hand_back<'s>(scope: &mut v8::PinScope<'s, '_>, steps: &Steps, p: Pixels<'_, 's>, rv: &mut v8::ReturnValue<'_, v8::Value>) {
-    let Some((out, [w, h], transformed)) = steps.apply(p.px, p.size) else { return rv.set_uint32(BAD) };
-    let wide = if transformed || steps.unmanaged { v8::null(scope).into() } else { p.wide };
+fn hand_back<'s>(scope: &mut v8::PinScope<'s, '_>, steps: &Steps, p: Pixels<'s>, rv: &mut v8::ReturnValue<'_, v8::Value>) {
+    let (made, [w, h], other) = if steps.transforms() {
+        let done = match &p.source {
+            Source::View(view) => bytes_read(*view, None).and_then(|px| steps.transformed(&px, p.size)),
+            Source::Owned(px) => steps.transformed(px, p.size),
+            Source::Blank(n) => steps.transformed(&vec![0; *n], p.size),
+        };
+        let Some((out, size, other)) = done else { return rv.set_uint32(BAD) };
+        (Some(crate::dom::u8_clamped_array(scope, out)), size, other)
+    } else {
+        let made = match p.source {
+            Source::View(view) => copy_of(scope, view),
+            Source::Owned(px) => Some(crate::dom::u8_clamped_array(scope, px)),
+            Source::Blank(n) => crate::dom::zeroed_clamped_array(scope, n),
+        };
+        (made, p.size, false)
+    };
+    let Some(made) = made.filter(|m| !m.is_undefined()) else { return rv.set_uint32(BAD) };
+    let wide = if other || steps.unmanaged { v8::null(scope).into() } else { p.wide };
     let items = [
-        crate::dom::u8_clamped_array(scope, out),
+        made,
         v8::Integer::new_from_unsigned(scope, w).into(),
         v8::Integer::new_from_unsigned(scope, h).into(),
         wide,
@@ -323,17 +349,19 @@ fn image_bitmap_of_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let null = v8::null(scope).into();
     if judged.blank {
         let [w, h] = judged.size.map(|v| v as usize);
-        let Ok(px) = zeroed_bytes(w * h * 4) else { return rv.set_uint32(BAD) };
-        let p = Pixels { px: Cow::Owned(px), size: judged.size, wide: null, display_p3, tainted: judged.tainted };
+        let p = Pixels { source: Source::Blank(w * h * 4), size: judged.size, wide: null, display_p3, tainted: judged.tainted };
         return hand_back(scope, &steps, p, &mut rv);
     }
-    let Some(px) = bytes_read(pixels, None) else { return rv.set_uint32(BAD) };
+    if bytes_span(pixels).is_none() {
+        return rv.set_uint32(BAD);
+    }
     let orientation = if kind == IMAGE && steps.flip { nid_of(scope, source).map_or(0, |id| dom(scope).arena.image_orientation(id)) } else { 0 };
     let p = if orientation > 1 {
+        let px = bytes_read(pixels, None).unwrap_or_default();
         let Some((px, size)) = crate::image_decode::unoriented(&px, judged.size, orientation) else { return rv.set_uint32(BAD) };
-        Pixels { px: Cow::Owned(px), size, wide: null, display_p3, tainted: judged.tainted }
+        Pixels { source: Source::Owned(px), size, wide: null, display_p3, tainted: judged.tainted }
     } else {
-        Pixels { px, size: judged.size, wide, display_p3, tainted: judged.tainted }
+        Pixels { source: Source::View(pixels), size: judged.size, wide, display_p3, tainted: judged.tainted }
     };
     hand_back(scope, &steps, p, &mut rv);
 }
@@ -354,10 +382,10 @@ fn image_bitmap_of_blob(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let null: v8::Local<'_, v8::Value> = v8::null(scope).into();
     let p = if steps.flip && b.orientation > 1 {
         let Some((px, size)) = crate::image_decode::unoriented(&b.rgba, size, b.orientation) else { return rv.set_uint32(BAD) };
-        Pixels { px: Cow::Owned(px), size, wide: null, display_p3: b.display_p3, tainted: false }
+        Pixels { source: Source::Owned(px), size, wide: null, display_p3: b.display_p3, tainted: false }
     } else {
         let wide = b.rgba_p3.map_or(null, |p| crate::dom::u8_clamped_array(scope, p));
-        Pixels { px: Cow::Owned(b.rgba), size, wide, display_p3: b.display_p3, tainted: false }
+        Pixels { source: Source::Owned(b.rgba), size, wide, display_p3: b.display_p3, tainted: false }
     };
     hand_back(scope, &steps, p, &mut rv);
 }
@@ -371,18 +399,18 @@ fn image_bitmap_of_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     if let Some(refusal) = steps.refusal() {
         return rv.set_uint32(refusal);
     }
-    let Some(mut px) = bytes_read(args.get(1), None) else { return rv.set_uint32(BAD) };
-    if args.get(2).is_true() {
-        px = Cow::Owned(unorm8(&px));
-    }
+    let Some(px) = bytes_read(args.get(1), None) else { return rv.set_uint32(BAD) };
+    let mut own = args.get(2).is_true().then(|| unorm8(&px));
     let space = args.get(3).to_rust_string_lossy(scope);
     let encoded = space.strip_suffix("-linear").unwrap_or(&space);
     if encoded != space {
-        convert_spaces(px.to_mut(), &space, encoded);
+        convert_spaces(own.get_or_insert_with(|| px.to_vec()), &space, encoded);
     }
     let size = [4, 5].map(|i| args.get(i).uint32_value(scope).unwrap_or(0));
     let wide = v8::null(scope).into();
-    let p = Pixels { px, size, wide, display_p3: encoded == "display-p3", tainted: false };
+    let view = v8::Local::new(scope, args.get(1));
+    let source = own.map_or(Source::View(view), Source::Owned);
+    let p = Pixels { source, size, wide, display_p3: encoded == "display-p3", tainted: false };
     hand_back(scope, &steps, p, &mut rv);
 }
 
@@ -432,14 +460,13 @@ mod tests {
         let plain = of(&[0.0, 0.0, 0.0, 0.0, 0.0, none, none, 0.0, 0.0]);
         assert!(!plain.transforms());
         assert_eq!(plain.fit(), None);
-        assert_eq!(plain.apply(Cow::Borrowed(&px), [1, 1]), Some((px.to_vec(), [1, 1], false)));
         let same_size = of(&[0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0]);
         assert_eq!(same_size.fit(), Some((1, 1)));
-        assert_eq!(same_size.apply(Cow::Borrowed(&px), [1, 1]), Some((px.to_vec(), [1, 1], false)));
+        assert_eq!(same_size.transformed(&px, [1, 1]), Some((px.to_vec(), [1, 1], false)));
         let flipped = of(&[0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]);
         assert_eq!(flipped.fit(), None);
-        assert_eq!(flipped.apply(Cow::Borrowed(&px), [1, 1]), Some((px.to_vec(), [1, 1], true)));
+        assert_eq!(flipped.transformed(&px, [1, 1]), Some((px.to_vec(), [1, 1], true)));
         // (…a size too large to hold)
-        assert_eq!(of(&[0.0, 0.0, 0.0, 0.0, 0.0, 65536.0, 65536.0, 0.0, 0.0]).apply(Cow::Borrowed(&px), [1, 1]), None);
+        assert_eq!(of(&[0.0, 0.0, 0.0, 0.0, 0.0, 65536.0, 65536.0, 0.0, 0.0]).transformed(&px, [1, 1]), None);
     }
 }

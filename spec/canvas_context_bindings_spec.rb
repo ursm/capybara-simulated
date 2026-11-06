@@ -357,6 +357,27 @@ RSpec.describe 'Canvas context bindings' do
     expect(got).to eq(%w[IndexSizeError RangeError none IndexSizeError SecurityError])
   end
 
+  # What the engine allocates for a page is V8's to count as it allocates: a loop of dead bitmaps is collected as it goes.
+  # Stores made in Rust and attached later put no pressure on the heap, and 4 GB of dead `getImageData` peaked at the 4 GB.
+  it 'leaves dead pixels for the collector as they churn', if: File.exist?('/proc/self/clear_refs') do
+    session
+    File.write('/proc/self/clear_refs', '5')
+    before = File.read('/proc/self/status')[/VmRSS:\s+(\d+)/, 1].to_i
+    session.evaluate_script(<<~JS)
+      (() => {
+        const c = new OffscreenCanvas(1000, 1000), g = c.getContext('2d');
+        g.fillRect(0, 0, 1, 1);
+        for (let i = 0; i < 1000; i++) g.getImageData(0, 0, 1000, 1000);
+        const clipped = new OffscreenCanvas(1000, 1000).getContext('2d');
+        for (let i = 0; i < 1000; i++) { clipped.rect(0, 0, 1, 1); clipped.clip(); clipped.reset(); }
+        for (let i = 0; i < 500; i++) new OffscreenCanvas(1000, 1000).getContext('2d').fillRect(0, 0, 1, 1);
+        return 0;
+      })()
+    JS
+    peak = File.read('/proc/self/status')[/VmHWM:\s+(\d+)/, 1].to_i
+    expect(peak - before).to be < 1_500_000
+  end
+
   # createImageBitmap, for an ImageData: "If IsDetachedBuffer(buffer) is true, then return a promise rejected with an
   # "InvalidStateError" DOMException." — after its own arguments' refusals ("If either sw or sh is given and is 0, then
   # return a promise rejected with a RangeError."; a resize of 0, an InvalidStateError) — and a bitmap of it its own

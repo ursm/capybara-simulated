@@ -5994,12 +5994,24 @@ pub(crate) fn u8_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> 
     let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
     v8::Uint8Array::new(scope, buffer, 0, len).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
-// …and a Uint8ClampedArray: pixels.
+// src/v8_shim.cc: an ArrayBuffer V8 allocates, or null.
+unsafe extern "C" {
+    fn csim_array_buffer_maybe_new(isolate: v8::UnsafeRawIsolatePtr, n: usize) -> *const v8::ArrayBuffer;
+}
+// …and a Uint8ClampedArray of `n` zero bytes, as `new Uint8ClampedArray(n)` makes one: a page that churns through bitmaps
+// has the heap collect for room as it allocates them, so its dead ones go. None where they cannot be had.
+pub(crate) fn zeroed_clamped_array<'s>(scope: &mut v8::PinScope<'s, '_>, n: usize) -> Option<v8::Local<'s, v8::Value>> {
+    // SAFETY: the shim answers a handle of this callback's scope (a `Local`'s representation) or null.
+    let buffer: Option<v8::Local<v8::ArrayBuffer>> = unsafe { std::mem::transmute(csim_array_buffer_maybe_new(scope.as_raw_isolate_ptr(), n)) };
+    v8::Uint8ClampedArray::new(scope, buffer?, 0, n).map(Into::into)
+}
+// …of `bytes`: pixels. Undefined where they cannot be had.
 pub(crate) fn u8_clamped_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
-    let len = bytes.len();
-    let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
-    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    v8::Uint8ClampedArray::new(scope, buffer, 0, len).map_or_else(|| v8::undefined(scope).into(), Into::into)
+    let Some(array) = zeroed_clamped_array(scope, bytes.len()) else { return v8::undefined(scope).into() };
+    if let Some(data) = crate::canvas::bytes_mut(array) {
+        data.copy_from_slice(&bytes);
+    }
+    array
 }
 pub(crate) fn f64_array<'s>(scope: &mut v8::PinScope<'s, '_>, vals: &[f64]) -> v8::Local<'s, v8::Float64Array> {
     let mut bytes = Vec::with_capacity(vals.len() * 8);

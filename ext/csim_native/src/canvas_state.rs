@@ -313,7 +313,7 @@ impl CanvasStateHandle {
         if !kept.is_undefined() {
             return Ok(Some(kept));
         }
-        let made = crate::dom::u8_clamped_array(scope, crate::canvas::zeroed_bytes(w * h * 4)?);
+        let made = crate::dom::zeroed_clamped_array(scope, w * h * 4).ok_or(crate::canvas::Oom)?;
         // SAFETY: the main thread writes the reference.
         unsafe { (*self.bitmap.get()).reset(scope, v8::Local::<v8::Object>::try_from(made).ok()) };
         Ok(Some(made))
