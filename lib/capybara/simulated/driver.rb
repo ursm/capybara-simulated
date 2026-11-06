@@ -230,8 +230,9 @@ module Capybara
 
       # What the app raised under any request, as a browser run's server has it (Capybara::Server::Middleware), from any
       # thread — a service worker's fetch is its worker's — for the session to raise the first of what its `server_errors`
-      # names at its next `raise_server_error!` (capybara/simulated.rb).
-      def app_raised(error) = (@app_errors ||= []) << error
+      # names at its next `raise_server_error!` (capybara/simulated.rb): the first of each class, in order, so that a page
+      # raising in a loop with no navigation holds no more than that.
+      def app_raised(error) = (@app_errors ||= {})[error.class] ||= error
 
       def take_app_errors
         errors = @app_errors

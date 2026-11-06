@@ -13690,9 +13690,11 @@ module Capybara
       # Whether a browser's request of `url` would have reached the app's server, which a run with a server listens on one port
       # under any name that resolves to it: a subdomain's, an apex's — the page's own, or its port under a name of its site, or
       # under any name at a port no CDN is on (cuprite with `host-resolver-rules`, measured). A limit: another site's name at the
-      # same non-default port counts, which a browser reaches only where it resolves here.
+      # same non-default port counts, which a browser reaches only where it resolves here. (…none of it on the default stand-in:
+      # a real run's server is 127.0.0.1 and a port, which `www.example.com`'s sibling names do not reach.)
       private def reaches_app?(url)
         return true if url_is_local?(url)
+        return false if @loopback_stand_in
 
         uri = parse_url(url.to_s)
         ref = current_url_parts || parse_url(@default_host.to_s)

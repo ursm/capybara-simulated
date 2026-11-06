@@ -40,7 +40,7 @@ Capybara::Session.prepend(Module.new {
     super
     return unless @driver.respond_to?(:take_app_errors) && (errors = @driver.take_app_errors) && config.raise_server_errors
 
-    error = errors.find {|e| config.server_errors.any? {|kind| e.is_a?(kind) } } or return
+    error = errors.each_value.find {|e| config.server_errors.any? {|kind| e.is_a?(kind) } } or return
     begin
       raise Capybara::CapybaraError, 'Your application server raised an error - It has been raised in your test code because Capybara.raise_server_errors == true'
     rescue Capybara::CapybaraError => capy_error # rubocop:disable Naming/RescuedExceptionsVariableName

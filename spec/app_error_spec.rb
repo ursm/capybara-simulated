@@ -164,7 +164,11 @@ RSpec.describe 'an exception of the app under a request of the page' do
   # port: 500, the next `visit` raises. Another port with no server, a CDN's name: TypeError, nothing raised. (Here the network
   # refuses all of them, and the app is asked for each: Forem's CDN script, `NOTOWN`.)
   describe 'a request off the page\'s own host' do
-    before { allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch).and_return(nil) }
+    before {
+      Capybara.app_host = 'http://lvh.test:18555'
+      allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch).and_return(nil)
+    }
+    after { Capybara.app_host = nil }
 
     def request_from(page, url)
       session.visit(page)
@@ -191,6 +195,24 @@ RSpec.describe 'an exception of the app under a request of the page' do
         end
       end
     end
+  end
+
+  # (…a real run's server is 127.0.0.1 and a port, which the default stand-in's sibling names do not reach)
+  it 'raises nothing of a sibling of the default stand-in, which reaches no server' do
+    allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch).and_return(nil)
+    session.visit('/')
+    expect(session.evaluate_async_script("const d = arguments[0]; const i = new Image(); i.onload = i.onerror = (e) => d(e.type); i.src = 'http://nope.example.com/raise.png';")).to eq('error')
+    expect { session.visit('/') }.not_to raise_error
+  end
+
+  it 'holds one error of each class, the first, whatever a page raises in a loop' do
+    session.visit('/')
+    expect(session.evaluate_async_script("const d = arguments[0]; (async () => { for (let i = 0; i < 20; i++) await fetch('/raise'); await fetch('/notimpl'); })().then(() => d(1));")).to eq(1)
+    errors = session.driver.instance_variable_get(:@app_errors)
+    expect(errors.keys).to eq([ArgumentError, NotImplementedError])
+    expect { session.visit('/') }.to raise_error(ArgumentError)
+    # (…the rest let go of with it, as Capybara's server keeps one)
+    expect { session.visit('/') }.not_to raise_error
   end
 
   # (…a Host, as every real request sends: a subdomain middleware reads the raw env)
