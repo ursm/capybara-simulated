@@ -7,7 +7,7 @@ require_relative 'support/session_teardown'
 # may be unloaded (a queued task, "checking if unloading is canceled" step 7), its response fetched, that document unloaded
 # and the next one made ("attempt to populate the history entry's document", "finalize a cross-document navigation"). So
 # what is due before all that runs first, and the frame's document and window are the old ones until then: here, a task
-# of the agent's event loop behind every other due at its instant (timers.rs `BEHIND`). Each page below as Chrome 156 and
+# of the agent's event loop behind every other due at its instant (timers.rs `BEHIND`). Each page below as Chrome 157 and
 # Firefox 159 ran it (fn_*.html, 2026-11-06, two runs each). They ask `beforeunload` inside `navigate`, before the setter
 # returns, where HTML queues it: `set old:bu ret`, here `set ret … P0 old:bu`.
 RSpec.describe 'a frame navigation as tasks' do
