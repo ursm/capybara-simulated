@@ -379,7 +379,7 @@ RSpec.describe 'table layout' do
   # squeezed in source order so percentage rows never overflow the table. With an auto-height table it has no
   # basis and is auto. All Chrome 137-measured.
   def pct_rows(table_style, markup)
-    measure(%(<table style="border-spacing:#{table_style}">#{markup}</table>), ['#r1', '#r2']).first.map { it[3] }
+    measure(%(<table style="border-spacing:#{table_style}">#{markup}</table>), ['#r1', '#r2']).first.map {|box| box[3] }
   end
   it 'resolves a percentage <tr> height against the table height as a fixed track' do
     # row1 50% of the 100px table → 50; the auto row2 takes the rest.
@@ -436,7 +436,7 @@ RSpec.describe 'table layout' do
   # A cell's min-width / max-width DO size its column (CSS Tables 3 §4.1, unlike its min/max-height): min-width
   # raises the column, max-width caps it — even below the content's own min-content, and clamping a declared
   # `width` too. The cap is over the WHOLE column (the widest cell's constraint wins across rows).
-  def col_w(sel, body) = measure(body, sel).first.map { it[2].round(2) }
+  def col_w(sel, body) = measure(body, sel).first.map {|box| box[2].round(2) }
   it 'lets a cell min-width / max-width size its column' do
     tbl = ->(cells) { %(<table style="border-spacing:0;font:16px monospace"><tr>#{cells}</tr></table>) }
     expect(col_w(['#c'], tbl['<td id="c" style="min-width:80px;padding:0">A</td>'])).to eq([80])              # raises past content
@@ -846,7 +846,7 @@ RSpec.describe 'table layout' do
   # track and takes none; when every row is declared the surplus spreads over all of them by their heights.
   it 'distributes a table-height surplus to auto rows in proportion to their content' do
     rows = lambda { |markup|
-      measure(%(<table style="border-spacing:0;height:100px">#{markup}</table>), ['#r1', '#r2']).first.map { it[3] }
+      measure(%(<table style="border-spacing:0;height:100px">#{markup}</table>), ['#r1', '#r2']).first.map {|box| box[3] }
     }
     # auto rows, content 10 / 30 → proportional 25 / 75 (not 50 / 50).
     expect(rows.call('<tr><td id="r1" style="padding:0"><div style="width:5px;height:10px"></div></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:30px"></div></td></tr>')).to eq([25, 75])
@@ -884,7 +884,7 @@ RSpec.describe 'table layout' do
   # the larger. Chrome 137, border-spacing:0.
   it 'distributes a table min-height over its rows like a height' do
     mh = lambda { |style, markup|
-      measure(%(<table style="border-spacing:0;#{style}">#{markup}</table>), ['#r1', '#r2']).first.map { it[3] }
+      measure(%(<table style="border-spacing:0;#{style}">#{markup}</table>), ['#r1', '#r2']).first.map {|box| box[3] }
     }
     two = '<tr><td id="r1" style="padding:0"><div style="width:5px;height:10px"></div></td></tr><tr><td id="r2" style="padding:0"><div style="width:5px;height:30px"></div></td></tr>'
     expect(mh.call('min-height:100px', two)).to eq([25, 75])                 # min-height distributes like height

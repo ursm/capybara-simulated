@@ -573,7 +573,7 @@ RSpec.describe 'native layout flex' do
   it 'falls a baseline align-content back the way each spelling does' do
     lines = '<div style="width:60px;height:20px"></div>' * 3
     stack = ->(wrap, k) {
-      item_boxes(%(<div style="display:flex;flex-wrap:#{wrap};width:100px;height:90px;align-content:#{k}">#{lines}</div>)).map { it[1] }
+      item_boxes(%(<div style="display:flex;flex-wrap:#{wrap};width:100px;height:90px;align-content:#{k}">#{lines}</div>)).map {|box| box[1] }
     }
     # Chrome, measured. The two fallbacks are different places, which is what makes the pairing below a claim.
     {'wrap' => [[0, 20, 40], [0, 30, 60]], 'wrap-reverse' => [[70, 50, 30], [70, 40, 10]]}.each do |wrap, (first, last)|
