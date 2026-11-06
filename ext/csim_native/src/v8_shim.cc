@@ -39,7 +39,8 @@ extern "C" const v8::Function* csim_bound_target(const v8::Function* f) {
 
 // A new ArrayBuffer of `n` zero bytes, made as a script's typed array makes one (BackingStore::Allocate: the heap told of
 // them as they are allocated, and collecting for room where it has none, which a store made elsewhere and attached later
-// never does) — a handle of the current scope, or null where they cannot be had (ArrayBuffer::New aborts the process there).
+// never does) — a handle of the current scope, or null where V8 answers that it cannot have them, as ArrayBuffer::New would
+// not. (Out of address space, measured, V8's heap runs out first: a V8OutOfMemoryError in Ruby, not a page's RangeError.)
 extern "C" const v8::ArrayBuffer* csim_array_buffer_maybe_new(v8::Isolate* isolate, size_t n) {
   v8::Local<v8::ArrayBuffer> buffer;
   return v8::ArrayBuffer::MaybeNew(isolate, n).ToLocal(&buffer) ? *buffer : nullptr;

@@ -1495,6 +1495,71 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['smooth'][3]).to eq(255)       # opaque edge stays opaque (clamp-to-edge)
   end
 
+  # HTML: "When the source rectangle is outside the source image, the source rectangle must be clipped to the source image and
+  # the destination rectangle must be clipped in the same proportion", and a filter reading past the image takes "the value
+  # from the nearest edge pixel": so the destination's edge is anti-aliased wherever it falls, smoothed or not, and what lies
+  # off the image paints nothing. Measured, alpha along a row, red source:
+  #                         `.75,.75` scaled        rotated 30° partial/full  `scale(2)`, `.25,.25`
+  #   here                  64 255 … 255 191 0      45/78, row 6 `21 239 …`   128 … 128
+  #   Chrome                0 255 … 255 255 0       47/78, row 6 `21 234 …`   0 … 255 (snaps)
+  #   Firefox               64 255 … 255 191 0      47/78                     128 … 128
+  it 'anti-aliases a drawn image\'s edge wherever it falls, and clips a source past the image' do
+    session = simulated_session(app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+        const solid = (w, h) => { const c = mk(w, h), g = c.getContext('2d'); g.fillStyle = '#f00'; g.fillRect(0, 0, w, h); return c; };
+        const row = (g, y, a, b) => Array.from(g.getImageData(a, y, b - a + 1, 1).data).filter((_, i) => i % 4 === 3);
+        const px = (g, x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
+        const out = {};
+        { const g = mk(12, 12).getContext('2d'); g.drawImage(solid(2, 2), 0.75, 0.75, 8, 8); out.scaled = row(g, 4, 0, 9); }
+        { const g = mk(12, 12).getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(solid(2, 2), 0.75, 0.75, 8, 8); out.nearest = row(g, 4, 0, 9); }
+        { const g = mk(12, 12).getContext('2d'); g.drawImage(solid(8, 8), 0.75, 0.75); out.oneToOne = row(g, 4, 0, 9); }
+        { const g = mk(20, 20).getContext('2d'); g.scale(2, 2); g.drawImage(solid(4, 4), 0.25, 0.25); out.scaledCtm = row(g, 4, 0, 10); }
+        { const g = mk(20, 20).getContext('2d'); g.translate(10, 3); g.rotate(Math.PI / 6); g.drawImage(solid(10, 10), 0, 0); out.rotated = row(g, 6, 7, 16); }
+        const lr = mk(2, 2), l = lr.getContext('2d');
+        l.fillStyle = '#f00'; l.fillRect(0, 0, 1, 2);
+        l.fillStyle = '#00f'; l.fillRect(1, 0, 1, 2);
+        { const g = mk(40, 20).getContext('2d'); g.drawImage(lr, -1, 0, 4, 2, 0, 0, 40, 20); out.clipped = [px(g, 9, 10), px(g, 10, 10), px(g, 29, 10), px(g, 30, 10)]; }
+        { const g = mk(8, 8).getContext('2d'); g.fillStyle = '#0f0'; g.fillRect(0, 0, 8, 8); g.globalCompositeOperation = 'copy'; g.drawImage(lr, 5, 0, 1, 1, 0, 0, 4, 4); out.offImageCopy = px(g, 6, 6); }
+        return JSON.stringify(out);
+      })()
+    JS
+    expect(JSON.parse(out)).to eq(
+      'scaled'       => [64, 255, 255, 255, 255, 255, 255, 255, 191, 0],
+      'nearest'      => [64, 255, 255, 255, 255, 255, 255, 255, 191, 0],
+      'oneToOne'     => [64, 255, 255, 255, 255, 255, 255, 255, 191, 0],
+      'scaledCtm'    => [128, 255, 255, 255, 255, 255, 255, 255, 128, 0, 0],
+      'rotated'      => [21, 239, 255, 255, 255, 255, 255, 255, 208, 63],
+      'clipped'      => [[0, 0, 0, 0], [255, 0, 0, 255], [0, 0, 255, 255], [0, 0, 0, 0]],
+      'offImageCopy' => [0, 255, 0, 255]
+    )
+  end
+
+  # HTML: "The image data must be processed in the original direction, even if the dimensions given are negative." So a
+  # negative size moves a rectangle and does not mirror it, of the source or of the destination, as Chrome and Firefox draw.
+  it 'does not mirror an image drawn with negative dimensions' do
+    session = simulated_session(app)
+    session.visit('/')
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+        const lr = mk(2, 2), l = lr.getContext('2d');
+        l.fillStyle = '#f00'; l.fillRect(0, 0, 1, 2);
+        l.fillStyle = '#00f'; l.fillRect(1, 0, 1, 2);
+        const left = (draw) => { const g = mk(8, 8).getContext('2d'); draw(g); return Array.from(g.getImageData(1, 1, 1, 1).data); };
+        return JSON.stringify([
+          left((g) => g.drawImage(lr, 8, 0, -8, 8)),
+          left((g) => g.drawImage(lr, 2, 0, -2, 2, 0, 0, 8, 8)),
+          left((g) => g.drawImage(lr, 0, 8, 8, -8)),
+          left((g) => { g.imageSmoothingEnabled = false; g.drawImage(lr, 8, 0, -8, 8); })
+        ]);
+      })()
+    JS
+    expect(JSON.parse(out)).to eq([[255, 0, 0, 255]] * 4)
+  end
+
   it 'lets adjacent atlas cells interfere when smoothing a scaled sub-rect, as HTML says' do
     session = simulated_session(app)
     session.visit('/')

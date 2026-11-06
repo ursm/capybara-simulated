@@ -147,7 +147,7 @@ fn canvas_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let format = Format::of(&args.get(3).to_rust_string_lossy(scope));
     let quality = args.get(4).number_value(scope).unwrap_or(f64::NAN);
     let space = crate::canvas::Space::of_code(state.map_or(0, |h| h.color_space_code()));
-    let kept = state.map(|h| h.bitmap(scope)).filter(|b| !b.is_undefined());
+    let kept = state.map(|h| h.readable_bitmap(scope)).filter(|b| !b.is_undefined());
     let pixels = match kept {
         Some(bitmap) => bitmap,
         None => {

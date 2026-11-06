@@ -106,7 +106,7 @@ fn views_of<'s>(
     let tagged = |(pixels, wide, display_p3): (v8::Local<'s, v8::Value>, v8::Local<'s, v8::Value>, bool)| (pixels, wide, if display_p3 { DISPLAY_P3 } else { SRGB });
     match kind {
         BITMAP => crate::image_bitmaps::source_pixels(scope, source).map(tagged),
-        CANVAS | OFFSCREEN => crate::canvas_state::handle(scope, context).map(|c| (c.bitmap(scope), null, c.color_space_code())),
+        CANVAS | OFFSCREEN => crate::canvas_state::handle(scope, context).map(|c| (c.readable_bitmap(scope), null, c.color_space_code())),
         IMAGE => nid_of(scope, source).and_then(|id| crate::image_requests::source_pixels(scope, id)).map(tagged),
         _ => nid_of(scope, source).and_then(|id| dom(scope).arena.video_frames.get(&id).cloned()).map(|frame| (frame.view(scope), null, SRGB)),
     }
@@ -150,6 +150,28 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "imageBitmapOfImageData", image_bitmap_of_image_data, context_id);
 }
 
+// HTML: "The image data must be processed in the original direction, even if the dimensions given are negative": each
+// rectangle by its corners, a negative size moving it — and "When the source rectangle is outside the source image, the
+// source rectangle must be clipped to the source image and the destination rectangle must be clipped in the same
+// proportion". `[source, destination]`, the second what is covered, its edge anti-aliased however it falls.
+fn clipped_rects([sx, sy, sw, sh, dx, dy, dw, dh]: [f64; 8], [iw, ih]: [u32; 2]) -> ([f64; 4], [f64; 4]) {
+    let [sx, sy, sw, sh] = crate::canvas::normalized([sx, sy, sw, sh]);
+    let [dx, dy, dw, dh] = crate::canvas::normalized([dx, dy, dw, dh]);
+    let axis = |s: f64, sl: f64, d: f64, dl: f64, extent: f64| {
+        let (lo, hi) = (s.max(0.0), (s + sl).min(extent));
+        if lo == s && hi == s + sl {
+            return (s, sl, d, dl);
+        }
+        if hi <= lo {
+            return (lo, 0.0, d, 0.0);
+        }
+        (lo, hi - lo, d + (lo - s) * (dl / sl), (hi - lo) * (dl / sl))
+    };
+    let (x, w, to_x, to_w) = axis(sx, sw, dx, dw, f64::from(iw));
+    let (y, h, to_y, to_h) = axis(sy, sh, dy, dh, f64::from(ih));
+    ([x, y, w, h], [to_x, to_y, to_w, to_h])
+}
+
 // __dom.canvasDrawImage(state, kind, source, contextState, sx, sy, sw, sh, dx, dy, dw, dh) -> 0, or the verdict of a source
 // that fails its usability check, the bindings' to throw: `drawImage()`, the source as `judge` takes it, an omitted
 // argument undefined. HTML's steps, in their order:
@@ -157,10 +179,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 //   "Let usability be the result of checking the usability of image." — a failing one thrown, "If usability is bad, then
 //   return (without drawing anything)."
 //   "Establish the source and destination rectangles" — "If one of the sw or sh arguments is zero, then return."
-//   "Paint the region of the image argument" — the destination rectangle through the CTM, under the clip, `globalAlpha`,
-//   the operator and the shadow, each covered pixel sampling the source (nearest, or bilinear where smoothing is on and the
-//   image is scaled or rotated; a negative dw / dh mirrors). A blank but sized canvas is transparent pixels, which it still
-//   DRAWS: a whole-canvas operator clears the destination it does not cover.
+//   "Paint the region of the image argument" — the destination rectangle, clipped with the source (`clipped_rects`), through
+//   the CTM, under the clip, `globalAlpha`, the operator and the shadow, each covered pixel sampling the source (nearest, or
+//   bilinear where smoothing is on and the image is scaled or rotated). A blank but sized canvas is transparent pixels,
+//   which it still DRAWS: a whole-canvas operator clears the destination it does not cover.
 //   "If image is not origin-clean, then set the CanvasRenderingContext2D's origin-clean flag to false." — so a draw that
 //   returned above does not taint, and one that lands off the canvas does.
 fn canvas_draw_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -183,21 +205,25 @@ fn canvas_draw_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         return rv.set_uint32(judged.verdict);
     }
     let natural = if kind == IMAGE { nid_of(scope, source).map_or([0, 0], |id| dom(scope).arena.image_natural_size(id)) } else { [0, 0] };
-    let [sx, sy, sw, sh, dx, dy, dw, dh] = image_rects(given, judged.size, natural);
-    if sw == 0.0 || sh == 0.0 {
+    let rects = image_rects(given, judged.size, natural);
+    if rects[2] == 0.0 || rects[3] == 0.0 {
         return;
     }
-    let (pixels, space) = match pixels_of(scope, h, kind, source, context, &judged) {
-        Ok(found) => found,
-        Err(Oom) => return throw_oom(scope),
-    };
-    let (m, smoothing) = {
-        let s = h.state();
-        (s.m, s.smoothing)
-    };
-    let [iw, ih] = judged.size.map(f64::from);
-    let paint = [6.0, iw, ih, f64::from(space), sx, sy, sw, sh, dx, dy, dw, dh, f64::from(u8::from(smoothing))];
-    draw(scope, h, false, &Shape::Rings { rings: Path::rect(m, [dx, dy, dw, dh]).fill_rings(), even_odd: false }, &paint, pixels);
+    let ([sx, sy, sw, sh], [dx, dy, dw, dh]) = clipped_rects(rects, judged.size);
+    // (…of a source wholly off the image, nothing to paint: a whole-canvas operator leaves the destination, Chrome and Firefox)
+    if sw > 0.0 && sh > 0.0 {
+        let (pixels, space) = match pixels_of(scope, h, kind, source, context, &judged) {
+            Ok(found) => found,
+            Err(Oom) => return throw_oom(scope),
+        };
+        let (m, smoothing) = {
+            let s = h.state();
+            (s.m, s.smoothing)
+        };
+        let [iw, ih] = judged.size.map(f64::from);
+        let paint = [6.0, iw, ih, f64::from(space), sx, sy, sw, sh, dx, dy, dw, dh, f64::from(u8::from(smoothing))];
+        draw(scope, h, false, &Shape::Rings { rings: Path::rect(m, [dx, dy, dw, dh]).fill_rings(), even_odd: false }, &paint, pixels);
+    }
     if judged.tainted {
         h.taint();
     }
@@ -411,9 +437,10 @@ fn image_bitmap_of_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     if let Some(refusal) = steps.refusal() {
         return rv.set_uint32(refusal);
     }
+    // (…the string first: reading one can allocate, and a small array's bytes move)
+    let space = Space::of_name(&args.get(3).to_rust_string_lossy(scope));
     let Some(px) = bytes_read(args.get(1), None) else { return rv.set_uint32(BAD) };
     let mut own = args.get(2).is_true().then(|| unorm8(&px));
-    let space = Space::of_name(&args.get(3).to_rust_string_lossy(scope));
     let encoded = space.encoded();
     if encoded != space {
         convert_buffer(space, encoded, own.get_or_insert_with(|| px.to_vec()));
@@ -480,5 +507,23 @@ mod tests {
         assert_eq!(flipped.transformed(&px, [1, 1]), Some((px.to_vec(), [1, 1], true)));
         // (…a size too large to hold)
         assert_eq!(of(&[0.0, 0.0, 0.0, 0.0, 0.0, 65536.0, 65536.0, 0.0, 0.0]).transformed(&px, [1, 1]), None);
+    }
+
+    // A negative size moves a rectangle, in either; a source past the image is clipped, the destination in proportion.
+    #[test]
+    fn rectangles_keep_their_direction_and_clip_in_proportion() {
+        let image = [2, 2];
+        let same = ([0.0, 0.0, 2.0, 2.0], [0.0, 0.0, 8.0, 8.0]);
+        assert_eq!(clipped_rects([0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 8.0, 8.0], image), same);
+        assert_eq!(clipped_rects([0.0, 0.0, 2.0, 2.0, 8.0, 0.0, -8.0, 8.0], image), same);
+        assert_eq!(clipped_rects([2.0, 2.0, -2.0, -2.0, 0.0, 0.0, 8.0, 8.0], image), same);
+        // (…sx -1 and 4 wide: 1 of 4 clipped off either side, 10 of 40 of the destination)
+        assert_eq!(clipped_rects([-1.0, 0.0, 4.0, 2.0, 0.0, 0.0, 40.0, 20.0], image), ([0.0, 0.0, 2.0, 2.0], [10.0, 0.0, 20.0, 20.0]));
+        // (…wholly off the image: no area)
+        let (src, dst) = clipped_rects([5.0, 0.0, 1.0, 2.0, 0.0, 0.0, 8.0, 8.0], image);
+        assert_eq!((src[2], dst[2]), (0.0, 0.0));
+        // (…what fits is not touched, past any arithmetic's rounding)
+        let huge = clipped_rects([0.0, 0.0, 2.0, 2.0, 1e308, 1e308, -1e308, -1e308], image);
+        assert_eq!(huge.1, [0.0, 0.0, 1e308, 1e308]);
     }
 }

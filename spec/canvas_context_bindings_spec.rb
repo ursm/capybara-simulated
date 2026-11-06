@@ -575,6 +575,53 @@ RSpec.describe 'Canvas context bindings' do
     expect(got).to eq([true, false, false, false, true, false])
   end
 
+  # A gradient's stops are "converted to the context's color space", between which they "must be linearly interpolated in the
+  # context's color space". Chrome interpolates in sRGB: display-p3 red -> blue at x=50 reads 115,20,124 there and 116,25,141
+  # here, a figure kept beside the spec for that reason (before: 115,20,125).
+  it 'interpolates a gradient in the bitmap\'s colour space' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const g = new OffscreenCanvas(100, 1).getContext('2d', {colorSpace: 'display-p3'});
+        const s = g.createLinearGradient(0, 0, 100, 0);
+        s.addColorStop(0, 'red');
+        s.addColorStop(1, 'blue');
+        g.fillStyle = s;
+        g.fillRect(0, 0, 100, 1);
+        return [...g.getImageData(50, 0, 1, 1).data];
+      })()
+    JS
+    expect(got).to eq([116, 25, 141, 255])
+  end
+
+  # A bitmap with no alpha has its pixels looked at only where an operation can have lowered them: a pixel an operation
+  # does not reach keeps what it was read as, a shadow's reach is the bitmap, and a read of one never drawn makes no bitmap,
+  # however large a canvas it is (a 30000² one fits no test's budget otherwise).
+  it 'bounds its alpha:false work by what an operation reaches' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const make = () => new OffscreenCanvas(8, 8).getContext('2d', {alpha: false});
+        const px = (g, x, y) => [...g.getImageData(x, y, 1, 1).data];
+        const out = {};
+        { const g = make(); g.fillStyle = '#f00'; g.fillRect(0, 0, 8, 8); g.globalCompositeOperation = 'source-atop'; g.fillStyle = 'rgba(0,255,0,.5)'; g.fillRect(1, 1, 1, 1); out.atop = [px(g, 1, 1), px(g, 2, 1)]; }
+        { const g = make(); g.fillStyle = '#f00'; g.fillRect(0, 0, 8, 8); g.clearRect(1, 1, 2, 2); out.clear = [px(g, 2, 2), px(g, 3, 3)]; }
+        { const g = make(); g.fillStyle = '#f00'; g.fillRect(0, 0, 8, 8); g.shadowColor = '#000'; g.shadowOffsetX = 4; g.globalCompositeOperation = 'destination-out'; g.fillRect(0, 0, 2, 2); out.shadow = px(g, 5, 1)[3]; }
+        { const g = make(); g.fillStyle = '#f00'; g.fillRect(0, 0, 8, 8); g.putImageData(new ImageData(new Uint8ClampedArray([0, 0, 255, 0]), 1, 1), 2, 2); out.put = [px(g, 2, 2), px(g, 3, 2)]; }
+        const huge = document.createElement('canvas');
+        huge.width = huge.height = 30000;
+        const h = huge.getContext('2d', {alpha: false});
+        out.untouched = [px(h, 5, 5), px(h, 30000, 5)];
+        return out;
+      })()
+    JS
+    expect(got).to eq(
+      'atop' => [[128, 128, 0, 255], [255, 0, 0, 255]],
+      'clear' => [[0, 0, 0, 255], [255, 0, 0, 255]],
+      'shadow' => 255,
+      'put' => [[0, 0, 255, 255], [255, 0, 0, 255]],
+      'untouched' => [[0, 0, 0, 255], [0, 0, 0, 0]]
+    )
+  end
+
   # What the engine allocates for a page is V8's to count as it allocates: a loop of dead bitmaps is collected as it goes.
   # Stores made in Rust and attached later put no pressure on the heap, and 4 GB of dead `getImageData` peaked at the 4 GB.
   it 'leaves dead pixels for the collector as they churn', if: File.exist?('/proc/self/clear_refs') do

@@ -298,15 +298,18 @@ impl CanvasStateHandle {
     pub(crate) fn alpha(&self) -> bool {
         self.settings.alpha
     }
-    // Its bitmap (`canvasBitmap`), as it reads — undefined for none, transparent black to whoever asks: a bitmap with its
-    // alpha `false` "starts off as opaque black instead of transparent black", which is made here as it is read.
+    // Its bitmap as it stands — undefined for none yet, which reads as its initial pixels.
     pub(crate) fn bitmap<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
         // SAFETY: the main thread reads the reference; nothing else writes it meanwhile.
-        if let Some(kept) = unsafe { (*self.bitmap.get()).get(scope) } {
-            return kept.into();
+        unsafe { (*self.bitmap.get()).get(scope) }.map_or_else(|| v8::undefined(scope).into(), Into::into)
+    }
+    // …for what takes its pixels whole (`canvasBitmap`): undefined for transparent black, whoever asks has that to itself;
+    // a bitmap with its alpha `false` "starts off as opaque black instead of transparent black", made here as it is asked for.
+    pub(crate) fn readable_bitmap<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
+        if self.settings.alpha {
+            return self.bitmap(scope);
         }
-        let made = if self.settings.alpha { None } else { self.drawable_bitmap(scope).ok().flatten() };
-        made.unwrap_or_else(|| v8::undefined(scope).into())
+        self.drawable_bitmap(scope).ok().flatten().unwrap_or_else(|| v8::undefined(scope).into())
     }
     // …what an operation draws into: made now, of its initial pixels, where it has none — none for a bitmap of no area.
     pub(crate) fn drawable_bitmap<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Result<Option<v8::Local<'s, v8::Value>>, crate::canvas::Oom> {
@@ -452,7 +455,7 @@ pub(crate) fn source_facts(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_
     let h = handle_of(scope, value)?;
     // SAFETY: the handle lives while its object, the argument, does.
     let h = unsafe { &*(h.as_ref() as *const CanvasStateHandle) };
-    Some((h.origin_clean.get(), !h.bitmap(scope).is_undefined()))
+    Some((h.origin_clean.get(), !h.settings.alpha || !h.bitmap(scope).is_undefined()))
 }
 
 // `__dom.CanvasStateBase`: the constructor of the isolate's template, made once per isolate.
@@ -496,14 +499,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 fn canvas_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle_of(scope, args.get(0)) else { return rv.set_null() };
     // SAFETY: the handle lives while its object, the argument, does.
-    let bitmap = unsafe { &*(h.as_ref() as *const CanvasStateHandle) }.bitmap(scope);
+    let bitmap = unsafe { &*(h.as_ref() as *const CanvasStateHandle) }.readable_bitmap(scope);
     if bitmap.is_undefined() { rv.set_null() } else { rv.set(bitmap) }
 }
 // __dom.canvasTakeBitmap(state) -> the context's bitmap, which it has none of from now on (`transferToImageBitmap`), or
 // null where it had none: in its encoded colour space, as an ImageBitmap keeps no linear values.
 fn canvas_take_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return rv.set_null() };
-    let bitmap = h.bitmap(scope);
+    let bitmap = h.readable_bitmap(scope);
     if bitmap.is_undefined() {
         return rv.set_null();
     }

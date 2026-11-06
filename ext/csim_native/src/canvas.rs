@@ -518,45 +518,43 @@ struct Image<'a> {
     smooth: bool,
 }
 
+// An index held in `0..n`, `n` above 0.
+fn held(v: i64, n: usize) -> usize {
+    v.clamp(0, n as i64 - 1) as usize
+}
+
 impl Image<'_> {
     // The source point a user-space point samples.
     fn source(&self, ux: f64, uy: f64) -> (f64, f64) {
         (self.src[0] + (ux - self.dst[0]) * self.scale.0, self.src[1] + (uy - self.dst[1]) * self.scale.1)
     }
-    // The byte offset of the source's nearest pixel to the user-space point, None outside it.
-    fn nearest(&self, ux: f64, uy: f64) -> Option<usize> {
+    // The byte offset of the source's nearest pixel to the user-space point — held at the image's edge: the destination
+    // rectangle is clipped with the source (canvas_image.rs `clipped_rects`), so only a pixel its edge partly covers can
+    // have a centre past it, and such a pixel takes the edge's colour in proportion to its coverage.
+    fn nearest(&self, ux: f64, uy: f64) -> usize {
         let (sx, sy) = self.source(ux, uy);
-        let (sx, sy) = (floor(sx), floor(sy));
-        (sx >= 0.0 && sy >= 0.0 && sx < self.iw as f64 && sy < self.ih as f64).then(|| (sy as usize * self.iw + sx as usize) * 4)
+        (held(floor(sy) as i64, self.ih) * self.iw + held(floor(sx) as i64, self.iw)) * 4
     }
     // The colour and alpha at the user-space point; `whole` as `Paint::sample`.
     fn sample(&self, ux: f64, uy: f64, whole: bool) -> Option<(Rgb, f64)> {
         let px = &self.px;
         if !self.smooth {
-            return match self.nearest(ux, uy) {
-                Some(j) if px[j + 3] > 0 => {
-                    Some((Rgb { r: f64::from(px[j]), g: f64::from(px[j + 1]), b: f64::from(px[j + 2]) }, unit(px[j + 3])))
-                }
-                _ if whole => Some((Rgb { r: 0.0, g: 0.0, b: 0.0 }, 0.0)),
-                _ => None,
+            let j = self.nearest(ux, uy);
+            return if px[j + 3] > 0 {
+                Some((Rgb { r: f64::from(px[j]), g: f64::from(px[j + 1]), b: f64::from(px[j + 2]) }, unit(px[j + 3])))
+            } else {
+                whole.then_some((Rgb { r: 0.0, g: 0.0, b: 0.0 }, 0.0))
             };
         }
         // The four pixels around the point, weighted by their nearness and premultiplied, so a transparent one
         // does not bleed its colour in — from the image, whatever the source rectangle: "When the filtering algorithm
         // requires a pixel value from outside the source rectangle but inside the original image data, then the value
         // from the original image data must be used", and from outside the image "the value from the nearest edge pixel".
-        // What a source point off the image would paint is clipped away: "When the source rectangle is outside the
-        // source image, the source rectangle must be clipped to the source image and the destination rectangle must be
-        // clipped in the same proportion".
         let (sx, sy) = self.source(ux, uy);
-        if !(sx >= 0.0 && sy >= 0.0 && sx < self.iw as f64 && sy < self.ih as f64) {
-            return whole.then_some((Rgb { r: 0.0, g: 0.0, b: 0.0 }, 0.0));
-        }
         let (gx, gy) = (sx - 0.5, sy - 0.5);
         let (fx, fy) = (floor(gx), floor(gy));
         let (tx, ty) = (gx - fx, gy - fy);
         let (x0, y0) = (fx as i64, fy as i64);
-        let held = |v: i64, n: usize| v.clamp(0, n as i64 - 1) as usize;
         let xs = [held(x0, self.iw), held(x0 + 1, self.iw)];
         let ys = [held(y0, self.ih), held(y0 + 1, self.ih)];
         let (mut r, mut g, mut b, mut a) = (0.0, 0.0, 0.0, 0.0);
@@ -610,7 +608,7 @@ impl Paint<'_> {
     // nearest source pixel's even where it draws smoothed.
     fn shadow_alpha(&self, ux: f64, uy: f64) -> f64 {
         match self {
-            Paint::Image(image) => image.nearest(ux, uy).map_or(0.0, |j| unit(image.px[j + 3])),
+            Paint::Image(image) => unit(image.px[image.nearest(ux, uy) + 3]),
             _ => self.sample(ux, uy, false).map_or(0.0, |(_, a)| a),
         }
     }
@@ -1142,15 +1140,29 @@ pub(crate) fn draw(scope: &mut v8::PinScope<'_, '_>, h: &CanvasStateHandle, plai
     if buf.len() < cw * ch * 4 {
         return;
     }
-    let clears = matches!(paint, Paint::Clear) || !matches!(op, Op::SourceOver);
+    let lowers_alpha = matches!(paint, Paint::Clear) || !matches!(op, Op::SourceOver);
+    // (…where it did: a whole-canvas operator's and a shadow's reach is the bitmap)
+    let reach = if op.whole_canvas() || shadow.is_some() { None } else { shape.bounds() };
     let draw = Draw { cw, ch, clip: clip.as_deref(), alpha, op, inv };
     if draw.run(buf, shape, &paint, shadow.as_ref()).is_err() {
         return throw_oom(scope);
     }
     // (…over an opaque bitmap source-over leaves it opaque, a draw loop's usual case: nothing to look at)
-    if clears && !h.alpha() {
-        over_black(buf);
+    if lowers_alpha && !h.alpha() {
+        for row in pixel_rows(buf, cw, ch, reach) {
+            over_black(row);
+        }
     }
+}
+
+// The rows of a `cw` × `ch` bitmap a device box (left, top, right, bottom) touches, each as far as it does — all of it for
+// none.
+fn pixel_rows(buf: &mut [u8], cw: usize, ch: usize, reach: Option<[f64; 4]>) -> impl Iterator<Item = &mut [u8]> {
+    let [l, t, r, b] = reach.unwrap_or([0.0, 0.0, cw as f64, ch as f64]);
+    let (x0, x1) = ((l.floor().max(0.0) as usize).min(cw), (r.ceil().min(cw as f64).max(0.0) as usize));
+    let (y0, y1) = ((t.floor().max(0.0) as usize).min(ch), (b.ceil().min(ch as f64).max(0.0) as usize));
+    let x1 = x1.max(x0);
+    buf.chunks_exact_mut(cw * 4).take(y1).skip(y0).map(move |row| &mut row[x0 * 4..x1 * 4])
 }
 
 // A bitmap with its alpha `false` after an operation that may have lowered some of it: "attempts to change the alpha
@@ -1256,8 +1268,8 @@ fn float16_into(bytes: &[u8], halves: &mut [u8]) {
 }
 
 // A rectangle `[x, y, w, h]` with a negative width or height moved rather than mirrored: HTML's getImageData (by way of
-// "initialize an ImageData", the magnitudes) and "put pixels from an ImageData onto a bitmap".
-fn normalized([mut x, mut y, mut w, mut h]: [f64; 4]) -> [f64; 4] {
+// "initialize an ImageData", the magnitudes), "put pixels from an ImageData onto a bitmap", and drawImage.
+pub(crate) fn normalized([mut x, mut y, mut w, mut h]: [f64; 4]) -> [f64; 4] {
     if w < 0.0 {
         (x, w) = (x + w, -w);
     }
@@ -1387,10 +1399,18 @@ fn canvas_get_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let [x, y, w, hgt] = normalized(rect).map(|v| v as i64);
     let Some(made) = crate::dom::zeroed_clamped_array(scope, (w * hgt * 4) as usize) else { return throw_oom(scope) };
     let bitmap = h.bitmap(scope);
+    let [cw, ch] = h.size().map(|v| v as i64);
     if let (Some(bytes), Some(out)) = (bytes_read(bitmap, None), bytes_mut(made)) {
-        let [cw, ch] = h.size().map(|v| v as i64);
         copy_rect(&bytes, [cw, ch], [x, y, w, hgt], out, [w, hgt], [0, 0]);
         convert_buffer(Space::of_code(h.color_space_code()), target, out);
+    } else if !h.alpha() {
+        // (…an untouched bitmap with its alpha `false` reads opaque black where it lies, with no need to make it)
+        if let Some(out) = bytes_mut(made) {
+            let reach = [-x as f64, -y as f64, (cw - x) as f64, (ch - y) as f64];
+            for row in pixel_rows(out, w as usize, hgt as usize, Some(reach)) {
+                row.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+            }
+        }
     }
     if !float16 {
         return rv.set(made);
@@ -1433,10 +1453,14 @@ fn canvas_put_image_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
     let Some(dst) = bytes_mut(bitmap) else { return };
     let [cw, ch] = h.size().map(|v| v as i64);
-    copy_rect(&px, image, [x, y, w, hgt], dst, [cw, ch], [dx + x, dy + y]);
+    let (at_x, at_y) = (dx + x, dy + y);
+    copy_rect(&px, image, [x, y, w, hgt], dst, [cw, ch], [at_x, at_y]);
     // (…"the putImageData() method effectively ignores every fourth byte in its input" where its alpha is `false`)
     if !h.alpha() {
-        dst.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+        let reach = [at_x as f64, at_y as f64, (at_x + w) as f64, (at_y + hgt) as f64];
+        for row in pixel_rows(dst, cw as usize, ch as usize, Some(reach)) {
+            row.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+        }
     }
 }
 
@@ -1564,20 +1588,32 @@ mod tests {
         assert_eq!(image_data_height(16, 2.0, None, false, false), Err(IMAGE_DATA_BAD_TYPE));
     }
 
-    // A bilinear sample takes its neighbours from the image, past the source rectangle (HTML: "the value from the original
-    // image data must be used"), holds at its edge, and paints nothing off it.
+    // A sample takes its neighbours from the image, past the source rectangle (HTML: "the value from the original image data
+    // must be used"), and holds at its edge: what a partly covered pixel with its centre past the edge takes.
     #[test]
-    fn samples_past_the_source_rectangle_but_not_past_the_image() {
+    fn samples_past_the_source_rectangle_and_holds_at_the_image_s_edge() {
         let px: Cow<'_, [u8]> = Cow::Owned(vec![255, 0, 0, 255, 0, 0, 255, 255]);
         let image = Image { px, iw: 2, ih: 1, src: [0.0, 0.0, 1.0, 1.0], dst: [0.0, 0.0, 40.0, 40.0], scale: (1.0 / 40.0, 1.0 / 40.0), smooth: true };
         let (c, a) = image.sample(39.5, 20.0, false).unwrap();
         assert!((c.r - 130.7).abs() < 0.1 && (c.b - 124.3).abs() < 0.1 && (a - 1.0).abs() < 1e-9, "{} {} {a}", c.r, c.b);
         let (c, _) = image.sample(0.5, 20.0, false).unwrap();
         assert_eq!((c.r, c.b), (255.0, 0.0));
-        let outside = Image { src: [-1.0, 0.0, 2.0, 1.0], dst: [0.0, 0.0, 40.0, 40.0], scale: (2.0 / 40.0, 1.0 / 40.0), ..image };
-        assert!(outside.sample(10.0, 20.0, false).is_none());
-        assert!(outside.sample(10.0, 20.0, true).is_some_and(|(_, a)| a == 0.0));
-        assert!(outside.sample(30.0, 20.0, false).is_some());
+        let (c, _) = image.sample(-3.0, 20.0, false).unwrap();
+        assert_eq!((c.r, c.b), (255.0, 0.0));
+        let nearest = Image { smooth: false, ..image };
+        assert_eq!(nearest.nearest(-3.0, -3.0), 0);
+        assert_eq!(nearest.nearest(500.0, 500.0), 4);
+    }
+
+    #[test]
+    fn rows_are_held_to_what_a_box_touches() {
+        let mut buf = vec![0u8; 4 * 3 * 4];
+        let rows: Vec<usize> = pixel_rows(&mut buf, 4, 3, Some([0.5, 1.0, 2.0, 2.0])).map(<[u8]>::len).collect();
+        assert_eq!(rows, vec![8]);
+        assert_eq!(pixel_rows(&mut buf, 4, 3, None).count(), 3);
+        assert_eq!(pixel_rows(&mut buf, 4, 3, Some([-9.0, -9.0, 99.0, 99.0])).map(<[u8]>::len).sum::<usize>(), 48);
+        assert_eq!(pixel_rows(&mut buf, 4, 3, Some([9.0, 9.0, 99.0, 99.0])).count(), 0);
+        assert_eq!(pixel_rows(&mut buf, 4, 3, Some([f64::NAN, 0.0, f64::NAN, 1.0])).count(), 1);
     }
 
     #[test]

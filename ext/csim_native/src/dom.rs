@@ -5999,7 +5999,7 @@ unsafe extern "C" {
     fn csim_array_buffer_maybe_new(isolate: v8::UnsafeRawIsolatePtr, n: usize) -> *const v8::ArrayBuffer;
 }
 // …and a Uint8ClampedArray of `n` zero bytes, as `new Uint8ClampedArray(n)` makes one: a page that churns through bitmaps
-// has the heap collect for room as it allocates them, so its dead ones go. None where they cannot be had.
+// has the heap collect for room as it allocates them, so its dead ones go. None where V8 answers that they cannot be had.
 fn zeroed_buffer<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: usize) -> Option<v8::Local<'s, v8::ArrayBuffer>> {
     // SAFETY: the shim answers a handle of this callback's scope (a `Local`'s representation) or null.
     unsafe { std::mem::transmute(csim_array_buffer_maybe_new(scope.as_raw_isolate_ptr(), bytes)) }
