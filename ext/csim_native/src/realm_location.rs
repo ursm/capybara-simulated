@@ -638,7 +638,7 @@ pub(crate) fn site_for_ruby(url: String) -> Option<String> {
 }
 // `value` host-parsed (URL "host parsing"), or None where it is no host — nothing but a host, as a URL's authority would
 // take it, with no port (`:` a forbidden host code point outside an IPv6 address's brackets).
-fn domain_host(value: &str) -> Option<String> {
+pub(crate) fn domain_host(value: &str) -> Option<String> {
     if !value.starts_with('[') && value.contains(':') {
         return None;
     }

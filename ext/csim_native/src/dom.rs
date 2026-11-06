@@ -1107,6 +1107,8 @@ pub(crate) struct RealmState {
     pub(crate) navigator: crate::navigator::Navigator,
     // Its Geolocation's watch ids and cached position (geolocation.rs).
     pub(crate) geolocation: crate::geolocation::Geolocation,
+    // …and its document's active WebAuthn request (webauthn.rs).
+    pub(crate) webauthn_request: Option<Box<crate::webauthn::ActiveRequest>>,
     // What its document planned for its navigable, for the host to take (navigation_plan.rs).
     pub(crate) navigation_plan: crate::navigation_plan::NavigationPlan,
     // Its parse's list of scripts to execute after parsing (script.rs `list_parser_script`), until "the end" takes it,

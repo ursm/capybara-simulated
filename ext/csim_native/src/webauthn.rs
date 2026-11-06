@@ -4,16 +4,19 @@
 // configures the authenticators (`Browser#webauthn`, webauthn.rb, as WebDriver's or CDP's commands do); the bindings
 // (webauthn.js) hold what is a JS value: the promise, the abort signal, and the objects a result is made into.
 //
-// A ceremony is two steps, as the spec's are: `begin_*`, as the page calls, takes a snapshot of the options (their
-// BufferSources must be, §5.1.3) and runs the client's checks; `finish`, in a task, asks the authenticators. So an abort
-// between them cancels a request no authenticator has answered, and no credential is made for it. The authenticators
-// answer at once, with no lifetime timer: one no authenticator can answer is a NotAllowedError now rather than at its
-// timeout, and an authenticator added while it is pending does not answer it.
+// A ceremony is two steps, as the spec's are: `begin`, as the page calls, runs Credential Management's checks in their
+// order and makes the request its document's one active request (`RealmState::webauthn_request`), the options
+// snapshotted (their BufferSources must be, §5.1.3) and WebAuthn's client steps run, which a task then rejects with; and
+// `ask`, in that task, asks the authenticators, again each time the driver adds one or a credential (§5.1.3 "If an
+// authenticator becomes available"). A request none answers waits for its lifetime timer, on the agent's event loop as a
+// page's own timer is (webauthn.js), so an abort cancels a request no authenticator has answered, and no credential is
+// made for it.
 //
 // ES256 is the one algorithm these authenticators make keys of (a request for no other is one they refuse), and they
 // attest a credential with its own key: `packed` self attestation (§8.2), or `none`.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use p256::ecdsa::signature::Signer as _;
@@ -22,7 +25,7 @@ use pkcs8::{DecodePrivateKey as _, EncodePublicKey as _};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 
-use crate::dom::{realm_id, register};
+use crate::dom::{realm_id, register, RealmArena};
 use crate::webcrypto::{array_buffer, base64url_decode, base64url_encode, buffer_bytes, fail, get, random_bytes, set, throw, Failure};
 
 type Outcome<T> = Result<T, Failure>;
@@ -110,14 +113,15 @@ impl Authenticator {
     }
 }
 
-// What a session's windows share. A request between its two steps is here too, by its number.
+// What a session's windows share.
 #[derive(Default)]
 struct Session {
     authenticators: Vec<Authenticator>,
-    last_authenticator: u64,
-    requests: HashMap<u64, Request>,
-    last_request: u64,
 }
+// The last authenticator's number and the last request's, every session's: a handle a test kept from before a reset
+// names no authenticator made since, and an old document's task no request of the next one's.
+static LAST_AUTHENTICATOR: AtomicU64 = AtomicU64::new(0);
+static LAST_REQUEST: AtomicU64 = AtomicU64::new(0);
 
 static SESSIONS: LazyLock<Mutex<HashMap<u64, Session>>> = LazyLock::new(Default::default);
 fn sessions() -> MutexGuard<'static, HashMap<u64, Session>> {
@@ -143,6 +147,7 @@ impl Caller {
     // "effectiveDomain" and the RP ID of a request, `requested` or that domain (§5.1.3 steps 6-8, §5.1.4.1, §5.1.10.1):
     // an opaque origin a NotAllowedError, a host that is no valid domain — an IP address — a SecurityError, and a
     // requested one that is neither the domain nor a registrable domain suffix of it (no public suffix) a SecurityError.
+    // HTML's check is of what it parses to, so `LOCALHOST` passes on `localhost`; the RP ID stays as it was given.
     fn rp_id(&self, requested: Option<&str>) -> Outcome<String> {
         let Some(domain) = self.effective_domain.as_deref() else {
             return fail("NotAllowedError", "The origin is opaque.");
@@ -152,7 +157,7 @@ impl Caller {
         }
         match requested {
             None => Ok(domain.to_owned()),
-            Some(rp_id) if crate::realm_location::registrable_domain_suffix(rp_id, domain) => Ok(rp_id.to_owned()),
+            Some(rp_id) if crate::realm_location::domain_host(rp_id).is_some_and(|host| crate::realm_location::registrable_domain_suffix(&host, domain)) => Ok(rp_id.to_owned()),
             Some(rp_id) => fail("SecurityError", format!("The relying party ID '{rp_id}' is not a registrable domain suffix of, nor equal to the current domain.")),
         }
     }
@@ -184,9 +189,19 @@ fn ccd_string(text: &str) -> String {
 }
 
 // ── Permissions Policy, as a frame's container declares it (§5.9) ────────────────────────────────────────────────────
+// A container's declared origin (Permissions Policy "declared origin"): none, opaque, for a sandboxed document or
+// `sandbox` attribute without `allow-same-origin`; its document's origin (`parent`) for `srcdoc`, no `src` or one that
+// does not parse; else the origin of its `src`, relative to its document (`base`).
+fn declared_origin(parent: &str, sandbox: Option<&str>, srcdoc: bool, src: Option<&str>, base: &str) -> Option<String> {
+    if parent == "null" || crate::sandbox::opaque_origin(None, sandbox) {
+        return None;
+    }
+    let parsed = src.filter(|_| !srcdoc).and_then(|src| ada_url::Url::parse(src, Some(base)).ok());
+    Some(parsed.map_or_else(|| parent.to_owned(), |url| url.origin().to_owned()))
+}
 // What an iframe's `allow` attribute says of `feature` for a document of origin `own` in it: none where it does not name
 // it. Its allowlist — `'src'` where it gives none — is `*`, `'self'` (the container document's origin, `parent`), `'src'`
-// (the origin `src` declares, `declared`), `'none'` or origins.
+// (its declared origin), `'none'` or origins.
 fn allow_attribute_grants(allow: &str, feature: &str, own: &str, parent: &str, declared: Option<&str>) -> Option<bool> {
     let directive = allow.split(';').find(|directive| directive.split_ascii_whitespace().next() == Some(feature))?;
     let mut members = directive.split_ascii_whitespace().skip(1).peekable();
@@ -205,16 +220,19 @@ fn allow_attribute_grants(allow: &str, feature: &str, own: &str, parent: &str, d
 // the top-level document, the container's `allow` attribute where it names the feature, else the frame's being same
 // origin with its parent. (A `Permissions-Policy` response header, which no document's policy here is read from, is a
 // gap: only an attribute can narrow or delegate a feature.)
-fn allowed_to_use(arena: &mut crate::dom::RealmArena, realm: i32, feature: &str) -> bool {
+fn allowed_to_use(arena: &mut RealmArena, realm: i32, feature: &str) -> bool {
     let mut frame = realm;
     while let Some(parent) = arena.parent_realm(frame) {
         let keys = (crate::referrer::known_origin_key(arena, frame), crate::referrer::known_origin_key(arena, parent));
         let origins = (crate::referrer::known_document(arena, frame), crate::referrer::known_document(arena, parent));
         let (Some(own), Some(parent_origin)) = origins else { return false };
-        let container = arena.frame_container(parent, frame).and_then(|c| arena.get(c));
-        let declared = container.and_then(|c| c.plain_attr("src")).and_then(|src| ada_url::Url::parse(src, Some(&parent_origin)).ok()).map(|url| url.origin().to_owned());
-        let named = container.and_then(|c| c.plain_attr("allow")).and_then(|allow| allow_attribute_grants(allow, feature, &own, &parent_origin, declared.as_deref()));
-        if !named.unwrap_or(keys.0.is_some() && keys.0 == keys.1) {
+        let same_origin = keys.0.is_some() && keys.0 == keys.1;
+        let container = arena.frame_container(parent, frame);
+        let base = container.and_then(|c| arena.get(c)).and_then(|_| arena.realm_document(parent)).map(|doc| arena.document_base_url(doc)).unwrap_or_default();
+        let node = container.and_then(|c| arena.get(c));
+        let declared = node.and_then(|c| declared_origin(&parent_origin, c.plain_attr("sandbox"), c.plain_attr("srcdoc").is_some(), c.plain_attr("src"), &base));
+        let named = node.and_then(|c| c.plain_attr("allow")).and_then(|allow| allow_attribute_grants(allow, feature, &own, &parent_origin, declared.as_deref()));
+        if !named.unwrap_or(same_origin) {
             return false;
         }
         frame = parent;
@@ -233,6 +251,7 @@ fn known_ids(descriptors: Vec<Descriptor>) -> Vec<Vec<u8>> {
 }
 
 struct CreationOptions {
+    timeout: Option<f64>,
     rp_id: Option<String>,
     user_id: Vec<u8>,
     challenge: Vec<u8>,
@@ -249,6 +268,7 @@ struct CreationOptions {
     conditional: bool,
 }
 struct RequestOptions {
+    timeout: Option<f64>,
     rp_id: Option<String>,
     challenge: Vec<u8>,
     allow: Vec<Descriptor>,
@@ -256,10 +276,25 @@ struct RequestOptions {
     conditional: bool,
 }
 
-// A request whose client steps are done, waiting for the authenticators.
+// A request made: its client steps' refusal, which its task rejects with; "silent", which no credential answers
+// (Credential Management §2.5.1); or one for the authenticators.
 enum Request {
+    Refused(Failure),
+    Silent,
     Create(Creation),
     Get(Assertion),
+}
+// A document's one active request of the type (Credential Management's "active credential types"), kept with its
+// settings object, so a new document has none: `number` tells a task of the last one's from it, `lifetime` is its timer's
+// ms — none for a conditional one, whose lifetime is its document's.
+pub(crate) struct ActiveRequest {
+    number: u64,
+    lifetime: Option<f64>,
+    request: Request,
+}
+// §15.1's recommended range and default for a ceremony's timeout, which a request's is corrected to (§5.1.3 step 4).
+fn lifetime_of(timeout: Option<f64>) -> f64 {
+    timeout.unwrap_or(300_000.0).clamp(300_000.0, 600_000.0)
 }
 struct Creation {
     rp_id: String,
@@ -490,8 +525,13 @@ struct Asserted {
 enum Answer {
     Created(Created),
     Asserted(Asserted),
-    // None yet: a conditional request nothing can answer is not settled (Credential Management §2.5.1).
-    Pending,
+}
+// What asking the authenticators comes to.
+enum Asked {
+    Answered(Answer),
+    Refused(Failure),
+    // None can answer, for now: its lifetime timer runs on.
+    Waits,
 }
 
 // §6.3.2 authenticatorMakeCredential on `authenticator`: Err a refusal, the status §5.1.3 tells apart only for an
@@ -619,23 +659,25 @@ fn finish_get(session: &mut Session, request: &Assertion) -> Outcome<Asserted> {
     }
     fail("NotAllowedError", NOT_ALLOWED)
 }
-// Step two of a request (`begin_*`'s): none where it has been cancelled.
-fn finish(partition: u64, number: u64) -> Option<Outcome<Answer>> {
-    let mut sessions = sessions();
-    let session = sessions.get_mut(&partition)?;
-    Some(match session.requests.remove(&number)? {
-        Request::Create(request) => finish_create(session, &request).map(Answer::Created),
-        // (…no credential for a conditional one, or its user's refusal: it waits on, as the spec's does for the user)
-        Request::Get(request) if request.conditional => Ok(finish_get(session, &request).map_or(Answer::Pending, Answer::Asserted)),
-        Request::Get(request) => finish_get(session, &request).map(Answer::Asserted),
-    })
-}
-fn enqueue(partition: u64, request: Request) -> u64 {
-    let mut sessions = sessions();
-    let session = sessions.entry(partition).or_default();
-    session.last_request += 1;
-    session.requests.insert(session.last_request, request);
-    session.last_request
+// A request asked of the authenticators, each refusal removing one from it (§5.1.3 "not equivalent to InvalidStateError",
+// §5.1.4.1 "any authenticator returns an error status"), which leaves it to wait, as the only ends a request has are an
+// authenticator's answer, its abort and its lifetime timer — but for an InvalidStateError, and a list of credentials none
+// of the authenticators could answer for (§5.1.4.1 "no eligible credential could be found"; a conditional request's list
+// is no such list).
+fn ask(session: &mut Session, request: &Request) -> Asked {
+    match request {
+        Request::Create(request) => match finish_create(session, request) {
+            Ok(created) => Asked::Answered(Answer::Created(created)),
+            Err(failure) if failure.name == "InvalidStateError" => Asked::Refused(failure),
+            Err(_) => Asked::Waits,
+        },
+        Request::Get(request) => match finish_get(session, request) {
+            Ok(asserted) => Asked::Answered(Answer::Asserted(asserted)),
+            Err(failure) if request.allow_given => Asked::Refused(failure),
+            Err(_) => Asked::Waits,
+        },
+        Request::Refused(_) | Request::Silent => Asked::Waits,
+    }
 }
 
 // A relying party's signals (§5.1.10.2-3), each authenticator's action: the credential with that id on the RP removed;
@@ -662,13 +704,16 @@ fn platform_authenticators(partition: u64) -> (bool, bool) {
 }
 
 // ── The driver's commands (§11.3-11.9): text the host passes through, as JSON ───────────────────────────────────────
+// (…the session's pending requests told, as anything a request could now be answered by arrives: a task of each window's)
+const AUTHENTICATOR_AVAILABLE: u32 = 33;
+fn tell_available(partition: u64) {
+    crate::agents::tell_session(partition, AUTHENTICATOR_AVAILABLE, [0.0; 4], true);
+}
 pub(crate) fn add_authenticator_for_ruby(partition: u64, config: String) -> String {
     let config: Value = serde_json::from_str(&config).unwrap_or(Value::Null);
-    let mut sessions = sessions();
-    let session = sessions.entry(partition).or_default();
-    session.last_authenticator += 1;
-    let id = format!("csim-auth-{}", session.last_authenticator);
-    session.authenticators.push(Authenticator::new(id.clone(), &config));
+    let id = format!("csim-auth-{}", LAST_AUTHENTICATOR.fetch_add(1, Ordering::Relaxed) + 1);
+    sessions().entry(partition).or_default().authenticators.push(Authenticator::new(id.clone(), &config));
+    tell_available(partition);
     id
 }
 pub(crate) fn remove_authenticator_for_ruby(partition: u64, id: String) {
@@ -724,6 +769,8 @@ pub(crate) fn add_credential_for_ruby(ruby: &magnus::Ruby, partition: u64, id: S
     let credential = command_credential(authenticator, &parameters).map_err(|why| magnus::Error::new(ruby.exception_arg_error(), why))?;
     let raw_id = ruby.str_from_slice(&credential.id);
     authenticator.keep(credential);
+    drop(sessions);
+    tell_available(partition);
     Ok(Some(raw_id))
 }
 pub(crate) fn remove_credential_for_ruby(partition: u64, id: String, credential_id: String) {
@@ -758,11 +805,13 @@ pub(crate) fn set_user_verified_for_ruby(partition: u64, id: String, verified: b
 
 // ── The bindings' ops ───────────────────────────────────────────────────────────────────────────────────────────────
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    register(scope, ns, "webauthnCheckPermission", check_permission_op, context_id);
-    register(scope, ns, "webauthnBeginCreate", begin_create_op, context_id);
-    register(scope, ns, "webauthnBeginGet", begin_get_op, context_id);
-    register(scope, ns, "webauthnFinish", finish_op, context_id);
+    register(scope, ns, "webauthnCreate", create_op, context_id);
+    register(scope, ns, "webauthnGet", get_op, context_id);
+    register(scope, ns, "webauthnLifetime", lifetime_op, context_id);
+    register(scope, ns, "webauthnAsk", ask_op, context_id);
+    register(scope, ns, "webauthnExpire", expire_op, context_id);
     register(scope, ns, "webauthnCancel", cancel_op, context_id);
+    register(scope, ns, "webauthnForgetRequest", forget_request_op, context_id);
     register(scope, ns, "webauthnSignalUnknownCredential", signal_unknown_credential_op, context_id);
     register(scope, ns, "webauthnSignalAllAcceptedCredentials", signal_all_accepted_credentials_op, context_id);
     register(scope, ns, "webauthnSignalCurrentUserDetails", signal_current_user_details_op, context_id);
@@ -822,6 +871,7 @@ fn creation_options(scope: &mut v8::PinScope<'_, '_>, pk: v8::Local<'_, v8::Obje
     });
     let cred_props = member_object(scope, pk, "extensions").and_then(|e| get(scope, e, "credProps")).is_some_and(|v| v.boolean_value(scope));
     Some(CreationOptions {
+        timeout: get(scope, pk, "timeout").and_then(|v| v.number_value(scope)),
         rp_id: member_text(scope, rp, "id"),
         user_id: member_bytes(scope, user, "id"),
         challenge: member_bytes(scope, pk, "challenge"),
@@ -839,6 +889,7 @@ fn creation_options(scope: &mut v8::PinScope<'_, '_>, pk: v8::Local<'_, v8::Obje
 }
 fn request_options(scope: &mut v8::PinScope<'_, '_>, pk: v8::Local<'_, v8::Object>, conditional: bool) -> RequestOptions {
     RequestOptions {
+        timeout: get(scope, pk, "timeout").and_then(|v| v.number_value(scope)),
         rp_id: member_text(scope, pk, "rpId"),
         challenge: member_bytes(scope, pk, "challenge"),
         allow: descriptors(scope, pk, "allowCredentials"),
@@ -847,53 +898,163 @@ fn request_options(scope: &mut v8::PinScope<'_, '_>, pk: v8::Local<'_, v8::Objec
     }
 }
 
-// __dom.webauthnCheckPermission(feature): throws the NotAllowedError of a document not allowed to use it (Credential
-// Management §2.5.1, §2.5.4).
-fn check_permission_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let feature = args.get(0).to_rust_string_lossy(scope);
-    let realm = realm_id(scope, &args);
-    if !allowed_to_use(&mut crate::dom::dom(scope).arena, realm, &feature) {
-        throw(scope, Failure { name: "NotAllowedError", message: format!("The '{feature}' feature is not enabled in this document.") });
+// The request of realm `realm`'s document made: a number its task and timer will name it by.
+fn make_active(scope: &mut v8::PinScope<'_, '_>, realm: i32, lifetime: Option<f64>, request: Request) -> f64 {
+    let number = LAST_REQUEST.fetch_add(1, Ordering::Relaxed) + 1;
+    if let Some(state) = crate::dom::dom(scope).arena.realm_state_mut(realm) {
+        state.webauthn_request = Some(Box::new(ActiveRequest { number, lifetime, request }));
+    }
+    number as f64
+}
+fn fail_with<T>(scope: &mut v8::PinScope<'_, '_>, name: &'static str, message: String) -> Option<T> {
+    throw(scope, Failure { name, message });
+    None
+}
+// Credential Management's checks a request of `publicKey` is refused by at once: "not fully active", no `publicKey`, a
+// request of the type already active, a document not allowed to use `feature`.
+fn fully_active(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()> {
+    if crate::dom::dom(scope).arena.navigables.fully_active(realm) { Some(()) } else { fail_with(scope, "InvalidStateError", "The document is not fully active.".to_owned()) }
+}
+fn public_key<'s>(scope: &mut v8::PinScope<'s, '_>, options: v8::Local<'_, v8::Object>) -> Option<v8::Local<'s, v8::Object>> {
+    match member_object(scope, options, "publicKey") {
+        Some(pk) => Some(pk),
+        None => fail_with(scope, "NotSupportedError", "Only public-key credentials are supported.".to_owned()),
     }
 }
-// __dom.webauthnBeginCreate(partition, publicKey, mediation) -> the request's number, or throws what its client steps
-// do. A cross-origin caller's user activation is consumed by it (§5.1.3 step 2), whatever comes of it after.
-fn begin_create_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let partition = partition_arg(scope, &args);
-    let Ok(pk) = v8::Local::<v8::Object>::try_from(args.get(1)) else { return };
-    let conditional = args.get(2).to_rust_string_lossy(scope) == "conditional";
-    let Some(options) = creation_options(scope, pk, conditional) else { return };
-    let caller = caller(scope, &args);
+fn not_active(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()> {
+    if crate::dom::dom(scope).arena.realm_state(realm).is_some_and(|state| state.webauthn_request.is_some()) {
+        fail_with(scope, "NotAllowedError", "A request is already pending.".to_owned())
+    } else {
+        Some(())
+    }
+}
+fn permitted(scope: &mut v8::PinScope<'_, '_>, realm: i32, feature: &str) -> Option<()> {
+    if allowed_to_use(&mut crate::dom::dom(scope).arena, realm, feature) {
+        Some(())
+    } else {
+        fail_with(scope, "NotAllowedError", format!("The '{feature}' feature is not enabled in this document."))
+    }
+}
+// §2.5.4 "Create a Credential" and [[Create]]'s client steps, a cross-origin caller's user activation consumed by them
+// (§5.1.3 step 2), whatever comes of them after: the request's number, undefined for a signal already aborted.
+fn begin_create_steps(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, options: v8::Local<'_, v8::Object>) -> Option<f64> {
+    let realm = realm_id(scope, args);
+    fully_active(scope, realm)?;
+    let pk = public_key(scope, options)?;
+    permitted(scope, realm, "publickey-credentials-create")?;
+    if args.get(1).is_true() {
+        return None;
+    }
+    not_active(scope, realm)?;
+    let conditional = member_text(scope, options, "mediation").as_deref() == Some("conditional");
+    let creation = creation_options(scope, pk, conditional)?;
+    let lifetime = lifetime_of(creation.timeout);
+    let caller = caller(scope, args);
     if caller.cross_origin && !conditional {
-        let realm = realm_id(scope, &args);
         crate::dom::dom(scope).arena.consume_activation(realm);
     }
-    match begin_create(options, &caller) {
-        Ok(request) => rv.set_double(enqueue(partition, Request::Create(request)) as f64),
-        Err(failure) => throw(scope, failure),
+    let request = begin_create(creation, &caller).map_or_else(Request::Refused, Request::Create);
+    Some(make_active(scope, realm, Some(lifetime), request))
+}
+// §2.5.1 "Request a Credential" and [[DiscoverFromExternalSource]]'s client steps: the same. (…no immediate mediation
+// here, its TypeError; and "silent", a public key credential always taking a gesture, before any WebAuthn step looks at
+// the options.)
+fn begin_get_steps(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, options: v8::Local<'_, v8::Object>) -> Option<f64> {
+    let realm = realm_id(scope, args);
+    fully_active(scope, realm)?;
+    if args.get(1).is_true() {
+        return None;
+    }
+    let pk = public_key(scope, options)?;
+    if member_text(scope, options, "uiMode").as_deref() == Some("immediate") {
+        return fail_with(scope, "TypeError", "Failed to execute 'get' on 'CredentialsContainer': Immediate mediation is not supported.".to_owned());
+    }
+    not_active(scope, realm)?;
+    permitted(scope, realm, "publickey-credentials-get")?;
+    let mediation = member_text(scope, options, "mediation");
+    if mediation.as_deref() == Some("silent") {
+        return Some(make_active(scope, realm, None, Request::Silent));
+    }
+    let conditional = mediation.as_deref() == Some("conditional");
+    let assertion = request_options(scope, pk, conditional);
+    let lifetime = (!conditional).then(|| lifetime_of(assertion.timeout));
+    let caller = caller(scope, args);
+    let request = begin_get(assertion, &caller).map_or_else(Request::Refused, Request::Get);
+    Some(make_active(scope, realm, lifetime, request))
+}
+// __dom.webauthnCreate(options, aborted) / __dom.webauthnGet(options, aborted) -> the request's number, undefined where
+// `aborted`, whether its signal is, says so, or throws a refusal of Credential Management's.
+fn create_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(options) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    if let Some(number) = begin_create_steps(scope, &args, options) {
+        rv.set_double(number);
     }
 }
-// __dom.webauthnBeginGet(partition, publicKey, mediation) -> the request's number, or throws what its client steps do.
-fn begin_get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let partition = partition_arg(scope, &args);
-    let Ok(pk) = v8::Local::<v8::Object>::try_from(args.get(1)) else { return };
-    let conditional = args.get(2).to_rust_string_lossy(scope) == "conditional";
-    let options = request_options(scope, pk, conditional);
-    let caller = caller(scope, &args);
-    match begin_get(options, &caller) {
-        Ok(request) => rv.set_double(enqueue(partition, Request::Get(request)) as f64),
-        Err(failure) => throw(scope, failure),
+fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(options) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    if let Some(number) = begin_get_steps(scope, &args, options) {
+        rv.set_double(number);
     }
 }
-// __dom.webauthnFinish(partition, number) -> the authenticators' answer, as an object of the realm's own ArrayBuffers,
-// or undefined for none yet (or a request cancelled); or throws their refusal.
-fn finish_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// The request `number` of the calling realm's document, out of it — none where it is no longer the active one.
+fn take_active(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, number: f64) -> Option<Box<ActiveRequest>> {
+    let realm = realm_id(scope, args);
+    let state = crate::dom::dom(scope).arena.realm_state_mut(realm)?;
+    state.webauthn_request.take_if(|active| active.number as f64 == number)
+}
+// __dom.webauthnLifetime(number) -> its lifetime timer's ms, undefined for none.
+fn lifetime_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let number = args.get(0).number_value(scope).unwrap_or(0.0);
+    let realm = realm_id(scope, &args);
+    let lifetime = crate::dom::dom(scope).arena.realm_state(realm).and_then(|state| state.webauthn_request.as_ref()).filter(|active| active.number as f64 == number).and_then(|active| active.lifetime);
+    if let Some(lifetime) = lifetime {
+        rv.set_double(lifetime);
+    }
+}
+// __dom.webauthnExpire(number): its lifetime timer up: the NotAllowedError it ends with (§5.1.3), where it is still the
+// active one.
+fn expire_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let number = args.get(0).number_value(scope).unwrap_or(0.0);
+    if take_active(scope, &args, number).is_some() {
+        throw(scope, Failure { name: "NotAllowedError", message: NOT_ALLOWED.to_owned() });
+    }
+}
+// __dom.webauthnForgetRequest(): the calling realm's Document renewed for a next document (dom-nodes.js
+// `__csimRenewDocument`), whose settings object has no active credential type.
+fn forget_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = realm_id(scope, &args);
+    if let Some(state) = crate::dom::dom(scope).arena.realm_state_mut(realm) {
+        state.webauthn_request = None;
+    }
+}
+// __dom.webauthnAsk(partition, number) -> the authenticators' answer, as an object of the realm's own ArrayBuffers, null
+// for "silent", or undefined for none yet (or no such request any more); or throws the refusal that ends the request.
+fn ask_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let partition = partition_arg(scope, &args);
-    let number = args.get(1).number_value(scope).unwrap_or(0.0) as u64;
-    match finish(partition, number) {
-        None | Some(Ok(Answer::Pending)) => {}
-        Some(Err(failure)) => throw(scope, failure),
-        Some(Ok(Answer::Created(created))) => {
+    let number = args.get(1).number_value(scope).unwrap_or(0.0);
+    let Some(active) = take_active(scope, &args, number) else { return };
+    let asked = match &active.request {
+        Request::Silent => return rv.set_null(),
+        Request::Refused(_) => None,
+        request => Some(ask(sessions().entry(partition).or_default(), request)),
+    };
+    let answer = match asked {
+        None => {
+            let Request::Refused(failure) = active.request else { return };
+            return throw(scope, failure);
+        }
+        Some(Asked::Refused(failure)) => return throw(scope, failure),
+        Some(Asked::Waits) => {
+            let realm = realm_id(scope, &args);
+            if let Some(state) = crate::dom::dom(scope).arena.realm_state_mut(realm) {
+                state.webauthn_request = Some(active);
+            }
+            return;
+        }
+        Some(Asked::Answered(answer)) => answer,
+    };
+    match answer {
+        Answer::Created(created) => {
             let out = v8::Object::new(scope);
             common_members(scope, out, &created.id, created.client_data, &created.authenticator_data, created.attachment);
             let attestation_object = array_buffer(scope, created.attestation_object);
@@ -910,7 +1071,7 @@ fn finish_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
             set(scope, out, "residentKey", resident_key);
             rv.set(out.into());
         }
-        Some(Ok(Answer::Asserted(asserted))) => {
+        Answer::Asserted(asserted) => {
             let out = v8::Object::new(scope);
             common_members(scope, out, &asserted.id, asserted.client_data, &asserted.authenticator_data, asserted.attachment);
             let signature = array_buffer(scope, asserted.signature);
@@ -940,13 +1101,10 @@ fn common_members(scope: &mut v8::PinScope<'_, '_>, out: v8::Local<'_, v8::Objec
     let attachment = text_value(scope, attachment);
     set(scope, out, "authenticatorAttachment", attachment);
 }
-// __dom.webauthnCancel(partition, number): the authenticators cancelled (§6.3.4): an aborted request that had not asked them.
+// __dom.webauthnCancel(number): the authenticators cancelled (§6.3.4): an aborted request gone from its document.
 fn cancel_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let partition = partition_arg(scope, &args);
-    let number = args.get(1).number_value(scope).unwrap_or(0.0) as u64;
-    if let Some(session) = sessions().get_mut(&partition) {
-        session.requests.remove(&number);
-    }
+    let number = args.get(0).number_value(scope).unwrap_or(0.0);
+    take_active(scope, &args, number);
 }
 
 // A signal's id or user id (§5.1.10): an error in decoding it a TypeError, before anything else of it is looked at.
@@ -1038,6 +1196,7 @@ mod tests {
     }
     fn creation() -> CreationOptions {
         CreationOptions {
+            timeout: None,
             rp_id: None,
             user_id: vec![1],
             challenge: vec![2],
@@ -1054,7 +1213,7 @@ mod tests {
         }
     }
     fn request() -> RequestOptions {
-        RequestOptions { rp_id: None, challenge: vec![3], allow: Vec::new(), user_verification: "preferred".to_owned(), conditional: false }
+        RequestOptions { timeout: None, rp_id: None, challenge: vec![3], allow: Vec::new(), user_verification: "preferred".to_owned(), conditional: false }
     }
     fn session(config: Value) -> Session {
         let mut session = Session::default();
@@ -1303,26 +1462,62 @@ mod tests {
     }
 
     #[test]
-    fn a_conditional_request_waits_for_what_its_filter_lets_through() {
-        let partition = 0xc0_0001;
-        let id = add_authenticator_for_ruby(partition, r#"{"hasResidentKey": true}"#.to_owned());
-        assert_eq!(id, "csim-auth-1");
-        let conditional = |allow: Vec<Descriptor>| {
-            let number = enqueue(partition, Request::Get(begin_get(RequestOptions { allow, conditional: true, ..request() }, &page()).ok().unwrap()));
-            finish(partition, number).unwrap().ok().unwrap()
-        };
-        assert!(matches!(conditional(Vec::new()), Answer::Pending));
-        let number = enqueue(partition, Request::Create(begin_create(CreationOptions { resident_key: Some("required".to_owned()), ..creation() }, &page()).ok().unwrap()));
-        let Answer::Created(created) = finish(partition, number).unwrap().ok().unwrap() else { panic!() };
-        assert!(matches!(conditional(vec![descriptor(&[9])]), Answer::Pending));
-        assert!(matches!(conditional(vec![descriptor(&created.id)]), Answer::Asserted(_)));
-        assert!(matches!(conditional(Vec::new()), Answer::Asserted(_)));
-        // (…a request cancelled is not answered)
-        let number = enqueue(partition, Request::Get(begin_get(request(), &page()).ok().unwrap()));
-        sessions().get_mut(&partition).unwrap().requests.remove(&number);
-        assert!(finish(partition, number).is_none());
+    fn a_request_none_can_answer_waits() {
+        let mut session = session(json!({"hasResidentKey": true}));
+        let conditional = |allow: Vec<Descriptor>| Request::Get(begin_get(RequestOptions { allow, conditional: true, ..request() }, &page()).ok().unwrap());
+        let modal = |options: RequestOptions| Request::Get(begin_get(options, &page()).ok().unwrap());
+        assert!(matches!(ask(&mut session, &conditional(Vec::new())), Asked::Waits));
+        assert!(matches!(ask(&mut session, &modal(request())), Asked::Waits));
+        assert!(matches!(ask(&mut Session::default(), &Request::Create(begin_create(creation(), &page()).ok().unwrap())), Asked::Waits));
+        assert!(matches!(ask(&mut session, &modal(allow(&[9]))), Asked::Refused(_)));
+        let made = Request::Create(begin_create(CreationOptions { resident_key: Some("required".to_owned()), ..creation() }, &page()).ok().unwrap());
+        let Asked::Answered(Answer::Created(created)) = ask(&mut session, &made) else { panic!() };
+        assert!(matches!(ask(&mut session, &conditional(vec![descriptor(&[9])])), Asked::Waits));
+        assert!(matches!(ask(&mut session, &conditional(vec![descriptor(&created.id)])), Asked::Answered(_)));
+        assert!(matches!(ask(&mut session, &modal(request())), Asked::Answered(_)));
+        let excluded = Request::Create(begin_create(CreationOptions { exclude: vec![descriptor(&created.id)], ..creation() }, &page()).ok().unwrap());
+        assert!(matches!(ask(&mut session, &excluded), Asked::Refused(_)));
+    }
+
+    #[test]
+    fn a_requests_timeout_is_corrected_to_the_recommended_range() {
+        assert_eq!(lifetime_of(None), 300_000.0);
+        assert_eq!(lifetime_of(Some(1000.0)), 300_000.0);
+        assert_eq!(lifetime_of(Some(400_000.0)), 400_000.0);
+        assert_eq!(lifetime_of(Some(9_000_000.0)), 600_000.0);
+    }
+
+    #[test]
+    fn a_handle_is_not_reused_after_a_session_is_cleared() {
+        let partition = 0xc0_0004;
+        let first = add_authenticator_for_ruby(partition, "{}".to_owned());
         clear(partition);
-        assert!(!sessions().contains_key(&partition));
+        assert_ne!(add_authenticator_for_ruby(partition, "{}".to_owned()), first);
+        clear(partition);
+    }
+
+    #[test]
+    fn a_declared_origin_is_where_a_frame_says_it_loads_from() {
+        let declared = |sandbox, srcdoc, src| declared_origin("https://a.test", sandbox, srcdoc, src, "https://base.test/dir/");
+        assert_eq!(declared(None, false, None).as_deref(), Some("https://a.test"));
+        assert_eq!(declared(None, true, Some("https://b.test/")).as_deref(), Some("https://a.test"));
+        assert_eq!(declared(None, false, Some("https://b.test/x")).as_deref(), Some("https://b.test"));
+        assert_eq!(declared(None, false, Some("/x")).as_deref(), Some("https://base.test"));
+        assert_eq!(declared(None, false, Some("http://[")).as_deref(), Some("https://a.test"));
+        assert_eq!(declared(Some("allow-scripts"), false, None), None);
+        assert_eq!(declared(Some("allow-same-origin"), false, None).as_deref(), Some("https://a.test"));
+        assert_eq!(declared_origin("null", None, false, None, ""), None);
+    }
+
+    #[test]
+    fn an_rp_id_is_checked_as_the_host_it_parses_to() {
+        for (requested, host, ok) in [("LOCALHOST", "localhost", true), ("B.EXAMPLE.com", "a.b.example.com", true), ("a b", "localhost", false), ("OTHER.test", "localhost", false)] {
+            let got = caller("https://x", host).rp_id(Some(requested));
+            assert_eq!(got.is_ok(), ok, "{requested}");
+            if ok {
+                assert_eq!(got.ok().unwrap(), requested);
+            }
+        }
     }
 
     #[test]

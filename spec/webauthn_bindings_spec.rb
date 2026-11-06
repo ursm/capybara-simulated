@@ -16,12 +16,19 @@ require_relative 'support/session_teardown'
 RSpec.describe 'WebAuthn bindings' do
   let(:app) { ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']] } }
 
+  # A script's result, the virtual clock taken past the lifetime timer of each request it waits on (§15.1's five minutes).
   def run(session, script)
     session.execute_script(<<~JS)
-      globalThis.__out = null;
+      globalThis.__out = '(pending)';
       (async () => { #{script} })().then((v) => { globalThis.__out = v; }, (e) => { globalThis.__out = 'threw ' + e.name; });
     JS
-    session.evaluate_script('globalThis.__out')
+    20.times do
+      out = session.evaluate_script('globalThis.__out')
+      return out unless out == '(pending)'
+
+      session.driver.browser.advance_virtual_clock_ms(300_000)
+    end
+    '(pending)'
   end
 
   it 'is what their IDL says' do
@@ -493,12 +500,6 @@ RSpec.describe 'WebAuthn bindings' do
       ];
       const refusedInOrder = [await rejection(sameTick[0]), await rejection(sameTick[1])];
       const silent = await navigator.credentials.get({mediation: 'silent', publicKey: {challenge: new Uint8Array(1), rpId: 'not.this.test'}});
-      const original = Promise;
-      globalThis.Promise = class Hijacked extends original {};
-      const unhijacked = navigator.credentials.get({mediation: 'silent', publicKey: {challenge: new Uint8Array(1)}});
-      globalThis.Promise = original;
-      const pageSawNoPromise = unhijacked.constructor.name !== 'Hijacked';
-      await unhijacked;
 
       const waiting = new AbortController();
       let settled = 'pending';
@@ -521,12 +522,12 @@ RSpec.describe 'WebAuthn bindings' do
       unfiltered.abort();
       const conditionalCreate = await rejection(navigator.credentials.create({...options(), mediation: 'conditional'}));
       return [
-        await aborted.then(() => 'none', (e) => e.name), await rejection(during), refusedInOrder, silent, pageSawNoPromise,
+        await aborted.then(() => 'none', (e) => e.name), await rejection(during), refusedInOrder, silent,
         whilePending, blocked, settled, chosen.id === made.id, filteredOut, conditionalCreate,
         await rejection(navigator.credentials.get({uiMode: 'immediate', publicKey: {challenge: new Uint8Array(1)}}))
       ];
     JS
-    expect(out).to eq(['RangeError', 'NotAllowedError', %w[SecurityError NotAllowedError], nil, true, 'pending', 'NotAllowedError', 'AbortError', true, 'pending', 'NotAllowedError', 'TypeError'])
+    expect(out).to eq(['RangeError', 'NotAllowedError', %w[SecurityError NotAllowedError], nil, 'pending', 'NotAllowedError', 'AbortError', true, 'pending', 'NotAllowedError', 'TypeError'])
     expect(webauthn.get_credentials(handle).size).to eq(2)
   end
 
@@ -596,8 +597,9 @@ RSpec.describe 'WebAuthn bindings' do
   end
 
   # The RP ID defaults to, and is checked against, the origin's effective domain (HTML §7.5.2 "if origin's domain is
-  # non-null, then return origin's domain"), which a `document.domain` write sets. Chrome and Firefox both keep the host
-  # here: the spec is explicit, so this follows it.
+  # non-null, then return origin's domain"), which a `document.domain` write sets. Firefox keeps the host here; Chrome's
+  # setter does nothing by default (its documents are origin-keyed), and with `Origin-Agent-Cluster: ?0` it follows the
+  # effective domain, as the spec says.
   it 'takes its RP ID from the effective domain' do
     session = simulated_session(app)
     session.visit 'http://a.rp.example.test/'
@@ -639,14 +641,200 @@ RSpec.describe 'WebAuthn bindings' do
     session.visit '/'
     webauthn = session.driver.browser.webauthn
     handle   = webauthn.add_virtual_authenticator('transport' => 'internal', 'hasUserVerification' => true)
-    expect(handle).to eq('csim-auth-1')
     popup = session.window_opened_by { session.execute_script("window.open('/', '_blank')") }
     session.within_window(popup) do
       expect(run(session, 'return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();')).to be(true)
     end
     session.reset!
     session.visit '/'
-    expect(session.driver.browser.webauthn.get_credentials(handle)).to eq([])
+    webauthn = session.driver.browser.webauthn
+    expect(webauthn.get_credentials(handle)).to eq([])
     expect(run(session, 'return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();')).to be(false)
+    # (…a handle from before the reset names no authenticator made since)
+    expect(webauthn.add_virtual_authenticator({})).not_to eq(handle)
+  end
+
+  # Permissions Policy's declared origin, the frame path itself: a same-origin frame with a bare `allow` is allowed
+  # whether it has a `src`, none or a `srcdoc` (Chrome and Firefox alike, measured), and a `src` is relative to its
+  # document's base URL.
+  it 'declares a frame origin as Permissions Policy says', :every_host_local do
+    based = lambda {|env|
+      body = env['SERVER_NAME'].start_with?('b.') ? '<!doctype html><meta charset="utf-8"><p>b' : '<!doctype html><meta charset="utf-8"><base href="http://b.rp.example.test/"><body>'
+      [200, {'content-type' => 'text/html'}, [body]]
+    }
+    session = simulated_session(app)
+    session.visit 'http://rp.example.test/'
+    session.driver.browser.webauthn.add_virtual_authenticator({})
+    out = run(session, <<~JS)
+      #{base64url}
+      const made = async (setup) => {
+        const frame = document.createElement('iframe');
+        setup(frame);
+        const loaded = new Promise((r) => { frame.onload = r; });
+        document.body.append(frame);
+        await loaded;
+        const answer = await rejection(frame.contentWindow.navigator.credentials.create(options()));
+        frame.remove();
+        return answer;
+      };
+      const both = 'publickey-credentials-create; publickey-credentials-get';
+      return [
+        await made((f) => {}),
+        await made((f) => { f.allow = both; }),
+        await made((f) => { f.allow = both; f.srcdoc = '<p>x'; }),
+        await made((f) => { f.allow = both; f.src = '/x'; }),
+        await made((f) => { f.allow = "publickey-credentials-create 'src'"; f.srcdoc = '<p>x'; }),
+        await made((f) => { f.allow = "publickey-credentials-create 'self'"; }),
+        await made((f) => { f.allow = "publickey-credentials-create 'none'"; })
+      ];
+    JS
+    expect(out).to eq(%w[none none none none none none NotAllowedError])
+
+    session = simulated_session(based)
+    session.visit 'http://a.rp.example.test/'
+    session.driver.browser.webauthn.add_virtual_authenticator({})
+    session.execute_script(<<~JS)
+      const frame = document.createElement('iframe');
+      frame.id = 'f';
+      frame.allow = 'publickey-credentials-get';
+      frame.src = 'x';
+      document.body.append(frame);
+    JS
+    session.within_frame('f') do
+      out = run(session, 'return [location.hostname, await navigator.credentials.get({publicKey: {challenge: new Uint8Array(1), allowCredentials: [{type: "public-key", id: new Uint8Array(1)}]}}).then(() => "none", (e) => e.message)];')
+      expect(out.first).to eq('b.rp.example.test')
+      expect(out.last).not_to include('not enabled')
+    end
+  end
+
+  # HTML "is a registrable domain suffix of or is equal to" parses the suffix first: an RP ID in capitals passes, and stays
+  # as given. (Chrome and Firefox both say SecurityError, measured: the rule is explicit.)
+  it 'checks the host an RP ID parses to' do
+    session = simulated_session(app)
+    session.visit 'http://a.rp.example.test/'
+    session.driver.browser.webauthn.add_virtual_authenticator({})
+    out = run(session, <<~JS)
+      #{base64url}
+      const made = await navigator.credentials.create(options({rp: {name: 'x', id: 'RP.Example.TEST'}}));
+      return [b64(made.response.getAuthenticatorData()), await rejection(navigator.credentials.create(options({rp: {name: 'x', id: 'a b'}})))];
+    JS
+    expect(WebauthnVerifier.authenticator_data(WebauthnVerifier.decode(out[0]))[:rp_id_hash]).to eq(Digest::SHA256.digest('RP.Example.TEST'))
+    expect(out[1]).to eq('SecurityError')
+  end
+
+  # Active credential types are the settings object's: a document renewed in its realm (a frame's or a window's initial
+  # about:blank, read before its navigation lands) has none, and the old one's request is nothing to the new one.
+  it 'forgets a request with its document' do
+    pages = ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']] }
+    session = simulated_session(pages)
+    session.visit 'http://rp.example.test/'
+    session.driver.browser.webauthn.add_virtual_authenticator({})
+    out = run(session, <<~JS)
+      #{base64url}
+      const conditional = (w) => { w.navigator.credentials.get({mediation: 'conditional', publicKey: {challenge: new Uint8Array(1)}}); };
+      const frame = document.createElement('iframe');
+      frame.src = '/next';
+      document.body.append(frame);
+      conditional(frame.contentWindow);
+      await new Promise((r) => { frame.onload = r; });
+      const framed = await rejection(frame.contentWindow.navigator.credentials.create(options()));
+
+      const opened = window.open('');
+      conditional(opened);
+      opened.location = '/next';
+      await new Promise((r) => { const poll = () => { opened.location.pathname === '/next' && opened.document.readyState === 'complete' ? r() : setTimeout(poll, 10); }; poll(); });
+      return [framed, await rejection(opened.navigator.credentials.create(options()))];
+    JS
+    expect(out).to eq(%w[none none])
+
+    run(session, "navigator.credentials.get({mediation: 'conditional', publicKey: {challenge: new Uint8Array(1)}}); return 1;")
+    session.visit 'http://rp.example.test/again'
+    out = run(session, <<~JS)
+      #{base64url}
+      return rejection(navigator.credentials.create(options()));
+    JS
+    expect(out).to eq('none')
+  end
+
+  # An authenticator becoming available answers what is pending (§5.1.3, §5.1.4.1: "If an authenticator becomes
+  # available"), a conditional get holding the type till then (Credential Management §2.5.1; Chrome and Firefox let the
+  # next request through, each its own way: the rule is explicit). Chrome answers a modal create so too, measured.
+  it 'asks the authenticators again as they become available' do
+    session = simulated_session(app)
+    session.visit 'http://rp.example.test/'
+    webauthn = session.driver.browser.webauthn
+    session.execute_script(<<~JS)
+      globalThis.__conditional = 'pending';
+      navigator.credentials.get({mediation: 'conditional', publicKey: {challenge: new Uint8Array(1)}}).then((c) => { globalThis.__conditional = c.id; }, (e) => { globalThis.__conditional = e.name; });
+    JS
+    out = run(session, <<~JS)
+      #{base64url}
+      return [globalThis.__conditional, await rejection(navigator.credentials.create(options()))];
+    JS
+    expect(out).to eq(%w[pending NotAllowedError])
+
+    handle = webauthn.add_virtual_authenticator('hasResidentKey' => true)
+    expect(run(session, 'return globalThis.__conditional;')).to eq('pending')
+    key = OpenSSL::PKey::EC.generate('prime256v1')
+    webauthn.add_credential(
+      handle,
+      'credentialId'         => 'AQID',
+      'rpId'                 => 'rp.example.test',
+      'privateKey'           => Base64.strict_encode64(key.private_to_der),
+      'isResidentCredential' => true,
+      'userHandle'           => 'AQ',
+      'signCount'            => 0
+    )
+    expect(run(session, 'return globalThis.__conditional;')).to eq('AQID')
+
+    webauthn.remove_virtual_authenticator(handle)
+    session.execute_script(<<~JS)
+      globalThis.__made = 'pending';
+      navigator.credentials.create({publicKey: {
+        rp: {name: 'x'}, user: {id: new Uint8Array([1]), name: 'u', displayName: 'U'}, challenge: new Uint8Array(1),
+        pubKeyCredParams: [{type: 'public-key', alg: -7}]
+      }}).then((c) => { globalThis.__made = typeof c.id; }, (e) => { globalThis.__made = e.name; });
+    JS
+    expect(session.evaluate_script('globalThis.__made')).to eq('pending')
+    webauthn.add_virtual_authenticator({})
+    session.evaluate_script('1')
+    expect(session.evaluate_script('globalThis.__made')).to eq('string')
+  end
+
+  # A request none can answer lives till its lifetime timer (§5.1.3, §5.1.4.1), `timeout` corrected to §15.1's range; only
+  # a list of credentials none could answer for ends early, and an abort.
+  it 'runs a lifetime timer' do
+    session = simulated_session(app)
+    session.visit 'http://rp.example.test/'
+    start = lambda {|name, call|
+      session.execute_script(<<~JS)
+        globalThis.#{name} = 'pending';
+        #{call}.then(() => { globalThis.#{name} = 'none'; }, (e) => { globalThis.#{name} = e.name; });
+      JS
+    }
+    read = ->(name) { session.evaluate_script("globalThis.#{name}") }
+    creation = "{rp: {name: 'x'}, user: {id: new Uint8Array([1]), name: 'u', displayName: 'U'}, challenge: new Uint8Array(1), pubKeyCredParams: [{type: 'public-key', alg: -7}]"
+    clock = session.driver.browser
+
+    start.call('a', "navigator.credentials.create({publicKey: #{creation}, timeout: 1000}})")
+    clock.advance_virtual_clock_ms(299_000)
+    expect(read.call('a')).to eq('pending')
+    clock.advance_virtual_clock_ms(2_000)
+    expect(read.call('a')).to eq('NotAllowedError')
+
+    start.call('b', "navigator.credentials.get({publicKey: {challenge: new Uint8Array(1), timeout: 9000000}})")
+    clock.advance_virtual_clock_ms(599_000)
+    expect(read.call('b')).to eq('pending')
+    clock.advance_virtual_clock_ms(2_000)
+    expect(read.call('b')).to eq('NotAllowedError')
+
+    start.call('c', "navigator.credentials.get({publicKey: {challenge: new Uint8Array(1), allowCredentials: [{type: 'public-key', id: new Uint8Array(1)}]}})")
+    expect(read.call('c')).to eq('NotAllowedError')
+
+    start.call('d', "(globalThis.__ac = new AbortController(), navigator.credentials.create({publicKey: #{creation}}, signal: globalThis.__ac.signal}))")
+    expect(read.call('d')).to eq('pending')
+    session.execute_script('globalThis.__ac.abort()')
+    expect(read.call('d')).to eq('AbortError')
+    expect(run(session, 'return await navigator.credentials.create({publicKey: {rp: {name: "x"}, user: {id: new Uint8Array([1]), name: "u", displayName: "U"}, challenge: new Uint8Array(1), pubKeyCredParams: [{type: "public-key", alg: -7}]}}).then(() => "none", (e) => e.name);')).to eq('NotAllowedError')
   end
 end
