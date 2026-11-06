@@ -203,8 +203,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "setBrowsingContextGroup", set_browsing_context_group, context_id);
     register(scope, ns, "effectiveDomain", effective_domain_op, context_id);
     register(scope, ns, "setDomain", set_domain_op, context_id);
-    register(scope, ns, "ipHost", ip_host_op, context_id);
-    register(scope, ns, "registrableDomainSuffix", registrable_domain_suffix_op, context_id);
 }
 
 // __dom.documentOrigin() -> the serialization of the calling realm's document's origin (`RealmLocation::origin`).
@@ -702,17 +700,6 @@ fn set_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let item = |s: &str| v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into);
     let (host, effective) = (item(&host), item(effective.as_deref().unwrap_or_default()));
     rv.set(v8::Array::new_with_elements(scope, &[why, host, effective]).into());
-}
-// __dom.ipHost(host) -> whether it is an IP address (`ip_host`).
-fn ip_host_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let host = args.get(0).to_rust_string_lossy(scope);
-    rv.set_bool(ip_host(&host));
-}
-// __dom.registrableDomainSuffix(suffix, host) -> whether `suffix` is a registrable domain suffix of `host` or it
-// (`registrable_domain_suffix`).
-fn registrable_domain_suffix_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (suffix, host) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
-    rv.set_bool(registrable_domain_suffix(&suffix, &host));
 }
 
 #[cfg(test)]

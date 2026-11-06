@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require_relative 'webauthn_state'
 
 
 module Capybara
@@ -199,29 +198,13 @@ module Capybara
         # eager-@app.calls a foreign URL (side effects: extra visit / log row).
         '__csim_allHostsLocal'       => ->(b, *a) { b.send(:all_hosts_local?) },
         '__csim_videoBytes'          => ->(b, *a) { b.video_bytes(a[0], a[2], realm: a[1]) },
-        # WebAuthn create / get raise `WebauthnState::Error` carrying
-        # the DOMException name (`InvalidStateError`, …); rescue here
-        # so the JS shim sees `{error:, name:}` instead of the
-        # `safe_call`-flattened nil that would collapse every failure
-        # to a generic NotAllowedError.
-        '__csimWebauthnCreate' => ->(b, *a) {
-          begin b.webauthn.create(a[0]); rescue WebauthnState::Error => e
-            {'error' => e.message, 'name' => e.webauthn_name}
-          end
-        },
-        '__csimWebauthnGet' => ->(b, *a) {
-          begin b.webauthn.get(a[0]); rescue WebauthnState::Error => e
-            {'error' => e.message, 'name' => e.webauthn_name}
-          end
-        },
-        '__csimWebauthnAddVirtualAuthenticator'      => ->(b, *a) { b.webauthn.add_virtual_authenticator(a[0]) },
-        '__csimWebauthnRemoveVirtualAuthenticator'   => ->(b, *a) { b.webauthn.remove_virtual_authenticator(a[0]); nil },
-        '__csimWebauthnAddCredential'                => ->(b, *a) { b.webauthn.add_credential(a[0], a[1]); nil },
-        '__csimWebauthnRemoveCredential'             => ->(b, *a) { b.webauthn.remove_credential(a[0], a[1]); nil },
-        '__csimWebauthnGetCredentials'               => ->(b, *a) { b.webauthn.get_credentials(a[0]) },
-        '__csimWebauthnSetUserVerified'              => ->(b, *a) { b.webauthn.set_user_verified(a[0], a[1]); nil },
-        '__csimWebauthnSignalUnknownCredential'      => ->(b, *a) { b.webauthn.signal_unknown_credential(a[0], a[1]); nil },
-        '__csimWebauthnSignalAllAcceptedCredentials' => ->(b, *a) { b.webauthn.signal_all_accepted_credentials(a[0], a[1], a[2]); nil }
+        # The driver's WebAuthn commands, as a test's `with_virtual_authenticator` reaches them from its page.
+        '__csimWebauthnAddVirtualAuthenticator'    => ->(b, *a) { b.webauthn.add_virtual_authenticator(a[0]) },
+        '__csimWebauthnRemoveVirtualAuthenticator' => ->(b, *a) { b.webauthn.remove_virtual_authenticator(a[0]); nil },
+        '__csimWebauthnAddCredential'              => ->(b, *a) { b.webauthn.add_credential(a[0], a[1]); nil },
+        '__csimWebauthnRemoveCredential'           => ->(b, *a) { b.webauthn.remove_credential(a[0], a[1]); nil },
+        '__csimWebauthnGetCredentials'             => ->(b, *a) { b.webauthn.get_credentials(a[0]) },
+        '__csimWebauthnSetUserVerified'            => ->(b, *a) { b.webauthn.set_user_verified(a[0], a[1]); nil }
       }.freeze
 
       def self.safe_call

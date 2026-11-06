@@ -19,7 +19,7 @@ require_relative 'errors'
 require_relative 'stack_resolver'
 require_relative 'trace'
 require_relative 'v8_runtime'
-require_relative 'webauthn_state'
+require_relative 'webauthn'
 
 module Capybara
   module Simulated
@@ -9435,7 +9435,7 @@ module Capybara
         {'bytes' => bytes, 'tainted' => result['tainted'] == true, 'meta' => meta}
       end
 
-      def webauthn = (@webauthn ||= WebauthnState.new)
+      def webauthn = (@webauthn ||= Webauthn.new(@session_partition))
 
       # Worker thread entry. Builds an isolate via `V8Runtime.build_worker`,
       # evaluates the worker script, then loops draining microtasks + timers +

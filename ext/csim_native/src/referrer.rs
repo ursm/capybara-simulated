@@ -367,6 +367,14 @@ fn document_chain(arena: &mut RealmArena, mut r: i32, own: bool, read: fn(&mut R
     }
     origins
 }
+// Whether realm `r`'s document is NOT same origin with its ancestors (Credential Management's "same-origin with its
+// ancestors" — an ancestor not known being none it is the same as), and its top-level document's origin, none for a
+// top-level document.
+pub(crate) fn ancestors_of_document(arena: &mut RealmArena, r: i32) -> (bool, Option<String>) {
+    let keys = document_chain(arena, r, true, known_origin_key);
+    let cross_origin = keys.iter().any(|key| key.is_none() || *key != keys[0]);
+    (cross_origin, document_chain(arena, r, false, known_document).pop().flatten())
+}
 // __dom.siteForCookies(realm) -> `site_for_cookies`, undefined for none.
 fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let r = args.get(0).int32_value(scope).unwrap_or(0);

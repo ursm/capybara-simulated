@@ -228,6 +228,7 @@ mod walk_ops;
 mod walk_reuse;
 mod wasm;
 mod web_locks;
+mod webauthn;
 mod xml_parse;
 mod xpath;
 mod yuv;
@@ -431,6 +432,13 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // as the session resets — and whether an agent of it has notices to take (agents.rs), its event loop work.
     native.define_module_function("session_partition_new", magnus::function!(session_partition_new, 0))?;
     native.define_module_function("session_partition_clear", magnus::function!(session_partition_clear, 1))?;
+    // A session's virtual WebAuthn authenticators (webauthn.rs), as the driver's commands reach them.
+    native.define_module_function("webauthn_add_authenticator", magnus::function!(webauthn::add_authenticator_for_ruby, 2))?;
+    native.define_module_function("webauthn_remove_authenticator", magnus::function!(webauthn::remove_authenticator_for_ruby, 2))?;
+    native.define_module_function("webauthn_add_credential", magnus::function!(webauthn::add_credential_for_ruby, 3))?;
+    native.define_module_function("webauthn_remove_credential", magnus::function!(webauthn::remove_credential_for_ruby, 3))?;
+    native.define_module_function("webauthn_credentials", magnus::function!(webauthn::credentials_for_ruby, 2))?;
+    native.define_module_function("webauthn_set_user_verified", magnus::function!(webauthn::set_user_verified_for_ruby, 3))?;
     native.define_module_function("agent_notices_pending", magnus::function!(agents::pending, 1))?;
     // (…and a worker's token, its agents' owner, and its agents gone as it is reaped)
     native.define_module_function("agent_owner_new", magnus::function!(agents::owner_new, 0))?;
@@ -453,11 +461,13 @@ fn session_partition_new() -> u64 {
     static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     LAST.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
-// …and its IndexedDB databases, its caches, its lock managers, its clipboard and its emulated position deleted.
+// …and its IndexedDB databases, its caches, its lock managers, its clipboard, its emulated position and its virtual
+// authenticators deleted.
 fn session_partition_clear(partition: u64) {
     idb_databases::clear(partition);
     cache_storage::clear(partition);
     web_locks::clear(partition);
     system_clipboard::clear(partition);
     geolocation::clear(partition);
+    webauthn::clear(partition);
 }

@@ -19,7 +19,7 @@ pub(crate) struct Failure {
     pub(crate) message: String,
 }
 type Outcome<T> = Result<T, Failure>;
-fn fail<T>(name: &'static str, message: impl Into<String>) -> Outcome<T> {
+pub(crate) fn fail<T>(name: &'static str, message: impl Into<String>) -> Outcome<T> {
     Err(Failure { name, message: message.into() })
 }
 fn data_error<T>(message: &str) -> Outcome<T> {
@@ -510,7 +510,7 @@ fn check_jwk(jwk: &Jwk, usages: Usages, extractable: bool, use_: &str) -> Outcom
 }
 
 // base64url (RFC 4648 §5) without padding, as JWK members are.
-fn base64url_encode(bytes: &[u8]) -> String {
+pub(crate) fn base64url_encode(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -523,7 +523,7 @@ fn base64url_encode(bytes: &[u8]) -> String {
 }
 // …and back — None for text that is no unpadded base64url: a character outside its alphabet (`=` among them), or a
 // length that leaves six bits over, a byte short.
-fn base64url_decode(text: &str) -> Option<Vec<u8>> {
+pub(crate) fn base64url_decode(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(text.len() * 3 / 4);
     let (mut acc, mut bits) = (0u32, 0);
     for c in text.bytes() {
@@ -549,7 +549,7 @@ fn base64url_decode(text: &str) -> Option<Vec<u8>> {
 pub(crate) fn random_hex(n: usize) -> String {
     random_bytes(n).iter().map(|x| format!("{x:02x}")).collect()
 }
-fn random_bytes(n: usize) -> Vec<u8> {
+pub(crate) fn random_bytes(n: usize) -> Vec<u8> {
     let mut out = vec![0u8; n];
     rand_core::OsRng.fill_bytes(&mut out);
     out
@@ -1839,14 +1839,14 @@ fn base64url_decode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 
 // A member of a dictionary the bindings made — its own, never one a page's `Object.prototype` holds (an
 // `Object.prototype.public` read as every algorithm's ECDH public key refused them all) — none where it is undefined.
-fn get<'s>(scope: &mut v8::PinScope<'s, '_>, object: v8::Local<'_, v8::Object>, name: &str) -> Option<v8::Local<'s, v8::Value>> {
+pub(crate) fn get<'s>(scope: &mut v8::PinScope<'s, '_>, object: v8::Local<'_, v8::Object>, name: &str) -> Option<v8::Local<'s, v8::Value>> {
     let key = v8::String::new(scope, name)?;
     if !object.has_own_property(scope, key.into())? {
         return None;
     }
     object.get(scope, key.into()).filter(|v| !v.is_undefined())
 }
-fn set(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>, name: &str, value: v8::Local<'_, v8::Value>) {
+pub(crate) fn set(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>, name: &str, value: v8::Local<'_, v8::Value>) {
     if let Some(key) = v8::String::new(scope, name) {
         object.create_data_property(scope, key.into(), value);
     }
@@ -2095,7 +2095,7 @@ pub(crate) fn array_buffer<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>)
     let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
     v8::ArrayBuffer::with_backing_store(scope, &store).into()
 }
-fn throw(scope: &mut v8::PinScope<'_, '_>, failure: Failure) {
+pub(crate) fn throw(scope: &mut v8::PinScope<'_, '_>, failure: Failure) {
     let Some(message) = v8::String::new(scope, &failure.message) else { return };
     if failure.name == "TypeError" {
         let e = v8::Exception::type_error(scope, message);
