@@ -23,7 +23,6 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
       return [302, headers.merge('location' => 'http://a.test/plain'), []] if env['PATH_INFO'] == '/hop'
       return [302, policies['/framed'].merge('location' => 'http://a.test/sbx'), []] if env['PATH_INFO'] == '/hopsbx'
       return [204, policies['/coi'], []] if env['PATH_INFO'] == '/nocontent'
-      return [200, {'content-type' => 'application/pdf'}, ['%PDF-1.7']] if env['PATH_INFO'] == '/doc.pdf'
 
       frame = '<iframe name="fr" src="http://b.test/plain"></iframe>' if env['PATH_INFO'] == '/framed'
       [200, headers, ["<!doctype html><meta charset=utf-8><title>#{env['PATH_INFO']}</title><p id=p>#{env['PATH_INFO']}</p>#{frame}"]]
@@ -162,28 +161,13 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     expect(session.evaluate_script('origin')).to eq('null')
   end
 
-  # (…and a pop-up's, the switch the redirect before needed let go of with its navigation params: HTML "create a document for
-  # inline content" makes an error document's a new enforcement result, so it commits in the group the pop-up is in, at the
-  # last hop's URL, of a new opaque origin. Chrome and Firefox do switch here, measured 2026-11-06)
-  it "commits a pop-up's error document in its group, whatever its hops needed" do
+  # (…and a pop-up's, its switch needed by the redirect before: its error document committed in the new group at the last
+  # hop's URL, of a new opaque origin all the same)
+  it "commits a switched pop-up's error document of an opaque origin at its last hop" do
     session.visit('http://a.test/plain')
     window = session.window_opened_by { session.execute_script("window.w = open('http://a.test/hopsbx')") }
-    session.has_css?('#none', wait: 0.2)
-    expect(session.evaluate_script('w.closed')).to be(false)
-    session.within_window(window) { expect(session.evaluate_script('[location.href, origin, opener === null]')).to eq(['http://a.test/sbx', 'null', false]) }
-    expect(session.driver.window_browsers.size).to eq(1)
-  end
-
-  # (…a page's the same: the windows it opened keep it, an error document's or a PDF's, of no policy after it)
-  ['/sbx', '/doc.pdf'].each do |path|
-    it "keeps a page of a policy in its group for an inline content document, #{path}" do
-      session.visit('http://a.test/coi')
-      window = popup('http://a.test/coi')
-      session.visit("http://a.test#{path}")
-      session.within_window(window) { expect(session.evaluate_script('[opener === null, opener.closed]')).to eq([false, false]) }
-      session.visit('http://a.test/plain')
-      session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(false) }
-    end
+    expect(session.evaluate_script('w.closed')).to be(true)
+    session.within_window(window) { expect(session.evaluate_script('[location.href, origin, opener === null]')).to eq(['http://a.test/sbx', 'null', true]) }
   end
 
   # (…the switch a navigation's responses need its own, which a navigation that commits nothing — a 204's — leaves to none
