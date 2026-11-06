@@ -149,7 +149,10 @@ RSpec.describe 'the platform\'s token for its own constructions' do
         BroadcastChannel: (arg) => [arg],
         WebSocket: (arg) => [`ws://a.test/${String(arg)}`],
         EventSource: (arg) => [arg],
-        Worker: (arg) => [arg]
+        Worker: (arg) => [arg],
+        Option: (arg) => [arg],
+        Image: (arg) => [arg],
+        Audio: (arg) => [arg]
       }).map(([name, make]) => {
         window.log = [];
         function NewTarget() {}
