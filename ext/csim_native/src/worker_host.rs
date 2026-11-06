@@ -61,6 +61,54 @@ struct State {
     // realm → the client id it adopted, and back
     clients: HashMap<i64, String>,
     realms: HashMap<String, i64>,
+    // The shared workers it hosts, by handle, in the order they were made.
+    shared: Vec<(i64, SharedWorker)>,
+}
+
+// What a SharedWorker constructor is judged by (HTML "SharedWorker constructor"): the constructor URL, name and storage key
+// (its origin and top-level site) that find a worker, the type and credentials mode one found must have, and the realms
+// connected to it, its owner set, which it is discarded with the last of.
+#[derive(Clone, Debug, PartialEq)]
+struct SharedWorkerKey {
+    url: String,
+    name: String,
+    origin: String,
+    site: String,
+}
+
+struct SharedWorker {
+    key: SharedWorkerKey,
+    worker_type: String,
+    credentials: String,
+    owners: Vec<i64>,
+}
+
+impl SharedWorker {
+    // Whether a constructor of these options may connect to it.
+    fn accepts(&self, worker_type: &str, credentials: &str) -> bool {
+        self.worker_type == worker_type && self.credentials == credentials
+    }
+    fn connect(&mut self, realm: i64) {
+        if !self.owners.contains(&realm) {
+            self.owners.push(realm);
+        }
+    }
+}
+
+impl State {
+    fn connect_shared(&mut self, handle: i64, worker_type: &str, credentials: &str, realm: i64) -> i64 {
+        let Some((_, worker)) = self.shared.iter_mut().find(|(h, _)| *h == handle) else { return 0 };
+        if !worker.accepts(worker_type, credentials) {
+            return -1;
+        }
+        worker.connect(realm);
+        handle
+    }
+    fn drop_owners(&mut self, handle: i64, gone: &[i64]) -> bool {
+        let Some((_, worker)) = self.shared.iter_mut().find(|(h, _)| *h == handle) else { return false };
+        worker.owners.retain(|o| !gone.contains(o));
+        !worker.owners.is_empty()
+    }
 }
 
 struct Leg {
@@ -137,7 +185,50 @@ impl WorkerHost {
         state.replies.clear();
         state.clients.clear();
         state.realms.clear();
+        state.shared.clear();
         self.answered.notify_all();
+    }
+
+    // ── Shared workers ──
+    // #shared_connect(url, name, origin, site, type, credentials, realm) { |handle| closing? } -> what a SharedWorker constructor
+    // finds: the handle of the worker of its constructor URL, name and storage key — the block saying of each whether its
+    // global's closing flag is set, which HTML's search skips — `realm` one more of its owners; 0 for none; -1 for one of
+    // another type or credentials mode, which fails the constructor's worker. (The block run with nothing locked: it is the
+    // host's, which may switch threads.)
+    #[allow(clippy::too_many_arguments)]
+    fn shared_connect(ruby: &magnus::Ruby, rb_self: &Self, url: String, name: String, origin: String, site: String, worker_type: String, credentials: String, realm: i64) -> Result<i64, magnus::Error> {
+        let key = SharedWorkerKey { url, name, origin, site };
+        let found: Vec<i64> = rb_self.lock().shared.iter().filter(|(_, w)| w.key == key).map(|(handle, _)| *handle).collect();
+        for handle in found {
+            let closing: bool = ruby.yield_value(handle)?;
+            if !closing {
+                return Ok(rb_self.lock().connect_shared(handle, &worker_type, &credentials, realm));
+            }
+        }
+        Ok(0)
+    }
+    // #shared_new(handle, url, name, origin, site, type, credentials, realm) — the worker `handle` a constructor made.
+    #[allow(clippy::too_many_arguments)]
+    fn shared_new(&self, handle: i64, url: String, name: String, origin: String, site: String, worker_type: String, credentials: String, realm: i64) {
+        let worker = SharedWorker { key: SharedWorkerKey { url, name, origin, site }, worker_type, credentials, owners: vec![realm] };
+        self.lock().shared.push((handle, worker));
+    }
+    // #shared_forget(handle) — it was reaped.
+    fn shared_forget(&self, handle: i64) {
+        self.lock().shared.retain(|(h, _)| *h != handle);
+    }
+    // #shared_owners_left(handle) { |realm| gone? } -> whether it has an owner left once those the block names are gone, its
+    // set let go of those. (The block run with nothing locked, as above.)
+    fn shared_owners_left(ruby: &magnus::Ruby, rb_self: &Self, handle: i64) -> Result<bool, magnus::Error> {
+        let owners = rb_self.lock().shared.iter().find(|(h, _)| *h == handle).map_or_else(Vec::new, |(_, w)| w.owners.clone());
+        let mut gone = Vec::new();
+        for owner in owners {
+            let is_gone: bool = ruby.yield_value(owner)?;
+            if is_gone {
+                gone.push(owner);
+            }
+        }
+        Ok(rb_self.lock().drop_owners(handle, &gone))
     }
 
     // ── Streamed responses ──
@@ -315,6 +406,10 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("owed?", method!(WorkerHost::is_owed, 1))?;
     class.define_method("clear", method!(WorkerHost::clear, 0))?;
     class.define_method("reset", method!(WorkerHost::reset, 0))?;
+    class.define_method("shared_connect", method!(WorkerHost::shared_connect, 7))?;
+    class.define_method("shared_new", method!(WorkerHost::shared_new, 8))?;
+    class.define_method("shared_forget", method!(WorkerHost::shared_forget, 1))?;
+    class.define_method("shared_owners_left", method!(WorkerHost::shared_owners_left, 1))?;
     class.define_method("stream_opened", method!(WorkerHost::stream_opened, 3))?;
     class.define_method("stream_closed", method!(WorkerHost::stream_closed, 3))?;
     class.define_method("stream_worker", method!(WorkerHost::stream_worker, 2))?;
@@ -338,6 +433,30 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shared_worker_found_takes_a_connection_only_of_its_type_and_credentials() {
+        let host = WorkerHost::new();
+        host.shared_new(7, "u".into(), "n".into(), "o".into(), "s".into(), "classic".into(), "same-origin".into(), 1);
+        let mut state = host.lock();
+        assert_eq!(state.connect_shared(7, "module", "same-origin", 2), -1);
+        assert_eq!(state.connect_shared(7, "classic", "include", 2), -1);
+        assert_eq!(state.connect_shared(7, "classic", "same-origin", 2), 7);
+        assert_eq!(state.connect_shared(7, "classic", "same-origin", 2), 7);
+        assert_eq!(state.connect_shared(9, "classic", "same-origin", 2), 0);
+        assert_eq!(state.shared[0].1.owners, [1, 2]);
+    }
+
+    #[test]
+    fn a_shared_worker_has_an_owner_left_until_the_last_goes() {
+        let host = WorkerHost::new();
+        host.shared_new(7, "u".into(), "n".into(), "o".into(), "s".into(), "classic".into(), "same-origin".into(), 1);
+        let mut state = host.lock();
+        state.connect_shared(7, "classic", "same-origin", 2);
+        assert!(state.drop_owners(7, &[1]));
+        assert!(!state.drop_owners(7, &[2]));
+        assert!(!state.drop_owners(9, &[]));
+    }
 
     #[test]
     fn a_release_never_goes_below_none() {

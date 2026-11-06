@@ -5037,7 +5037,8 @@ module Capybara
       # `agent_cluster_key`)
       # (…`isolated` whether the context that creates it is cross-origin isolated, which a dedicated or shared one is too:
       # its realm's own — a window's of a browsing context group its page left keeping its group's)
-      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil,
+      # (…`credentials` a shared one's credentials mode, which another connecting to it must be of)
+      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil, credentials: nil,
                        sw_body: nil, sw_imports: nil, site: nil, isolated: false, at: nil, epoch_at: nil, shift: nil, travel: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
@@ -5068,18 +5069,14 @@ module Capybara
         # worker's its registration's, `site`)
         site ||= parent_worker ? @workers.dig(parent_worker, :partition) : blob_partition_site(realm_id.to_i)
         # A SharedWorker connects to the shared worker of its constructor URL and name in its storage key where one runs —
-        # HTML "SharedWorker constructor" — no worker of its own spawned: its realm one more of the worker's owners, its
-        # port posted to it as a connection (workers.js). One of another type fails the constructor's worker: an `error`
-        # event, no connection (Chrome 156 and Firefox 159 alike).
+        # HTML "SharedWorker constructor" (worker_host.rs `shared_connect`) — no worker of its own spawned: its realm one
+        # more of the worker's owners, its port posted to it as a connection (workers.js). One of another type or credentials
+        # mode fails the constructor's worker: an `error` event, no connection (Chrome 156 and Firefox 159 alike).
         if shared
-          key = [url.to_s, name.to_s, creator_key.to_s, site.to_s]
-          if (running = @workers.find {|_h, w| w[:shared_key] == key && w[:thread]&.alive? && !w[:stopping] })
-            h, w = running
-            return worker_fail(handle, 'The shared worker is of another type') if w[:type] != worker_type(script_type)
-
-            w[:owners] << realm_id.to_i unless w[:owners].include?(realm_id.to_i)
-            return h
-          end
+          shared_worker = [url.to_s, name.to_s, creator_key.to_s, site.to_s, worker_type(script_type), credentials.to_s, realm_id.to_i]
+          running = @worker_host.shared_connect(*shared_worker) {|h| !(w = @workers[h]) || !w[:thread]&.alive? || w[:stopping] == true }
+          return running if running.positive?
+          return worker_fail(handle, 'The shared worker is of another type or credentials mode') if running.negative?
         end
         ctrl = service ? 0 : worker_controller_handle(target, shared, controller_handle, site).to_i
         # A worker whose MAIN SCRIPT a fetch-handling SW controls fetches it THROUGH that SW
@@ -5162,12 +5159,10 @@ module Capybara
                                  elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin] - @clock_epoch_at.to_f
                                  end
         record[:next_timer_at] = record[:origin]
-        # (…a shared worker's constructor URL, name and storage key, what another SharedWorker connects to it by, its type,
-        # which that one's must be, and its owners: the realms connected to it, which it is discarded with the last of)
+        # (…a shared worker known by what another SharedWorker connects to it by, and who is connected: worker_host.rs)
         if shared
-          record[:shared_key] = [url.to_s, name.to_s, creator_key.to_s, site.to_s]
-          record[:type]       = worker_type(script_type)
-          record[:owners]     = [realm_id.to_i]
+          record[:shared] = true
+          @worker_host.shared_new(handle, *shared_worker)
         end
         # (…its storage partition its owner document's — a nested worker's its parent's — as it was made: blob_rules.rs
         # `partition_site`)
@@ -5272,7 +5267,7 @@ module Capybara
         # so without the per-worker tally its share is only released by the reset that fires when
         # the LAST worker goes — which never happens while a service worker is registered.
         # (…a shared worker's every message a connection, which it answers through the port, never a reply of its own)
-        unless w[:shared_key]
+        unless w[:shared]
           @worker_host.owe(WorkerHost::POSTED, 1)
           w[:in_flight] = w[:in_flight].to_i + 1
         end
@@ -6760,7 +6755,7 @@ module Capybara
         rid = realm_id.to_i
         return nil if rid.zero?
 
-        discard_workers(@workers.to_a.reject {|_h, w| w[:service] || owners_left?(w) {|r| r == rid } }.to_h)
+        discard_workers(@workers.to_a.reject {|h, w| w[:service] || owners_left?(h, w) {|r| r == rid } }.to_h)
       end
 
       # …and every one the window's document — and its frames, and their workers — created, as a navigation replaces
@@ -6768,15 +6763,12 @@ module Capybara
       # (…not those of the windows it opened, which outlive it: v8_runtime.rb `window_realm_trees`)
       private def terminate_document_workers
         windows = @runtime.window_realm_trees
-        discard_workers(@workers.to_a.reject {|_h, w| w[:service] || owners_left?(w) {|r| !windows.include?(r) } }.to_h)
+        discard_workers(@workers.to_a.reject {|h, w| w[:service] || owners_left?(h, w) {|r| !windows.include?(r) } }.to_h)
       end
       # …whether worker `w` has an owner left once those `gone` names are gone: a dedicated worker's its creator, a shared
       # worker's any realm connected to it, its set of them let go of those.
-      private def owners_left?(w, &gone)
-        return !gone.call(w[:realm]) unless w[:owners]
-
-        w[:owners].reject!(&gone)
-        !w[:owners].empty?
+      private def owners_left?(handle, w, &gone)
+        w[:shared] ? @worker_host.shared_owners_left(handle, &gone) : !gone.call(w[:realm])
       end
 
       # (…`doomed` and — transitively — their NESTED workers, recorded with realm 0 + parent_worker: their Worker
@@ -7733,6 +7725,7 @@ module Capybara
       # goes, so skipping this path leaves `polling?` stuck true for the rest of the session and
       # every later negative assertion burns the full wait.
       private def reap_worker(handle, w)
+        @worker_host.shared_forget(handle.to_i) if w[:shared]
         # A worker that dies still 'activating' releases what Handle Fetch parked on its
         # activation: deferred subresource fetches fall through to the network (queue pushes
         # + counter under the lock — safe from any thread), and a marker rides the outbox so
