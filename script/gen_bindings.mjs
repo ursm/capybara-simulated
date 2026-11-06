@@ -42,7 +42,8 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // attributes slots of its state that its init fills — but what `event` says otherwise. `steps`: attributes whose getter and
 // setter steps the implementation's (`impl.get_x(state)`), no slot of theirs filled. `slots`: attributes that read another's
 // slot, by the slot. `init`: attributes `impl.init(state, init)` fills instead, as the object is made — and it may fill
-// any other state of the event's: [] for that alone.
+// any other state of the event's: [] for that alone. `initialized`: its legacy `init…` operation goes on with
+// `impl.initialized(state)`, for what it resets that no argument names.
 // GlobalEventHandlers' touch handlers, which a desktop with no touch screen — headless Chrome's and Firefox's, measured —
 // exposes on no object: feature detection reads them (flatpickr binds `touchstart` instead of `mousedown` where
 // `window.ontouchstart` is defined).
@@ -311,13 +312,13 @@ const INTERFACES = [
   }],
   ['uievents', 'FocusEvent', { event: {} }],
   ['pointerevents', 'MouseEvent', {
-    event: { steps: ['layerX', 'layerY', 'pageX', 'pageY', 'offsetX', 'offsetY'], slots: { x: 'clientX', y: 'clientY' }, init: [] }
+    event: { steps: ['layerX', 'layerY', 'pageX', 'pageY', 'offsetX', 'offsetY'], slots: { x: 'clientX', y: 'clientY' }, init: [], initialized: true }
   }],
   ['pointerevents', 'WheelEvent', { event: {}, omitMembers: { momentum: 'a draft of Pointer Events neither Chrome nor Firefox has' } }],
-  ['uievents', 'TextEvent', { event: {} }],
+  ['uievents', 'TextEvent', { event: { initialized: true } }],
   ['uievents', 'InputEvent', { event: { init: [] } }],
-  ['uievents', 'KeyboardEvent', { event: { init: [] } }],
-  ['uievents', 'CompositionEvent', { event: {} }],
+  ['uievents', 'KeyboardEvent', { event: { init: [], initialized: true } }],
+  ['uievents', 'CompositionEvent', { event: { initialized: true } }],
   ['pointerevents', 'PointerEvent', { event: { init: ['tiltX', 'tiltY', 'altitudeAngle', 'azimuthAngle'] } }],
   ['touch-events', 'Touch', { install: true }],
   ['touch-events', 'TouchList'],
@@ -719,7 +720,7 @@ const REFLECTION = [
 ];
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'Dictionary', 'EMPTY_DICTIONARY', 'convertedList', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -766,6 +767,25 @@ const EDITORS_DRAFT_ADDITIONS = {
     partial interface FontFace { attribute CSSOMString sizeAdjust; };`
 };
 for (const [spec, text] of Object.entries(EDITORS_DRAFT_ADDITIONS)) all[spec] = parseIdl(text);
+// …and what a draft redefines of another spec's, which @webref/idl still gives as that spec has it — each its draft's IDL,
+// word for word, with the draft it is from; each member takes the other's place. One @webref/idl has come to agree with is
+// an error (below), and the entry goes.
+const EDITORS_DRAFT_REDEFINITIONS = {
+  // https://drafts.csswg.org/cssom-view/#extensions-to-the-mouseevent-interface: of Pointer Events' `long`s
+  'cssom-view-ed': `
+    partial interface MouseEvent {
+      readonly attribute double screenX;
+      readonly attribute double screenY;
+      readonly attribute double clientX;
+      readonly attribute double clientY;
+    };
+    partial dictionary MouseEventInit {
+      double screenX = 0.0;
+      double screenY = 0.0;
+      double clientX = 0.0;
+      double clientY = 0.0;
+    };`
+};
 // Every interface, callback interface, mixin and dictionary of every spec, by name: what an interface type, an
 // `includes` or a dictionary type names. And what adds to one beside its definition — a mixin it includes, a partial
 // of it — by the name of the mixin, or the spec of the partial.
@@ -791,6 +811,17 @@ for (const spec of Object.keys(EDITORS_DRAFT_ADDITIONS)) {
       if (others.some((o) => o && o.members.some((x) => x.name === m.name))) {
         throw new Error(`${d.name}.${m.name}: @webref/idl has it now — remove it from EDITORS_DRAFT_ADDITIONS`);
       }
+    }
+  }
+}
+
+for (const [spec, text] of Object.entries(EDITORS_DRAFT_REDEFINITIONS)) {
+  for (const d of parseIdl(text)) {
+    const { members } = definitions.get(d.name) && d.type === 'interface' ? definitions.get(d.name) : dictionaries.get(d.name);
+    for (const m of d.members) {
+      const at = members.findIndex((o) => o.name === m.name);
+      if (at === -1 || typeName(members[at].idlType) === typeName(m.idlType)) throw new Error(`${d.name}.${m.name}: nothing for ${spec} to redefine now — remove it from EDITORS_DRAFT_REDEFINITIONS`);
+      members[at] = m;
     }
   }
 }
@@ -1400,6 +1431,12 @@ function generateInterface(def, options = {}) {
   let stringifierOut = null;
   const constructors = [];
   const memberList = membersOf(def, options.omit, options.omitMembers);
+  if (options.event) {
+    const { steps = [], slots = {}, init = [] } = options.event;
+    for (const attribute of [...steps, ...Object.keys(slots), ...init]) {
+      if (!memberList.some((m) => m.type === 'attribute' && m.name === attribute)) throw new Error(`${name}: \`event\` names ${attribute}, which is no attribute of it`);
+    }
+  }
   if (options.crossOrigin) crossOriginTables.push([name, crossOriginTable(name, memberList, options.crossOrigin)]);
   for (const m of memberList) {
     const label = `${name}.${m.name || m.type}`;
@@ -1725,18 +1762,21 @@ function installInterface(def, { body, statics, unforgeables, checks, unscopable
   return lines.join('\n');
 }
 
-// An event interface: its class, `extends` the class of the interface it inherits, its members in it, enumerable; its
-// arguments converted by position — no array to make per event, none whose iterator a page has replaced to walk — and
-// handed up with PLATFORM, which the engine makes an event with too (`new X(PLATFORM, type, init)`, its init unconverted, as
-// the steps give it — all there is of an interface with no constructor). Its state one record, every interface's of the
-// event in one (event-state.js, whose `EventState` the root's is), which a member reads: an attribute one slot read, no
-// call of an implementation. Each interface adds to it its brand, which tells its objects apart, and each attribute what
-// its init's member of the name gave — a FrozenArray a frozen copy of the sequence.
+// An event interface: its class, its members in it, enumerable, chained to the class of the interface it inherits by its
+// [[Prototype]]s alone — no `extends`, no `super`: nothing of a page's put in that chain is ever called, with PLATFORM or
+// at all, and `new` works whatever is put there; a page's own subclass is `new.target`'s, as it is of any class. Its
+// arguments converted by position — no array to make per event, none whose iterator a page has replaced to walk — or
+// given with PLATFORM, the engine's own making of one (`new X(PLATFORM, type, init)`, its init unconverted, as the steps
+// give it — all there is of an interface with no constructor). Its state one record, every interface's of the event in
+// one (event-state.js, whose `EventState` the root's is), which a member reads: an attribute one slot read, no call of an
+// implementation. `fill<Name>`, each interface's part of a constructor, adds to it its brand, which tells its objects
+// apart, and each attribute what its init's member of the name gave — a FrozenArray a frozen copy of the sequence.
 function eventInterface(def, { init, slots = {}, steps = [] }, { memberList, body, statics, unforgeables, checks, constants, constructors }) {
   const name = def.name;
   if (constructors.length > 1) throw new Error(`${name}: an overloaded event constructor is not generated yet`);
   const [ctor] = constructors;
   if (ctor && ctor.arguments.length !== 2) throw new Error(`${name}: an event constructor of other than a type and an init is not generated yet`);
+  if (unforgeables.length && def.inheritance) throw new Error(`${name}: [LegacyUnforgeable] members of other than the root event interface are not generated yet`);
   const required = ctor ? ctor.arguments.filter((a) => !a.optional).length : 0;
   const converted = ctor ? convertArguments(name, ctor, checks, () => null) : [];
   const given = new Map();
@@ -1752,13 +1792,29 @@ function eventInterface(def, { init, slots = {}, steps = [] }, { memberList, bod
     if (member && typeOfSlot(member.idlType) !== typeOfSlot(a.idlType)) {
       throw new Error(`${name}.${a.name}: a ${typeName(a.idlType)} its init gives as a ${typeName(member.idlType)} — \`event\` says what it is`);
     }
-    return `      state.${a.name} = ${a.idlType.generic === 'FrozenArray' ? `frozenCopy(init.${a.name})` : `init.${a.name}`};`;
+    return `  state.${a.name} = ${a.idlType.generic === 'FrozenArray' ? `frozenCopy(init.${a.name})` : `init.${a.name}`};`;
   };
+  // (…the interfaces it inherits, the topmost first — the root's state made first — itself the last)
+  const chain = [];
+  for (let d = def; d.inheritance; d = definitions.get(d.inheritance)) chain.unshift(d.name);
   const lines = [`// interface ${name}${def.inheritance ? ` : ${def.inheritance}` : ''} (${def.spec}), an event`];
+  if (def.inheritance) {
+    if (init) lines.push(`let ${name}InitSteps;`);
+    lines.push(`function fill${name}(state, init) {`);
+    lines.push(`  state.${name} = true;`);
+    for (const a of memberList) {
+      if (a.type === 'attribute' && !steps.includes(a.name) && !(a.name in slots) && !init?.includes(a.name)) lines.push(filled(a));
+    }
+    if (init) lines.push(`  ${name}InitSteps(state, init);`);
+    lines.push(`}`);
+  }
+  if (unforgeables.length) lines.push(`class EventUnforgeables {`, ...unforgeables, `}`, `const defineEventUnforgeables = unforgeableMembers(EventUnforgeables.prototype);`);
   lines.push(`export function define${name}(${def.inheritance ? 'Parent, ' : ''}impl) {`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
-  if (unforgeables.length) lines.push(`  class Unforgeables {`, ...unforgeables, `  }`, `  const defineUnforgeables = unforgeableMembers(Unforgeables.prototype);`);
-  lines.push(`  class ${name}${def.inheritance ? ' extends Parent' : ''} {`);
+  if (init) lines.push(`  ${name}InitSteps = impl.init;`);
+  // (…a key its name, by which V8 names the class as esbuild's renaming of a nested `class Event` would not: its
+  // constructor called with no `new`, its stack frames)
+  lines.push(`  const ${name} = ({ ${name}: class {`);
   lines.push(`    constructor(type, init, platformInit) {`);
   if (ctor) {
     const message = `Failed to construct '${name}': ${required} argument${required === 1 ? '' : 's'} required, but only `;
@@ -1776,21 +1832,17 @@ function eventInterface(def, { init, slots = {}, steps = [] }, { memberList, bod
     lines.push(`      type = init;`);
     lines.push(`      init = platformInit;`);
   }
-  if (def.inheritance) {
-    lines.push(`      super(PLATFORM, type, init);`);
-    lines.push(`      const state = slotsOf(this, 'Event');`);
-    lines.push(`      state.${name} = true;`);
-    for (const a of memberList) {
-      if (a.type === 'attribute' && !steps.includes(a.name) && !(a.name in slots) && !init?.includes(a.name)) lines.push(filled(a));
-    }
-    if (init) lines.push(`      impl.init(state, init);`);
-  } else {
-    lines.push(`      makeSlots(this, 'Event', new EventState(type, init));`);
-  }
-  if (unforgeables.length) lines.push(`      defineUnforgeables(this);`);
+  lines.push(`      const state = new EventState(type, init);`);
+  lines.push(`      makeSlots(this, 'Event', state);`);
+  for (const n of chain) lines.push(`      fill${n}(state, init);`);
+  lines.push(`      defineEventUnforgeables(this);`);
   lines.push(`    }`);
   lines.push(...body);
-  lines.push(`  }`);
+  lines.push(`  } }).${name};`);
+  if (def.inheritance) {
+    lines.push(`  Object.setPrototypeOf(${name}, Parent);`);
+    lines.push(`  Object.setPrototypeOf(${name}.prototype, Parent.prototype);`);
+  }
   lines.push(`  registerInterface('${name}', (o) => slotsOf(o, '${name}') !== undefined);`);
   const isUnforgeable = (m) => (m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable');
   const onPrototype = memberList.filter((m) => (m.type === 'attribute' || m.type === 'operation') && m.name && m.special !== 'static' && !isUnforgeable(m));
@@ -1827,7 +1879,8 @@ function eventInitSteps(def, m, memberList) {
       const a = attributeOf(argument);
       return ` self.${a.name} = ${a.idlType.generic === 'FrozenArray' ? `frozenCopy(a${i + 3})` : `a${i + 3}`};`;
     });
-    return `const ${converted.map((value, i) => `a${i} = ${value}`).join(', ')}; if (self.dispatchFlag) return; initEventSteps(self, a0, a1, a2);${stores.join('')}`;
+    const after = interfaceOptions(def.name).event.initialized ? ' impl.initialized(self);' : '';
+    return `const ${converted.map((value, i) => `a${i} = ${value}`).join(', ')}; if (self.dispatchFlag) return; initEventSteps(self, a0, a1, a2);${stores.join('')}${after}`;
   };
 }
 
@@ -1919,7 +1972,9 @@ function convertArguments(iface, m, checks, named, source = 'arguments') {
   return m.arguments.map((a, i) => {
     const where = { iface, member: m.name, index: i };
     const expr = named(a) ?? (a.variadic ? `restOf(${source}, ${i})` : `${source}[${i}]`);
-    if (a.variadic) return `convertedList(${expr}, (x) => ${conversion(a.idlType, 'x', where, checks, a.extAttrs)})`;
+    // (…a variadic one its list converted in place — a rest parameter's or `restOf`'s, each element the fresh array's own
+    // property, so no setter of a page's meets it — by a loop of its own, whose conversion each site's feedback inlines)
+    if (a.variadic) return `((list) => { for (let i = 0; i < list.length; i++) { const x = list[i]; list[i] = ${conversion(a.idlType, 'x', where, checks, a.extAttrs)}; } return list; })(${expr})`;
     if (a.optional) {
       if (dictionaries.has(a.idlType.idlType) || a.default?.type === 'dictionary') return conversion(a.idlType, expr, where, checks, a.extAttrs);
       const missing = a.default ? defaultValue(a.default, `${iface}.${m.name}(${a.name})`) : 'undefined';

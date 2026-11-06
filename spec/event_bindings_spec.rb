@@ -10,11 +10,12 @@ require_relative 'support/session_teardown'
 RSpec.describe 'Event bindings on a hostile page' do
   let(:session) do
     simulated_session(lambda {|_env|
-      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><div id=a><span id=b></span></div>']]
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><div id=a><span id=b></span></div><button id=button>b</button><input id=field name=field><div id=source draggable=true>s</div><script>window.shadowChild = document.body.appendChild(document.createElement("div")).attachShadow({mode: "open"}).appendChild(document.createElement("i"));</script>']]
     })
   end
 
   before { session.visit '/' }
+
 
   let(:steps) do
     <<~'JS'
@@ -71,16 +72,14 @@ RSpec.describe 'Event bindings on a hostile page' do
   def results_under(change, restore)
     session.evaluate_script(<<~JS)
       (() => {
-        const seen = new Map();
-        const hit = (what) => { seen.set(what, true); };
-        const shadowChild = document.body.appendChild(document.createElement('div')).attachShadow({mode: 'open'}).appendChild(document.createElement('i'));
+        const seen = Object.create(null);
+        const hit = (what) => { seen[what] = true; };
+        const shadowChild = window.shadowChild;
         #{change}
         let out, threw = null;
         try { out = (() => { #{steps} })(); } catch (e) { threw = String(e); }
         #{restore}
-        const hits = [];
-        seen.forEach((_, what) => { hits[hits.length] = what; });
-        return {out, threw, hits};
+        return {out, threw, hits: Object.keys(seen)};
       })()
     JS
   end
@@ -114,8 +113,16 @@ RSpec.describe 'Event bindings on a hostile page' do
       "const d = Object.getOwnPropertyDescriptor(Array.prototype, 'constructor'); Object.defineProperty(Array.prototype, 'constructor', {get() { hit('constructor'); return Array; }, configurable: true});",
       "Object.defineProperty(Array.prototype, 'constructor', d);"
     ],
+    'a replaced Map.prototype.get and set' => [
+      "const g = Map.prototype.get, t = Map.prototype.set; Map.prototype.get = function (k) { hit('get'); return g.call(this, k); }; Map.prototype.set = function (k, v) { hit('set'); return t.call(this, k, v); };",
+      'Map.prototype.get = g; Map.prototype.set = t;'
+    ],
+    'a replaced Set.prototype.has and add' => [
+      "const h = Set.prototype.has, a = Set.prototype.add; Set.prototype.has = function (v) { hit('has'); return h.call(this, v); }; Set.prototype.add = function (v) { hit('add'); return a.call(this, v); };",
+      'Set.prototype.has = h; Set.prototype.add = a;'
+    ],
     'accessors on Object.prototype named as a slot' => [
-      "const names = ['owner', 'Event', 'MouseEvent', 'target', 'type', 'modifiers', 'dispatchFlag']; for (const n of names) Object.defineProperty(Object.prototype, n, {get() { hit('get ' + n); }, set(v) { hit('set ' + n); }, configurable: true});",
+      "const names = ['owner', 'Event', 'MouseEvent', 'target', 'type', 'modifiers', 'dispatchFlag', 'removed']; for (const n of names) Object.defineProperty(Object.prototype, n, {get() { hit('get ' + n); }, set(v) { hit('set ' + n); }, configurable: true});",
       'for (const n of names) delete Object.prototype[n];'
     ]
   }.each do |name, (change, restore)|
@@ -125,6 +132,152 @@ RSpec.describe 'Event bindings on a hostile page' do
       expect(result['out']).to eq(expected)
       expect(result['hits']).to eq([])
     end
+  end
+
+  # (…each of these a global the page has replaced, or taken away)
+  {
+    'Object.defineProperty' => 'Object.defineProperty = undefined;',
+    'Reflect.apply'         => 'Reflect.apply = undefined;',
+    'Object.freeze'         => 'Object.freeze = undefined;',
+    'Object.assign'         => 'Object.assign = undefined;'
+  }.each do |name, change|
+    it "needs no #{name} of the page's" do
+      session.visit '/'
+      session.execute_script(change)
+      expect(session.evaluate_script(<<~JS)).to eq(expected)
+        (() => {
+          const shadowChild = window.shadowChild;
+          #{steps}
+        })()
+      JS
+    end
+  end
+
+  # (…the engine's own events, by every gesture a driver plays: what their inits leave out is no member of a page's)
+  it 'reads nothing of Object.prototype making the events of a gesture' do
+    session.visit '/form'
+    session.execute_script(<<~'JS')
+      window.hits = new Map();
+      for (const name of [
+        'view', 'detail', 'which', 'bubbles', 'cancelable', 'composed', 'relatedTarget', 'clientX', 'clientY', 'screenX', 'screenY',
+        'button', 'buttons', 'ctrlKey', 'shiftKey', 'altKey', 'metaKey', 'movementX', 'movementY', 'modifierAltGraph', 'modifierCapsLock',
+        'pointerId', 'width', 'height', 'pressure', 'tangentialPressure', 'tiltX', 'tiltY', 'twist', 'altitudeAngle', 'azimuthAngle',
+        'pointerType', 'isPrimary', 'coalescedEvents', 'predictedEvents', 'persistentDeviceId', 'dataTransfer', 'data', 'inputType',
+        'isComposing', 'targetRanges', 'key', 'code', 'location', 'repeat', 'charCode', 'keyCode', 'submitter', 'oldState', 'newState'
+      ]) {
+        Object.defineProperty(Object.prototype, name, {
+          get() { window.hits.set(name, true); },
+          // (…the host's own write of an object it hands in stays a write: rusty_racer's Object::set, not the platform's)
+          set(value) { Object.defineProperty(this, name, {value, writable: true, enumerable: true, configurable: true}); },
+          configurable: true
+        });
+      }
+    JS
+    session.find('#button').click
+    session.find('#button').right_click
+    session.find('#button').double_click
+    session.find('#button').hover
+    session.fill_in('field', with: 'x')
+    session.find('#field').send_keys('y', :enter)
+    session.find('#source').drag_to(session.find('#button'))
+    hits = session.evaluate_script('(() => { const out = []; window.hits.forEach((_, k) => { out[out.length] = k; }); return out.sort(); })()')
+    expect(hits).to eq([])
+  end
+
+  it 'makes an event whatever a page has put in the chain of its interface objects' do
+    expect(session.evaluate_script(<<~JS)).to eq([2, 'x', 0, true])
+      (() => {
+        Object.setPrototypeOf(MouseEvent, null);
+        const clientX = new MouseEvent('x', {clientX: 2}).clientX;
+        Object.setPrototypeOf(MouseEvent, UIEvent);
+        let called = 0;
+        const own = Object.getPrototypeOf(CustomEvent);
+        Object.setPrototypeOf(CustomEvent, function () { called++; });
+        const custom = new CustomEvent('x');
+        Object.setPrototypeOf(CustomEvent, own);
+        class Mine extends MouseEvent {}
+        return [clientX, custom.type, called, new Mine('m') instanceof UIEvent];
+      })()
+    JS
+  end
+
+  # (…DOM "add an event listener": the signal's abort removes that listener, not one like it added since — spec; Firefox)
+  it "removes on abort the signal's own listener, not one added again since" do
+    expect(session.evaluate_script(<<~JS)).to eq(1)
+      (() => {
+        const el = document.getElementById('b'), controller = new AbortController();
+        let heard = 0;
+        const f = () => { heard++; };
+        el.addEventListener('s', f, {signal: controller.signal});
+        el.removeEventListener('s', f);
+        el.addEventListener('s', f);
+        controller.abort();
+        el.dispatchEvent(new Event('s'));
+        return heard;
+      })()
+    JS
+  end
+
+  # (…Chrome's and Firefox's, measured: `initUIEvent` and `initEvent` leave both)
+  it 'resets what a legacy init leaves out' do
+    expect(session.evaluate_script(<<~JS)).to eq([false, false, 0, 0, 0, true, 5])
+      (() => {
+        const mouse = new MouseEvent('x', {modifierAltGraph: true});
+        mouse.initMouseEvent('y');
+        const key = new KeyboardEvent('x', {modifierCapsLock: true, detail: 5});
+        key.initKeyboardEvent('y');
+        const composition = new CompositionEvent('x', {detail: 5});
+        composition.initCompositionEvent('y');
+        const text = document.createEvent('TextEvent');
+        text.initUIEvent('u', false, false, null, 5);
+        text.initTextEvent('y');
+        const ui = new MouseEvent('x', {modifierCapsLock: true, detail: 5});
+        ui.initEvent('y');
+        return [
+          mouse.getModifierState('AltGraph'),
+          key.getModifierState('CapsLock'),
+          key.detail,
+          composition.detail,
+          text.detail,
+          ui.getModifierState('CapsLock'),
+          ui.detail
+        ];
+      })()
+    JS
+  end
+
+  # (…CSSOM View's `double`s: a non-finite one a TypeError — Chrome's and Firefox's too — a fractional one kept, where both
+  # floor a MouseEvent's and keep a PointerEvent's: the draft's IDL makes no such difference)
+  it "converts a mouse event's coordinates as doubles" do
+    expect(session.evaluate_script(<<~JS)).to eq(['TypeError', 'TypeError', 1.5, 1.5, 2.5])
+      (() => {
+        const outcome = (f) => { try { return f(); } catch (e) { return e.constructor.name; } };
+        return [
+          outcome(() => new MouseEvent('x', {clientX: NaN})),
+          outcome(() => new MouseEvent('x', {screenY: Infinity})),
+          new MouseEvent('x', {clientX: 1.5}).clientX,
+          new PointerEvent('x', {clientX: 1.5}).x,
+          new WheelEvent('x', {screenY: 2.5}).screenY
+        ];
+      })()
+    JS
+  end
+
+  # (…the doubled blank list of a dispatch's path, so a tree as deep as this is no list kept per depth)
+  it 'keeps one blank list, however many depths a shadow dispatch has been at' do
+    expect(session.evaluate_script(<<~JS)).to eq(4 + 600)
+      (() => {
+        const host = document.body.appendChild(document.createElement('div'));
+        let node = host.attachShadow({mode: 'open'}).appendChild(document.createElement('i'));
+        let last = 0;
+        for (let i = 0; i < 600; i++) {
+          node.addEventListener('d', (e) => { last = e.composedPath().length; }, {once: true});
+          node.dispatchEvent(new Event('d', {bubbles: true, composed: false}));
+          node = node.appendChild(document.createElement('i'));
+        }
+        return last + 4 - 1;
+      })()
+    JS
   end
 
   it "still walks a page's own iterable by its iterator: a sequence member of an init" do
