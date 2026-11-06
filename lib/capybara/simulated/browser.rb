@@ -7322,7 +7322,7 @@ module Capybara
         # (…a network error's the URL it was at — its last hop's: HTML "create navigation params by fetching" sets the
         # entry's URL to each URL a redirect goes on to, the error document committed at that one; Chrome and Firefox,
         # measured 2026-11-01, traverse back to the last URL they requested)
-        failed = -> { {'error' => true, 'url' => fetch.target, 'coop_switch' => fetch.coop_switch?} }
+        failed = -> { {'error' => true, 'url' => fetch.target} }
         hop = run_navigation_fetch(
           fetch,
           body:         body,
@@ -7350,8 +7350,7 @@ module Capybara
             return {'no_document' => true}
           end
         end
-        # (…a response the host cannot hand on — a NUL in a header — a network error at its URL, as one of no response is,
-        # the opener policy switch its hops needed carried all the same: navigation_fetch.rs `coop_switch?`)
+        # (…a response the host cannot hand on — a NUL in a header — a network error at its URL, as one of no response is)
         # (…a PDF's body none of its document's, unread: closed with the hop)
         body = hop.command == 'inline' ? '' : hop.document || read_rack_body(hop.rack_body)
         out  = response_hash(hop.status, hop.headers, body, target, fetch.redirected?) or return failed.()
@@ -11198,7 +11197,6 @@ module Capybara
 
           # (…a network error an error document at the URL it failed at, of a new opaque origin, as the page's is:
           # `commit_error_document`)
-          switch = resp ? resp.fetch('coop_switch', false) : false
           resp = {'status' => 0, 'headers' => {'content-type' => 'text/html'}, 'body' => '', 'url' => resp ? resp['url'] : url, 'error' => true} if !resp || resp['error']
           headers = resp['headers'] || {}
           response = [resp['status'], headers]
@@ -11222,6 +11220,8 @@ module Capybara
             body, ctype, opener_policy = '', 'text/html', nil
             made = {doc_origin: 'null', referrer: resp['referrer'], client_id: resp['resulting_client_id']}
           end
+          # (…neither of which switches its group, whatever its hops needed: `boot_inline_document`)
+          switch = !resp['error'] && !resp['inline'] && resp['coop_switch'] == true
         end
         # (…about:blank a new empty document — HTML "navigate" to a URL matching about:blank, its reload too, which
         # Chrome measured makes a new one, its writes gone — of the initiator's origin and base URL, sandboxed as the
@@ -12812,11 +12812,14 @@ module Capybara
       # an empty `text/html` document at the response's URL, of a new opaque origin, and of no policy its response sets — no
       # Content-Security-Policy, Referrer-Policy, Refresh or opener policy (a new policy container); the response recorded as
       # it came. (`commits` the navigation's, which clears the navigable's name by the origin it leaves.)
+      # (…its navigation params a new opener policy and a new enforcement result, so its browsing context group is the one
+      # the navigable is in, whatever policy the response had or its hops needed — an error document's the same:
+      # `commit_error_document`)
       private def boot_inline_document(url, status, headers, commits, client_id: nil)
         commits.(nil)
         self.page_url = url.to_s
         record_response(status, headers)
-        boot_response_into_ctx('', opaque_origin: true, inline: true, client_id: client_id)
+        boot_response_into_ctx('', opaque_origin: true, coop_switch: false, inline: true, client_id: client_id)
       end
       private def download_in_place(url, headers, body)
         save_downloaded_response(url, headers, body)
@@ -12862,7 +12865,8 @@ module Capybara
       # The page's document committed, of opener policy `coop` — the one place every commit goes through (a response's, an
       # about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context group is left
       # for a new one where needed: its navigation's enforcement result's switch, the one its responses made (`due`,
-      # navigation_fetch.rs `CoopEnforcement`), or, one no hop enforced, of no policy, judged here (session_history.rs
+      # navigation_fetch.rs `CoopEnforcement`; false an inline content document's: `boot_inline_document`), or, one no hop
+      # enforced, of no policy, judged here (session_history.rs
       # `opener_policy_switch`). A group of the page's next document's isolation: HTML's "cross-origin isolation mode" is
       # a group's, set only as one is made for a document "same-origin-plus-COEP" — every document here in a secure
       # context, as `isSecureContext` says (a real browser's http://www.example.com would not be; its http://127.0.0.1
@@ -13438,7 +13442,7 @@ module Capybara
       def commit_error_document(url)
         self.page_url = url
         record_response(0, {'content-type' => 'text/html'})
-        boot_response_into_ctx('', opaque_origin: true)
+        boot_response_into_ctx('', opaque_origin: true, coop_switch: false)
       end
       # Whether `url` is an HTTP(S) URL — one a fetch goes over the network for, and the only kind a redirect is followed to.
       def http_url?(url) = url.to_s.match?(%r{\Ahttps?://}i)
