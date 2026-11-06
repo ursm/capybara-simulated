@@ -133,6 +133,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "docHidePage", hide_page, context_id);
     crate::dom::register(scope, ns, "docFinishLoading", finish_loading, context_id);
     crate::dom::register(scope, ns, "docCompletelyLoaded", completely_loaded, context_id);
+    crate::dom::register(scope, ns, "docLoadFired", load_fired, context_id);
     crate::dom::register(scope, ns, "docAbortParser", abort_parser_op, context_id);
     crate::dom::register(scope, ns, "docLoadAborted", load_aborted, context_id);
     crate::dom::register(scope, ns, "docAborts", aborts, context_id);
@@ -256,6 +257,11 @@ fn load_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         set_load_delay(scope, cid, 0);
         return rv.set_uint32(LOAD_ABORTED);
     }
+    // (…none where a `javascript:` URL's task, a gate above, planned the document that replaces it: Chrome and Firefox fire no
+    // `load` for a document that set `location` to one as it parsed)
+    if arena.navigation_plan.javascript_document_planned() {
+        return;
+    }
     if arena.load_delayed_here(cid) {
         if let Some(state) = arena.realm_state_mut(cid) {
             // (…a container's load owed stays owed)
@@ -360,6 +366,12 @@ fn abort_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 fn completely_loaded(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     rv.set_bool(crate::dom::dom(scope).arena.document_states.lifecycle(doc).completely_loaded);
+}
+
+// __dom.docLoadFired(docNid) -> whether its load has fired, or begun to: nothing more delays it.
+fn load_fired(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::dom(scope).arena.document_states.lifecycle(doc).load_fired);
 }
 
 // __dom.docCompleteInitial(docNid) — a new window's initial about:blank, which no parse makes (HTML "create a new

@@ -42,9 +42,10 @@ impl LoadGates {
     }
 }
 
-// The flush is bounded: flushing one can queue another (a frame's document brings its own sheets), and a document that
-// keeps queuing them would otherwise never load.
-const FLUSH_ROUNDS: usize = 8;
+// The flush is bounded: flushing one can queue another (a frame's document brings its own sheets, a script's `load` the next
+// script of a chain, which HTML "the end" waits for however long), and a document that keeps queuing them would otherwise
+// never load. As the boot's own drain of them is (browser.rb `BOOT_SCRIPT_DRAIN_MAX_ITER`).
+const FLUSH_ROUNDS: usize = 300;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "loadGate", load_gate_op, context_id);

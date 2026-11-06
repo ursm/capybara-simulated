@@ -3,6 +3,8 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/https_app_host'
+require_relative 'support/every_host_local'
 
 # A top-level document's `javascript:` URL: a string result makes the document that replaces it (HTML "evaluate a javascript:
 # URL", whose response is at the active document's URL, of its policy container and opener policy), in a new entry in place
@@ -82,6 +84,17 @@ RSpec.describe 'a top-level javascript: URL' do
       expect(read('document.title')).to eq('target')
     end
 
+    # (…"navigate to a javascript: URL" judges the ongoing navigation at its step 2 alone, before it evaluates. `stop()` Chrome K,
+    # Firefox stays; `document.open()` Chrome K, Firefox the written one.)
+    it 'makes the document though its script stopped loading, or opened the one it ran in' do
+      go('/target')
+      run(%q(location.href = "javascript:stop(); '<title>K1</title>'"))
+      expect(poll_until { read('document.title') == 'K1' }).to be(true)
+      go('/target')
+      run(%q(location.href = "javascript:document.open(); document.write('<title>W</title>'); document.close(); '<title>K2</title>'"))
+      expect(poll_until { read('document.title') == 'K2' }).to be(true)
+    end
+
     it 'ends the navigation under way, whose document it makes instead' do
       go('/target')
       run("location.href = '/planned'; location.href = #{markup.inspect}")
@@ -119,6 +132,30 @@ RSpec.describe 'a top-level javascript: URL' do
 
     # (…its opener policy the active document's, HTML "evaluate a javascript: URL": no group left, the windows it opened
     # their opener still, and cross-origin isolated as it was. Chrome and Firefox: no switch.)
+    # (…Chrome and Firefox make it, then traverse.)
+    it 'makes the document ahead of a traversal its script asked for' do
+      session.visit('/target')
+      session.visit('/second')
+      session.execute_script("sessionStorage.removeItem('made')")
+      session.execute_script(%q(location.href = "javascript:history.back(); '<script>sessionStorage.made = 1<\\/script><title>K</title>'"))
+      expect(poll_until { session.evaluate_script('location.pathname') == '/target' }).to be(true)
+      expect(session.evaluate_script('sessionStorage.made')).to eq('1')
+    end
+
+    # (…no `load` of a document that set it as it parsed, in its parse or at its DOMContentLoaded: Chrome and Firefox.)
+    {
+      'as it parsed'           => 'location.href = J',
+      'at DOMContentLoaded'    => "document.addEventListener('DOMContentLoaded', () => { location.href = J; })"
+    }.each do |what, script|
+      it "fires no load of the document it replaces, a location set #{what}" do
+        doc = "<script>const J = \"javascript:'<title>J</title>'\"; sessionStorage.removeItem('loaded'); addEventListener('load', () => { sessionStorage.loaded = '1'; }); #{script};</script>"
+        page = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><title>g</title>#{doc}after"]] })
+        page.visit('/g')
+        expect(poll_until { page.evaluate_script('document.title') == 'J' }).to be(true)
+        expect(page.evaluate_script('sessionStorage.loaded')).to be_nil
+      end
+    end
+
     it 'stays in its browsing context group, its opener policy kept', :every_host_local do
       session.visit('https://a.test/coop')
       expect(session.evaluate_script('crossOriginIsolated')).to be(true)
@@ -202,6 +239,45 @@ RSpec.describe 'a top-level javascript: URL' do
       expect(poll_until { session.evaluate_script('document.title') == 'J' }).to be(true)
       session.execute_script('location.reload()')
       expect(poll_until { session.evaluate_script('document.title') == 'GET' }).to be(true)
+    end
+  end
+
+  # (…"reserved environment: null", and "active service worker is set in the Handle Fetch algorithm", which no fetch here ran:
+  # Chrome and Firefox no controller.)
+  context 'in the scope of a service worker', :every_host_local, :https do
+    let(:session) {
+      simulated_session(lambda {|env|
+        if env['PATH_INFO'] == '/sw.js'
+          next [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+            self.addEventListener('install', () => self.skipWaiting());
+            self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));
+            self.addEventListener('fetch', () => {});
+          JS
+        end
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><title>doc</title>']]
+      })
+    }
+
+    before do
+      session.visit('https://a.test/page')
+      session.execute_script("navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => { window.ready = true; }, (e) => { window.ready = String(e); })")
+      expect(poll_until { session.evaluate_script('window.ready') }).to be(true)
+      session.visit('https://a.test/page')
+      expect(poll_until { session.evaluate_script('!!navigator.serviceWorker.controller') }).to be(true)
+    end
+
+    it 'leaves the page uncontrolled' do
+      session.execute_script(%q(location.href = "javascript:'<title>J</title>'"))
+      expect(poll_until { session.evaluate_script('document.title') == 'J' }).to be(true)
+      expect(session.evaluate_script('navigator.serviceWorker.controller')).to be_nil
+    end
+
+    it 'leaves a pop-up uncontrolled' do
+      session.execute_script("window.w = open('/popup')")
+      expect(poll_until { session.evaluate_script("w.document.readyState === 'complete' && !!w.navigator.serviceWorker.controller") }).to be(true)
+      session.execute_script(%q(w.location.href = "javascript:'<title>J</title>'"))
+      expect(poll_until { session.evaluate_script('w.document.title') == 'J' }).to be(true)
+      expect(session.evaluate_script('w.navigator.serviceWorker.controller')).to be_nil
     end
   end
 end

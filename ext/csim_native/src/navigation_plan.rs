@@ -283,6 +283,11 @@ impl NavigationPlan {
     pub(crate) fn traversal_planned(&self) -> bool {
         self.own.traversal.is_some()
     }
+    // …and whether what is planned is a `javascript:` URL's document, which replaces this one before its load
+    // (document_lifecycle.rs `load_steps`).
+    pub(crate) fn javascript_document_planned(&self) -> bool {
+        self.own.location.as_ref().is_some_and(|l| l.document.is_some())
+    }
     pub(crate) fn plan_traversal(&mut self, traversal: Traversal) {
         self.supersede();
         self.own.traversal = Some(traversal);
@@ -509,8 +514,9 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // opens a new window, whose navigation is that navigable's; nor a reload, which HTML "reload a navigable" queues on the
 // traversal queue as "apply the reload history step" and is no ongoing navigation until that step applies (step 8.4,
 // "traversal") — the host's, once the tasks queued on the document's event loop by then have run, this one's among them
-// (`Reload::mark`). (Chrome and Firefox go on with a location navigation set before it — whatwg/html#2590 — the spec's
-// text the ruling here.)
+// (`Reload::mark`). (Chrome and Firefox go on with a location navigation set before it — whatwg/html#2590 — and with the first
+// of two `javascript:` URLs — whatwg/html#12120, "Browsers only cancel pending js url navigations in form submission", which
+// calls step 2's text wrong — the spec's text the ruling here.)
 fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
@@ -541,22 +547,26 @@ fn javascript_ongoing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let of = if args.get(1).is_int32() { args.get(1).int32_value(scope).unwrap_or(cid) } else { cid };
     rv.set_bool(navigation_ongoing_of(realm(scope, cid), of, at));
 }
-// __dom.planJavascriptDocument(markup, url, at): the string a top-level document's `javascript:` URL's script returned, begun
-// at `at`, planned as the document that replaces it at `url`, its own — HTML "navigate to a javascript: URL" finalizing its
-// navigation with a new entry in place of the active one, on the traversal queue, so off the stack of the script that made
-// it. None where a navigation begun since ended it ("ongoing navigation"), nor beside a traversal or a reload planned, whose
-// document is the one its navigable goes on to make either way (url-parse.js `evaluateJavascriptURL`).
+// __dom.planJavascriptDocument(markup, url): the string a top-level document's `javascript:` URL's script returned, planned
+// as the document that replaces it at `url`, its own — HTML "navigate to a javascript: URL" finalizing its navigation with a
+// new entry in place of the active one, on the traversal queue, so off the stack of the script that made it. The text judges
+// the ongoing navigation at its step 2 alone, before it evaluates, and clears it at step 3 (`javascriptOngoing`), so what its
+// script did to it is no reason for none: a `stop()` in it, a `document.open()`, a `history.back()` make the document all the
+// same (Chrome, and for the traversal Firefox, measured). None beside a location navigation its script began, which would
+// replace it at once (both browsers make none, the state they end in the same), nor a reload or a window's traversal planned,
+// whose document its navigable goes on to make. It is its navigable's navigation from here, which a later one ends.
 fn plan_javascript_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let markup = args.get(0).to_rust_string_lossy(scope);
     let url = args.get(1).to_rust_string_lossy(scope);
-    let at = args.get(2).number_value(scope).map_or(0, |n| n as u64);
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
-    if !navigation_ongoing_of(arena, cid, at) || arena.navigation_plan.traversal_planned() || arena.navigation_plan.own.reload.is_some() {
+    let own = &arena.navigation_plan.own;
+    if own.location.is_some() || own.reload.is_some() || own.traversal.is_some() {
         return;
     }
+    let ongoing = begin_navigation_of(arena, cid, None);
     let plan = &mut arena.navigation_plan;
-    plan.own.location = Some(Location { url, replace: true, initiator: None, activated: false, blob: None, ongoing: at, document: Some(markup) });
+    plan.own.location = Some(Location { url, replace: true, initiator: None, activated: false, blob: None, ongoing, document: Some(markup) });
     plan.own.planned = next_planned();
 }
 // __dom.planReload(activated, blob): the calling realm's document's reload planned, superseding what it planned before —
@@ -925,14 +935,15 @@ pub(crate) fn drop_routed(arena: &mut crate::dom::RealmArena, realm: i32) -> boo
     dropped
 }
 // __dom.ownPlanned() -> which of a location navigation (1), a reload (2) and a frame's submission (4) is planned, 0 for
-// none — and whether the host plans a navigation of a frame (8: frame_navigation.rs `HostNavigation`) or routes a
-// frame's submission (16: `RoutedSubmissions`).
+// none — whether the host plans a navigation of a frame (8: frame_navigation.rs `HostNavigation`) or routes a frame's
+// submission (16: `RoutedSubmissions`) — and whether the location navigation is a `javascript:` URL's document (32).
 fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let arena = &crate::dom::dom(scope).arena;
     let routed = arena.routed_submissions.first_planned().is_some_and(|at| arena.frame_navigations.due(at));
     let frames = (u32::from(arena.frame_navigations.hosted()) << 3) | (u32::from(routed) << 4);
     let own = &plan(scope, &args).own;
-    let bits = u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1) | (u32::from(own.submission.is_some()) << 2);
+    let document = own.location.as_ref().is_some_and(|l| l.document.is_some());
+    let bits = u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1) | (u32::from(own.submission.is_some()) << 2) | (u32::from(document) << 5);
     rv.set_uint32(bits | frames);
 }
 // __dom.flushBegin(): the tasks due before a navigation of the page about to run — what it planned kept apart, so they

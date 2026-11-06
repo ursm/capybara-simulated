@@ -105,7 +105,8 @@ IN_SCOPE_NOTES = {
     '(`assert_equals(referrer, originalReferrer, ...)`). Current HTML "evaluate a javascript: URL" makes its navigation ' \
     'params with "request: null", and "create and initialize a Document object" sets a referrer only "If ' \
     'navigationParams\'s request is non-null"; the old referrer goes to the new entry\'s document state ("request ' \
-    'referrer: oldDocState\'s request referrer"), what a reload sends. So the document\'s is the empty string. Chrome ' \
+    'referrer: oldDocState\'s request referrer"), what a reload sends. So the document\'s is the empty string, a thing the ' \
+    'text itself asks: "this will cause the referrer of the resulting Document to be null; is that correct?". Chrome ' \
     'keeps it, Firefox has none (measured 2026-11-07). Its `no-referrer` subtest passes either way.',
   'url/javascript-urls.window.js' =>
     'IN SCOPE, against the test: it asserts that both of two `javascript:` URL navigations begun in one task run ' \
@@ -114,7 +115,8 @@ IN_SCOPE_NOTES = {
     'navigation for navigable to navigationId."; step 21: "If url\'s scheme is "javascript", then: ... Queue a global ' \
     'task ... to navigate to a javascript: URL"), and "navigate to a javascript: URL" step 2 returns: "If ' \
     'targetNavigable\'s ongoing navigation is no longer navigationId, then return." So the second ends the first, which ' \
-    'runs nothing. The text is not withdrawn (whatwg/html#2590 is open); the user ruled for the text over Chrome and ' \
+    'runs nothing. The text is not withdrawn (whatwg/html#2590 and #12120, "Browsers only cancel pending js url navigations ' \
+    'in form submission", are open); the user ruled for the text over Chrome and ' \
     'Firefox. Re-check when the test or the text changes.',
   'html/browsers/the-window-object/close-method.window.js' => PAGEHIDE_OF_INITIAL_ABOUT_BLANK,
   'html/browsers/the-window-object/self-et-al.window.js' => PAGEHIDE_OF_INITIAL_ABOUT_BLANK

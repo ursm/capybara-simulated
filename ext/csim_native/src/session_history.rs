@@ -1150,6 +1150,13 @@ impl SessionHistory {
         }
         Some(n)
     }
+    // #stash_queued: the traversals its page asked for that no task of it applied made the host's to apply, its document about
+    // to be replaced with its session history's queue going on (a `javascript:` URL's: browser.rb `commit_javascript_document`).
+    fn stash_queued(&self) {
+        let mut guard = self.lock();
+        let t = &mut *guard;
+        t.stashed.extend(t.queued.drain(..).map(|q| q.delta));
+    }
     // #clear_queued: the page's traversals let go — its document gone, whose traversals go with it.
     fn clear_queued(&self) {
         self.lock().queued.clear();
@@ -1220,6 +1227,11 @@ impl SessionHistory {
     }
     fn navigation_ongoing(&self, nav: u32, id: u64) -> bool {
         self.lock().navigation_ongoing(nav, id)
+    }
+    // #ongoing_navigation(navigable) -> the number of its ongoing navigation as it stands, what a fetch under way goes by: another
+    // once it has its response, one begun meanwhile ended it (browser.rb `navigate_top_level`).
+    fn ongoing_navigation(&self, nav: u32) -> Option<u64> {
+        self.lock().ongoing.get(&nav).copied()
     }
     // #clear: no entries at all, nor traversals queued, nor a document's URL.
     // (…a reset's: a fresh window's, what it knew of its opener and its documents gone with them)
@@ -1483,6 +1495,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
     class.define_method("last_token", method!(SessionHistory::last_token, 0))?;
     class.define_method("clear_queued", method!(SessionHistory::clear_queued, 0))?;
+    class.define_method("stash_queued", method!(SessionHistory::stash_queued, 0))?;
     class.define_method("go_to", method!(SessionHistory::go_to, 1))?;
     class.define_method("hold", method!(SessionHistory::hold, 3))?;
     class.define_method("step", method!(SessionHistory::step, 0))?;
@@ -1494,6 +1507,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("restore_frame", method!(SessionHistory::restore_frame, 1))?;
     class.define_method("begin_navigation", method!(SessionHistory::begin_navigation, 1))?;
     class.define_method("navigation_ongoing?", method!(SessionHistory::navigation_ongoing, 2))?;
+    class.define_method("ongoing_navigation", method!(SessionHistory::ongoing_navigation, 1))?;
     class.define_method("forget_frame", method!(SessionHistory::forget_frame, 1))?;
     class.define_method("clear", method!(SessionHistory::clear, 0))?;
     Ok(())

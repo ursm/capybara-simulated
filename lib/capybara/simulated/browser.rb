@@ -2509,6 +2509,8 @@ module Capybara
       # they wait for their task, which runs after what is due now.
       private def apply_planned_traversals_before_navigations
         return unless @session_history.queued?
+        # (…behind a `javascript:` URL's document its script's traversal asked for: `commit_javascript_document`)
+        return if own_planned.anybits?(OWN_JAVASCRIPT_DOCUMENT)
         return unless @session_history.queued_documents? || pending_navigation_besides_traversals?
 
         apply_planned_traversals
@@ -2623,6 +2625,9 @@ module Capybara
       # page's own, and the one another window planned of it (session_history.rs `Asked`).
       private def cancel_navigations_for(nav)
         if nav.zero?
+          # (…no `javascript:` URL's document, finalized ahead of the traversal: `commit_javascript_document`)
+          return if own_planned.anybits?(OWN_JAVASCRIPT_DOCUMENT)
+
           @runtime.call('__csimSupersedePlanned')
           @session_history.take_planned
         elsif (realm = navigable_realm(nav))
@@ -3080,7 +3085,8 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration — on an idle page too: the time a test sleeps passes for its `Date` (agent_clock.rs), which
       # reads no wall clock beside the virtual one (a `click(delay: 2)`'s mouseup two seconds after its mousedown).
-      def tick_real_time(step_ms: nil)
+      # (…`drain` false for a tick inside a fetch under way, whose caller takes what its tasks planned as it comes to it)
+      def tick_real_time(step_ms: nil, drain: true)
         # (…a worker's timer too: its clock is the window's, which moves only as this advances it — `worker_due_within`)
         return unless step_ms || @timers_active || async_io_pending? || background_steps_pending? || (!@workers.empty? && worker_next_timer_at)
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
@@ -3161,7 +3167,7 @@ module Capybara
         end
         # What the handlers that fired during the drain left to do (e.g. `setTimeout(() => location.pathname = X)`).
         # Outside the @ticking guard so the navigate's rebuild_ctx is well-clear of the V8 call we just made.
-        drain_task_intents
+        drain_task_intents if drain
       end
 
       # What a task the page ran left the browser to do, done: a navigation it planned (`drain_pending_navigation`), a
@@ -3529,6 +3535,19 @@ module Capybara
         ms = ms.to_i
         tick_real_time(step_ms: ms) if ms > 0
       end
+      # …the app's `sleep` in the middle of a request the driver made of it on this thread (`SleepHook`), as a server takes its
+      # time: the page's event loop runs on meanwhile, a timer's `stop()` or its `location` reaching the fetch under way — but
+      # no document is made from inside the fetch, what its tasks planned the fetch's caller's to take as it returns (the
+      # navigation under way, ended by one begun since, makes none: `navigate_top_level`) — and no task at all runs under a
+      # script of the page's, as a fetch it made run-to-completion holds (an inserted script's, a synchronous XHR's: Chrome and
+      # Firefox `after` before the timer it set before them).
+      def server_slept_ms(ms)
+        return unless ms.positive? && !@runtime.call('__csimScriptOnStack')
+
+        tick_real_time(step_ms: ms, drain: false)
+      end
+      # Whether the app is answering a request on this thread (`app_call`).
+      def self.in_app_call? = Thread.current[:csim_app_calls].to_i.positive?
 
       # Re-sync the Ruby-side timer mirror with a freshly-rebuilt JS
       # context. Clear `@timers_active` and the `@polling_grace` grace
@@ -10932,6 +10951,7 @@ module Capybara
       # What the page's own plan holds (navigation_plan.rs `ownPlanned`): a location navigation, a reload, a frame's
       # submission to it — and whether the host plans a navigation of a frame.
       OWN_LOCATION = 1
+      OWN_JAVASCRIPT_DOCUMENT = 32
       FRAMES_PLANNED = 8 | 16
       private def own_planned = @runtime.call('__csimOwnPlanned').to_i
       # The navigation of the page its `location` planned, taken: its URL, whether it replaces the current entry, the
@@ -10958,10 +10978,14 @@ module Capybara
       # unloading is canceled": at the URL of the document it replaces, in a new entry in place of that one's, the request
       # referrer the entry's document state had kept, and no resource: a reload's a GET (Chrome re-POSTs). Of that document's
       # origin, policy container and opener policy, no browsing context group left; its own referrer none, of no request
-      # (Chrome keeps the last, Firefox none), its classic history state none (Chrome keeps it, Firefox none).
+      # (Chrome keeps the last, Firefox none), its classic history state none (Chrome keeps it, Firefox none), and no service
+      # worker's client: "reserved environment: null", no fetch for Handle Fetch to set one (Chrome and Firefox: no controller).
       JAVASCRIPT_DOCUMENT_ENTRY_KEEPS = %i[referer referrer_policy referrer origin cross_site opener_policy].freeze
       private def commit_javascript_document(url, markup, ongoing)
         invalidate_find_cache
+        # (…a traversal its script asked for goes on after it, the session history's queue not the document's: both browsers
+        # make the document, then traverse)
+        @session_history.stash_queued
         # (…what is due on the page run first, as before any navigation: `flush_outgoing_page_init`; a navigation of its the
         # one that goes on, which ends this one)
         flush_outgoing_page_init if @timers_active
@@ -10976,7 +11000,8 @@ module Capybara
         self.page_url = url
         record_response(200, headers)
         @current_referer = ''
-        boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy)
+        boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy, controlled: false)
+        consume_pending_history_traverse
       end
       # …the response it is made of, HTML's: `text/html;charset=utf-8` and, given here as its headers, the policy container of
       # realm `realm`'s document: the Content-Security-Policy its own response had (`headers`), the referrer policy it has now.
@@ -11168,10 +11193,13 @@ module Capybara
         if body.nil? && (http_url?(url) || failed)
           by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
           by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
+          awaited = history&.ongoing_navigation(0)
           resp = unless failed
             frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, coop_realm: realm_id, **by)
           end
           return if resp && resp['no_document']
+          # (…none where a navigation begun as the response was awaited ended it: `navigate_top_level`)
+          return if history && history.ongoing_navigation(0) != awaited
 
           # (…a network error an error document at the URL it failed at, of a new opaque origin, as the page's is:
           # `commit_error_document`)
@@ -11270,7 +11298,7 @@ module Capybara
         given   = @runtime.window_realm_meta[realm_id]&.fetch(:response, nil) || ABOUT_BLANK_RESPONSE
         headers = javascript_document_headers(realm_id, url, given[1])
         _, csp, referrer_policy = Native.document_params(headers, url, @loopback_stand_in)
-        made = {csp: csp, referrer_policy: referrer_policy}
+        made = {csp: csp, referrer_policy: referrer_policy, controlled: false}
         kept = history.active(0)&.then {|id| history.entry(id).slice(*JAVASCRIPT_DOCUMENT_ENTRY_KEEPS) }
         if about_blank_url?(url)
           made.merge!(window_about_blank(realm_id, 'reload', realm_id, nil, nil, nil, url).except(:referrer, :referrer_policy))
@@ -12716,6 +12744,7 @@ module Capybara
           # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
           # `event.request.headers` alike)
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
+          awaited = @session_history.ongoing_navigation(0)
           hop = run_navigation_fetch(
             fetch,
             body:         req_body,
@@ -12741,6 +12770,15 @@ module Capybara
             redirected:   -> { redirect_history_entry(fetch.target, get: fetch.request_method == 'GET') }
           )
           target = fetch.target
+          # (…none where a navigation begun as the response was awaited ended it, whose own plan the page then takes: HTML
+          # "navigate", "this will abort other ongoing navigations" — a timer's `location` with the app taking its time)
+          unless @session_history.ongoing_navigation(0) == awaited
+            hop.rack_body.close if hop.rack_body.respond_to?(:close)
+            restore_navigation_history
+            @session_history.forget(0)
+            superseded = true
+            return
+          end
           case hop.command
           when 'fail'
             return error_document.(target, fetch.coop_switch?)
@@ -12768,6 +12806,7 @@ module Capybara
           # No document committed (a download, a raise mid-fetch) → the page that
           # flushed is still live and still means what its timers asked for.
           restore_flushed_nav_intents
+          drain_pending_navigation if superseded
         end
       end
       # The origin of the page's document a navigation leaves — a window's of no entry yet its initial about:blank's, its
@@ -12931,7 +12970,8 @@ module Capybara
       # (…`content_type` the type its body said where it did — MIME Sniffing's computed one — over the response's)
       # (…`inline` an inline content document's: `boot_inline_document`)
       # (…`client_id` the reserved client id of the navigation whose response it is: `run_navigation_fetch`)
-      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: false, inherited_coop: nil, content_type: nil, inline: false, client_id: nil)
+      # (…`controlled` false for one no fetch made, which Handle Fetch sets no worker of: `commit_javascript_document`)
+      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: false, inherited_coop: nil, content_type: nil, inline: false, client_id: nil, controlled: true)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -13028,7 +13068,7 @@ module Capybara
         opts['refresh'] = refresh if refresh
         # (…the worker controlling it: its navigation's — not one still activating, which the navigation's wait for it
         # gave up on, the navigation having gone to the network: `await_sw_activation`)
-        if http_url?(page_url)
+        if controlled && http_url?(page_url)
           controller = sw_client_controller_for(page_url, Native.site(page_url).to_s)
           controller = nil if controller && controller[1] && !Native.sw_worker_activated(@sw_partition, controller[0])
           opts['controller'] = controller if controller
@@ -13514,6 +13554,7 @@ module Capybara
       # next request — and lets go of the body the app gave before it ends. The session's cancellation alone: the app's
       # own `Timeout.timeout` (Rack::Timeout, a client library's) still interrupts it.
       def app_call(env, deferring: false)
+        Thread.current[:csim_app_calls] = Thread.current[:csim_app_calls].to_i + 1
         return @app.call(env) unless deferring
 
         Thread.handle_interrupt(EventSourceCancelled => :never) {
@@ -13524,6 +13565,8 @@ module Capybara
           Thread.current[:csim_event_stream_app_body] = response[2]
           response
         }
+      ensure
+        Thread.current[:csim_app_calls] -= 1
       end
 
       # A body that ended before its Content-Length did: the bytes that came, and then a network error.

@@ -21,6 +21,7 @@ RSpec.describe 'a script element' do
       when '/gone.mjs'  then [200, {'content-type' => 'text/javascript'}, ["L.push('run'); document.getElementById('me').removeAttribute('src')"]]
       when '/moved.js'  then [200, {'content-type' => 'text/javascript'}, ["L.push('run'); document.getElementById('me').setAttribute('src', '/other.js')"]]
       when '/other.js'  then [200, {'content-type' => 'text/javascript'}, ["L.push('other')"]]
+      when '/blank'     then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><title>blank</title>']]
       else [404, {'content-type' => 'text/plain'}, ['']]
       end
     })
@@ -64,6 +65,48 @@ RSpec.describe 'a script element' do
       expect(log_of(inserted("s.src = '/log.js'"))).to eq(['inserted', 'run', 'load', 'window load'])
       expect(log_of(inserted("s.src = '/log.js'; s.async = false"))).to eq(['inserted', 'run', 'load', 'window load'])
     end
+
+    # (…however long the chain: HTML "the end" spins until the lists are empty; both browsers wait for all 14)
+    %w[classic module].each do |kind|
+      it "waits for a chain of 14 dynamic #{kind} scripts, each its last one's `load`'s" do
+        setup = kind == 'module' ? "s.type = 'module'; s.src = '/log.mjs?' + n" : "s.src = '/log.js?' + n"
+        log = log_of(<<~HTML)
+          <script>
+            let n = 0;
+            const go = () => { if (n++ < 14) { const s = document.createElement('script'); #{setup}; s.onload = () => { L.push('load'); go(); }; document.head.append(s); } };
+            go();
+          </script>
+        HTML
+        expect(log.last).to eq('window load')
+        expect(log.count('run')).to eq(14)
+      end
+    end
+
+    # (…the preparation-time document's load, past already: its parent's waits for none of it. Chrome and Firefox.)
+    it "does not wait for a script its frame's load handler put in the frame's document" do
+      module_script = "const s = d.createElement('script'); s.type = 'module'; s.src = '/log.mjs'"
+      classic_script = "const s = document.createElement('script'); s.src = '/log.js'"
+      [module_script, classic_script].each do |made|
+        log = log_of(<<~HTML)
+          <script>
+            const f = document.createElement('iframe');
+            f.src = '/blank';
+            f.onload = () => {
+              L.push('frame load');
+              const d = f.contentDocument;
+              f.contentWindow.L = L;
+              #{made};
+              s.onload = () => L.push('load');
+              d.head.append(s);
+            };
+            document.body.append(f);
+          </script>
+        HTML
+        expect(poll_until { session.evaluate_script("L.includes('load')") }).to be(true)
+        log = session.evaluate_script('L')
+        expect(log).to eq(['frame load', 'window load', 'run', 'load'])
+      end
+    end
   end
 
   describe 'from an external file, as it was prepared' do
@@ -92,6 +135,21 @@ RSpec.describe 'a script element' do
 
     it 'runs what it was prepared with though its src was changed before its task' do
       expect(log_of(inserted("s.type = 'module'; s.src = '/log.mjs'", "s.src = '/other.js'"))).to eq(['inserted', 'run', 'load', 'window load'])
+    end
+
+    # (…"Let source text be el's child text content", as it is prepared: both browsers run A)
+    it 'runs the text an inline dynamic module had as it was prepared' do
+      expect(log_of(inserted(%(s.type = 'module'; s.textContent = "L.push('A')"), %(s.textContent = "L.push('B')")))).to eq(['inserted', 'A', 'window load'])
+    end
+
+    # (…"execute the script element" step 2: its preparation-time document no longer its node document, it returns. Chrome no
+    # event, Firefox an `error`.)
+    %w[classic module].each do |kind|
+      it "runs nothing of a dynamic #{kind} script moved to another document before its task, and fires nothing" do
+        setup = kind == 'module' ? "s.type = 'module'; s.src = '/log.mjs'" : "s.src = '/log.js'"
+        body = "<iframe id=f></iframe>#{inserted(setup, "document.getElementById('f').contentDocument.head.append(s)")}"
+        expect(log_of(body)).to eq(['inserted', 'window load'])
+      end
     end
 
     it 'runs nothing again for a src it set as it ran' do

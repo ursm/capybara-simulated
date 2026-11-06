@@ -1595,7 +1595,8 @@ module Capybara
         csp: nil,
         client_id: nil,
         refresh: nil,
-        sandbox: nil
+        sandbox: nil,
+        controlled: true
       )
         realm.call('__csimUpdateLocation', url.to_s)
         # (…its `Date` what its server rendered it with: the host's clock's offset, where that has moved since its opener's
@@ -1620,8 +1621,8 @@ module Capybara
         # (…a CONTROLLED client where a registration's scope covers its URL, matched in its own top-level site — Service
         # Workers "Handle Fetch": the reserved client's active service worker, which the document's client takes — wired
         # before its scripts run, as a frame's is (`create_frame_realm`), which registers it as a client; none for one of
-        # an opaque origin)
-        if doc_origin.to_s != 'null' && (ctrl = @browser.sw_client_controller_for(url.to_s, Native.site(url.to_s)))
+        # an opaque origin, nor one no fetch made: `controlled` false)
+        if controlled && doc_origin.to_s != 'null' && (ctrl = @browser.sw_client_controller_for(url.to_s, Native.site(url.to_s)))
           realm.call('__csim_swSetControllerDirect', *ctrl)
         end
         # (…its window's session history told of it, before its scripts read its `history`)
@@ -1685,6 +1686,7 @@ module Capybara
         client_id: nil,
         refresh: nil,
         sandbox: nil,
+        controlled: true,
         entry: nil,
         viewport: nil,
         group: page_group
@@ -1747,7 +1749,7 @@ module Capybara
           load_window_document(
             realm, url, body, content_type,
             doc_origin: doc_origin, location_origin: location_origin, about_base: about_base, referrer: referrer, referrer_policy: referrer_policy,
-            csp: csp, client_id: client_id, refresh: refresh, sandbox: sandbox, entry: entry
+            csp: csp, client_id: client_id, refresh: refresh, sandbox: sandbox, entry: entry, controlled: controlled
           )
         end
         realm.id
