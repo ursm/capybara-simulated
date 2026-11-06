@@ -61507,10 +61507,6 @@ web-locks/partitioned-web-locks.tentative.https.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: "[harness] TIMEOUT"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 web-locks/storage-buckets.tentative.https.any.js:
 - name: Storage buckets have independent locks
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

@@ -2910,8 +2910,6 @@ html/browsers/browsing-the-web/navigating-across-documents/initial-empty-documen
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-204-pushState-replaceState.html:
 - history.pushState
 - history.replaceState
-html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-204.html:
-- about:blank on top of 204 loads async
 html/browsers/browsing-the-web/navigating-across-documents/javascript-url-load-as-html.xhtml:
 - 'javascript: URL navigation to a string must create a HTML document using the correct
   properties'
@@ -2993,13 +2991,6 @@ html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/f
 - Replace during the pageshow event, triggered by formElement.submit()
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit.html:
 - Replace before load, triggered by same-document formElement.submit()
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src-during-load.html:
-- Replace during the load event, triggered by setting iframeElement.src
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src-during-pageshow.html:
-- Replace during the pageshow event, triggered by setting iframeElement.src
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src.html:
-- Replace before load, triggered by setting iframeElement.src
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/source/navigate-child-src-about-blank.html:
 - Set the src attribute to about:blank and check referrer
 html/browsers/browsing-the-web/navigating-across-documents/top-level-data-url.window.js:
@@ -7108,8 +7099,8 @@ websockets/unload-a-document/002.html:
 - 'WebSockets: navigating top-level browsing context with closed websocket'
 - 'WebSockets: navigating top-level browsing context with closed websocket'
 - 'WebSockets: navigating top-level browsing context with closed websocket'
-websockets/unload-a-document/003.html:
-- 'WebSockets: navigating nested browsing context'
+websockets/unload-a-document/004.html:
+- 'WebSockets: navigating nested browsing context with closed websocket'
 webstorage/localstorage-share-data-unrelated-origins.html:
 - Ensure two about:srcdoc origins cannot share localstorage
 - "[harness] TIMEOUT"
