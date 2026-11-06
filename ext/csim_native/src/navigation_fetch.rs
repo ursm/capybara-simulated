@@ -257,8 +257,9 @@ impl NavigationFetch {
     // "as if navigable navigated itself" — which its redirect-taint is walked with in place of `origin`: its Origin, a
     // re-post's the one it was first sent with, and its Sec-Fetch-Site still a user's; nil none), `traversed_initiator`
     // (a top-level traversal's, of no initiator: its entry's document state's initiator origin, serialized — which its
-    // cookies are judged by alone, Fetch's step 2; nil none), `coop` (a top-level traversable's: the opener policy of its
-    // document, by its name — coop.rs — which its responses' are enforced against: `response`; nil a frame's, none).
+    // cookies are judged by alone, Fetch's step 2; nil none), `traversable` (a top-level traversable's, by its number: the
+    // opener policy of its document — session_history.rs `opener_policy_of` — is what its responses' are enforced against:
+    // `response`; nil a frame's, none).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -276,7 +277,12 @@ impl NavigationFetch {
         };
         let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
         let ancestors = ancestors.map(|a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>()).transpose()?;
-        let coop = text("coop")?.map(|name| CoopEnforcement { coop: Coop::named(&name), origin: None, facts: None, switch: false });
+        let coop = Option::<u64>::try_convert(get("traversable")?)?.map(|id| CoopEnforcement {
+            coop: crate::session_history::opener_policy_of(id),
+            origin: None,
+            facts: None,
+            switch: false,
+        });
         Ok(NavigationFetch {
             origin: judged_origin,
             user_activated: get("user_activated")?.to_bool(),

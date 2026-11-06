@@ -262,6 +262,10 @@ struct Traversable {
     url: Option<String>,
     noting: bool,
     passed: Vec<String>,
+    // The opener policy of the document its top-level navigable is at (HTML Document's "opener policy", which only a
+    // top-level one's is ever read): what its next navigation's responses are enforced against (navigation_fetch.rs
+    // `CoopEnforcement`), and a window's initial about:blank takes of its creator (coop.rs `inherited`).
+    opener_policy: crate::coop::Value,
 }
 
 impl Drop for Traversable {
@@ -1221,6 +1225,7 @@ impl SessionHistory {
         t.frames_saved.clear();
         t.ongoing.clear();
         (t.closed, t.by_web_content, t.popup_sandbox) = (false, false, 0);
+        t.opener_policy = crate::coop::Value::UnsafeNone;
         t.queued.clear();
         t.stashed.clear();
         t.flushed = None;
@@ -1252,6 +1257,31 @@ impl SessionHistory {
     // #popup_sandbox = flags: the sandboxing flags it was made with (`popup_sandbox`).
     pub(crate) fn set_popup_sandbox(&self, flags: u32) {
         self.lock().popup_sandbox = flags;
+    }
+    // #opener_policy = name: the opener policy of the document it now shows, by its name (coop.rs), as that one commits.
+    fn set_opener_policy(&self, name: String) {
+        self.lock().opener_policy = crate::coop::Value::named(&name);
+    }
+    // #opener_policy_switch { [origin, initial about:blank] } -> whether a navigation of it to a response of no policy — one
+    // no hop enforced: an about:blank document's, a `blob:` or `data:` URL's — needs a browsing context group switch
+    // (coop.rs `switch_for_no_policy`), the block giving the facts of the document it leaves.
+    fn opener_policy_switch(ruby: &magnus::Ruby, rb_self: &Self) -> Result<bool, magnus::Error> {
+        let document = rb_self.lock().opener_policy;
+        crate::coop::switch_for_no_policy(document, || ruby.yield_value(ruby.qnil()))
+    }
+    // #inherit_opener_policy(creator) { [origin, top-level origin] }: its initial about:blank made by a document of top-level
+    // traversable `creator`, the policy it takes of that one (coop.rs `inherited`) — the block giving that document's facts.
+    fn inherit_opener_policy(ruby: &magnus::Ruby, rb_self: &Self, creator: &Self) -> Result<(), magnus::Error> {
+        let top_level = creator.lock().opener_policy;
+        let inherited = crate::coop::inherited(top_level, || ruby.yield_value(ruby.qnil()))?;
+        rb_self.lock().opener_policy = inherited;
+        Ok(())
+    }
+    // #opener_policy_isolates? { [origin, top-level origin] } -> whether a window a document of it opens is opened without
+    // its opener (coop.rs `isolates_opener`), the block giving that document's facts.
+    fn opener_policy_isolates(ruby: &magnus::Ruby, rb_self: &Self) -> Result<bool, magnus::Error> {
+        let top_level = rb_self.lock().opener_policy;
+        crate::coop::isolates_opener(top_level, || ruby.yield_value(ruby.qnil()))
     }
     // #close!: it closed (HTML "close a top-level traversable") — or was parked, its page gone: nothing asked of it is
     // taken any more.
@@ -1390,6 +1420,10 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("ask_close", method!(SessionHistory::ask_close, 0))?;
     class.define_method("by_web_content=", method!(SessionHistory::set_by_web_content, 1))?;
     class.define_method("popup_sandbox=", method!(SessionHistory::set_popup_sandbox, 1))?;
+    class.define_method("opener_policy=", method!(SessionHistory::set_opener_policy, 1))?;
+    class.define_method("opener_policy_switch", method!(SessionHistory::opener_policy_switch, 0))?;
+    class.define_method("inherit_opener_policy", method!(SessionHistory::inherit_opener_policy, 1))?;
+    class.define_method("opener_policy_isolates?", method!(SessionHistory::opener_policy_isolates, 0))?;
     class.define_method("session_storage=", method!(SessionHistory::set_session_storage, 1))?;
     class.define_method("session_storage", method!(SessionHistory::session_storage, 0))?;
     class.define_method("own!", method!(SessionHistory::own, 0))?;
@@ -1439,6 +1473,22 @@ mod tests {
 
     fn history() -> SessionHistory {
         SessionHistory::new()
+    }
+
+    // The opener policy of its document, read by number as a navigation begins, and none once it is cleared or gone.
+    #[test]
+    fn it_holds_its_document_s_opener_policy() {
+        use crate::coop::Value;
+        let h = history();
+        assert_eq!(opener_policy_of(h.id), Value::UnsafeNone);
+        h.set_opener_policy("same-origin".to_owned());
+        assert_eq!(opener_policy_of(h.id), Value::SameOrigin);
+        h.clear();
+        assert_eq!(opener_policy_of(h.id), Value::UnsafeNone);
+        h.set_opener_policy("same-origin".to_owned());
+        let id = h.id;
+        drop(h);
+        assert_eq!(opener_policy_of(id), Value::UnsafeNone);
     }
 
     // A page's flush sets aside the traversals stashed before it and keeps what it stashed apart: given back ahead of
@@ -1853,6 +1903,11 @@ pub(crate) fn set_name_of(id: u64, name: &[u16]) {
     let mut t = traversable.lock().unwrap_or_else(PoisonError::into_inner);
     let build = t.build;
     t.state.set_name(build, name);
+}
+
+// The opener policy of the document top-level traversable `id` is at (`opener_policy`), none for one gone.
+pub(crate) fn opener_policy_of(id: u64) -> crate::coop::Value {
+    histories().1.get(&id).and_then(Weak::upgrade).map_or(crate::coop::Value::UnsafeNone, |t| lock(&t).opener_policy)
 }
 
 // Whether top-level traversable `id` closed: its page's browsing context discarded, which no opener of another window

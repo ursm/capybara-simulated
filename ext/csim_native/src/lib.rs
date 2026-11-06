@@ -343,7 +343,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("header_map", magnus::function!(response_headers::header_map_for_ruby, 1))?;
     native.define_module_function("location_fields", magnus::function!(response_headers::location_fields_for_ruby, 1))?;
     native.define_module_function("redirect_locations", magnus::function!(response_headers::redirect_locations_for_ruby, 2))?;
-    native.define_module_function("coop_switch", magnus::function!(coop::switch_for_ruby, 5))?;
     // A request's Referer, under its referrer policy (referrer.rs).
     native.define_module_function("request_referrer", magnus::function!(referrer::request_referrer_for_ruby, 3))?;
     native.define_module_function("referrer_url", magnus::function!(referrer::referrer_url_for_ruby, 1))?;

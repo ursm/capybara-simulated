@@ -1,11 +1,13 @@
 // Cross-origin opener policies (HTML §7.1.3): a document's — its response's `Cross-Origin-Opener-Policy`, made
 // "same-origin-plus-COEP" by an embedder policy compatible with cross-origin isolation — and whether a navigation of a
 // top-level traversable to a response needs a browsing context group switch, judged against the document it leaves:
-// what the host does with a navigation response (browser.rb `coop_switch?`) — a pop-up's that needs one leaving its
-// opener's browsing context group, the isolate it is a realm of, for a Browser of its own.
+// what the host does with a navigation response (browser.rb `commit_coop`) — a pop-up's that needs one leaving its
+// opener's browsing context group, the isolate it is a realm of, for a Browser of its own. The policy of the document a
+// top-level traversable is at is the traversable's (session_history.rs `opener_policy`).
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Value {
+    #[default]
     UnsafeNone,
     SameOriginAllowPopups,
     SameOrigin,
@@ -79,10 +81,40 @@ pub(crate) fn switch_needed(initial_about_blank: bool, document_origin: &str, do
     !matching(document, document_origin, response, response_origin)
 }
 
-// Native.coop_switch(initial_about_blank, document_origin, document_value, response_origin, response_value) ->
-// `switch_needed`, the values by their names.
-pub(crate) fn switch_for_ruby(initial_about_blank: bool, document_origin: String, document: String, response_origin: String, response: String) -> bool {
-    switch_needed(initial_about_blank, &document_origin, Value::named(&document), &response_origin, Value::named(&response))
+// …of a response of no policy — every one made of no headers: an about:blank document's, a `blob:` or `data:` URL's — the
+// host asked the facts of the document it leaves (its origin, whether it is its initial about:blank) only for one of a
+// policy. HTML "create navigation params by fetching" enforces these as it does any response, "obtain an opener policy"
+// of none of the headers it reads saying otherwise. Chrome and Firefox differ (measured 2026-11-06): an about:blank or
+// `blob:` document there inherits its initiator's policy and stays, as the open whatwg/html#5198 would have it, whose
+// answer would change this one step.
+pub(crate) fn switch_for_no_policy<E>(document: Value, facts: impl FnOnce() -> Result<(String, bool), E>) -> Result<bool, E> {
+    if document == Value::UnsafeNone {
+        return Ok(false);
+    }
+    let (document_origin, initial) = facts()?;
+    Ok(switch_needed(initial, &document_origin, document, "null", Value::UnsafeNone))
+}
+
+// The opener policy a new window's initial about:blank takes of its creator (HTML "create a new browsing context and
+// document"): that of its creator's top-level document, where the creator's origin (`facts`, with that document's) is
+// that one's, an opaque one being no other's — none otherwise.
+pub(crate) fn inherited<E>(top_level: Value, facts: impl FnOnce() -> Result<(String, String), E>) -> Result<Value, E> {
+    if top_level == Value::UnsafeNone {
+        return Ok(top_level);
+    }
+    let (creator_origin, top_level_origin) = facts()?;
+    Ok(if creator_origin != "null" && creator_origin == top_level_origin { top_level } else { Value::UnsafeNone })
+}
+
+// Whether a window a document opens is opened without its opener (HTML "the rules for choosing a navigable"): its top-level
+// document of a policy "same-origin" or "same-origin-plus-COEP", and its own origin (`facts`, with that document's) not
+// that one's.
+pub(crate) fn isolates_opener<E>(top_level: Value, facts: impl FnOnce() -> Result<(String, String), E>) -> Result<bool, E> {
+    if !matches!(top_level, Value::SameOrigin | Value::SameOriginPlusCoep) {
+        return Ok(false);
+    }
+    let (origin, top_level_origin) = facts()?;
+    Ok(origin != top_level_origin)
 }
 
 #[cfg(test)]
@@ -114,5 +146,42 @@ mod tests {
         assert!(!switch_needed(true, a, SameOriginAllowPopups, b, UnsafeNone));
         assert!(switch_needed(false, a, SameOriginAllowPopups, b, UnsafeNone));
         assert!(switch_needed(true, a, UnsafeNone, a, NoopenerAllowPopups));
+    }
+
+    #[test]
+    fn a_response_of_no_policy_switches_from_any_document_of_one_but_an_initial_about_blank_s_allowing_popups() {
+        use Value::*;
+        let facts = |initial| move || Ok::<_, ()>(("http://a.test".to_owned(), initial));
+        assert_eq!(switch_for_no_policy(UnsafeNone, || Err(())), Ok(false));
+        assert_eq!(switch_for_no_policy(SameOrigin, facts(false)), Ok(true));
+        assert_eq!(switch_for_no_policy(SameOriginPlusCoep, facts(false)), Ok(true));
+        assert_eq!(switch_for_no_policy(SameOriginAllowPopups, facts(false)), Ok(true));
+        assert_eq!(switch_for_no_policy(SameOrigin, facts(true)), Ok(true));
+        assert_eq!(switch_for_no_policy(SameOriginAllowPopups, facts(true)), Ok(false));
+        assert_eq!(switch_for_no_policy(NoopenerAllowPopups, facts(true)), Ok(false));
+    }
+
+    fn origins(a: &str, b: &str) -> impl FnOnce() -> Result<(String, String), ()> {
+        let pair = (a.to_owned(), b.to_owned());
+        move || Ok(pair)
+    }
+
+    #[test]
+    fn a_new_window_takes_its_creator_s_top_level_policy_only_of_that_one_s_origin() {
+        use Value::*;
+        assert_eq!(inherited(UnsafeNone, || Err(())), Ok(UnsafeNone));
+        assert_eq!(inherited(SameOrigin, origins("http://a.test", "http://a.test")), Ok(SameOrigin));
+        assert_eq!(inherited(SameOrigin, origins("http://b.test", "http://a.test")), Ok(UnsafeNone));
+        assert_eq!(inherited(SameOrigin, origins("null", "null")), Ok(UnsafeNone));
+    }
+
+    #[test]
+    fn only_a_same_origin_top_level_document_isolates_a_frame_of_another_origin_s_openings() {
+        use Value::*;
+        assert_eq!(isolates_opener(SameOrigin, origins("http://b.test", "http://a.test")), Ok(true));
+        assert_eq!(isolates_opener(SameOriginPlusCoep, origins("http://b.test", "http://a.test")), Ok(true));
+        assert_eq!(isolates_opener(SameOrigin, origins("http://a.test", "http://a.test")), Ok(false));
+        assert_eq!(isolates_opener(SameOriginAllowPopups, || Err(())), Ok(false));
+        assert_eq!(isolates_opener(UnsafeNone, || Err(())), Ok(false));
     }
 }
