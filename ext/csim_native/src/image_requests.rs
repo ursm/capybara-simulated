@@ -348,6 +348,22 @@ fn info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
+// What a draw or a pattern reads of an image element's decoded bitmap: its pixels, its Display P3 ones, whether the first
+// are Display P3 values — and its NATURAL size, its size over its source's pixel density.
+pub(crate) fn source_pixels<'s>(scope: &mut v8::PinScope<'s, '_>, id: NodeId) -> Option<(v8::Local<'s, v8::Value>, v8::Local<'s, v8::Value>, bool)> {
+    let b = crate::dom::dom(scope).arena.image(id).and_then(|r| r.bitmap.clone())?;
+    let p3 = match &b.p3 {
+        Some(p) => p.view(scope),
+        None => v8::null(scope).into(),
+    };
+    Some((b.srgb.view(scope), p3, b.display_p3))
+}
+impl RealmArena {
+    pub(crate) fn image_natural_size(&self, id: NodeId) -> [u32; 2] {
+        let d = self.image_density(id);
+        self.image(id).map_or([0, 0], |r| r.size.map(|v| (f64::from(v) / d).trunc() as u32))
+    }
+}
 // __dom.imageBitmap(img) -> [pixels, pixelsP3 | null, displayP3] — views on the current request's decoded bitmap — or
 // null where it has none.
 fn bitmap_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

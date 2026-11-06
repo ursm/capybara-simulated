@@ -211,4 +211,36 @@ RSpec.describe 'Canvas context bindings' do
     JS
     expect(got).to eq([255, 255, 255, 255, 255, 255, 0, 0])
   end
+
+  # A canvas of another realm is a source like any: its size, its bitmap and its colour space are its context's, drawn
+  # with the arena's reads whichever realm's bindings ask; and its own context made a canvas of the first realm's a source.
+  it 'takes a canvas of another realm as a source' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const frame = document.body.appendChild(document.createElement('iframe'));
+        const other = frame.contentDocument.createElement('canvas');
+        other.width = other.height = 2;
+        const theirs = other.getContext('2d', {colorSpace: 'display-p3'});
+        theirs.fillStyle = 'rgb(255, 0, 0)';
+        theirs.fillRect(0, 0, 1, 2);
+
+        const ctx = document.createElement('canvas').getContext('2d');
+        ctx.drawImage(other, 0, 0);
+        const drawn = [...ctx.getImageData(0, 0, 1, 1).data, ctx.getImageData(1, 0, 1, 1).data[3], ctx.getImageData(2, 0, 1, 1).data[3]];
+        const tiled = document.createElement('canvas').getContext('2d');
+        tiled.fillStyle = tiled.createPattern(other, 'repeat');
+        theirs.clearRect(0, 0, 2, 2);
+        tiled.fillRect(0, 0, 2, 2);
+
+        const mine = document.createElement('canvas');
+        mine.width = mine.height = 1;
+        mine.getContext('2d').fillRect(0, 0, 1, 1);
+        theirs.drawImage(mine, 0, 0, 2, 2);
+        const blank = document.createElement('canvas').getContext('2d');
+        blank.drawImage(frame.contentDocument.createElement('canvas'), 0, 0);
+        return [drawn, tiled.getImageData(0, 0, 1, 1).data[3], tiled.getImageData(1, 0, 1, 1).data[3], theirs.getImageData(1, 1, 1, 1).data[3], blank.getImageData(0, 0, 1, 1).data[3]];
+      })()
+    JS
+    expect(got).to eq([[255, 0, 0, 255, 0, 0], 255, 0, 255, 0])
+  end
 end

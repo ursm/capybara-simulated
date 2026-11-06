@@ -47,6 +47,80 @@ RSpec.describe 'canvas origin-clean flag' do
     JS
     expect(got).to eq(%w[clean SecurityError SecurityError SecurityError SecurityError SecurityError])
   end
+
+  # HTML's drawImage steps, in their order: "If any of the arguments are infinite or NaN, then return." "Let usability be
+  # the result of checking the usability of image." "If usability is bad, then return (without drawing anything)." [the
+  # rectangles] "If one of the sw or sh arguments is zero, then return. Nothing is painted." [the paint] "If image is not
+  # origin-clean, then set the CanvasRenderingContext2D's origin-clean flag to false."
+  #
+  # So a draw that returned taints nothing, and one of no destination or off the canvas, which painted nothing but did not
+  # return, does. Measured `throw/flag`, the page at 127.0.0.1 and its image at localhost:
+  #                                      Chrome                  Firefox
+  #   NaN dx, Infinity dw, NaN sx        none/clean              none/clean
+  #   sw or sh 0                         none/clean              none/SecurityError
+  #   dw 0                               none/clean              none/SecurityError
+  #   off the canvas                     none/SecurityError      none/SecurityError
+  #   zero-size canvas, NaN dx           InvalidStateError       none
+  #   zero-size canvas, Infinity dw      InvalidStateError       none
+  #   zero-size canvas, sw 0             InvalidStateError       InvalidStateError
+  # The spec is explicit on each, and each row has an engine that keeps to it.
+  it 'is cleared by a draw that did not return before its last step, and thrown for a source only once its arguments are finite' do
+    app = ->(env) {
+      if env['PATH_INFO'] == '/a.png'
+        [200, {'content-type' => 'image/png'}, [png]]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body></body>']]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], got = {};
+      const draws = (name, draw) => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 4;
+        let threw = 'none';
+        try { draw(c.getContext('2d')); } catch (e) { threw = e.name; }
+        try { c.toDataURL(); got[name] = `${threw}/clean`; } catch (e) { got[name] = `${threw}/${e.name}`; }
+      };
+      const zero = document.createElement('canvas');
+      zero.width = 0;
+      const img = new Image();
+      img.onload = () => {
+        draws('control', (g) => g.drawImage(img, 0, 0));
+        draws('NaN dx', (g) => g.drawImage(img, NaN, 0));
+        draws('Infinity dw', (g) => g.drawImage(img, 0, 0, Infinity, 1));
+        draws('NaN sx', (g) => g.drawImage(img, NaN, 0, 1, 1, 0, 0, 1, 1));
+        draws('sw 0', (g) => g.drawImage(img, 0, 0, 0, 1, 0, 0, 1, 1));
+        draws('sh 0', (g) => g.drawImage(img, 0, 0, 1, 0, 0, 0, 1, 1));
+        draws('dw 0', (g) => g.drawImage(img, 0, 0, 0, 1));
+        draws('off the canvas', (g) => g.drawImage(img, 100, 100));
+        draws('zero NaN dx', (g) => g.drawImage(zero, NaN, 0));
+        draws('zero Infinity dw', (g) => g.drawImage(zero, 0, 0, Infinity, 1));
+        draws('zero', (g) => g.drawImage(zero, 0, 0));
+        draws('zero sw 0', (g) => g.drawImage(zero, 0, 0, 0, 1, 0, 0, 1, 1));
+        draws('no source yet', (g) => g.drawImage(new Image(), NaN, 0));
+        done(got);
+      };
+      img.src = 'http://other.test/a.png';
+    JS
+    expect(got).to eq(
+      'control'          => 'none/SecurityError',
+      'NaN dx'           => 'none/clean',
+      'Infinity dw'      => 'none/clean',
+      'NaN sx'           => 'none/clean',
+      'sw 0'             => 'none/clean',
+      'sh 0'             => 'none/clean',
+      'dw 0'             => 'none/SecurityError',
+      'off the canvas'   => 'none/SecurityError',
+      'zero NaN dx'      => 'none/clean',
+      'zero Infinity dw' => 'none/clean',
+      'zero'             => 'InvalidStateError/clean',
+      'zero sw 0'        => 'InvalidStateError/clean',
+      'no source yet'    => 'none/clean'
+    )
+  end
+
   # What clears it is the image's RESPONSE not being CORS-same-origin — a no-cors one any hop of which left the
   # document's origin (Fetch's response tainting stays opaque) — whatever origin the image's URL is of: a same-origin URL
   # redirected to another origin taints, a cross-origin one redirected back taints, a CORS one through it does not.

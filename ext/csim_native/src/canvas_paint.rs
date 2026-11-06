@@ -68,7 +68,7 @@ impl CanvasPaintHandle {
     }
 }
 
-// What the rasterizer paints with for `paint` (canvas.rs `canvasDraw`'s paint): a gradient's kind and geometry, then its
+// What the rasterizer paints with for `paint` (canvas.rs `draw`'s paint): a gradient's kind and geometry, then its
 // stops' count and each stop; a pattern's tile size, the axes it repeats on, its colour space and its transform — and
 // its tile's pixels. None for an object that is no paint.
 pub(crate) fn paint_data<'s>(scope: &mut v8::PinScope<'s, '_>, paint: v8::Local<'_, v8::Object>) -> Option<(Vec<f64>, Option<v8::Local<'s, v8::Object>>)> {
@@ -152,7 +152,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
         ns.set(scope, name.into(), base.into());
     }
     crate::dom::register(scope, ns, "canvasGradientInit", canvas_gradient_init, context_id);
-    crate::dom::register(scope, ns, "canvasPatternInit", canvas_pattern_init, context_id);
     crate::dom::register(scope, ns, "canvasAddColorStop", canvas_add_color_stop, context_id);
     crate::dom::register(scope, ns, "canvasPatternTransform", canvas_pattern_transform, context_id);
 }
@@ -183,18 +182,23 @@ fn canvas_gradient_init(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 // `repeat-y`, `no-repeat`.
 const REPEATS: [(bool, bool); 4] = [(true, true), (true, false), (false, true), (false, false)];
 
-// __dom.canvasPatternInit(paint, wrapper, pixels, w, h, repetition, p3) — a pattern, its interface object `wrapper`: its
-// `w` × `h` tile `pixels` (its own copy, a Display P3 one where `p3`), repeating as `repetition` says (`REPEATS`), under
-// the identity until its transform is set.
-fn canvas_pattern_init(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(h) = handle(scope, args.get(0)) else { return };
-    own(scope, h, args.get(1));
-    let pixels = v8::Local::<v8::Object>::try_from(args.get(2)).ok();
+// A pattern (`canvasPatternTile`), its interface object `wrapper`: its `size` tile `pixels` (its own copy, a Display P3 one
+// where `p3`), repeating as `repetition` says (`REPEATS`), under the identity until its transform is set.
+pub(crate) fn init_pattern(
+    scope: &mut v8::PinScope<'_, '_>,
+    paint: v8::Local<'_, v8::Value>,
+    wrapper: v8::Local<'_, v8::Value>,
+    pixels: v8::Local<'_, v8::Value>,
+    [w, hgt]: [f64; 2],
+    repetition: u32,
+    p3: bool,
+) {
+    let Some(h) = handle(scope, paint) else { return };
+    own(scope, h, wrapper);
+    let pixels = v8::Local::<v8::Object>::try_from(pixels).ok();
     // SAFETY: the main thread writes the reference.
     unsafe { (*h.pixels.get()).reset(scope, pixels) };
-    let [w, hgt] = [3, 4].map(|k| args.get(k).number_value(scope).unwrap_or(0.0));
-    let (repeat_x, repeat_y) = REPEATS[args.get(5).uint32_value(scope).unwrap_or(0).min(3) as usize];
-    let p3 = args.get(6).is_true();
+    let (repeat_x, repeat_y) = REPEATS[repetition.min(3) as usize];
     *h.paint.borrow_mut() = Some(Paint::Pattern(Tile { w, h: hgt, repeat_x, repeat_y, p3, m: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0] }));
 }
 

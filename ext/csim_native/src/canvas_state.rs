@@ -284,6 +284,10 @@ impl CanvasStateHandle {
     pub(crate) fn size(&self) -> [usize; 2] {
         self.size.get()
     }
+    // The bitmap no longer origin-clean.
+    pub(crate) fn taint(&self) {
+        self.origin_clean.set(false);
+    }
     // Whether its bitmap holds Display P3 values.
     pub(crate) fn display_p3(&self) -> bool {
         self.settings.color_space == DISPLAY_P3
@@ -737,7 +741,7 @@ fn canvas_origin_clean(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // __dom.canvasTaint(state): the bitmap no longer origin-clean.
 fn canvas_taint(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if let Some(h) = handle(scope, args.get(0)) {
-        h.origin_clean.set(false);
+        h.taint();
     }
 }
 

@@ -97,6 +97,12 @@ pub(crate) fn source_facts(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_
     Some((h.closed.get(), h.size.get(), h.tainted.get(), pixels))
 }
 
+// …and what a draw or a pattern reads of it: its pixels, its Display P3 ones, whether the first are Display P3 values.
+pub(crate) fn source_pixels<'s>(scope: &mut v8::PinScope<'s, '_>, value: v8::Local<'_, v8::Value>) -> Option<(v8::Local<'s, v8::Value>, v8::Local<'s, v8::Value>, bool)> {
+    let h = handle(scope, value)?;
+    Some((h.pixels(scope, 0), h.pixels(scope, 1), h.display_p3.get()))
+}
+
 // `__dom.ImageBitmapStateBase`: the constructor of the isolate's template, made once per isolate.
 fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Function>> {
     scope.get_cpp_heap()?;

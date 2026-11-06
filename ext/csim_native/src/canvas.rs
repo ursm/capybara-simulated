@@ -860,7 +860,6 @@ fn box_blur(src: &[f32], dst: &mut [f32], w: usize, h: usize, radius: usize, hor
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "canvasRect", canvas_rect, context_id);
     crate::dom::register(scope, ns, "canvasDrawPath", canvas_draw_path, context_id);
-    crate::dom::register(scope, ns, "canvasDrawRectImage", canvas_draw_rect_image, context_id);
     crate::dom::register(scope, ns, "canvasClip", canvas_clip, context_id);
     crate::dom::register(scope, ns, "canvasConvert", canvas_convert, context_id);
     crate::dom::register(scope, ns, "pixelsUnorm8", pixels_unorm8, context_id);
@@ -981,16 +980,6 @@ fn canvas_draw_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         STROKE => draw_style(scope, h, crate::canvas_state::STROKE, &shape),
         _ => draw_style(scope, h, crate::canvas_state::FILL, &shape),
     }
-}
-
-// __dom.canvasDrawRectImage(state, x, y, w, h, paint, pixels): a user-space rectangle filled with the paint given.
-fn canvas_draw_rect_image(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(h) = crate::canvas_state::handle(scope, args.get(0)) else { return };
-    let rect: [f64; 4] = std::array::from_fn(|i| args.get(i as i32 + 1).number_value(scope).unwrap_or(f64::NAN));
-    let rings = Path::rect(h.state().m, rect).fill_rings();
-    let paint = crate::dom::f64_arg(args.get(5)).to_vec();
-    let pixels = v8::Local::new(scope, args.get(6));
-    draw(scope, h, false, &Shape::Rings { rings, even_odd: false }, &paint, pixels);
 }
 
 // A shape drawn with the state's fill or stroke style (`slot`): its gradient's or its pattern's paint (canvas_paint.rs
