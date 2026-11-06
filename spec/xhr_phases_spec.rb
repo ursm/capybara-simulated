@@ -11,18 +11,10 @@ require_relative 'support/poll_until'
 RSpec.describe 'XHR event phases' do
   include PollUntil
 
-  # (…`/boom` a request's network error, what the page sees: the session's raising it is app_error_spec.rb's)
-  around do |example|
-    raising = Capybara.raise_server_errors
-    Capybara.raise_server_errors = false
-    example.run
-  ensure
-    Capybara.raise_server_errors = raising
-  end
-
   let(:app) {
     lambda do |env|
-      raise 'boom' if env['PATH_INFO'] == '/boom'
+      # (…a network error: Content-Length values that differ. RFC 9112 §6.3; an app's exception would be a 500, as Puma's)
+      next [200, {'content-length' => '1, 2'}, ['x']] if env['PATH_INFO'] == '/boom'
       next [200, {'content-type' => 'text/plain'}, ["#{env['CONTENT_TYPE']} #{env['rack.input'].read}"]] if env['PATH_INFO'] == '/echo-type'
       [200, {'content-type' => 'text/plain'}, [env['PATH_INFO'] == '/' ? '<!doctype html><body>' : 'ok']]
     end

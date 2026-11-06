@@ -268,8 +268,16 @@ traversal or reload has replaced it as its navigable's ongoing one
 (session_history.rs `begin_navigation`) — except a
 redirect's later hop into such a scope, which waits what it can in place
 and, as no deferral can make a chain's hop again, goes on to the network
-where it can't. List and justify these explicitly; don't let them
-multiply.
+where it can't; and an interface's flat class (`inheritInterface` and
+gen_bindings.mjs `shell`, as the event classes) reads NewTarget's `prototype`
+before its arguments are converted, where Web IDL's constructor steps convert
+first and then internally create the object: a class with no `extends`
+allocates `this` as its body begins, and the `super` that would defer it walks
+the [[Prototype]] chain a page can reach, what the flat form took off so that
+PLATFORM stays out of a page's reach and `new` works whatever is put there —
+no WPT and no library observes the order but through a getter on a NewTarget's
+`prototype`, and Chrome and Firefox read it first on every interface measured.
+List and justify these explicitly; don't let them multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
 not say. Where the spec is silent or ambiguous, match Chromium / Firefox

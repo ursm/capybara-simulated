@@ -756,8 +756,20 @@ module WptRunner
     [101, {}, []]
   end
 
+  # What wptserve does with a handler that raises: a 500 for the test to read, and no error of the session's.
+  class HandlerErrors
+    def initialize(app) = @app = app
+
+    def call(env)
+      @app.call(env)
+    rescue StandardError => e
+      [500, {'content-type' => 'text/plain'}, ["#{e.class}: #{e.message}"]]
+    end
+  end
+
   def app
     @app ||= Rack::Builder.new {
+      use HandlerErrors
       run lambda {|env|
         req  = Rack::Request.new(env)
         path = req.path_info

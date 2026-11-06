@@ -179,10 +179,12 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     expect { session.within_window(popup) { nil } }.to raise_error(Capybara::WindowError)
   end
 
-  it 'raises what the app raised for a visit in it, and answers the status its document was served with' do
+  it 'raises what the app raised for a visit in it at the next, and answers the status its document was served with' do
     popup = open_popup
     session.within_window(popup) do
-      expect { session.visit('/boom') }.to raise_error(RuntimeError, 'boom')
+      session.visit('/boom')
+      expect(session.status_code).to eq(500)
+      expect { session.visit('/missing') }.to raise_error(RuntimeError, 'boom')
       session.visit('/missing')
       expect([session.status_code, session.response_headers['Content-Type']]).to eq([404, 'text/html'])
     end

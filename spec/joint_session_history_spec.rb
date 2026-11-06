@@ -154,7 +154,8 @@ RSpec.describe 'the joint session history' do
     expect(session).to have_current_path('/f2')
   end
 
-  # The application's error in a traversal's request is the test's, as a visit's is.
+  # The application's error in a traversal's request is the test's, as a visit's is: a 500, and raised at the session's next
+  # `visit` (Capybara::Session#raise_server_error!; `go_forward` itself raises nothing there).
   it "raises the application's error of a traversal" do
     gets = 0
     session = simulated_session(lambda {|env|
@@ -166,7 +167,8 @@ RSpec.describe 'the joint session history' do
     session.visit '/a'
     session.visit '/b'
     session.go_back
-    expect { session.go_forward }.to raise_error(RuntimeError, 'boom')
+    session.go_forward
+    expect { session.visit('/a') }.to raise_error(RuntimeError, 'boom')
   end
 
   # A window `window.open` made is a traversable of its own: its `history` is its initial about:blank's, not the

@@ -4526,7 +4526,12 @@ module Capybara
         # for the window, a worker's own for its sockets, as its `fetch` calls the app.
         # (No handshake timeout: a server that never writes the 101 leaks the
         # reader+socket until its teardown — acceptable, real servers always respond.)
-        @app.call(env)
+        begin
+          @app.call(env)
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          @driver&.app_raised(e) if app_exception?(e)
+          raise
+        end
         accept = Digest::SHA1.base64digest(key + WS_GUID)
         @websocket_lock.synchronize do
           @websocket_sockets[id]     = csim_io
@@ -10662,9 +10667,7 @@ module Capybara
           return chain_response(out, plan, tainted)
         end
       rescue StandardError => e
-        if e.is_a?(RaisedByApp) then e.tell_driver
-        else warn "[capybara-simulated] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
-        end
+        warn "[capybara-simulated] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
         nil
       end
 
@@ -13582,7 +13585,8 @@ module Capybara
       # next request — and lets go of the body the app gave before it ends. The session's cancellation alone: the app's
       # own `Timeout.timeout` (Rack::Timeout, a client library's) still interrupts it.
       # (…`own_host` that the request was the app's to answer: another host's that the network refused comes to it as well,
-      # for a 404, and what it raises of that is no error of the test's — the browser's request never reached the app)
+      # for a 404, and what it raises of that is no error of the test's — the browser's request never reached the app: it
+      # goes up to what asked, a network error)
       def app_call(env, deferring: false, own_host: true)
         return in_app_call { @app.call(env) } unless deferring
 
@@ -13596,20 +13600,18 @@ module Capybara
             response
           }
         }
-      rescue StandardError => e
-        if own_host && !e.frozen?
-          e.extend(RaisedByApp)
-          e.csim_driver = @driver
-        end
-        raise
-      end
-      # What the app raised, as it goes up through a fetch — told from what the driver raises for a redirect or a body: what
-      # makes a network error of it tells the driver (`Driver#app_raised`), whose next call raises it.
-      module RaisedByApp
-        attr_accessor :csim_driver
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        raise unless own_host && app_exception?(e)
 
-        def tell_driver = csim_driver&.app_raised(self)
+        # (…as the stack a browser run has: Capybara::Server::Middleware records it, and Puma answers every client a 500 of
+        # its message and backtrace, no Content-Type — Puma 8 under Capybara, measured)
+        @driver&.app_raised(e)
+        body = "Puma caught this error: #{e.message} (#{e.class})\n#{e.backtrace&.join("\n") || '<no backtrace available>'}"
+        [500, {'content-length' => body.bytesize.to_s}, [body]]
       end
+      # Whether `e` is what the app raised, of what goes up through its call — not a process's or a thread's own way out, nor
+      # the driver's cancelling of it — any class of exception, a LoadError's or a test's, as Middleware's `rescue` has it.
+      private def app_exception?(e) = !(e.is_a?(SystemExit) || e.is_a?(SignalException) || e.is_a?(EventSourceCancelled))
 
       # A body that ended before its Content-Length did: the bytes that came, and then a network error.
       CutShortBody = Struct.new(:bytes) {

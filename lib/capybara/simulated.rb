@@ -30,3 +30,20 @@ Capybara.register_driver :simulated do |app|
   Capybara::Simulated.next_driver_user_agent = nil
   Capybara::Simulated::Driver.new(app, viewport: vp, user_agent: ua)
 end
+
+# Capybara raises what the app raised at `visit`, `refresh`, `reset!` and a failed `synchronize`, all by
+# `Session#raise_server_error!`, which asks its server — none here: `needs_server?` is false — so the driver, which stands in
+# for that server (`Driver#app_raised`), is asked too. As Capybara has it: `raise_server_errors` the session's to say, the error
+# let go of either way, and its cause Capybara's own words.
+Capybara::Session.prepend(Module.new {
+  def raise_server_error!
+    super
+    return unless @driver.respond_to?(:take_app_error) && (error = @driver.take_app_error) && config.raise_server_errors
+
+    begin
+      raise Capybara::CapybaraError, 'Your application server raised an error - It has been raised in your test code because Capybara.raise_server_errors == true'
+    rescue Capybara::CapybaraError => capy_error # rubocop:disable Naming/RescuedExceptionsVariableName
+      raise error, cause: capy_error
+    end
+  end
+})
