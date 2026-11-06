@@ -130,22 +130,74 @@ RSpec.describe 'the platform\'s token for its own constructions' do
     expect(illegal).to eq([])
   end
 
-  # Web IDL's constructor steps read NewTarget's `prototype` once, as the object is made.
-  it 'reads NewTarget\'s `prototype` once', :every_host_local do
+  # Web IDL's constructor steps: its arguments converted, then the object made, reading NewTarget's `prototype` once ("Let
+  # <constructor, values> be the result of passing S and args to the overload resolution algorithm. Let object be the result of
+  # internally creating a new object implementing I, with realm and NewTarget."). No `super`, so nothing of a page's is called.
+  it 'converts its arguments, then reads NewTarget\'s `prototype`, once', :every_host_local do
     session.visit('https://a.test/')
-    counts = session.evaluate_script(<<~JS)
-      [
-        (t) => Reflect.construct(DOMException, ['m', 'NotFoundError'], t),
-        (t) => Reflect.construct(QuotaExceededError, ['m'], t)
-      ].map((make) => {
-        let reads = 0;
+    got = session.evaluate_script(<<~JS)
+      Object.entries({
+        DOMException: (arg) => [arg, 'NotFoundError'],
+        QuotaExceededError: (arg) => [arg],
+        Event: (arg) => [arg],
+        MouseEvent: (arg) => [arg],
+        PerformanceMark: (arg) => [arg],
+        DOMPoint: (arg) => [arg],
+        DOMRect: (arg) => [arg],
+        File: (arg) => [[], arg],
+        Touch: (arg) => [{ identifier: 1, target: document, get clientX() { log.push('arg'); return 0; } }],
+        BroadcastChannel: (arg) => [arg],
+        WebSocket: (arg) => [`ws://a.test/${String(arg)}`],
+        EventSource: (arg) => [arg],
+        Worker: (arg) => [arg]
+      }).map(([name, make]) => {
+        window.log = [];
         function NewTarget() {}
-        const target = new Proxy(NewTarget, { get(t, p, r) { if (p === 'prototype') reads++; return Reflect.get(t, p, r); } });
-        make(target);
-        return reads;
+        NewTarget.prototype = window[name].prototype;
+        const target = new Proxy(NewTarget, { get(t, p, r) { if (p === 'prototype') log.push('proto'); return Reflect.get(t, p, r); } });
+        const arg = { toString() { log.push('arg'); return '/x'; } };
+        const spy = () => { log.push('spy'); };
+        const before = Object.getPrototypeOf(window[name]);
+        Object.setPrototypeOf(window[name], spy);
+        try {
+          const made = Reflect.construct(window[name], make(arg), target);
+          if (!(made instanceof window[name])) log.push('no instance');
+        } catch (e) {
+          log.push(String(e));
+        }
+        Object.setPrototypeOf(window[name], before);
+        return [name, log.join('>').replace(/^(arg>)+/, 'arg>')];
       });
     JS
-    expect(counts).to eq([1, 1])
+    expect(got).to all(satisfy {|_name, order| order == 'arg>proto' })
+  end
+
+  it 'answers a class without `new` and with another NewTarget as a class does', :every_host_local do
+    session.visit('https://a.test/')
+    expect(session.evaluate_script(<<~JS)).to eq([true, true, true, true, 0, 'Event', 'XMLHttpRequest', 1, 'DOMPoint'])
+      (() => {
+        const threw = (f) => { try { f(); return false; } catch (e) { return e instanceof TypeError; } };
+        function Other() {}
+        return [
+          threw(() => Event('x')),
+          threw(() => XMLHttpRequest()),
+          Object.getPrototypeOf(Reflect.construct(DOMPoint, [], Other)) === Other.prototype,
+          Object.getPrototypeOf(Reflect.construct(Event, ['x'], Other)) === Other.prototype,
+          XMLHttpRequest.length,
+          Event.name,
+          XMLHttpRequest.name,
+          Event.length,
+          DOMPoint.name
+        ];
+      })()
+    JS
+  end
+
+  # (…a function made Object's by no one: a page's Object swapped out reaches no construction)
+  it 'makes its object whatever a page has put at `Object`', :every_host_local do
+    session.visit('https://a.test/')
+    session.execute_script('window.Object = function () { throw new Error("page"); };')
+    expect(session.evaluate_script("[new Event('x').type, new DOMPoint(1).x, new XMLHttpRequest() instanceof EventTarget]")).to eq(['x', 1, true])
   end
 
   it 'keeps a page\'s subclass of a flat interface a subclass', :every_host_local do

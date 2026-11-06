@@ -744,7 +744,7 @@ const REFLECTION = [
 ];
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'PlainObject', 'NO_ARGUMENTS', 'reflectConstruct', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -1833,7 +1833,8 @@ function installInterface(def, { shell, body, statics, unforgeables, checks, uns
   return lines.join('\n');
 }
 
-// An interface's class, of a `shell`: what `install<Name>` puts its members on (see `shell` above).
+// An interface's class, of a `shell`: what `install<Name>` puts its members on (see `shell` above). No `super` makes its object
+// (`class extends Object` makes it none before its body): webidl.js `reflectConstruct`.
 function shellClass(def, constructors) {
   const name = def.name;
   if (constructors.length > 1) throw new Error(`${name}: an overloaded constructor of a shell is not generated yet`);
@@ -1848,28 +1849,31 @@ function shellClass(def, constructors) {
   const lines = [`export function define${name}(${def.inheritance ? 'Parent, ' : ''}impl) {`];
   lines.push(`  registerInterface('${name}', (o) => slotsOf(o, '${name}') !== undefined);`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
-  lines.push(`  const ${name} = ({ ${name}: class {`);
+  // (…its object made after its arguments are converted: webidl.js `reflectConstruct`; `slots.owner` what it answers, a Proxy
+  // of it where its `init` made one)
+  const made = [`      const slots = makeSlots(reflectConstruct(PlainObject, NO_ARGUMENTS, new.target), '${chain[0]}');`];
+  for (const n of chain.slice(1)) made.push(`      slots.${n} = true;`);
+  lines.push(`  const ${name} = ({ ${name}: class extends Object {`);
   lines.push(`    constructor() {`);
-  if (!ctor) lines.push(`      constructedBy(PLATFORM, arguments[0], '${name}');`);
-  lines.push(`      const slots = makeSlots(this, '${chain[0]}');`);
-  for (const n of chain.slice(1)) lines.push(`      slots.${n} = true;`);
   if (ctor) {
     const message = `Failed to construct '${name}': ${required} argument${required === 1 ? '' : 's'} required, but only `;
-    lines.push(`      if (arguments[0] === PLATFORM) {`);
-    lines.push(`        return impl.init(slots, ${platformArguments});`);
-    lines.push(`      } else {`);
+    lines.push(`      if (arguments[0] !== PLATFORM) {`);
     if (required) lines.push(`        if (arguments.length < ${required}) throw new TypeError(${JSON.stringify(message)} + arguments.length + ' present.');`);
-    lines.push(`        impl.construct(${['slots', ...converted].join(', ')});`);
+    converted.forEach((value, i) => lines.push(`        const a${i} = ${value};`));
+    lines.push(...made.map((l) => `  ${l}`));
+    lines.push(`        impl.construct(${['slots', ...converted.map((_, i) => `a${i}`)].join(', ')});`);
+    lines.push(`        return slots.owner;`);
     lines.push(`      }`);
   } else {
-    lines.push(`      return impl.init(slots, ${platformArguments});`);
+    lines.push(`      constructedBy(PLATFORM, arguments[0], '${name}');`);
   }
+  lines.push(...made);
+  lines.push(`      impl.init(slots, ${platformArguments});`);
+  lines.push(`      return slots.owner;`);
   lines.push(`    }`);
   lines.push(`  } }).${name};`);
-  if (def.inheritance) {
-    lines.push(`  Object.setPrototypeOf(${name}, Parent);`);
-    lines.push(`  Object.setPrototypeOf(${name}.prototype, Parent.prototype);`);
-  }
+  lines.push(`  Object.setPrototypeOf(${name}, ${def.inheritance ? 'Parent' : 'Function.prototype'});`);
+  if (def.inheritance) lines.push(`  Object.setPrototypeOf(${name}.prototype, Parent.prototype);`);
   lines.push(`  install${name}(${name}, impl);`);
   lines.push(`  return ${name};`);
   lines.push(`}`);
@@ -1877,7 +1881,7 @@ function shellClass(def, constructors) {
 }
 
 // An event interface: its class, its members in it, enumerable, chained to the class of the interface it inherits by its
-// [[Prototype]]s alone — no `extends`, no `super`: nothing of a page's put in that chain is ever called, with PLATFORM or
+// [[Prototype]]s alone — no `super`: nothing of a page's put in that chain is ever called, with PLATFORM or
 // at all, and `new` works whatever is put there; a page's own subclass is `new.target`'s, as it is of any class. Its
 // arguments converted by position — no array to make per event, none whose iterator a page has replaced to walk — or
 // given with PLATFORM, the engine's own making of one (`new X(PLATFORM, type, init)`, its init unconverted, as the steps
@@ -1928,7 +1932,7 @@ function eventInterface(def, { init, slots = {}, steps = [] }, { memberList, bod
   if (init) lines.push(`  ${name}InitSteps = impl.init;`);
   // (…a key its name, by which V8 names the class as esbuild's renaming of a nested `class Event` would not: its
   // constructor called with no `new`, its stack frames)
-  lines.push(`  const ${name} = ({ ${name}: class {`);
+  lines.push(`  const ${name} = ({ ${name}: class extends Object {`);
   lines.push(`    constructor(type, init, platformInit) {`);
   if (ctor) {
     const message = `Failed to construct '${name}': ${required} argument${required === 1 ? '' : 's'} required, but only `;
@@ -1947,16 +1951,16 @@ function eventInterface(def, { init, slots = {}, steps = [] }, { memberList, bod
     lines.push(`      init = platformInit;`);
   }
   lines.push(`      const state = new EventState(type, init);`);
-  lines.push(`      stampSlots(this, 'Event', state);`);
+  lines.push(`      const self = reflectConstruct(PlainObject, NO_ARGUMENTS, new.target);`);
+  lines.push(`      stampSlots(self, 'Event', state);`);
   for (const n of chain) lines.push(`      fill${n}(state, init);`);
-  lines.push(`      defineEventUnforgeables(this);`);
+  lines.push(`      defineEventUnforgeables(self);`);
+  lines.push(`      return self;`);
   lines.push(`    }`);
   lines.push(...body);
   lines.push(`  } }).${name};`);
-  if (def.inheritance) {
-    lines.push(`  Object.setPrototypeOf(${name}, Parent);`);
-    lines.push(`  Object.setPrototypeOf(${name}.prototype, Parent.prototype);`);
-  }
+  lines.push(`  Object.setPrototypeOf(${name}, ${def.inheritance ? 'Parent' : 'Function.prototype'});`);
+  if (def.inheritance) lines.push(`  Object.setPrototypeOf(${name}.prototype, Parent.prototype);`);
   lines.push(`  registerInterface('${name}', (o) => slotsOf(o, '${name}') !== undefined);`);
   const isUnforgeable = (m) => (m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable');
   const onPrototype = memberList.filter((m) => (m.type === 'attribute' || m.type === 'operation') && m.name && m.special !== 'static' && !isUnforgeable(m));
