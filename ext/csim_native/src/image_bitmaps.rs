@@ -128,6 +128,26 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageBitmapState", state_op, context_id);
     crate::dom::register(scope, ns, "imageBitmapSize", size_op, context_id);
     crate::dom::register(scope, ns, "imageBitmapClose", close_op, context_id);
+    crate::dom::register(scope, ns, "imageBitmapCloneRefusal", clone_refusal_op, context_id);
+}
+
+// Why a bitmap cannot be serialized or transferred, its steps the same for both: "If value's [[Detached]] internal slot is
+// true, then throw a "DataCloneError"", as much as "If value's origin-clean flag is not set, then throw a "DataCloneError"".
+const CLONE_DETACHED: u32 = 1;
+const CLONE_NOT_ORIGIN_CLEAN: u32 = 2;
+fn clone_refusal(closed: bool, tainted: bool) -> u32 {
+    if tainted {
+        CLONE_NOT_ORIGIN_CLEAN
+    } else if closed {
+        CLONE_DETACHED
+    } else {
+        0
+    }
+}
+// __dom.imageBitmapCloneRefusal(state) -> `clone_refusal`, 0 for none.
+fn clone_refusal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let refusal = handle(scope, args.get(0)).map_or(0, |h| clone_refusal(h.closed.get(), h.tainted.get()));
+    rv.set_uint32(refusal);
 }
 
 // __dom.imageBitmapState(state) -> [pixels | null, width, height, pixelsP3 | null, displayP3, tainted, closed]: the
@@ -163,4 +183,17 @@ fn close_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     }
     h.size.set([0, 0]);
     h.closed.set(true);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bitmap_refuses_a_clone_for_its_taint_first() {
+        assert_eq!(clone_refusal(false, false), 0);
+        assert_eq!(clone_refusal(true, false), CLONE_DETACHED);
+        assert_eq!(clone_refusal(false, true), CLONE_NOT_ORIGIN_CLEAN);
+        assert_eq!(clone_refusal(true, true), CLONE_NOT_ORIGIN_CLEAN);
+    }
 }

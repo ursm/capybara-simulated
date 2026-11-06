@@ -468,6 +468,65 @@ RSpec.describe 'Canvas context bindings' do
     )
   end
 
+  # HTML: "Queue a global task, using the bitmap task source, to resolve promise with imageBitmap." — so no microtask queued
+  # after the call sees it settled (Firefox `micro0,micro1,micro2,task,bitmap`, where Chrome has it after the first); its
+  # refusals of what it was given "return a promise rejected" at once, and a Blob that does not decode is a task's as well.
+  it 'settles createImageBitmap in a task' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], log = [];
+      const chain = (name) => Promise.resolve().then(() => log.push(name + '0')).then(() => log.push(name + '1')).then(() => log.push(name + '2'));
+      const made = createImageBitmap(new ImageData(1, 1)).then(() => log.push('made'));
+      const refused = createImageBitmap(new ImageData(1, 1), 0, 0, 0, 1).catch((e) => log.push(e.name));
+      const blob = createImageBitmap(new Blob(['not an image'])).catch((e) => log.push('blob ' + e.name));
+      chain('m');
+      Promise.all([made, refused, blob]).then(() => done(log));
+    JS
+    expect(got.first(4)).to eq(%w[RangeError m0 m1 m2])
+    expect(got.drop(4)).to contain_exactly('made', 'blob InvalidStateError')
+  end
+
+  # A page's `Array.prototype[Symbol.iterator]` is its own: nothing a canvas does for it goes through one, as in Chrome and
+  # Firefox, where an empty one changes nothing. (An argument the page gives as a sequence is the page's to iterate.)
+  it 'runs no iterator of the page for its own arguments' do
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const make = (w = 10, h = 10) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+      const source = make(4, 4);
+      source.getContext('2d').fillRect(0, 0, 4, 4);
+      (async () => {
+        const bitmap = await createImageBitmap(source), data = new ImageData(1, 1);
+        const own = Array.prototype[Symbol.iterator];
+        let calls = 0;
+        Array.prototype[Symbol.iterator] = function () { calls++; return {next: () => ({done: true})}; };
+        const alpha = (g) => g.getImageData(0, 0, 1, 1).data[3];
+        const out = {};
+        const op = (name, f) => { const before = calls; out[name] = [f(), calls - before]; };
+        op('drawImage', () => { const g = make().getContext('2d'); g.drawImage(source, 0, 0); return alpha(g); });
+        op('drawBitmap', () => { const g = make().getContext('2d'); g.drawImage(bitmap, 0, 0); return alpha(g); });
+        op('createPattern', () => make().getContext('2d').createPattern(source, 'repeat') !== null);
+        op('fillRect', () => { const g = make(7, 9).getContext('2d'); g.fillRect(0, 0, 99, 99); return alpha(g); });
+        op('resize', () => { const c = make(), g = c.getContext('2d'); c.width = 5; g.fillRect(0, 0, 9, 9); return alpha(g); });
+        op('fillText', () => { const g = make().getContext('2d'); g.fillText('x', 1, 1); return g.measureText('x').width > 0; });
+        op('roundRect', () => { const g = make().getContext('2d'); g.roundRect(0, 0, 4, 4, 0); g.fill(); return alpha(g); });
+        op('transfer', () => { const o = new OffscreenCanvas(2, 2); o.getContext('2d'); return o.transferToImageBitmap().width; });
+        op('offscreen', () => new OffscreenCanvas(2, 3).getContext('2d').getImageData(0, 0, 1, 1).data[3]);
+        op('imageData', () => new ImageData(new Uint8ClampedArray(4), 1).width + new ImageData(1, 1).height);
+        op('path', () => { const p = new Path2D(); p.rect(0, 0, 1, 1); const g = make().getContext('2d'); g.fill(new Path2D(p)); return alpha(g); });
+        const before = calls;
+        const bitmaps = [createImageBitmap(source), createImageBitmap(source, 0, 0, 2, 2), createImageBitmap(data)];
+        const counted = calls - before;
+        Array.prototype[Symbol.iterator] = own;
+        out.createImageBitmap = [(await bitmaps[1]).width, counted];
+        done(out);
+      })();
+    JS
+    expect(got).to eq(
+      'drawImage' => [255, 0], 'drawBitmap' => [255, 0], 'createPattern' => [true, 0], 'fillRect' => [255, 0], 'resize' => [255, 0],
+      'fillText' => [true, 0], 'roundRect' => [255, 0], 'transfer' => [2, 0], 'offscreen' => [0, 0],
+      'imageData' => [2, 0], 'path' => [255, 0], 'createImageBitmap' => [2, 0]
+    )
+  end
+
   # What the engine allocates for a page is V8's to count as it allocates: a loop of dead bitmaps is collected as it goes.
   # Stores made in Rust and attached later put no pressure on the heap, and 4 GB of dead `getImageData` peaked at the 4 GB.
   it 'leaves dead pixels for the collector as they churn', if: File.exist?('/proc/self/clear_refs') do

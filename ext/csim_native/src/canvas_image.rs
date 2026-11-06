@@ -134,8 +134,8 @@ fn pixels_of<'s>(
 
 // HTML "establish the source and destination rectangles": `given` the drawImage arguments (sx, sy, sw, sh, dx, dy, dw, dh)
 // — the source's size the image's, in image pixels, where omitted; the destination's its NATURAL size where that is too,
-// "one CSS pixel in the image [...] treated as one unit" (an image element's bitmap over its source's pixel density: a `2x`
-// candidate's half; Chrome and Firefox).
+// "one CSS pixel in the image is treated as one unit" (an image element's bitmap over its source's pixel density: a `2x`
+// candidate's half, as Chrome draws a parsed `srcset`; Chrome for a dynamic one, and Firefox for both, draw its pixels).
 fn image_rects(given: [Option<f64>; 8], size: [u32; 2], natural: [u32; 2]) -> [f64; 8] {
     let or = |i: usize, default: u32| given[i].unwrap_or(f64::from(default));
     let whole = |v: u32, n: u32| if n > 0 { n } else { v };
@@ -239,8 +239,10 @@ fn canvas_create_pattern(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 
 // ── createImageBitmap (HTML §8.10) ──
 // Why it refuses, past the source's verdicts (`BAD` its plain InvalidStateError, the rest usability's): a crop of no area
-// is a RangeError.
+// is a RangeError; a Blob that does not decode, the InvalidStateError HTML queues a task to reject with, the rest
+// returned at once.
 const CROP_NO_AREA: u32 = 6;
+const UNDECODABLE: u32 = 7;
 
 // What it was asked to do to the pixels: `[crop, sx, sy, sw, sh, resizeWidth, resizeHeight, flipY, colorSpaceConversion
 // is "none"]`, `crop` and the flags 0 or 1 and a resize size NaN when the options give none.
@@ -376,17 +378,17 @@ fn image_bitmap_of_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     hand_back(scope, &steps, p, &mut rv);
 }
 
-// __dom.imageBitmapOfBlob(steps, bytes) -> a bitmap of a Blob's bytes decoded: `BAD` for none or an undecodable one.
+// __dom.imageBitmapOfBlob(steps, bytes) -> a bitmap of a Blob's bytes decoded: `UNDECODABLE` for none or an undecodable one.
 fn image_bitmap_of_blob(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(steps) = Steps::of(&crate::dom::f64_arg(args.get(0))) else { return rv.set_uint32(BAD) };
     if let Some(refusal) = steps.refusal() {
         return rv.set_uint32(refusal);
     }
-    let Some(bytes) = bytes_read(args.get(1), None) else { return rv.set_uint32(BAD) };
+    let Some(bytes) = bytes_read(args.get(1), None) else { return rv.set_uint32(UNDECODABLE) };
     let decoded = std::panic::catch_unwind(|| crate::image_decode::decode(&bytes, steps.fit()));
-    let Ok(crate::image_decode::Decoded::Bitmap(b)) = decoded else { return rv.set_uint32(BAD) };
+    let Ok(crate::image_decode::Decoded::Bitmap(b)) = decoded else { return rv.set_uint32(UNDECODABLE) };
     if b.rgba.is_empty() {
-        return rv.set_uint32(BAD);
+        return rv.set_uint32(UNDECODABLE);
     }
     let size = [b.width, b.height];
     let null: v8::Local<'_, v8::Value> = v8::null(scope).into();

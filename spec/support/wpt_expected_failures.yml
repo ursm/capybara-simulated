@@ -3876,12 +3876,8 @@ html/canvas/element/manual/imagebitmap/createImageBitmap-origin.sub.html:
 - 'redirected to same-origin HTMLVideoElement: origin unclear getImageData'
 - 'unclean HTMLCanvasElement: origin unclear bitmaprenderer.transferFromImageBitmap'
 - 'unclean ImageBitmap: origin unclear bitmaprenderer.transferFromImageBitmap'
-html/canvas/element/manual/imagebitmap/createImageBitmap-serializable.html:
-- Serializing a non-origin-clean ImageBitmap throws.
 html/canvas/element/manual/imagebitmap/createImageBitmap-svg-resize.html:
 - "== html/canvas/element/manual/imagebitmap/createImageBitmap-svg-resize-ref.html"
-html/canvas/element/manual/imagebitmap/createImageBitmap-transfer.html:
-- Transferring a non-origin-clean ImageBitmap throws.
 html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-flipped.html:
 - "== html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap-flipped-expected.html"
 html/canvas/element/manual/imagebitmap/imageBitmapRendering-transferFromImageBitmap.html:

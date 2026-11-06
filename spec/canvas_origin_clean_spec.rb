@@ -121,6 +121,42 @@ RSpec.describe 'canvas origin-clean flag' do
     )
   end
 
+  # HTML's ImageBitmap serialization and transfer steps both: "If value's origin-clean flag is not set, then throw a
+  # "DataCloneError" DOMException." Chrome and Firefox throw on both too. A bitmap that refuses stays usable, and one of a
+  # clean source clones and transfers.
+  it 'keeps an ImageBitmap that is not origin-clean from being cloned or transferred' do
+    app = ->(env) {
+      if env['PATH_INFO'] == '/a.png'
+        [200, {'content-type' => 'image/png'}, [png]]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body></body>']]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const threw = (f) => { try { f(); return 'none'; } catch (e) { return e.name; } };
+      const img = new Image();
+      img.onload = async () => {
+        const dirty = await createImageBitmap(img);
+        const clean = await createImageBitmap(new ImageData(1, 1));
+        done([
+          threw(() => structuredClone(dirty)),
+          threw(() => structuredClone(dirty, {transfer: [dirty]})),
+          threw(() => postMessage(dirty, '*')),
+          threw(() => postMessage(0, '*', [dirty])),
+          dirty.width,
+          structuredClone(clean).width,
+          structuredClone(clean, {transfer: [clean]}).width,
+          clean.width
+        ]);
+      };
+      img.src = 'http://other.test/a.png';
+    JS
+    expect(got).to eq(['DataCloneError', 'DataCloneError', 'DataCloneError', 'DataCloneError', 1, 1, 1, 0])
+  end
+
   # What clears it is the image's RESPONSE not being CORS-same-origin — a no-cors one any hop of which left the
   # document's origin (Fetch's response tainting stays opaque) — whatever origin the image's URL is of: a same-origin URL
   # redirected to another origin taints, a cross-origin one redirected back taints, a CORS one through it does not.
