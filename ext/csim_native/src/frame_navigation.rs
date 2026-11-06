@@ -66,6 +66,9 @@ struct FrameNavigation {
     planned: u32,
     // …begun, its task run: the navigable's ongoing navigation from there (`stopFrameLoading`).
     form_begun: bool,
+    // Whether the build under way waits on the response of its navigation (frame_response.rs `navigate`): that navigation is
+    // its navigable's ongoing one till the response is in, a stop cancelling it.
+    awaiting_response: bool,
     // …and the navigation the host plans to make of it, by the order it was planned in (`HostNavigation`).
     host: Option<(u64, HostNavigation)>,
     // Whether the navigation it plans now aborted its document, planned while that one's parser was active
@@ -425,10 +428,10 @@ impl RealmArena {
     pub(crate) fn frame_navigation_activated(&self, container: NodeId) -> bool {
         self.frame_navigations.0.get(&container).is_some_and(|nav| nav.activated)
     }
-    // The markup of the about:srcdoc document the container's navigable is at, none for another (`document_srcdoc`).
     pub(crate) fn frame_srcdoc_fragment(&self, container: NodeId) -> String {
         self.frame_navigations.0.get(&container).map_or_else(String::new, |nav| nav.srcdoc_fragment.clone())
     }
+    // The markup of the about:srcdoc document the container's navigable is at, none for another (`document_srcdoc`).
     pub(crate) fn frame_document_srcdoc(&self, container: NodeId) -> Option<String> {
         self.frame_navigations.0.get(&container).and_then(|nav| nav.document_srcdoc.clone())
     }
@@ -734,7 +737,7 @@ fn frame_navigation_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
 // A navigation of frame realm `realm`'s navigable begun: its document aborted where its parser is active still (HTML
 // "navigate" queues "abort a document and its descendants", which a parse that runs to its end here has not left yet) —
 // whether it was (none for a realm with no document).
-fn abort_document(arena: &mut crate::dom::RealmArena, realm: i32) -> bool {
+pub(crate) fn abort_document(arena: &mut crate::dom::RealmArena, realm: i32) -> bool {
     arena.realm_document(realm).is_some_and(|doc| arena.document_states.lifecycle_mut(doc).abort_parser(false))
 }
 // …the document of the container's navigable's: none where it has no realm made yet (its initial about:blank, which a
@@ -1146,6 +1149,10 @@ impl RealmArena {
     // Whether something delays realm `cid`'s document's load event now: its images (image_requests.rs
     // `images_delay_load`), its containers' loads still owed (`frame_loads_owed`), and its child navigables' documents
     // whose own load is delayed.
+    // Whether realm `cid`'s document has a frame in it.
+    pub(crate) fn has_frames(&self, cid: i32) -> bool {
+        self.frame_navigations.0.keys().any(|&container| self.get(container).is_some_and(|n| n.realm == cid) && self.is_connected(container))
+    }
     pub(crate) fn load_delayed_here(&self, cid: i32) -> bool {
         self.images_delay_load(cid)
             || frame_loads_owed(self, cid)
@@ -1248,6 +1255,11 @@ fn stop_frame(arena: &mut RealmArena, cid: i32, container: NodeId, by_stop: bool
     }
     crate::session_history::begin_navigation_of(arena, cid, Some(container));
     let mut stopped = arena.stop_attribute_navigation(container);
+    if arena.frame_navigations.0.get(&container).is_some_and(|nav| nav.awaiting_response) {
+        arena.supersede_frame_nav(container);
+        arena.take_frame_history_url(container);
+        stopped = true;
+    }
     if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
         if nav.host.take_if(|(_, host)| by_stop || matches!(host, HostNavigation::Navigate { .. })).is_some() {
             stopped = true;
@@ -1321,6 +1333,19 @@ impl RealmArena {
         let nav = self.frame_navigation(container);
         nav.generation = nav.generation.wrapping_add(1);
         nav.flags &= !(LOAD_OWED | BUILD_QUEUED);
+    }
+    // The navigation of the container whose response its build goes to wait on: its number, whether another has replaced it
+    // by the time the response is in — none of it to load then (HTML "abort a document": "discarding any further data
+    // received from the network"; "navigate" ends the ongoing one).
+    pub(crate) fn await_frame_response(&mut self, container: NodeId) -> u32 {
+        let nav = self.frame_navigation(container);
+        nav.awaiting_response = true;
+        nav.generation
+    }
+    pub(crate) fn frame_response_in(&mut self, container: NodeId, generation: u32) -> bool {
+        let nav = self.frame_navigation(container);
+        nav.awaiting_response = false;
+        nav.generation == generation
     }
     // The history entry the navigation pushes as it commits, let go of: one that makes no document pushes none.
     pub(crate) fn take_frame_history_url(&mut self, container: NodeId) {
@@ -1453,7 +1478,8 @@ impl RealmArena {
             return (FrameSource::Srcdoc(srcdoc), reload);
         }
         let Some(node) = self.get(container) else { return (FrameSource::None, reload) };
-        if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| !went_on).map(str::to_owned) {
+        // (…refused, a `srcdoc` has only `stop()` to refuse it: `process_src` asks about a `src` where it has none)
+        if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| !went_on && !refused).map(str::to_owned) {
             self.frame_navigation(container).loading_srcdoc = Some(srcdoc.clone());
             return (FrameSource::Srcdoc(srcdoc), reload);
         }
@@ -1656,7 +1682,7 @@ impl RealmArena {
         }
         let Some(node) = self.get(container) else { return false };
         if node.plain_attr("srcdoc").is_some() {
-            return true;
+            return nav.is_none_or(|n| n.flags & SRC_REFUSED == 0);
         }
         let leaving = nav.is_some_and(|n| n.flags & COMMIT_PENDING != 0);
         let Some(src) = navigated_src(nav, node) else { return leaving };

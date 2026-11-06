@@ -1793,6 +1793,8 @@ module Capybara
         return m.to_a if m.is_a?(ModuleError)
         begin
           instantiate_native_module(m, url, target, handles, options)
+          return true if target.call('__csimModuleCancelled') == true
+
           # (…its evaluation's rejection — a top-level throw, a top-level await's — reported at its window, `error`
           # event and all, as HTML "run a module script" reports it: the realm's own `__csimReportError`)
           m.evaluate(report: '__csimReportError')

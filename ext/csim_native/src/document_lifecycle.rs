@@ -34,6 +34,8 @@ pub(crate) struct Lifecycle {
     // container's `load` was being fired, the load its written document comes to fires none at that container.
     opened: bool,
     mute_iframe_load: bool,
+    // Its DOMContentLoaded's task over: "the end" has only its load left to do.
+    content_loaded_over: bool,
     // Aborted while its parser was active (HTML "navigate" → "abort a document and its descendants" → "abort a parser"):
     // "the end" runs for it no more — no DOMContentLoaded, no load of its own, none at its container.
     aborted: bool,
@@ -53,6 +55,7 @@ impl Default for Lifecycle {
             completely_loaded: false,
             opened: false,
             mute_iframe_load: false,
+            content_loaded_over: false,
             aborted: false,
         }
     }
@@ -77,7 +80,8 @@ impl Lifecycle {
     }
     // HTML "abort a parser", where its parser is active: whether it was. A navigation of its document's aborts the parse
     // alone (as it is planned, from a script the parse runs); `stop()` also what "the end" has left of it, up to its load
-    // (Chrome and Firefox: none after a `stop()` in a DOMContentLoaded handler). Its readiness is the bindings' to step on,
+    // (Chrome and Firefox: none after a `stop()` in a DOMContentLoaded handler, nor with an image of its own pending) — the
+    // caller's to spare one left waiting on its frames alone (`abort_parser_op`). Its readiness is the bindings' to step on,
     // firing `readystatechange` (`docAbortStep`): as the abort itself for `stop()`, as the parse leaves off for a navigation.
     pub(crate) fn abort_parser(&mut self, to_its_load: bool) -> bool {
         if self.aborted || self.load_fired || !(self.ready == READY_LOADING || (to_its_load && self.ready == READY_INTERACTIVE)) {
@@ -105,6 +109,7 @@ impl Lifecycle {
         self.completely_loaded = false;
         self.aborted = false;
         self.opened = true;
+        self.content_loaded_over = false;
         self.mute_iframe_load |= muted;
         self.update_readiness(READY_LOADING)
     }
@@ -115,6 +120,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "docOpen", open, context_id);
     crate::dom::register(scope, ns, "docTheEnd", the_end, context_id);
     crate::dom::register(scope, ns, "docContentLoadedDue", content_loaded_due, context_id);
+    crate::dom::register(scope, ns, "docContentLoadedEnd", content_loaded_end, context_id);
     crate::dom::register(scope, ns, "docLoadDue", load_due, context_id);
     crate::dom::register(scope, ns, "docLoadSteps", load_steps, context_id);
     crate::dom::register(scope, ns, "docShowPage", show_page, context_id);
@@ -122,6 +128,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "docFinishLoading", finish_loading, context_id);
     crate::dom::register(scope, ns, "docCompletelyLoaded", completely_loaded, context_id);
     crate::dom::register(scope, ns, "docAbortParser", abort_parser_op, context_id);
+    crate::dom::register(scope, ns, "docLoadAborted", load_aborted, context_id);
     crate::dom::register(scope, ns, "docParserAborted", parser_aborted, context_id);
     crate::dom::register(scope, ns, "docAbortStep", abort_step, context_id);
     crate::dom::register(scope, ns, "docCompleteInitial", complete_initial, context_id);
@@ -174,6 +181,12 @@ fn content_loaded_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_bool(due);
 }
 
+// __dom.docContentLoadedEnd(docNid) — "the end"'s DOMContentLoaded task for the document over.
+fn content_loaded_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    lifecycle_of(scope, doc).content_loaded_over = true;
+}
+
 // Whether "the end"'s load task is due (`docLoadDue`): not, for a parsed document, or for a written one — whose
 // container's load follows its own, but where it was muted.
 const NOT_DUE: u32 = 0;
@@ -223,10 +236,16 @@ fn load_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     if let Ok(run) = v8::Local::<v8::Function>::try_from(args.get(0)) {
         crate::load_gates::flush(scope, cid, run);
     }
-    // (…a gate's work may have fired it: a frame built, whose build fired this one's load re-entrantly)
+    // (…a gate's work may have fired it: a frame built, whose build fired this one's load re-entrantly — or aborted it: a
+    // `stop()` in an `async` script, or as a frame's server took its time)
     let arena = crate::dom::realm(scope, cid);
-    if arena.document_states.lifecycle(doc).load_fired {
+    let lc = arena.document_states.lifecycle(doc);
+    if lc.load_fired {
         return;
+    }
+    if lc.is_aborted() {
+        set_load_delay(scope, cid, 0);
+        return rv.set_uint32(LOAD_ABORTED);
     }
     if arena.load_delayed_here(cid) {
         if let Some(state) = arena.realm_state_mut(cid) {
@@ -270,11 +289,24 @@ fn finish_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     lifecycle_of(scope, doc).completely_loaded = true;
 }
 
-// __dom.docAbortParser(docNid) -> whether the document's parser was active, aborted now (`Lifecycle::abort_parser`): HTML
-// "abort a document", `stop()`'s.
+// __dom.docAbortParser(docNid, imagesCancelled) -> whether the document's parser was active, aborted now
+// (`Lifecycle::abort_parser`): HTML "abort a document", `stop()`'s, `imagesCancelled` whether it cancelled an image of the
+// document's. Its frames' documents and navigations are stopped by then, so one past its DOMContentLoaded that has frames
+// and nothing of its own left to wait for has its load fire all the same (the parser that text means is over; Chrome and
+// Firefox, a `stop()` of a page whose frame is loading), which one whose own image was cancelled does not, however much
+// the text would let it (Chrome and Firefox, again).
 fn abort_parser_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    rv.set_bool(lifecycle_of(scope, doc).abort_parser(true));
+    let images = args.get(1).is_true();
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let frames_only = !images && arena.document_states.lifecycle(doc).content_loaded_over && arena.has_frames(cid);
+    rv.set_bool(!frames_only && lifecycle_of(scope, doc).abort_parser(true));
+}
+// __dom.docLoadAborted() — the calling realm's document aborted: nothing of it delays its parent's load any more.
+fn load_aborted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    set_load_delay(scope, cid, 0);
 }
 // __dom.docParserAborted(docNid) -> whether the document's active parser was aborted: HTML's flag, which the document open
 // and write steps return at, and what the parse leaves off at, "the end" none.

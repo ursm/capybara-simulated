@@ -23,6 +23,8 @@ pub(crate) struct ImageRequest {
     // by (HTML: the density-corrected natural width and height).
     density: f64,
     load: u32,
+    // The load past the stable state "update the image data" awaits (`imageStableState`), 0 for none.
+    stable_load: u32,
     // (…the key a hash: a `data:` URL is the whole image)
     key: Option<u64>,
     // Its decoded image's pixels, none where it has none (unavailable, pending, broken, no area).
@@ -117,22 +119,34 @@ impl RealmArena {
 }
 
 // __dom.imageFetchesStop() -> the images of the calling realm's document whose fetches its abort cancelled (HTML "abort a
-// document") — `[element, load]` each, their responses, when they come, loading into nothing, delaying its load no more —
-// each a network error: `imageFetchAborted` on the task that says so.
+// document") — `[element, load, error]` each, their responses, when they come, loading into nothing, delaying its load no
+// more — each complete and broken on the task that says so (`imageFetchAborted`), as Chrome and Firefox agree. `error`
+// whether its `error` fires with that: HTML cancels the fetch "discarding any tasks queued for them", no event, which is
+// what is left wherever the engines differ — Chrome fires it wherever, Firefox not for an image whose fetch has begun —
+// but for one whose stable state has not come yet ("update the image data" awaits it before it fetches, so no fetch of it
+// is there to cancel): the same task as an `src` a script set, a node it inserted, a `document.write` of it. That one
+// fails as it goes on to fetch, and both fire it.
 fn fetches_stop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let arena = &mut crate::dom::dom(scope).arena;
     let mut stopped: Vec<(NodeId, u32)> = arena.image_fetches.values().filter(|f| f.realm == cid).map(|f| (f.node, f.load)).collect();
     stopped.extend(arena.image_arrivals.iter().filter(|a| a.0 == cid).map(|a| (a.1, a.2)));
     arena.forget_image_fetches_of(cid);
-    let items: Vec<v8::Local<v8::Value>> = stopped.iter().map(|&(node, load)| {
-        let pair = [v8::Number::new(scope, node.to_f64()).into(), v8::Integer::new_from_unsigned(scope, load).into()];
-        v8::Array::new_with_elements(scope, &pair).into()
+    let stopped: Vec<(NodeId, u32, bool)> = stopped.into_iter().map(|(node, load)| (node, load, arena.image(node).is_some_and(|r| r.stable_load != load))).collect();
+    let items: Vec<v8::Local<v8::Value>> = stopped.iter().map(|&(node, load, error)| {
+        let entry = [v8::Number::new(scope, node.to_f64()).into(), v8::Integer::new_from_unsigned(scope, load).into(), v8::Boolean::new(scope, error).into()];
+        v8::Array::new_with_elements(scope, &entry).into()
     }).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
+// __dom.imageStableState(img, load) — load `load` of the image past the stable state "update the image data" awaits.
+fn stable_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = element(scope, args.get(0)) else { return };
+    let load = args.get(1).uint32_value(scope).unwrap_or(0);
+    crate::dom::dom(scope).arena.image_mut(id).stable_load = load;
+}
 // __dom.imageFetchAborted(nid, load) -> whether load `load` of the image is its current one still, its request now broken and
-// complete, its `error` to fire (Chrome fires it wherever; Firefox where the image is script-inserted, none elsewhere).
+// complete.
 fn fetch_aborted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let load = args.get(1).uint32_value(scope).unwrap_or(0);
@@ -150,6 +164,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageLoadBegin", load_begin, context_id);
     crate::dom::register(scope, ns, "imageFetchesStop", fetches_stop, context_id);
     crate::dom::register(scope, ns, "imageFetchAborted", fetch_aborted, context_id);
+    crate::dom::register(scope, ns, "imageStableState", stable_state, context_id);
     crate::dom::register(scope, ns, "imageLoadClear", load_clear, context_id);
     crate::dom::register(scope, ns, "imageInfo", info, context_id);
     crate::dom::register(scope, ns, "imageUrl", url, context_id);

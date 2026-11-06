@@ -239,7 +239,11 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
         v8::Boolean::new(scope, activated).into(),
     ];
     let request = v8::Array::new_with_elements(scope, &request).into();
+    let generation = realm(scope, cid).await_frame_response(container);
     let resp = call(scope, host, H_FRAME_NAVIGATION, &[request])?.map(|resp| v8::Local::new(scope, resp));
+    if !realm(scope, cid).frame_response_in(container, generation) {
+        return Ok(FRAME_KEPT);
+    }
     let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
     let flag = |scope: &mut v8::PinScope<'_, '_>, k: &str| resp.and_then(|resp| member(scope, resp, k)).is_some_and(|v| v.is_true());
     let no_document = flag(scope, "no_document");

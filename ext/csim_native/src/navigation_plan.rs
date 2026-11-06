@@ -487,6 +487,9 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
     arena.navigation_plan.supersede();
     let ongoing = begin_navigation_of(arena, cid, None);
+    // (…its document aborted where its parser is active still: HTML "navigate", as a frame's is, frame_navigation.rs
+    // `abort_document`)
+    crate::frame_navigation::abort_document(arena, cid);
     let plan = &mut arena.navigation_plan;
     plan.own.location = Some(Location { url, replace, initiator, activated, blob, ongoing });
     plan.own.planned = next_planned();

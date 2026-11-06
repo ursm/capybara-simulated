@@ -1104,4 +1104,272 @@ RSpec.describe 'a frame navigation as tasks' do
     s.execute_script("document.getElementById('f').src = '/b'")
     s.within_frame('f') { expect(s.find('#at').text).to eq('b') }
   end
+
+  # `stop()` against a server that takes its time: a `/slow/<ms>/<name>` answers after that long, the event loop going on
+  # meanwhile as the virtual clock moves (the app's `sleep`). Each page as Chrome 157 and Firefox 159 ran it (rvfn `k*_`,
+  # `h_*`, `m_*`, `z3_*`, 2026-11-06). They fire a parent's `load` inside the `stop()` that ended what delayed it, where HTML
+  # "the end" queues a task for it ("Queue a global task on the DOM manipulation task source"), and read `complete` there:
+  # the explicit text the ruling, so `Pload` comes after the `stop()` here, and a page not aborted reads `interactive` in it.
+  describe 'stop() as a server takes its time' do
+    SLOW_TYPES = {'js' => 'text/javascript', 'css' => 'text/css', 'png' => 'image/png', 'html' => 'text/html'}.freeze
+
+    def slow_session(pages)
+      simulated_session(->(env) {
+        path = env['PATH_INFO']
+        if (m = path.match(%r{\A/slow/(\d+)/(.*)\z}))
+          sleep(m[1].to_i / 1000.0)
+          type = m[2].split('.').last
+          body = {
+            'js'   => "(window.L || top.L).push('#{m[2]}-ran')",
+            'html' => "<!DOCTYPE html><title>sf</title><script>top.L.push('sf-script'); onload = () => top.L.push('sf-load')</script>",
+            'css'  => 'p { color: red }'
+          }.fetch(type, 'x')
+          next [200, {'content-type' => SLOW_TYPES.fetch(type, 'text/plain')}, [body]]
+        end
+        next [204, {}, []] if path == '/nothing'
+
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{pages.fetch(path)}"]]
+      })
+    end
+
+    PAGE_LOG = <<~HTML
+      <title>x</title><pre id="out"></pre><script>
+        const L = window.L = [];
+        const logged = () => { const o = document.getElementById('out') || document.documentElement.appendChild(document.createElement('pre')); o.id = 'out'; o.textContent = L.join(' '); document.title = 'done'; };
+        addEventListener('DOMContentLoaded', () => L.push('dcl'));
+        addEventListener('load', () => L.push('load'));
+      </script>
+    HTML
+
+    # What a page logs by `at` ms, its readiness at the end.
+    def page_log(body, at: 400, pages: {})
+      s = slow_session(pages.merge('/' => <<~HTML))
+        #{PAGE_LOG}<script>setTimeout(() => { L.push('rs:' + document.readyState); logged(); }, #{at});</script>#{body}
+      HTML
+      s.visit '/'
+      expect(s).to have_title('done', wait: 15)
+      s.find('#out', visible: :all).text(:all)
+    end
+
+    # A page of one frame `f` at `/c`, what comes of it by then.
+    def frame_log(child, at: 700, parent: '')
+      page_log(<<~HTML, at: at, pages: {'/c' => child})
+        <iframe id="f" src="/c"></iframe><script>
+          f = document.getElementById('f');
+          f.onload = () => L.push('Fload');
+          #{parent}
+        </script>
+      HTML
+    end
+
+    CHILD_LOAD = "<title>c</title><script>addEventListener('load', () => top.L.push('cload'))</script>"
+    CHILD_STOP = "<script>setTimeout(() => { stop(); top.L.push('cstop:' + document.readyState); }, 0)</script>"
+
+    # HTML "abort a document": an aborted document's load never fires, and so delays its parent's no more.
+    it "fires its parent's load after a frame's stop() cancels its image" do
+      log = frame_log("#{CHILD_LOAD}<img src=\"/slow/60/i.png\">#{CHILD_STOP}")
+      # Chrome and Firefox: dcl Pload cstop:complete, the load inside the stop()
+      expect(log).to eq('dcl cstop:complete load rs:complete')
+    end
+
+    it "fires its parent's load with another frame's in it fired before" do
+      log = page_log(<<~HTML, at: 700, pages: {'/c' => "#{CHILD_LOAD}<img src=\"/slow/200/i.png\">#{CHILD_STOP}", '/g' => '<title>g</title>'})
+        <iframe id="f" src="/c"></iframe><iframe id="g" src="/g"></iframe><script>
+          document.getElementById('g').onload = () => L.push('Gload');
+        </script>
+      HTML
+      # Chrome and Firefox: dcl Gload load cstop:complete
+      expect(log).to eq('dcl cstop:complete Gload load rs:complete').or eq('dcl Gload cstop:complete load rs:complete')
+    end
+
+    it "fires the page's load after its own stop() ends what only its frame delayed" do
+      log = frame_log(
+        "#{CHILD_LOAD}<img src=\"/slow/300/i.png\"><script>setTimeout(() => { stop(); top.L.push('cstop:' + document.readyState); }, 50)</script>",
+        parent: "setTimeout(() => { stop(); L.push('stopped'); }, 30);"
+      )
+      # Chrome and Firefox: dcl load stopped cstop:complete, the frame's abort in the stop(), and no cload, no Fload
+      expect(log).to eq('dcl stopped load cstop:complete rs:complete')
+    end
+
+    it "fires no load of a page with an image of its own after its stop(), a frame in it or not" do
+      log = page_log(<<~HTML, pages: {'/g' => '<title>g</title>'})
+        <iframe src="/g"></iframe><img src="/slow/300/i.png"><script>addEventListener('DOMContentLoaded', () => { stop(); L.push('stopped'); });</script>
+      HTML
+      expect(log).to eq('dcl stopped rs:complete')
+    end
+
+    it "fires no load of a page aborted with its load waiting on a frame's server" do
+      log = page_log(<<~HTML)
+        <iframe src="/slow/100/f.html"></iframe><img src="/slow/300/i.png"><script>setTimeout(() => { stop(); L.push('stopped'); }, 20)</script>
+      HTML
+      expect(log).to eq('dcl stopped rs:complete')
+    end
+
+    # HTML "abort a parser": "Throw away any pending content in the input stream, and discard any future content".
+    {
+      "a custom element's constructor" => [
+        "<script>customElements.define('x-s', class extends HTMLElement { constructor() { super(); stop(); L.push('ce'); } })</script><x-s></x-s>",
+        'ce'
+      ],
+      "a frame's load fired as it is inserted" => ["<iframe onload=\"stop(); L.push('ifrl')\"></iframe>", 'ifrl'],
+      'a script a `document.write` wrote' => [
+        %(<script>document.write('<script>stop(); document.write("<script>L.push(1)<\\\\/script>"); L.push("w2")<\\/script><script>L.push("dw-after")<\\/script>')</script>),
+        'w2'
+      ]
+    }.each do |what, (markup, logged)|
+      it "goes no further than #{what} that stopped the parser" do
+        log = page_log("#{markup}<p id=\"after\">after</p><script>L.push('after-script')</script>")
+        expect(log).to eq("#{logged} rs:complete")
+      end
+    end
+
+    # HTML "abort a document": "Cancel any instances of the fetch algorithm… discarding any tasks queued for them".
+    {
+      'a deferred script' => ['<script defer src="/slow/120/s.js"></script>', 'after-script stopped rs:complete'],
+      'an `async` script' => ['<script async src="/slow/120/s.js"></script>', 'after-script dcl stopped rs:complete'],
+      'a module script'   => ['<script type="module" src="/slow/120/s.js"></script>', 'after-script stopped rs:complete']
+    }.each do |what, (markup, logged)|
+      it "runs no #{what.sub(/\Aa(n)? /, '')} whose fetch a stop() cancelled" do
+        log = page_log("#{markup}<script>setTimeout(() => { stop(); L.push('stopped'); }, 0)</script><script>L.push('after-script')</script>")
+        expect(log).to eq(logged)
+      end
+    end
+
+    it 'runs no parser-blocking script whose fetch a stop() cancelled, and goes no further' do
+      log = page_log("<script>setTimeout(() => { stop(); L.push('stopped'); }, 0)</script><script src=\"/slow/120/s.js\"></script><script>L.push('after-script')</script>")
+      expect(log).to eq('stopped rs:complete')
+    end
+
+    it 'runs no script a script inserted, stop() in the same task (Chrome its `error`, Firefox none)' do
+      log = page_log(<<~HTML)
+        <script>
+          const s = document.createElement('script');
+          s.src = '/slow/20/s.js';
+          s.onload = () => L.push('sl');
+          s.onerror = () => L.push('se');
+          document.head.append(s);
+          stop();
+        </script>
+      HTML
+      expect(log).to eq('rs:complete')
+    end
+
+    # DOMContentLoaded waits for the list of scripts to execute after parsing, which an `async` one is not on: Chrome and
+    # Firefox `dcl s.js-ran load` with a server that answers at once.
+    it 'runs an `async` script after DOMContentLoaded, ahead of the load' do
+      expect(page_log('<script async src="/slow/0/s.js"></script><p>x</p>')).to eq('dcl s.js-ran load rs:complete')
+    end
+
+    it "cancels an `async` script's fetch with a stop() in a DOMContentLoaded handler" do
+      log = page_log('<script async src="/slow/0/s.js"></script><script>addEventListener("DOMContentLoaded", () => stop())</script>')
+      expect(log).to eq('dcl rs:complete')
+    end
+
+    it 'leaves a srcdoc frame not built yet at its initial about:blank with the parser stopped' do
+      log = page_log(<<~HTML, at: 300, pages: {'/g' => '<title>g</title>'})
+        <iframe id="f" srcdoc="<title>sd</title><img src=/slow/100/i.png>"></iframe><script>
+          f = document.getElementById('f');
+          stop();
+          L.push(f.contentWindow.location.href);
+          setTimeout(() => L.push(f.contentWindow.location.href + ':' + f.contentDocument.readyState), 200);
+        </script>
+      HTML
+      expect(log).to eq('about:blank about:blank:complete rs:complete')
+    end
+
+    it "drops a frame's response a stop() cancelled as it was fetched" do
+      log = page_log(<<~HTML, at: 300)
+        <iframe id="g" src="/slow/100/f.html"></iframe><script>
+          g = document.getElementById('g');
+          g.onload = () => L.push('Gload');
+          setTimeout(() => { stop(); L.push('stopped'); }, 20);
+          setTimeout(() => L.push(g.contentWindow.location.href), 200);
+        </script>
+      HTML
+      # Chrome and Firefox: dcl load stopped about:blank
+      expect(log).to eq('dcl stopped load about:blank rs:complete')
+    end
+
+    it 'navigates a frame again as the response of its last navigation is fetched' do
+      log = page_log(<<~HTML, at: 500)
+        <iframe id="f" src="/slow/100/a.html"></iframe><script>
+          f = document.getElementById('f');
+          f.onload = () => L.push('fl:' + f.contentWindow.location.href.split('/').pop());
+          setTimeout(() => { f.src = '/slow/10/b.html'; }, 20);
+        </script>
+      HTML
+      expect(log).to eq('dcl sf-script sf-load fl:b.html load rs:complete')
+    end
+
+    # The container's load: none for a document aborted, whatever else it has waiting; after its document's for one not.
+    {
+      'a style sheet'     => '<link rel="stylesheet" href="/slow/60/s.css">',
+      'a deferred script' => '<script defer src="/slow/60/s.js"></script>'
+    }.each do |what, markup|
+      it "fires no container load for a frame stopped as it parsed with #{what} pending" do
+        expect(frame_log("#{CHILD_LOAD}#{markup}<script>stop()</script>")).to eq('dcl load rs:complete')
+      end
+      it "fires no container load for a frame stopped in its DOMContentLoaded with #{what} on it" do
+        log = frame_log("#{CHILD_LOAD}#{markup}<script>addEventListener('DOMContentLoaded', () => stop())</script>")
+        expect(log).not_to include('Fload')
+      end
+    end
+
+    it "fires a frame's container load after its document's, its build waiting on its server" do
+      log = frame_log("#{CHILD_LOAD}<link rel=\"stylesheet\" href=\"/slow/100/s.css\">")
+      expect(log).to eq('dcl cload Fload load rs:complete')
+    end
+
+    # HTML "navigate": a page's own, as a frame's, aborts the parser that planned it.
+    it "aborts the page's parser with a location set as it parses, which makes no document" do
+      log = page_log(<<~HTML)
+        <script>location.href = '/nothing'; L.push('set');</script><p id="z">z</p><script>L.push('after')</script>
+      HTML
+      # Chrome and Firefox: set rs:complete
+      expect(log).to eq('set rs:complete')
+    end
+
+    # HTML cancels the fetch "discarding any tasks queued for them": no event wherever the engines differ. Both fire `error`
+    # for an image whose stable state had not come as the `stop()` ran, whose fetch "update the image data" had not begun.
+    # `complete` true in every one.
+    IMAGE_ONE = "i.onerror = () => L.push('E'); i.onload = () => L.push('I'); setTimeout(() => L.push('c' + i.complete), 100);"
+    {
+      'its `src` set in that task'                  => ["const i = new Image(); i.src = '/slow/200/i.png'; #{IMAGE_ONE} stop();", 'E ctrue'],
+      'it inserted in that task'                    => ["document.body.insertAdjacentHTML('beforeend', '<img id=i src=/slow/200/i.png>'); const i = document.getElementById('i'); #{IMAGE_ONE} stop();", 'E ctrue'],
+      'its `src` set a task before'                 => ["const i = new Image(); i.src = '/slow/200/i.png'; #{IMAGE_ONE} setTimeout(() => stop(), 0);", 'ctrue'],
+      'its `src` set before a microtask checkpoint' => ["(async () => { const i = new Image(); i.src = '/slow/200/i.png'; #{IMAGE_ONE} await 0; stop(); })();", 'ctrue']
+    }.each do |what, (script, logged)|
+      it "cancels an image's fetch with `stop()`, #{what}" do
+        log = page_log("<body><script>onload = () => setTimeout(() => { #{script} }, 10)</script>")
+        expect(log).to eq("dcl load #{logged} rs:complete")
+      end
+    end
+
+    it "cancels the fetch of an image a parser-run script's `document.write` wrote, with its `stop()`" do
+      log = page_log(<<~HTML)
+        <script>document.write('<img id="i" src="/slow/200/i.png">'); const i = document.getElementById('i'); #{IMAGE_ONE} stop();</script>
+      HTML
+      expect(log).to eq('E ctrue rs:complete')
+    end
+
+    it "fires no `error` at a parsed image for the stop() of a later script" do
+      log = page_log(<<~HTML)
+        <img id="i" src="/slow/200/i.png"><script>const i = document.getElementById('i'); #{IMAGE_ONE} stop();</script>
+      HTML
+      expect(log).to eq('ctrue rs:complete')
+    end
+
+    it 'rejects the decodes waiting on an image a stop() cancelled, with no `error`' do
+      log = page_log(<<~HTML)
+        <script>onload = () => setTimeout(() => {
+          const i = new Image();
+          i.onerror = () => L.push('E');
+          i.src = '/slow/200/i.png';
+          i.decode().then(() => L.push('decoded'), () => L.push('rejected'));
+          setTimeout(() => stop(), 10);
+        }, 10)</script>
+      HTML
+      expect(log).to eq('dcl load rejected rs:complete')
+    end
+  end
 end
