@@ -3000,7 +3000,10 @@ module Capybara
           result = dom_call('__pollAsyncResult')
           return result['value'] if result.is_a?(Hash) && result.key?('value')
           break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
-          sleep 0.01
+          # (…awake the moment a worker posts, what the script may be waiting on, where one runs)
+          if @workers.empty? then sleep 0.01
+          else @worker_outbox_head ||= pop_with_timeout(@worker_outbox, 0.01)
+          end
           tick_real_time
         end
         raise ScriptTimeoutError, "the script did not call its callback within #{Capybara.default_max_wait_time} seconds"
@@ -10153,6 +10156,10 @@ module Capybara
         else
           rt&.dispose
         end
+        # (…and not held from here on: rusty_racer roots an isolate's owner Thread for as long as its Context lives, and the
+        # dead Thread reaching the Context through what this method's closures keep is a cycle through a GC root — the
+        # Context, its isolate's wrappers and every one of those closures, about 1 MB a worker, for the life of the process)
+        rt = nil
       end
 
       # Bundlers that ship a worker inline as a Blob (Tesseract,
