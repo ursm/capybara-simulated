@@ -38,10 +38,12 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // name, an operation `'method'`, an attribute what of it is exposed (`'get'`, `'set'`, `'get set'`, the table's
 // [[NeedsGet]] / [[NeedsSet]]) — emitted as `CROSS_ORIGIN_<NAME>_PROPERTIES`, a Set of the names, and
 // `CROSS_ORIGIN_<NAME>_KINDS`, each one's kind (platform-globals.js, the WindowProxy and the Location of another origin).
-// `event`: an event interface, whose class the binding makes too (`eventInterface`: `define<Name>(Parent, impl)`), its
-// attributes slots of its state that its init fills — but what `event` says otherwise. `steps`: attributes whose getter and
-// setter steps the implementation's (`impl.get_x(state)`), no slot of theirs filled. `slots`: attributes that read another's
-// slot, by the slot. `init`: attributes `impl.init(state, init)` fills instead, as the object is made — and it may fill
+// `slots`: the attributes whose getter reads a slot of the object's and no more, needing no implementation — a slot of the
+// attribute's name, or, in an object among them, of the name it gives it: a setter, where it has one, stays the
+// implementation's. `event`: an event interface, whose class the binding makes too (`eventInterface`:
+// `define<Name>(Parent, impl)`), its attributes slots of its state that its init fills — but what `event` says otherwise.
+// `steps`: attributes whose getter and setter steps the implementation's (`impl.get_x(state)`), no slot of theirs filled.
+// `slots`: attributes that read another's slot, by the slot. `init`: attributes `impl.init(state, init)` fills instead, as the object is made — and it may fill
 // any other state of the event's: [] for that alone. `initialized`: its legacy `init…` operation goes on with
 // `impl.initialized(state)`, for what it resets that no argument names.
 // GlobalEventHandlers' touch handlers, which a desktop with no touch screen — headless Chrome's and Firefox's, measured —
@@ -325,13 +327,16 @@ const INTERFACES = [
   ['uievents', 'KeyboardEvent', { event: { init: [], initialized: true } }],
   ['uievents', 'CompositionEvent', { event: { initialized: true } }],
   ['pointerevents', 'PointerEvent', { event: { init: ['tiltX', 'tiltY', 'altitudeAngle', 'azimuthAngle'] } }],
-  ['touch-events', 'Touch', { install: true }],
+  ['touch-events', 'Touch', {
+    install: true,
+    slots: ['identifier', 'target', 'screenX', 'screenY', 'clientX', 'clientY', 'pageX', 'pageY', 'radiusX', 'radiusY', 'rotationAngle', 'force', 'altitudeAngle', 'azimuthAngle', 'touchType']
+  }],
   ['touch-events', 'TouchList'],
   ['touch-events', 'TouchEvent', {
     event: { init: ['touches', 'targetTouches', 'changedTouches'] },
     namedProperties: 'none: getModifierState is the plain operation Chrome and Firefox have, no named property of the event'
   }],
-  ['html', 'DataTransfer', { install: true }],
+  ['html', 'DataTransfer', { install: true, slots: [{ items: 'list', files: 'filesView' }] }],
   ['html', 'DataTransferItemList'],
   ['html', 'DataTransferItem', {
     omit: {
@@ -348,8 +353,8 @@ const INTERFACES = [
     }
   }],
   ['css-font-loading', 'FontFaceSet', { install: true }],
-  ['html', 'MediaError'],
-  ['html', 'ImageData', { install: true }],
+  ['html', 'MediaError', { slots: ['code', 'message'] }],
+  ['html', 'ImageData', { install: true, slots: ['width', 'height', 'data', 'pixelFormat', 'colorSpace'] }],
   ['html', 'ImageBitmap'],
   ['html', 'BarProp'],
   // (…`document.all`, an object the engine makes (legacy.rs `allCollectionObject`), whose interceptors answer its indices and
@@ -363,13 +368,13 @@ const INTERFACES = [
   // this one, whose `pdfViewerEnabled` is true: each named by its name or type, [LegacyUnenumerableNamedProperties])
   ['html', 'PluginArray', { namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
   ['html', 'MimeTypeArray', { namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
-  ['html', 'Plugin', { namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
-  ['html', 'MimeType'],
+  ['html', 'Plugin', { slots: ['name'], namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
+  ['html', 'MimeType', { slots: ['type'] }],
   ['html', 'External'],
   ['html', 'CustomElementRegistry', { install: true }],
   ['html', 'ValidityState'],
   ['html', 'CustomStateSet', { install: true }],
-  ['html', 'ElementInternals', { install: true }],
+  ['html', 'ElementInternals', { install: true, slots: ['states'] }],
   ['html', 'DOMStringMap', { install: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
   ['dom', 'HTMLCollection', {
     install: true,
@@ -393,15 +398,15 @@ const INTERFACES = [
   ['html', 'OffscreenCanvasRenderingContext2D', { install: true }],
   ['html', 'OffscreenCanvas', { install: true }],
   ['SVG', 'SVGAnimatedString'],
-  ['clipboard-apis', 'ClipboardItem', { install: true }],
+  ['clipboard-apis', 'ClipboardItem', { install: true, slots: ['presentationStyle', 'types'] }],
   ['clipboard-apis', 'Clipboard', { install: true }],
   ['screen-orientation', 'ScreenOrientation', { install: true }],
-  ['html', 'MessageChannel', { install: true }],
+  ['html', 'MessageChannel', { install: true, slots: ['port1', 'port2'] }],
   ['html', 'MessagePort', {
     install: true,
     omitMembers: { onclose: 'withdrawn from the HTML Standard — no close event is fired at a port; Chrome and Firefox have none' }
   }],
-  ['html', 'BroadcastChannel', { install: true }],
+  ['html', 'BroadcastChannel', { install: true, slots: ['name'] }],
   ['html', 'EventSource', { install: true }],
   ['websockets', 'WebSocket', { install: true }],
   ['html', 'DragEvent', { event: {} }],
@@ -425,28 +430,28 @@ const INTERFACES = [
   ['clipboard-apis', 'ClipboardEvent', { event: {} }],
   ['cssom-view', 'MediaQueryListEvent', { event: {} }],
   ['IndexedDB', 'IDBVersionChangeEvent', { event: {} }],
-  ['IndexedDB', 'IDBRequest', { install: true }],
+  ['IndexedDB', 'IDBRequest', { install: true, slots: ['source', 'transaction'] }],
   ['IndexedDB', 'IDBOpenDBRequest', { install: true }],
   ['IndexedDB', 'IDBFactory', { install: true }],
   ['IndexedDB', 'IDBDatabase', { install: true }],
-  ['IndexedDB', 'IDBTransaction', { install: true }],
-  ['IndexedDB', 'IDBObjectStore', { install: true }],
-  ['IndexedDB', 'IDBIndex', { install: true }],
-  ['IndexedDB', 'IDBKeyRange', { install: true }],
-  ['IndexedDB', 'IDBRecord', { install: true }],
-  ['IndexedDB', 'IDBCursor', { install: true }],
+  ['IndexedDB', 'IDBTransaction', { install: true, slots: ['mode', 'durability', 'error', { db: 'connection' }] }],
+  ['IndexedDB', 'IDBObjectStore', { install: true, slots: ['name', 'keyPath', 'transaction'] }],
+  ['IndexedDB', 'IDBIndex', { install: true, slots: ['name', 'keyPath', { objectStore: 'storeHandle' }] }],
+  ['IndexedDB', 'IDBKeyRange', { install: true, slots: ['lowerOpen', 'upperOpen'] }],
+  ['IndexedDB', 'IDBRecord', { install: true, slots: ['key', 'primaryKey', 'value'] }],
+  ['IndexedDB', 'IDBCursor', { install: true, slots: ['source', 'direction', 'request', { key: 'keyValue', primaryKey: 'primaryKeyValue' }] }],
   ['IndexedDB', 'IDBCursorWithValue', { install: true }],
   ['html', 'DOMStringList'],
   ['html', 'Location', { install: true, crossOrigin: { href: 'set', replace: 'method' } }],
   ['html', 'History', { install: true }],
   ['css-font-loading', 'FontFaceSetLoadEvent', { event: {} }],
   ['gamepad', 'GamepadEvent', { event: {} }],
-  ['orientation-event', 'DeviceMotionEventAcceleration'],
-  ['orientation-event', 'DeviceMotionEventRotationRate'],
+  ['orientation-event', 'DeviceMotionEventAcceleration', { slots: ['x', 'y', 'z'] }],
+  ['orientation-event', 'DeviceMotionEventRotationRate', { slots: ['alpha', 'beta', 'gamma'] }],
   ['orientation-event', 'DeviceMotionEvent', { event: { init: ['acceleration', 'accelerationIncludingGravity', 'rotationRate'] } }],
   ['orientation-event', 'DeviceOrientationEvent', { event: {} }],
-  ['webidl', 'DOMException', { install: true }],
-  ['webidl', 'QuotaExceededError', { install: true }],
+  ['webidl', 'DOMException', { install: true, slots: ['name', 'message', 'code'] }],
+  ['webidl', 'QuotaExceededError', { install: true, slots: ['quota', 'requested'] }],
   ['dom', 'DOMImplementation', { install: true }],
   ['geometry', 'DOMPointReadOnly', { install: true }],
   ['geometry', 'DOMPoint', { install: true }],
@@ -454,7 +459,7 @@ const INTERFACES = [
   ['geometry', 'DOMRect', { install: true }],
   ['geometry', 'DOMRectList'],
   ['geometry', 'DOMQuad', { install: true }],
-  ['geometry', 'DOMMatrixReadOnly', { install: true }],
+  ['geometry', 'DOMMatrixReadOnly', { install: true, slots: ['is2D'] }],
   ['geometry', 'DOMMatrix', { install: true }],
   ['url', 'URL', { install: true }],
   ['url', 'URLSearchParams', { install: true }],
@@ -465,14 +470,15 @@ const INTERFACES = [
   ['dom', 'XMLDocument', { install: true }],
   ['webcrypto', 'CryptoKey', { install: true }],
   ['webcrypto', 'SubtleCrypto', { install: true }],
-  ['webcrypto', 'Crypto', { install: true }],
+  ['webcrypto', 'Crypto', { install: true, slots: ['subtle'] }],
   ['service-workers', 'Cache', { install: true }],
   ['service-workers', 'CacheStorage', { install: true }],
-  ['requestidlecallback', 'IdleDeadline', { install: true }],
+  ['requestidlecallback', 'IdleDeadline', { install: true, slots: ['didTimeout'] }],
   ['web-locks', 'LockManager', { install: true }],
-  ['web-locks', 'Lock', { install: true }],
-  ['service-workers', 'ServiceWorker', { install: true }],
+  ['web-locks', 'Lock', { install: true, slots: ['name', 'mode'] }],
+  ['service-workers', 'ServiceWorker', { install: true, slots: ['scriptURL', 'state'] }],
   ['service-workers', 'ServiceWorkerRegistration', {
+    slots: ['scope'],
     install: true,
     omit: {
       'background-fetch': 'backgroundFetch: Background Fetch is not implemented',
@@ -485,21 +491,23 @@ const INTERFACES = [
       PushManagerAttribute: 'pushManager: the Push API is not implemented'
     }
   }],
-  ['service-workers', 'ServiceWorkerContainer', { install: true }],
+  ['service-workers', 'ServiceWorkerContainer', { install: true, slots: ['controller'] }],
   ['service-workers', 'NavigationPreloadManager', { install: true }],
   ['html', 'Worker', { install: true }],
-  ['html', 'SharedWorker', { install: true }],
-  ['credential-management', 'Credential', { install: true }],
+  ['html', 'SharedWorker', { install: true, slots: ['port'] }],
+  ['credential-management', 'Credential', { install: true, slots: ['id', 'type'] }],
   ['credential-management', 'CredentialsContainer', { install: true }],
-  ['webauthn', 'PublicKeyCredential', { install: true }],
+  ['webauthn', 'PublicKeyCredential', { install: true, slots: ['rawId', 'response', 'authenticatorAttachment'] }],
   ['webauthn', 'AuthenticatorResponse', { install: true }],
-  ['webauthn', 'AuthenticatorAttestationResponse', { install: true }],
-  ['webauthn', 'AuthenticatorAssertionResponse', { install: true }],
+  ['webauthn', 'AuthenticatorAttestationResponse', { install: true, slots: ['attestationObject'] }],
+  ['webauthn', 'AuthenticatorAssertionResponse', { install: true, slots: ['authenticatorData', 'signature', 'userHandle'] }],
   ['service-workers', 'Client', {
+    slots: ['url', 'frameType', 'id', 'type'],
     install: true,
     omit: { 'page-lifecycle': 'lifecycleState: the Page Lifecycle API is not implemented (a WICG proposal)' }
   }],
   ['service-workers', 'WindowClient', {
+    slots: ['focused'],
     install: true,
     omitMembers: {
       ancestorOrigins: "the ancestor origins of a client: Location's ancestorOrigins, which it mirrors, is not implemented (Firefox has neither)"
@@ -522,8 +530,9 @@ const INTERFACES = [
         'no engine ships'
     }
   }],
-  ['web-animations', 'KeyframeEffect', { install: true }],
+  ['web-animations', 'KeyframeEffect', { install: true, slots: ['target'] }],
   ['web-animations', 'Animation', {
+    slots: ['id', 'effect', 'timeline'],
     install: true,
     omitMembers: { trigger: 'Animation Triggers are not implemented (an unratified draft only Chrome ships)' }
   }],
@@ -531,8 +540,8 @@ const INTERFACES = [
   ['css-transitions-2', 'CSSTransition', { install: true }],
   ['html', 'DOMParser', { install: true }],
   ['html', 'XMLSerializer', { install: true }],
-  ['intersection-observer', 'IntersectionObserver', { install: true }],
-  ['intersection-observer', 'IntersectionObserverEntry', { install: true }],
+  ['intersection-observer', 'IntersectionObserver', { install: true, slots: ['root', 'rootMargin', 'scrollMargin', 'thresholds', 'delay', 'trackVisibility'] }],
+  ['intersection-observer', 'IntersectionObserverEntry', { install: true, slots: ['time', 'rootBounds', 'boundingClientRect', 'intersectionRect', 'isIntersecting', 'isVisible', 'intersectionRatio', 'target'] }],
   ['hr-time', 'Performance', {
     install: true,
     omit: {
@@ -541,35 +550,36 @@ const INTERFACES = [
       'performance-measure-memory': 'measureUserAgentSpecificMemory: memory measurement is not implemented'
     }
   }],
-  ['performance-timeline', 'PerformanceEntry', { install: true }],
+  ['performance-timeline', 'PerformanceEntry', { install: true, slots: ['id', 'name', 'entryType', 'startTime', 'duration', 'navigationId'] }],
   ['user-timing', 'PerformanceMark', { install: true }],
   ['user-timing', 'PerformanceMeasure', { install: true }],
-  ['server-timing', 'PerformanceServerTiming', { install: true }],
+  ['server-timing', 'PerformanceServerTiming', { install: true, slots: ['name', 'duration', 'description'] }],
   ['resource-timing', 'PerformanceResourceTiming', { install: true }],
   ['performance-timeline', 'PerformanceObserver', { install: true }],
   ['performance-timeline', 'PerformanceObserverEntryList', { install: true }],
   ['resize-observer', 'ResizeObserver', { install: true }],
-  ['resize-observer', 'ResizeObserverEntry', { install: true }],
-  ['resize-observer', 'ResizeObserverSize', { install: true }],
+  ['resize-observer', 'ResizeObserverEntry', { install: true, slots: ['target', 'contentRect', 'borderBoxSize', 'contentBoxSize', 'devicePixelContentBoxSize'] }],
+  ['resize-observer', 'ResizeObserverSize', { install: true, slots: ['inlineSize', 'blockSize'] }],
   ['xhr', 'XMLHttpRequestEventTarget', { install: true }],
   ['xhr', 'XMLHttpRequestUpload', { install: true }],
-  ['xhr', 'XMLHttpRequest', { install: true, omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
+  ['xhr', 'XMLHttpRequest', { slots: ['upload'], install: true, omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
   ['fetch', 'Request', {
+    slots: ['method', 'url', 'headers', 'destination', 'referrer', 'referrerPolicy', 'mode', 'credentials', 'cache', 'redirect', 'integrity', 'keepalive', 'isReloadNavigation', 'isHistoryNavigation', 'signal'],
     install: true,
     omit: { 'local-network-access': 'targetAddressSpace: Local Network Access is not implemented (a WICG proposal)' }
   }],
-  ['fetch', 'Response', { install: true }],
+  ['fetch', 'Response', { install: true, slots: ['type', 'url', 'redirected', 'status', 'ok', 'statusText', 'headers'] }],
   ['encoding', 'TextEncoder', { install: true }],
-  ['encoding', 'TextDecoder', { install: true }],
-  ['encoding', 'TextDecoderStream', { install: true }],
+  ['encoding', 'TextDecoder', { install: true, slots: ['fatal', 'ignoreBOM'] }],
+  ['encoding', 'TextDecoderStream', { install: true, slots: ['fatal', 'ignoreBOM'] }],
   ['encoding', 'TextEncoderStream', { install: true }],
-  ['FileAPI', 'Blob', { install: true }],
-  ['FileAPI', 'File', { install: true }],
+  ['FileAPI', 'Blob', { install: true, slots: ['size', 'type'] }],
+  ['FileAPI', 'File', { install: true, slots: ['name', 'lastModified'] }],
   // (…made natively: a FileList is [Serializable], and V8's serializer takes no Proxy)
   ['FileAPI', 'FileList', { nativeIndexed: true }],
-  ['FileAPI', 'FileReader', { install: true }],
+  ['FileAPI', 'FileReader', { install: true, slots: ['readyState', 'result', 'error'] }],
   ['FileAPI', 'FileReaderSync', { install: true }],
-  ['dom', 'XPathResult', { install: true }],
+  ['dom', 'XPathResult', { install: true, slots: [{ resultType: 'type' }] }],
   ['dom', 'XPathExpression', { install: true }],
   ['dom', 'XPathEvaluator', { install: true }],
   ['dom', 'AbstractRange', { install: true }],
@@ -584,8 +594,8 @@ const INTERFACES = [
   ['cssom', 'MediaList'],
   ['cssom', 'StyleSheetList'],
   ['cssom', 'CSSRuleList'],
-  ['cssom', 'StyleSheet', { install: true }],
-  ['cssom', 'CSSStyleSheet', { install: true }],
+  ['cssom', 'StyleSheet', { install: true, slots: ['href', 'parentStyleSheet', 'title', 'media'] }],
+  ['cssom', 'CSSStyleSheet', { install: true, slots: ['ownerRule'] }],
   ['cssom', 'CSSRule', { install: true }],
   ['cssom', 'CSSGroupingRule', { install: true }],
   ['cssom', 'CSSStyleRule', { install: true }],
@@ -612,21 +622,21 @@ const INTERFACES = [
   ['css-nesting', 'CSSNestedDeclarations', { install: true }],
   ['css-anchor-position', 'CSSPositionTryRule', { install: true }],
   ['dom', 'MutationObserver', { install: true }],
-  ['cssom-view', 'MediaQueryList', { install: true }],
+  ['cssom-view', 'MediaQueryList', { install: true, slots: ['media'] }],
   ['geolocation', 'Geolocation'],
-  ['geolocation', 'GeolocationPosition'],
+  ['geolocation', 'GeolocationPosition', { slots: ['coords', 'timestamp'] }],
   ['geolocation', 'GeolocationCoordinates'],
-  ['geolocation', 'GeolocationPositionError'],
+  ['geolocation', 'GeolocationPositionError', { slots: ['code'] }],
   ['permissions', 'Permissions', {
     omit: {
       'permissions-request': 'request: Requesting Permissions is a WICG proposal (headless Chrome exposes none)',
       'permissions-revoke': 'revoke: Relinquishing Permissions is a WICG proposal (headless Chrome exposes none)'
     }
   }],
-  ['permissions', 'PermissionStatus', { install: true }],
-  ['cssom-view', 'CaretPosition', { install: true }],
-  ['dom', 'MutationRecord', { install: true }],
-  ['dom', 'AbortController', { install: true }],
+  ['permissions', 'PermissionStatus', { install: true, slots: ['state', 'name'] }],
+  ['cssom-view', 'CaretPosition', { install: true, slots: ['offsetNode', 'offset'] }],
+  ['dom', 'MutationRecord', { install: true, slots: ['type', 'target', 'previousSibling', 'nextSibling', 'attributeName', 'attributeNamespace', 'oldValue'] }],
+  ['dom', 'AbortController', { install: true, slots: ['signal'] }],
   ['dom', 'AbortSignal', { install: true }],
   ['dom', 'ShadowRoot', { install: true, omitMembers: { setHTML: 'the Sanitizer API is not implemented' } }],
   ['html', 'WorkerGlobalScope', {
@@ -1417,6 +1427,17 @@ function membersOf(def, omit = {}, omitMembers = {}, addedSecure = new Set()) {
   return members;
 }
 
+// An interface's `slots` as a Map of each attribute to its slot — a name that is no attribute of it, or an event handler's,
+// an error.
+function attributeSlots(name, slots = [], memberList) {
+  const map = new Map(slots.flatMap((entry) => (typeof entry === 'string' ? [[entry, entry]] : Object.entries(entry))));
+  for (const attribute of map.keys()) {
+    const m = memberList.find((x) => x.type === 'attribute' && x.name === attribute && x.special !== 'static');
+    if (!m || EVENT_HANDLER_TYPES.has(m.idlType.idlType)) throw new Error(`${name}: \`slots\` names ${attribute}, which is no attribute of it`);
+  }
+  return map;
+}
+
 // The CrossOriginProperties of the interfaces that have them (their `crossOrigin` option), by interface — each member it
 // names checked against the IDL: an operation's kind `'method'`, an attribute's what of it is exposed, `'set'` only of
 // one whose set does something: a writable attribute, or one whose puts go to another ([PutForwards]) — not a
@@ -1463,6 +1484,7 @@ function generateInterface(def, options = {}) {
   const addedSecure = new Set();
   const memberList = membersOf(def, options.omit, options.omitMembers, addedSecure);
   listSecureContext(def, memberList, addedSecure);
+  const slotOfAttribute = attributeSlots(name, options.slots, memberList);
   if (options.event) {
     const { steps = [], slots = {}, init = [] } = options.event;
     for (const attribute of [...steps, ...Object.keys(slots), ...init]) {
@@ -1547,9 +1569,11 @@ function generateInterface(def, options = {}) {
       if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientThis')) throw new Error(`${label}: a [LegacyLenientThis] attribute is not generated yet`);
       const reflection = options.install ? reflectionOf(name, m, { iface: name, member: m.name }) : null;
       // (…an event's its slot, but where its steps are the implementation's)
-      const slot = options.event && !options.event.steps?.includes(m.name) ? options.event.slots?.[m.name] ?? m.name : null;
+      const eventSlot = options.event && !options.event.steps?.includes(m.name) ? options.event.slots?.[m.name] ?? m.name : null;
+      const slot = eventSlot ?? slotOfAttribute.get(m.name);
       // (…a promise-typed one's exception its promise's rejection, as its getter steps say)
-      const getter = slot ? `return ${self}.${slot};`
+      const slotRead = slot && `${options.install ? `thisOf(this ?? globalThis, '${name}')` : self}.${slot}`;
+      const getter = slot ? `return ${slotRead};`
         : reflection?.get ? `const self = ${self}; return ${reflection.get};`
         : `return ${getImpl}(${self});`;
       out.push(`    get ${key}() { ${promiseOf(m) ? rejecting(getter) : getter} }`);
@@ -1560,7 +1584,7 @@ function generateInterface(def, options = {}) {
         // (…the object no object — a document's `location` with no window — a TypeError)
         const target = forwards.rhs.value;
         const notObject = JSON.parse(failure({ iface: name, member: m.name }, 'The attribute value is not an object'));
-        out.push(`    set ${key}(v) { const object = ${getImpl}(${self}); if (!isObject(object)) throw new TypeError(${JSON.stringify(notObject)}); object.${target} = v; }`);
+        out.push(`    set ${key}(v) { const object = ${slotRead ?? `${getImpl}(${self})`}; if (!isObject(object)) throw new TypeError(${JSON.stringify(notObject)}); object.${target} = v; }`);
       } else if ((m.extAttrs || []).some((e) => e.name === 'Replaceable')) {
         // [Replaceable] (Web IDL §3.7.6): a write to the read-only attribute replaces it with a data property of the
         // object — a page's `innerWidth = 1024` keeps its own value, and the attribute is gone for it
@@ -1574,7 +1598,7 @@ function generateInterface(def, options = {}) {
         const value = `enumValue(v, ${JSON.stringify(enums.get(m.idlType.idlType))}, ${failure({ iface: name, member: m.name })})`;
         const v = m.idlType.nullable ? `${nullish('v')} ? null : ${value}` : value;
         out.push(`    set ${key}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) { ${withCEReactions(m, `${setImpl}(self, value);`)} } }`);
-      } else if (!m.readonly && slot) {
+      } else if (!m.readonly && eventSlot) {
         out.push(`    set ${key}(v) { ${self}.${slot} = ${conversion(m.idlType, 'v', { iface: name, member: m.name }, checks)}; }`);
       } else if (!m.readonly && reflection) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
@@ -1626,7 +1650,11 @@ function generateInterface(def, options = {}) {
         if (inherited.length) preamble.push(`  const inheritedJSON = defaultJSONOf(Object.getPrototypeOf(iface.prototype), ${JSON.stringify(inherited)});`);
         const attrs = regular(memberList);
         members.push('toJSON');
-        const own = attrs.map((a) => `${a.name}: impl.get_${a.name}(self)`);
+        const own = attrs.map((a) => {
+          const slot = slotOfAttribute.get(a.name);
+          if (!slot) return `${a.name}: impl.get_${a.name}(self)`;
+          return `${a.name}: ${options.install ? `thisOf(self, '${name}')` : 'self'}.${slot}`;
+        });
         body.push(`    toJSON() { const self = ${self}; return { ${(inherited.length ? ['...inheritedJSON(self)'] : []).concat(own).join(', ')} }; }`);
         continue;
       }
