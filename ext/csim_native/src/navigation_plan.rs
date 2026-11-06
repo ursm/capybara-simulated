@@ -319,6 +319,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "submissionRoute", submission_route, context_id);
     register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
+    register(scope, ns, "stopOwnLoading", stop_own_loading, context_id);
     register(scope, ns, "flushBegin", flush_begin, context_id);
     register(scope, ns, "flushEnd", flush_end, context_id);
     register(scope, ns, "flushRestore", flush_restore, context_id);
@@ -860,6 +861,18 @@ fn take_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
         v8::String::new(scope, &s.referrer.1).unwrap().into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.stopOwnLoading() -> whether a top-level document's location navigation was planned, let go now: HTML "stop loading"
+// its navigable where its unload counter is 0 (a frame's are its container's: frame_navigation.rs `stopFrameLoading`) — not
+// a reload's, a traversal's, nor a form's plan, whose navigation has not begun.
+fn stop_own_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let top = realm(scope, cid);
+    if top.unloading(cid) {
+        return rv.set_bool(false);
+    }
+    begin_navigation_of(top, cid, None);
+    rv.set_bool(plan(scope, &args).own.location.take().is_some());
 }
 // __dom.ownPlanned() -> which of a location navigation (1), a reload (2) and a frame's submission (4) is planned, 0 for
 // none — and whether the host plans a navigation of a frame (8: frame_navigation.rs `HostNavigation`) or routes a

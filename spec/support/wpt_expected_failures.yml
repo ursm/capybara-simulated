@@ -5998,17 +5998,8 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-refresh-
 - document.open() aborts documents that are queued for navigation through Refresh
   header with timeout 0 (fetch())
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-while-navigating.window.js:
-- "[harness] TIMEOUT"
-- document.open() aborts documents that are navigating through Location (XMLHttpRequest)
-- document.open() aborts documents that are navigating through Location (fetch())
-- document.open() aborts documents that are navigating through iframe loading (XMLHttpRequest)
-- document.open() aborts documents that are navigating through iframe loading (fetch())
 - document.open() aborts documents that are navigating through iframe loading (image
   loading)
-- document.open() aborts documents that are queued for navigation through .click()
-  (XMLHttpRequest)
-- document.open() aborts documents that are queued for navigation through .click()
-  (fetch())
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/aborted-parser.window.js:
 - async document.open() after parser is aborted
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/bailout-exception-vs-return-origin.sub.window.js:
@@ -7104,8 +7095,6 @@ websockets/unload-a-document/004.html:
 webstorage/localstorage-share-data-unrelated-origins.html:
 - Ensure two about:srcdoc origins cannot share localstorage
 - "[harness] TIMEOUT"
-xhr/abort-after-stop.window.js:
-- abort-after-stop
 xhr/access-control-basic-allow-preflight-cache-timeout.any.js:
 - Preflight cache should be invalidated on timeout
 - "[dedicatedworker] Preflight cache should be invalidated on timeout"

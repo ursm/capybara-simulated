@@ -120,10 +120,10 @@ pub(crate) struct EventLoop {
     // that leaves the agent carries.
     pub(crate) agent_epoch: Option<f64>,
     seq: u64,
-    // The `BEHIND` tasks queued, as far as it knows (a realm's going with its list found out by the next `step_past_behind`),
-    // and how many tasks ran past them since one last ran.
-    behind: u32,
-    behind_passed: u32,
+    // The tasks it has taken, and the `BEHIND` ones queued — their realm, their key — each with that count as it last was
+    // not due, what its wait is counted from (one gone with its realm found out by the next `step_past_behind`).
+    tasks_run: u64,
+    behind: Vec<(u64, i32, i64)>,
     steps: Vec<Vec<i32>>,
     // The nesting level of the timer task running now — none where the task running is none of a timer's (a platform
     // task, an animation frame, a script the host runs) — which a timer it schedules nests in (`timerNext`,
@@ -199,13 +199,14 @@ impl Ord for Due {
 // the response in — which HTML runs in parallel with the event loop, a network's time away from the task that began it.
 // A zero timer queued after the `src` set comes first, and the chain it starts, until its nesting clamp moves it past
 // this instant (`old-t30 P0 old-pagehide`; Chrome `c0 … c4` before the pagehide, Firefox `c0 c1 c2`). The clock moving on
-// ends the wait, a task due earlier running first; so does the event loop running `BEHIND_WAITS` tasks past it at the same
-// instant, as real time would have let the response in by then: an `await new Promise(r => setTimeout(r))` loop polling for
-// the frame's next document nests in no timer and moves the clock no further, here (`step_past_behind`).
+// ends the wait, a task due earlier running first; so does the event loop running `BEHIND_WAITS` tasks past it, due, at the
+// same instant, as real time would have let the response in by then: an `await new Promise(r => setTimeout(r))` loop polling
+// for the frame's next document nests in no timer and moves the clock no further, here (`step_past_behind`). Each task's
+// own wait, whatever other navigations came and went — a frame's `src` has two: its document asked, then its commit.
 pub(crate) const AHEAD: u8 = 0;
 const IN_TURN: u8 = 1;
 const BEHIND: u8 = 2;
-const BEHIND_WAITS: u32 = 64;
+const BEHIND_WAITS: u64 = 64;
 
 impl Timers {
     // Whether the task of key `key` is queued still.
@@ -384,35 +385,35 @@ impl RealmArena {
         });
         first
     }
-    // A task of turn `turn` taken: where it ran past `BEHIND` ones, their wait counted, and over `BEHIND_WAITS` those queued
-    // made tasks in turn, ahead by when they were queued.
-    fn step_past_behind(&mut self, turn: u8) {
-        if turn == BEHIND {
-            self.event_loop.behind = self.event_loop.behind.saturating_sub(1);
-            self.event_loop.behind_passed = 0;
+    // A task of key `key` taken: its own wait over, where it was `BEHIND`; the wait of those it ran past counted, and those
+    // waiting `BEHIND_WAITS` made tasks in turn, ahead by when they were queued.
+    fn step_past_behind(&mut self, key: i64) {
+        self.event_loop.tasks_run += 1;
+        if self.event_loop.behind.is_empty() {
             return;
         }
-        if self.event_loop.behind == 0 {
-            return;
-        }
-        self.event_loop.behind_passed += 1;
-        if self.event_loop.behind_passed < BEHIND_WAITS {
-            return;
-        }
-        self.event_loop.behind = 0;
-        self.event_loop.behind_passed = 0;
-        for realm in self.event_loop_realms() {
-            let Some(timers) = self.timers_of(realm) else { continue };
-            let behind: Vec<_> = timers.order.iter().filter(|e| e.1 == BEHIND).copied().collect();
-            for entry in behind {
-                timers.order.remove(&entry);
-                let (due, _, seq, key) = entry;
-                timers.order.insert((due, IN_TURN, seq, key));
-                if let Some(t) = timers.by_key.get_mut(&key) {
-                    t.turn = IN_TURN;
-                }
+        let run = self.event_loop.tasks_run;
+        let now = self.event_loop.clock;
+        let mut waiting = std::mem::take(&mut self.event_loop.behind);
+        waiting.retain_mut(|(from, realm, behind)| {
+            if *behind == key {
+                return false;
             }
-        }
+            let Some(timers) = self.timers_of(*realm) else { return false };
+            let Some(timer) = timers.by_key.get_mut(behind) else { return false };
+            if timer.due > now {
+                *from = run;
+                return true;
+            }
+            if run - *from < BEHIND_WAITS {
+                return true;
+            }
+            timers.order.remove(&(Due(timer.due), BEHIND, timer.seq, *behind));
+            timers.order.insert((Due(timer.due), IN_TURN, timer.seq, *behind));
+            timer.turn = IN_TURN;
+            false
+        });
+        self.event_loop.behind = waiting;
         self.event_loop.changed();
     }
     // Realm `cid`'s timer task over: a repeating one queued again (`Timers::end_task`).
@@ -810,7 +811,10 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         if let Some(source) = source {
             timers.sources.insert(key, source);
         }
-        arena.event_loop.behind += u32::from(behind);
+        if behind {
+            let run = arena.event_loop.tasks_run;
+            arena.event_loop.behind.push((run, cid, key));
+        }
     }
     rv.set_double(key as f64);
 }
@@ -851,7 +855,7 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     timers.order.remove(&(Due(due), turn, seq, key));
     timers.sources.remove(&key);
     timers.in_task = true;
-    arena.step_past_behind(turn);
+    arena.step_past_behind(key);
     let timers = &mut arena.enter(cid).timers;
     let run = due.max(now);
     let repeats = timers.by_key.get(&key).and_then(|t| t.period);

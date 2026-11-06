@@ -389,7 +389,7 @@ RSpec.describe 'choosing a navigable by name' do
     expect(poll_until { s.evaluate_script('1') && cookies['/d'] }).to eq('bu=1')
   end
 
-  # …a `src` change the same: its document asked on the navigation's task (HTML "checking if unloading is canceled" step 7,
+  # …a `src` change the same: its document asked on the navigation's task (HTML "checking if unloading is canceled" queues the task that fires it,
   # where Chrome and Firefox ask inside the setter), unloaded when the response is in — its window the frame's until then,
   # a second change asking it again (Chrome: beforeunload twice, `contentWindow` the old window, the old document's text,
   # one unload), and a beforeunload handler rewriting `src` a navigation of its own, ignored.

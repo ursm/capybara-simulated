@@ -87,6 +87,10 @@ impl Lifecycle {
     pub(crate) fn is_completely_loaded(&self) -> bool {
         self.completely_loaded
     }
+    // Whether its parser was aborted: its load never fires.
+    pub(crate) fn is_aborted(&self) -> bool {
+        self.aborted
+    }
     // HTML document open steps: a document of its own written into it from here, numbered `generation` — "the end" of its
     // parse owed nothing of what the last one had (a task of that one's still queued, for its number, fires nothing) —
     // its container's load muted where it was being fired as it was opened, and loading again: whether that changed its
@@ -114,6 +118,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "docHidePage", hide_page, context_id);
     crate::dom::register(scope, ns, "docFinishLoading", finish_loading, context_id);
     crate::dom::register(scope, ns, "docCompletelyLoaded", completely_loaded, context_id);
+    crate::dom::register(scope, ns, "docAbortParser", abort_parser_op, context_id);
     crate::dom::register(scope, ns, "docCompleteInitial", complete_initial, context_id);
 }
 
@@ -260,6 +265,12 @@ fn finish_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     lifecycle_of(scope, doc).completely_loaded = true;
 }
 
+// __dom.docAbortParser(docNid) -> whether the document's parser was active, aborted now (`Lifecycle::abort_parser`): HTML
+// "abort a document", `stop()`'s.
+fn abort_parser_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(lifecycle_of(scope, doc).abort_parser());
+}
 // __dom.docCompletelyLoaded(docNid) -> whether the document is completely loaded — before it is, a navigation it plans
 // replaces its session history entry, and what waits for it waits.
 fn completely_loaded(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

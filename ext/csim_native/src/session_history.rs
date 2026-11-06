@@ -53,6 +53,8 @@ struct Data {
     name: Option<Vec<u16>>,
     state: Option<Arc<[u8]>>,
     form_state: Option<Arc<[u8]>>,
+    // A frame's about:srcdoc document's markup: its document state's resource, what a traversal makes it of again.
+    srcdoc: Option<Arc<str>>,
 }
 
 impl Data {
@@ -87,6 +89,9 @@ impl Data {
         if let Some(v) = text("name")? {
             self.name = v.map(|n| n.encode_utf16().collect());
         }
+        if let Some(v) = text("srcdoc")? {
+            self.srcdoc = v.map(Into::into);
+        }
         if let Some(v) = bytes("state")? {
             self.state = v;
         }
@@ -110,6 +115,9 @@ impl Data {
         self.cross_site = self.cross_site.or(leaving.cross_site);
         if self.name.is_none() {
             self.name.clone_from(&leaving.name);
+        }
+        if self.srcdoc.is_none() {
+            self.srcdoc.clone_from(&leaving.srcdoc);
         }
         self
     }
@@ -142,6 +150,9 @@ impl Data {
         }
         if let Some(v) = &self.name {
             hash.aset(ruby.to_symbol("name"), String::from_utf16_lossy(v))?;
+        }
+        if let Some(v) = &self.srcdoc {
+            hash.aset(ruby.to_symbol("srcdoc"), &**v)?;
         }
         for (key, field) in [("state", &self.state), ("form_state", &self.form_state)] {
             if let Some(v) = field {
@@ -368,19 +379,24 @@ impl Queued {
 // The navigable a list belongs to: 0 the traversable's own.
 const TOP: u32 = 0;
 
-// Whether a frame's entry at `url` can be made again by a traversal alone: one of an http(s) URL, a `blob:` one's —
-// fetched anew from the window's blob URL store, a revoked one's a network error (HTML "apply the history step": its
-// document made by fetching) — or about:blank's; what a frame's document at another records no entry for.
+// Whether a frame's entry at `url` can be made again by a traversal: one of an http(s) URL, a `blob:` one's — fetched anew
+// from the window's blob URL store, a revoked one's a network error (HTML "apply the history step": its document made by
+// fetching) — a data: one's, which holds its own bytes, about:blank's, or an about:srcdoc one's, whose markup its entry
+// keeps (HTML's document state "about base URL" and resource: `Data::srcdoc`, a traversal's `traversable`).
 pub(crate) fn recordable(url: &str) -> bool {
     let scheme = url.split_once(':').map_or("", |(s, _)| s);
     if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") {
         return url[scheme.len()..].starts_with("://");
     }
-    if scheme.eq_ignore_ascii_case("blob") {
+    if scheme.eq_ignore_ascii_case("blob") || scheme.eq_ignore_ascii_case("data") {
         return true;
     }
-    let rest = url.get(..11).filter(|s| s.eq_ignore_ascii_case("about:blank")).map(|_| &url[11..]);
-    rest.is_some_and(|rest| rest.is_empty() || rest.starts_with(['?', '#']))
+    let about = |name: &str| url.get(..name.len()).filter(|s| s.eq_ignore_ascii_case(name)).map(|_| &url[name.len()..]);
+    about("about:blank").or_else(|| about("about:srcdoc")).is_some_and(|rest| rest.is_empty() || rest.starts_with(['?', '#']))
+}
+// …and an entry of it: an about:srcdoc one's where it has the markup (the entry of a frame left before it kept any has none).
+fn traversable(url: &str, data: &Data) -> bool {
+    recordable(url) && (data.srcdoc.is_some() || url.get(..12).is_none_or(|s| !s.eq_ignore_ascii_case("about:srcdoc")))
 }
 
 // One navigable's change of active entry a traversal makes: its navigable, the entry, and whether that is of the same
@@ -716,14 +732,13 @@ impl Traversable {
     }
 
     // …the plan of a traversal by `delta` as the host applies it: past a step whose frame's entry it cannot make again
-    // alone — a srcdoc document it left, a data: one's, which have no bytes to come back to (`recordable`) —
-    // on to the next step that way.
+    // (`traversable`), on to the next step that way.
     fn traversal(&self, mut delta: i64) -> Option<(i64, Vec<Change>)> {
         let way = if delta > 0 { 1 } else { -1 };
         loop {
             let plan = self.plan(delta)?;
             let stuck = plan.1.iter().any(|&(nav, id, same_document)| {
-                nav != TOP && !same_document && !self.state.entry(id).is_some_and(|e| recordable(&e.url))
+                nav != TOP && !same_document && !self.state.entry(id).is_some_and(|e| traversable(&e.url, &e.data))
             });
             if !stuck {
                 return Some(plan);
@@ -1502,7 +1517,8 @@ mod tests {
         assert_eq!(h.take_all_queued(), vec![(t2, -1, 0)]);
         assert!(!h.is_queued());
         assert_eq!(h.last_token(), t2);
-        assert!(recordable("about:blank#x") && recordable("HTTPS://a.test/") && !recordable("about:blanky") && !recordable("data:,x"));
+        assert!(recordable("about:blank#x") && recordable("HTTPS://a.test/") && !recordable("about:blanky") && recordable("data:,x"));
+        assert!(recordable("about:srcdoc") && !recordable("about:srcdocs") && !recordable("about:other"));
         assert!(recordable("blob:http://a.test/0d3c") && recordable("BLOB:null/x"));
     }
 
@@ -2226,6 +2242,13 @@ fn frame_entry(arena: &crate::dom::RealmArena, realm: i32, create: bool) -> Opti
     if let Some(entry) = t.state.entry_mut(id).filter(|e| e.data.text("referrer").is_none()) {
         Arc::make_mut(&mut entry.data).set_text("referrer", referrer);
         t.version += 1;
+    }
+    // (…and the markup of the about:srcdoc document it is at, as its realm's: `frame_document_srcdoc`)
+    if let Some(entry) = t.state.entry_mut(id).filter(|e| e.data.srcdoc.is_none()) {
+        if let Some(srcdoc) = arena.live_container(realm).and_then(|c| arena.frame_document_srcdoc(c)) {
+            Arc::make_mut(&mut entry.data).srcdoc = Some(srcdoc.into());
+            t.version += 1;
+        }
     }
     drop(guard);
     Some((frame, id))

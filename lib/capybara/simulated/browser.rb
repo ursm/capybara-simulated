@@ -673,7 +673,7 @@ module Capybara
           break unless @load_navigations_due
 
           @load_navigations_due = false
-          @runtime.run_navigation_turn(SETTLE_MAX_ITER_TASKS)
+          run_navigation_turn
           consume_pending_frame_nav
           consume_pending_frame_submit
           consume_pending_location
@@ -915,7 +915,7 @@ module Capybara
           parent_realm = @current_realm_id
           tick_real_time
           # (…and a navigation of it the host is to make made first: the document the user switching to the frame waits for)
-          @runtime.run_navigation_turn(SETTLE_MAX_ITER_TASKS)
+          run_navigation_turn
           rid = dom_call('__csimEnsureFrameRealm', target.to_i).to_i
           if rid.zero?
             raise Capybara::Simulated::StaleElement,
@@ -11313,6 +11313,10 @@ module Capybara
       # due after it to run after it — none for the flush of a page being left, whose plans go with it unless it stays
       # (`flush_outgoing_page_init`), nor of the settle a navigation being taken commits with, whose document's next
       # navigation the drain after it takes: a frame reloading itself as it loads nests no deeper. Whether it took any.
+      # …the navigation turn run where one is queued, which a task queued keeps the driver stepping for: none on an idle page.
+      private def run_navigation_turn
+        @runtime.run_navigation_turn(SETTLE_MAX_ITER_TASKS) if @timers_active
+      end
       def take_frame_navigations_due
         return false if @flushing_outgoing_page || @taking_frame_navigations
 
@@ -11457,7 +11461,7 @@ module Capybara
       # (…whatever its URL, so the entry a reload reads is the document's the frame is at: one a traversal cannot make
       # again alone — a data: one's, a srcdoc one's, whose bytes are its document's — passed over by a traversal,
       # session_history.rs `traversal`)
-      def record_frame_nav(realm_id, new_url, post: nil)
+      def record_frame_nav(realm_id, new_url, post: nil, srcdoc: nil)
         return if realm_id.nil? || realm_id.zero?
         # (…none of a javascript: URL's, which runs in the document it is at — HTML "navigate", its result at most
         # replacing it)
@@ -11471,6 +11475,7 @@ module Capybara
         frame_entry(realm_id, create: true)
         leave_frame_entry(realm_id) unless initial
         data = post ? {body: post[:body].to_s, content_type: post[:content_type], origin: post[:origin]}.compact : {}
+        data[:srcdoc] = srcdoc if srcdoc
         initial ? history.replace(nav, parent_nav, new_url.to_s, false, data) : history.push(nav, parent_nav, new_url.to_s, false, data)
       end
       # …an entry pushed (`record`), or the current one replaced (`replace_frame_entry`).
@@ -11479,11 +11484,11 @@ module Capybara
       end
       # …and a navigation of it its session history records no entry for — a location's: the current entry made its, so
       # neither a reload nor a traversal goes back to the document it left.
-      def replace_frame_entry(realm_id, url)
+      def replace_frame_entry(realm_id, url, srcdoc: nil)
         return unless (nav, parent_nav, _, history = frame_navigable(realm_id)) && frame_entry(realm_id, create: true)
 
         save_frame_history(nav, history)
-        history.replace(nav, parent_nav, url.to_s, false, {})
+        history.replace(nav, parent_nav, url.to_s, false, srcdoc ? {srcdoc: srcdoc} : {})
       end
       # …kept as it stood before a navigation recorded or replaced an entry of it, which one that ends in no document —
       # a download, a navigation handed off — restores (`frame_navigation_made_no_document`): neither is a navigation of
@@ -11517,7 +11522,7 @@ module Capybara
       # (…`url` its document's URL as the navigation began, where a handler since may have moved its location: a
       # traversal's, which asked it first)
       def leave_frame_entry(realm_id, url = frame_realm_url(realm_id))
-        # (…a document no entry was recorded for — a data: one's, a srcdoc one's — leaving the entry before it as it is)
+        # (…a document no entry was recorded for leaving the entry before it as it is)
         return unless Native.history_recordable_url(url)
         return unless (history, id = frame_entry(realm_id))
 
@@ -11628,6 +11633,17 @@ module Capybara
           # (…not asked again where a traversal asked it before its step: `perform_history_traverse`)
           prompted = @prompted_frames&.delete?(realm_id) ? true : false
           return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, nil, prompted)
+        end
+        # (…a data: URL's and a srcdoc's as a navigation to them is, no server's to answer — its markup the entry's)
+        srcdoc = entry[:srcdoc]
+        if srcdoc || url.match?(/\Adata:/i)
+          entered = @frame_stack.find {|e| e[:realm_id] == realm_id }
+          return unless prompt_to_unload_frame(realm_id)
+
+          return reload_current_frame_realm(url, srcdoc, 'text/html', entry: entered) if entered && srcdoc
+          return navigate_frame(url, entry: entered, is_history: true, record: false, initiator: realm_id) if entered
+
+          return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, nil, true, srcdoc)
         end
         # A history TRAVERSAL restores the entry's persisted form state (bfcache) and its classic history API state, which
         # the document made starts with (as the page's: `replay_history_entry`), as `[state]`, its request referred as the
@@ -12026,6 +12042,7 @@ module Capybara
         seed = frame_seed(parent, handle, url, csp, doc_origin) or return
         return unless unload_frame_document(parent, realm_id)
 
+        frame_realm_host_call(parent, '__csimHostCommitBegins', handle)
         new_id = @runtime.reload_frame_realm(
           realm_id,
           parent.to_i,
@@ -12094,11 +12111,12 @@ module Capybara
         end
       end
       def drain_pending_navigation
-        # (…a navigation of a frame the task planned, its turn on the event loop queued, due with what is due before it: a
-        # script the driver ran on an idle page has no step following to run it)
-        @runtime.run_navigation_turn(SETTLE_MAX_ITER_TASKS)
         take_window_tasks
         apply_planned_traversals_before_navigations
+        # (…a navigation of a frame the task planned, its turn on the event loop queued, due with what is due before it: a
+        # script the driver ran on an idle page has no step following to run it — behind a traversal planned with it, which
+        # cancels it)
+        run_navigation_turn
         consume_pending_sw_client_nav
         consume_sw_deferred_navigations
         consume_pending_location
@@ -12396,6 +12414,7 @@ module Capybara
         # `__csimTakeFrameNavBlob`)
         frame_realm_host_call(parent, '__csimForgetFrameLoaded', old_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
 
+        frame_realm_host_call(parent, '__csimHostCommitBegins', entry[:iframe_handle])
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh).to_i
         return if new_id.zero?
         frame_navigation_made_document(new_id)

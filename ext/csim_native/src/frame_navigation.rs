@@ -64,6 +64,8 @@ struct FrameNavigation {
     // The form submission the container's navigable plans to navigate to (HTML "plan to navigate": one pending
     // navigation per navigable, a later one replacing it), by the number `planFrameNavigation` gave it — 0 for none.
     planned: u32,
+    // …begun, its task run: the navigable's ongoing navigation from there (`stopFrameLoading`).
+    form_begun: bool,
     // …and the navigation the host plans to make of it, by the order it was planned in (`HostNavigation`).
     host: Option<(u64, HostNavigation)>,
     // Whether the navigation it plans now aborted its document, planned while that one's parser was active
@@ -74,6 +76,12 @@ struct FrameNavigation {
     // had (user_activation.rs) — its last activation, on the event loop's clock, and the activation notifications
     // that reached it — which that window takes as its realm is made (navigables.rs `set_frame_realm`).
     activation: Option<(f64, u32)>,
+    // The markup of the about:srcdoc document it is at, none for a document of another URL (`document_srcdoc`) — of the
+    // one the build under way loads, till it commits (`loading_srcdoc`) — and of the one a traversal goes to
+    // (`traversal_srcdoc`, taken by its build), which is no attribute's by then.
+    document_srcdoc: Option<String>,
+    loading_srcdoc: Option<String>,
+    traversal_srcdoc: Option<String>,
     // …and when its initial about:blank document was made, on the event loop's clock — as its post-insertion step ran —
     // which that document's time origin is (HTML "create a new browsing context and document"), however much later its
     // realm is made: navigables.rs `set_frame_realm`.
@@ -149,8 +157,12 @@ struct Plans {
     // (navigation_plan.rs `next_planned`).
     turn: Option<i64>,
     through: u64,
+    // …a word the event loop's step reads after each task, set as a turn has run and until the host is told, where it ends
+    // the step (timers.js `runLoopStepBody`).
+    turn_due: crate::dom::SharedWord,
     // …and when it last ran, on the virtual clock: one queued at that same instant waits a nested-timer clamp, so a frame
-    // its load handlers navigate again on every load is paced, as a network's response paces it, and the clock moves.
+    // its load handlers navigate again on every load is paced, as a network's response paces it, and the clock moves. The
+    // agent's, as the turn is: another frame's navigation planned at that instant waits with it.
     turn_ran: Option<f64>,
 }
 
@@ -282,11 +294,16 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameLoadFired", frame_load_fired, context_id);
     crate::dom::register(scope, ns, "frameSubmissionResponse", frame_submission_response, context_id);
     crate::dom::register(scope, ns, "frameTakeContent", frame_take_content, context_id);
+    crate::dom::register(scope, ns, "hostCommitBegins", host_commit_begins, context_id);
+    crate::dom::register(scope, ns, "frameSrcdocCommits", frame_srcdoc_commits, context_id);
+    crate::dom::register(scope, ns, "frameLoadingSrcdoc", frame_loading_srcdoc, context_id);
+    crate::dom::register(scope, ns, "frameTraversalSrcdoc", frame_traversal_srcdoc, context_id);
     crate::dom::register(scope, ns, "planFrameNavigation", plan_frame_navigation, context_id);
     crate::dom::register(scope, ns, "landFrameNavigation", land_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameNavigationPlanned", frame_navigation_planned, context_id);
     crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
     crate::dom::register(scope, ns, "stopFrameLoading", stop_frame_loading, context_id);
+    crate::dom::register(scope, ns, "frameFormBegun", frame_form_begun, context_id);
     crate::dom::register(scope, ns, "frameWindowRead", frame_window_read, context_id);
     crate::dom::register(scope, ns, "cancelFrameLocation", cancel_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameLocation", plan_frame_location, context_id);
@@ -295,6 +312,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "navigationTurnDelay", navigation_turn_delay, context_id);
     crate::dom::register(scope, ns, "navigationTurnKey", navigation_turn_key, context_id);
     crate::dom::register(scope, ns, "navigationTurnRan", navigation_turn_ran, context_id);
+    let turn_due = crate::dom::dom(scope).arena.frame_navigations.1.turn_due.store();
+    crate::dom::view_word(scope, ns, "navigationTurnDue", turn_due);
+    crate::dom::register(scope, ns, "frameNavigationBegins", frame_navigation_begins, context_id);
+    crate::dom::register(scope, ns, "frameNavAsks", frame_nav_asks, context_id);
     crate::dom::register(scope, ns, "dropFrameNavigation", drop_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameNavigationFinalized", frame_navigation_finalized, context_id);
     crate::dom::register(scope, ns, "takeFrameNavigations", take_frame_navigations, context_id);
@@ -398,6 +419,10 @@ fn frame_navigation_activated(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
 impl RealmArena {
     pub(crate) fn frame_navigation_activated(&self, container: NodeId) -> bool {
         self.frame_navigations.0.get(&container).is_some_and(|nav| nav.activated)
+    }
+    // The markup of the about:srcdoc document the container's navigable is at, none for another (`document_srcdoc`).
+    pub(crate) fn frame_document_srcdoc(&self, container: NodeId) -> Option<String> {
+        self.frame_navigations.0.get(&container).and_then(|nav| nav.document_srcdoc.clone())
     }
 }
 // __dom.frameSandbox(containerNid) -> `RealmArena::frame_sandbox` (null: none), not taken: what the navigation under way
@@ -546,6 +571,7 @@ fn plan_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     // (…the host's planned navigation of it replaced too)
     let nav = navs.0.entry(container).or_default();
     nav.planned = token;
+    nav.form_begun = false;
     nav.host = None;
     nav.aborted_document = aborted;
     navs.1.last.insert(form, (token, container));
@@ -569,6 +595,7 @@ impl RealmArena {
         let navs = &mut self.frame_navigations;
         let Some(nav) = navs.0.get_mut(&container).filter(|n| token != 0 && n.planned == token) else { return false };
         nav.planned = 0;
+        nav.form_begun = false;
         if navs.1.last.get(&form).is_some_and(|&(t, _)| t == token) {
             navs.1.last.remove(&form);
         }
@@ -648,6 +675,44 @@ fn frame_take_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_int32(old.unwrap_or(-1));
 }
 
+// __dom.hostCommitBegins(containerNid) -> whether a navigation its attributes began was under way: the document the host's
+// navigation made about to run — one its `load` handler begins of the frame after it the frame's next.
+fn host_commit_begins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let pending = arena.frame_nav_has(container, COMMIT_PENDING);
+    let nav = arena.frame_navigation(container);
+    nav.flags &= !(COMMIT_PENDING | PROMPT_OWED);
+    nav.src = None;
+    nav.history = None;
+    nav.document_srcdoc = None;
+    rv.set_bool(pending);
+}
+// __dom.frameSrcdocCommits(containerNid) — the document the container's build loads about to be made: the markup it loaded
+// (`frame_source`) the document's from here, what its entry keeps. __dom.frameLoadingSrcdoc(containerNid) -> that markup,
+// null for none. __dom.frameTraversalSrcdoc(containerNid, markup) — a traversal's: what its build loads.
+fn frame_srcdoc_commits(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let nav = crate::dom::realm(scope, cid).frame_navigation(container);
+    nav.document_srcdoc = nav.loading_srcdoc.take();
+}
+fn frame_loading_srcdoc(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let srcdoc = crate::dom::realm(scope, cid).frame_navigations.0.get(&container).and_then(|nav| nav.loading_srcdoc.clone());
+    if let Some(s) = srcdoc.and_then(|s| v8::String::new(scope, &s)) {
+        rv.set(s.into());
+    }
+}
+fn frame_traversal_srcdoc(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let srcdoc = args.get(1).to_rust_string_lossy(scope);
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).frame_navigation(container).traversal_srcdoc = Some(srcdoc);
+}
 // __dom.frameNavigationPlanned(containerNid, token) -> whether the planned navigation is the container's navigable's
 // still — its request then the one to send.
 fn frame_navigation_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -738,7 +803,7 @@ fn navigation_turn_queued(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionC
 fn navigation_turn_delay(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let arena = &crate::dom::dom(scope).arena;
     let now = arena.event_loop.clock;
-    rv.set_double(if arena.frame_navigations.1.turn_ran.is_some_and(|at| now - at < FRAME_NAV_PACE_MS) { FRAME_NAV_PACE_MS } else { 0.0 });
+    rv.set_double(if arena.frame_navigations.1.turn_ran == Some(now) { FRAME_NAV_PACE_MS } else { 0.0 });
 }
 fn navigation_turn_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let key = args.get(0).integer_value(scope);
@@ -751,6 +816,7 @@ fn navigation_turn_ran(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCall
     plans.turn = None;
     plans.turn_ran = Some(now);
     plans.through = crate::navigation_plan::planned_so_far();
+    plans.turn_due.set(1);
 }
 // __dom.takeFrameNavigations(kind) -> the navigations of the kind `kind` ("navigate", "reload") the host planned of
 // frames and the navigation turn has made due, in the order they were planned, which none plans any more: `[realm, url,
@@ -808,25 +874,33 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 }
 
 // __dom.cancelFrameNavigation(containerNid) — another navigation of the container's navigable replaces the one a form
-// planned and the one the host planned (its `src` set — a navigation of whatever navigable it has then — or the navigable
-// destroyed with the container's removal): the form's response, when it comes, loads into nothing.
+// planned, the one the host planned and the one its attributes began (its `src` set — a navigation of whatever navigable it
+// has then — the navigable destroyed with the container's removal, a traversal making its document again: HTML "apply the
+// history step" sets its ongoing navigation to "traversal"): the form's response, when it comes, loads into nothing.
 fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    if let Some(nav) = crate::dom::realm(scope, cid).frame_navigations.0.get_mut(&container) {
+    let arena = crate::dom::realm(scope, cid);
+    arena.stop_attribute_navigation(container);
+    if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
         nav.planned = 0;
+        nav.form_begun = false;
         nav.host = None;
     }
 }
 
-// __dom.cancelFrameLocation(containerNid) — the navigation the host plans to make of the container's navigable let go, a
-// `javascript:` URL's begun in it the ongoing one now (url-parse.js `runJavascriptURL`) — but not the form submission it
-// plans to navigate to (`planned`), whose navigation HTML "plan to navigate" begins in a task after, ending that one, nor
-// a reload, which is no ongoing navigation (navigation_plan.rs `let_go`).
+// __dom.cancelFrameLocation(containerNid) — a `javascript:` URL's navigation of the container's navigable begun, its ongoing
+// one now, HTML "navigate" setting it before it branches on the URL's scheme (url-parse.js `runJavascriptURL`, dom-nodes.js
+// `_javascriptNavigation`): the navigation the host plans to make of it let go, and the one its attributes began — but not
+// the form submission it plans to navigate to (`planned`), whose navigation HTML "plan to navigate" begins in a task after,
+// ending that one, nor a reload, which is no ongoing navigation (navigation_plan.rs `let_go`). Chrome and Firefox go on with
+// the one under way; the spec wins, ursm's ruling.
 fn cancel_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    if let Some(nav) = crate::dom::realm(scope, cid).frame_navigations.0.get_mut(&container) {
+    let arena = crate::dom::realm(scope, cid);
+    arena.stop_attribute_navigation(container);
+    if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
         nav.host.take_if(|(_, host)| matches!(host, HostNavigation::Navigate { .. }));
     }
 }
@@ -848,6 +922,47 @@ fn frame_load_fired(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     arena.frame_navigation(container).loaded_at = Some(at);
 }
 
+// __dom.frameNavigationBegins(containerNid, commitsLater, prompted) -> whether the frame's old document stays its own until
+// the navigation's task, as HTML "navigate" has it: it has one, and is connected, where a task is coming (`commitsLater`,
+// none in a snapshot's build) — its document still to be asked unless `prompted`. A frame none is coming for unloads it now.
+fn frame_navigation_begins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let (coming, prompted) = (args.get(1).is_true(), args.get(2).is_true());
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let later = coming && arena.frame_realm(container).is_some() && arena.is_connected(container);
+    arena.set_frame_nav(container, COMMIT_PENDING, later);
+    arena.set_frame_nav(container, PROMPT_OWED, later && !prompted);
+    rv.set_bool(later);
+}
+// __dom.frameNavAsks(containerNid, generation, asked) -> the realm whose document the navigation's task asks whether it may
+// be unloaded, -1 for none: the one it owes, its navigation still the latest (`generation`, none for a build that does not
+// know: the host's forced one) and no document above it asking already — and, a navigation a later one replaced, `asked`,
+// the one that was to be asked, while it still is the frame's: HTML "navigate" asks, and only then looks whether it is
+// still the ongoing one.
+fn frame_nav_asks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_int32(-1);
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let generation = if args.get(1).is_undefined() { None } else { args.get(1).uint32_value(scope) };
+    let asked = args.get(2).int32_value(scope).unwrap_or(-1);
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let realm = arena.frame_realm(container);
+    let latest = generation.is_none_or(|g| arena.frame_navigations.0.get(&container).is_some_and(|n| n.generation == g));
+    if !latest {
+        if arena.is_connected(container) && asked >= 0 && realm == Some(asked) {
+            rv.set_int32(asked);
+        }
+        return;
+    }
+    if !arena.frame_nav_has(container, PROMPT_OWED) {
+        return;
+    }
+    arena.set_frame_nav(container, PROMPT_OWED, false);
+    if let Some(realm) = realm.filter(|&r| !arena.ancestor_unloading(r)) {
+        rv.set_int32(realm);
+    }
+}
 // __dom.frameNavGeneration(containerNid) -> the number of the container's latest navigation, as `frameLoadBegin` answers
 // it: whether the one a task was queued for still is.
 fn frame_nav_generation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -1107,20 +1222,39 @@ fn frame_window_read(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     nav.flags = (nav.flags & !LOAD_FIRED) | WINDOW_READ;
     rv.set_bool(true);
 }
-// __dom.stopFrameLoading(containerNid) -> whether HTML "stop loading" the container's navigable — its document opened again
-// (dom-nodes.js `_open`) — cancelled a navigation of it: the one its attributes began (`stop_attribute_navigation`), the
-// one the host plans and the one a form plans, still waiting on their turn or their task.
+// __dom.stopFrameLoading(containerNid) -> whether the container's navigable had a navigation ID for its ongoing navigation,
+// which HTML "stop loading" sets to null where its document's unload counter is 0 (its document opened again, dom-nodes.js
+// `_open`, `window.stop()`): the navigation its attributes began (`stop_attribute_navigation`), the host's to a URL — a
+// `location`'s, a link's: HTML "navigate" begun as they are — and a form's once its task has begun it. Not a form's still
+// planned, which HTML "plan to navigate" queues with no ongoing navigation (Firefox; Chrome cancels it), nor a reload, which
+// makes it "traversal" as its history step applies, that a navigation ID is not (Firefox for `document.open()`; Chrome
+// stays, and both for `stop()`).
 fn stop_frame_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
+    if arena.frame_realm(container).is_some_and(|r| arena.unloading(r)) {
+        return rv.set_bool(false);
+    }
+    crate::session_history::begin_navigation_of(arena, cid, Some(container));
     let mut stopped = arena.stop_attribute_navigation(container);
     if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
-        stopped |= nav.delaying_load_events();
-        nav.host = None;
-        nav.planned = 0;
+        if nav.host.take_if(|(_, host)| matches!(host, HostNavigation::Navigate { .. })).is_some() {
+            stopped = true;
+        }
+        if nav.form_begun {
+            nav.form_begun = false;
+            nav.planned = 0;
+            stopped = true;
+        }
     }
     rv.set_bool(stopped);
+}
+// __dom.frameFormBegun(containerNid) — the task a form's plan queued has begun its navigation, the navigable's ongoing one.
+fn frame_form_begun(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).frame_navigation(container).form_begun = true;
 }
 impl RealmArena {
     // The navigation the container's attributes began, its build still to commit — queued (`BUILD_QUEUED`), or the frame
@@ -1239,6 +1373,11 @@ impl RealmArena {
         let nav = self.frame_navigation(container);
         let reload = nav.flags & RELOAD_NAV != 0;
         nav.flags &= !RELOAD_NAV;
+        nav.loading_srcdoc = None;
+        if let Some(srcdoc) = nav.traversal_srcdoc.take() {
+            nav.loading_srcdoc = Some(srcdoc.clone());
+            return (FrameSource::Srcdoc(srcdoc), reload);
+        }
         let kept = nav.reload.take();
         let reload_url = kept.filter(|_| reload);
         if let Some(content) = nav.contents[CONTENT_NAV].take() {
@@ -1255,8 +1394,9 @@ impl RealmArena {
             let url = url.split('#').next().unwrap_or_default();
             !url.eq_ignore_ascii_case("about:srcdoc")
         });
-        if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| !went_on) {
-            return (FrameSource::Srcdoc(srcdoc.to_owned()), reload);
+        if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| !went_on).map(str::to_owned) {
+            self.frame_navigation(container).loading_srcdoc = Some(srcdoc.clone());
+            return (FrameSource::Srcdoc(srcdoc), reload);
         }
         // (…a reload's URL, else the one its navigation started with, else its `src` — that refused by its attributes'
         // processing none, but not a reload's nor that of a navigation under way, which a refused change leaves to go on)
@@ -1377,6 +1517,10 @@ fn frame_load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     // document waiting on nothing, as Chrome fires only its page's load. One planned by its load's handlers once it
     // loaded leaves its load the container's to fire: "completely finish loading" queues it as the load task ends.)
     if arena.frame_navigations.0.get(&container).is_some_and(|n| n.aborted_document && (n.planned != 0 || n.host.is_some())) {
+        return rv.set_uint32(DUE_PAID);
+    }
+    // (…nor for a document `stop()` aborted as it parsed: Chrome and Firefox fire neither its load nor this one)
+    if arena.frame_realm(container).and_then(|frame| arena.realm_document(frame)).is_some_and(|doc| arena.document_states.lifecycle(doc).is_aborted()) {
         return rv.set_uint32(DUE_PAID);
     }
     // (…none yet where the frame's document has its load delayed — its images fetched — which fires this one with its

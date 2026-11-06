@@ -4,7 +4,7 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
 # HTML "navigate" runs a few steps at once and the rest in parallel with the event loop: its document asked whether it
-# may be unloaded (a queued task, "checking if unloading is canceled" step 7), its response fetched, that document unloaded
+# may be unloaded (HTML "checking if unloading is canceled" queues a global task to fire `beforeunload`), its response fetched, that document unloaded
 # and the next one made ("attempt to populate the history entry's document", "finalize a cross-document navigation"). So
 # what is due before all that runs first, and the frame's document and window are the old ones until then: here, a task
 # of the agent's event loop behind every other due at its instant (timers.rs `BEHIND`). Each page below as Chrome 157 and
@@ -112,7 +112,8 @@ RSpec.describe 'a frame navigation as tasks' do
   end
 
   # …nor a loop polling for the next document with zero timers awaited, which nests in no timer: the clock stays, and the
-  # navigation goes on all the same (WPT replace-before-load/iframe-src).
+  # navigation goes on all the same (WPT replace-before-load/iframe-src), each of its tasks past `BEHIND_WAITS` tasks run at
+  # its instant — 128 for a `src`, its document asked and then its commit.
   it 'waits for a loop of awaited zero timers no further than a bounded number of tasks' do
     log = log_of(<<~JS)
       f.src = '/child?new';
@@ -525,6 +526,281 @@ RSpec.describe 'a frame navigation as tasks' do
     s.within_frame('f') do
       s.click_link 'go'
       expect(s.find('#at').text).to eq('b')
+    end
+  end
+
+  # Each navigation's wait its own: what ran before it was queued, and a navigation gone with its realm, count for nothing.
+  # Chrome `set old:bu old:ph … Z0 …`, Firefox `set old:bu Z0 … Z4 old:ph …`: no task of the page's is overtaken here for
+  # having been preceded by others.
+  it "counts a navigation's wait from when it is queued, past one gone with its realm" do
+    log = log_of(<<~JS, pages: {'/outer' => '<iframe id="g" src="/child?g"></iframe>'})
+      const o = document.createElement('iframe');
+      o.src = '/outer';
+      o.onload = async () => {
+        const P = (ms) => new Promise((r) => setTimeout(r, ms));
+        const g = o.contentDocument.getElementById('g');
+        g.src = '/child?g2';
+        o.remove();
+        for (let i = 0; i < 60; i++) await P(1);
+        L.length = 0;
+        L.push('set');
+        f.src = '/child?new';
+        for (let i = 0; i < 5; i++) setTimeout(() => L.push('Z' + i), 0);
+      };
+      document.body.appendChild(o);
+    JS
+    expect(log.first(7)).to eq(%w[set Z0 Z1 Z2 Z3 Z4 old:beforeunload])
+  end
+
+  # A document's opening stops the navigation under way, and one that has none to stop only: a form's planned navigation is
+  # none yet, HTML "plan to navigate" queuing it with no ongoing navigation — the document open steps stop loading only "if
+  # ongoing navigation is a navigation ID". Firefox goes on with the form's, Chrome cancels it.
+  it "goes on with a form's planned navigation of a frame whose document is opened" do
+    log = log_of(<<~JS)
+      document.getElementById('fm').submit();
+      const d = f.contentDocument;
+      d.open();
+      d.write('<title>opened</title>');
+      d.close();
+      setTimeout(() => L.push('final:' + U(f)), 200);
+    JS
+    expect(log).to include('viaF=1:script', 'final:child?viaF=1')
+  end
+
+  # …nor a reload: "reload pending" and a step on the traversal queue, its ongoing navigation "traversal" as it applies, no
+  # navigation ID. Firefox reloads, Chrome stays at the document opened.
+  it 'goes on with a reload of a frame whose document is opened' do
+    uh = %(<title>u</title><script>top.L.push("uh"); window.go = () => { location.reload(); document.open(); document.write("<title>opened</title>"); document.close() }</script>)
+    log = log_of(<<~JS, attrs: 'src="/uh"', pages: {'/uh' => uh})
+      f.contentWindow.setTimeout('go()', 0);
+      setTimeout(() => L.push('final:' + f.contentDocument.title), 200);
+    JS
+    expect(log).to eq(%w[uh final:u])
+  end
+
+  # A document a host navigation made, its `load` handler setting its container's `src`: that navigation the frame's next,
+  # none of the commit's it ran in. Chrome and Firefox: `wl fromload:script fromload:load final:…fromload`.
+  {'its location' => "f.contentWindow.location.href = '/wl';", 'a link' => "document.getElementById('ln').href = '/wl'; document.getElementById('ln').click();"}.each do |what, run|
+    it "keeps the src a document set of its frame as it loaded, navigated to by #{what}" do
+      log = log_of(<<~JS, pages: {'/wl' => "<script>onload = () => { top.L.push('wl'); frameElement.src = '/child?fromload' }</script>"})
+        #{run}
+        setTimeout(() => L.push('final:' + U(f)), 200);
+      JS
+      expect(log).to include('wl', 'fromload:script', 'fromload:load', 'final:child?fromload')
+    end
+  end
+
+  # `stop()`: HTML "stop loading" its navigable, a navigation ID the ongoing one no more. Chrome and Firefox stay at `?old`.
+  {
+    'its src'       => "f.src = '/child?new';",
+    'about:blank'   => "f.src = 'about:blank';",
+    'its location'  => "f.contentWindow.location.href = '/child?new';"
+  }.each do |what, run|
+    it "stops the navigation by #{what} with the frame's window's stop()" do
+      log = log_of(<<~JS)
+        #{run}
+        f.contentWindow.stop();
+        setTimeout(() => L.push('final:' + U(f)), 200);
+      JS
+      expect(log).not_to include('new:script')
+      expect(log.last).to eq('final:child?old')
+    end
+  end
+
+  # …the frame's document's own, its navigation begun in it. Chrome and Firefox stay at `?old`.
+  it "stops a frame's navigation of itself with its own stop()" do
+    log = log_of(<<~JS)
+      f.contentWindow.eval('location.href = "/child?new"; stop()');
+      setTimeout(() => L.push('final:' + U(f)), 200);
+    JS
+    expect(log.last).to eq('final:child?old')
+  end
+
+  # …a form's, once its task has begun it; still planned it is none yet — HTML "plan to navigate" — where Chrome and Firefox
+  # cancel that too.
+  it "stops a form's navigation its task began, not one still planned" do
+    later = log_of(<<~JS)
+      document.getElementById('fm').submit();
+      setTimeout(() => f.contentWindow.stop(), 0);
+      setTimeout(() => L.push('final:' + U(f)), 200);
+    JS
+    expect(later.last).to eq('final:child?old')
+    planned = log_of(<<~JS)
+      document.getElementById('fm').submit();
+      f.contentWindow.stop();
+      setTimeout(() => L.push('final:' + U(f)), 200);
+    JS
+    expect(planned.last).to eq('final:child?viaF=1')
+  end
+
+  # …not a descendant's by its parent's `stop()`, which aborts its document only, HTML "abort a document and its
+  # descendants" — nor a reload, no navigation ID. Chrome and Firefox stop both.
+  it "goes on with a frame's navigation by its parent's stop(), and with a reload by its own" do
+    log = log_of(<<~JS)
+      f.src = '/child?new';
+      window.stop();
+      setTimeout(() => L.push('final:' + U(f)), 200);
+    JS
+    expect(log.last).to eq('final:child?new')
+    log = log_of(<<~JS)
+      f.contentWindow.location.reload();
+      f.contentWindow.stop();
+    JS
+    expect(log).to include('old:script')
+  end
+
+  # …a top-level document's location navigation. Chrome and Firefox stay.
+  it "stops the page's location navigation" do
+    s = session('/' => '<title>p</title><script>onload = () => setTimeout(() => { location.href = "/other"; stop(); setTimeout(() => { document.title = "stayed" }, 100) }, 0)</script>', '/other' => '<title>other</title>')
+    s.visit '/'
+    expect(s).to have_title('stayed', wait: 5)
+  end
+
+  # HTML "abort a document": its fetches cancelled. An XHR's `abort` and `loadend` come on a task, DONE with a status of 0; a
+  # `fetch()` rejects with a TypeError. Chrome and Firefox: `ret:1 x-abort:4:0 x-loadend:4:0`, `ret f-rej:TypeError`.
+  xhr_log = "const x = new w.XMLHttpRequest(); x.open('GET', '/child?x'); for (const t of ['abort', 'load', 'loadend']) x.addEventListener(t, () => L.push('x-' + t + ':' + x.readyState + ':' + x.status)); x.send();"
+  ['f.contentWindow.stop()', 'window.stop()'].each do |stop|
+    it "aborts the frame's XHR and fetch() with #{stop}" do
+      log = log_of(<<~JS)
+        const w = f.contentWindow;
+        #{xhr_log}
+        w.fetch('/child?y').then(() => L.push('f-ok'), (e) => L.push('f-rej:' + e.name));
+        #{stop};
+        L.push('ret:' + x.readyState);
+      JS
+      expect(log).to include('ret:1', 'x-abort:4:0', 'x-loadend:4:0', 'f-rej:TypeError')
+      expect(log.join(' ')).not_to include('x-load:')
+    end
+  end
+
+  # …and by the document's opening where a navigation was under way, and only then: `abort.sub`. Chrome: `x-abort:4:0`.
+  it 'aborts the XHR of a document opened with a navigation under way, and only then' do
+    log = log_of(<<~JS)
+      const w = f.contentWindow;
+      #{xhr_log}
+      w.location.href = '/child?new';
+      w.document.open();
+      w.document.close();
+    JS
+    expect(log).to include('x-abort:4:0')
+    log = log_of(<<~JS)
+      const w = f.contentWindow;
+      #{xhr_log}
+      w.document.open();
+      w.document.close();
+    JS
+    expect(log).to include('x-load:4:200')
+  end
+
+  # …and its parser's: the rest of its input thrown away, no `load` — its own or its container's. Chrome and Firefox: `a b`,
+  # nothing after the script that stopped it.
+  it 'aborts the parser of a document whose script stops it' do
+    log = log_of(<<~'JS')
+      f.onload = () => L.push('P-load');
+      f.srcdoc = '<script>top.L.push("a"); stop(); top.L.push("b");<\/script><p>a</p><script>top.L.push("c")<\/script>';
+    JS
+    expect(log.last(2)).to eq(%w[a b])
+  end
+
+  # A `javascript:` URL's navigation aborts the one under way: HTML "navigate" sets the ongoing navigation before it branches
+  # on the scheme (ursm's ruling, spec over browsers). Chrome and Firefox go on with `?b` in all three: `… JS old:ph old:un
+  # b:script b:load final:…?b`.
+  {
+    'a src, a src'           => "f.src = '/child?b'; f.src = 'javascript:void(top.L.push(\"JS\"))';",
+    'a src, a location'      => "f.src = '/child?b'; f.contentWindow.location.href = 'javascript:void(top.L.push(\"JS\"))';",
+    'a location, a src'      => "f.contentWindow.location.href = '/child?b'; f.src = 'javascript:void(top.L.push(\"JS\"))';"
+  }.each do |what, run|
+    it "ends a navigation with a javascript: URL's: #{what}" do
+      log = log_of(<<~JS)
+        #{run}
+        setTimeout(() => L.push('final:' + U(f)), 200);
+      JS
+      expect(log).to include('JS', 'final:child?old')
+      expect(log).not_to include('b:script')
+    end
+  end
+
+  # A traversal cancels a navigation queued with it, in either order: HTML "apply the history step" sets the ongoing navigation
+  # to "traversal". Chrome and Firefox: `h+4 s1:?a3:h+4 s2:?a2:h+4 s3:?a:h+4 s4:?old:h+4`.
+  it 'goes back past a navigation queued with the traversal, in either order' do
+    s = session(
+      '/child' => child_log,
+      '/'      => <<~HTML
+        <title>page</title><iframe id="f" src="/child?old"></iframe><pre id="out"></pre><script>
+          window.L = [];
+          const f = document.getElementById('f');
+          const P = (ms) => new Promise((r) => setTimeout(r, ms));
+          const q = () => f.contentWindow.location.search;
+          onload = async () => {
+            await P(50);
+            const h0 = history.length;
+            const R = [];
+            for (const a of ['a', 'a2', 'a3', 'a4']) { f.src = '/child?' + a; await P(80); }
+            f.src = '/child?b'; history.back(); await P(200);
+            R.push('s1:' + q() + ':h+' + (history.length - h0));
+            f.contentWindow.location.href = '/child?c'; history.back(); await P(200);
+            R.push('s2:' + q() + ':h+' + (history.length - h0));
+            history.back(); f.src = '/child?d'; await P(200);
+            R.push('s3:' + q() + ':h+' + (history.length - h0));
+            history.back(); f.contentWindow.location.href = '/child?e'; await P(200);
+            R.push('s4:' + q() + ':h+' + (history.length - h0));
+            document.getElementById('out').textContent = R.join(' ');
+            document.title = 'done';
+          };
+        </script>
+      HTML
+    )
+    s.visit '/'
+    expect(s).to have_title('done', wait: 20)
+    expect(s.find('#out', visible: :all).text(:all)).to eq('s1:?a3:h+4 s2:?a2:h+4 s3:?a:h+4 s4:?old:h+4')
+  end
+
+  # A data: URL's and a srcdoc's entries are traversed to, both ways, as `history.length` says they are there: the first holds
+  # its bytes, the second's markup the entry keeps. Chrome and Firefox land on each (Chrome's srcdoc document with the
+  # attribute gone an empty one: HTML's document state keeps its resource).
+  {
+    "f.srcdoc = '<title>sd</title>'; await P(100); f.removeAttribute('srcdoc');" => 'about:srcdoc:sd,child?old,about:srcdoc:sd,child?c',
+    "f.src = 'data:text/html,<title>d</title>'; await P(100);"                  => 'opaque,child?old,opaque,child?c'
+  }.each do |first, trail|
+    it "traverses to the entry of #{first[/srcdoc|data/]}, both ways" do
+      s = session(
+        '/child' => child_log,
+        '/'      => <<~HTML
+          <title>page</title><iframe id="f" src="/child?old"></iframe><pre id="out"></pre><script>
+            window.L = [];
+            const f = document.getElementById('f');
+            const P = (ms) => new Promise((r) => setTimeout(r, ms));
+            const at = () => { const d = f.contentDocument; return d ? String(d.URL).replace(/^.*\\//, '') + (d.URL.startsWith('about') ? ':' + d.title : '') : 'opaque'; };
+            onload = async () => {
+              await P(50);
+              #{first}
+              f.src = '/child?c'; await P(100);
+              const R = [];
+              history.back(); await P(100); R.push(at());
+              history.back(); await P(100); R.push(at());
+              history.forward(); await P(100); R.push(at());
+              history.forward(); await P(100); R.push(at());
+              document.getElementById('out').textContent = R.join(',');
+              document.title = 'done';
+            };
+          </script>
+        HTML
+      )
+      s.visit '/'
+      expect(s).to have_title('done', wait: 20)
+      expect(s.find('#out', visible: :all).text(:all)).to eq(trail)
+    end
+  end
+
+  it 'traverses an entered frame to a srcdoc entry, the scope following it' do
+    s = session('/' => '<iframe id="f" srcdoc="<p id=at>first</p>"></iframe>', '/b' => '<p id="at">b</p>')
+    s.visit '/'
+    s.within_frame('f') { expect(s.find('#at').text).to eq('first') }
+    s.execute_script("const f = document.getElementById('f'); f.removeAttribute('srcdoc'); f.src = '/b'")
+    s.within_frame('f') do
+      expect(s.find('#at').text).to eq('b')
+      s.execute_script('history.back()')
+      expect(s).to have_css('#at', text: 'first')
     end
   end
 
