@@ -3,13 +3,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # What answers a controlled client's request (fetch_rules.rs `fetch_route`): an http(s) URL its service worker, a
 # `data:` URL its own processor, and any other scheme the network, which refuses it — Handle Fetch sees HTTP(S) requests
 # alone, so a worker answering everything never answers `about:blank`, from fetch() or XHR.
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'a controlled client’s request route', :every_host_local do
+RSpec.describe 'a controlled client’s request route' do
   include PollUntil
 
   let(:app) {

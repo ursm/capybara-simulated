@@ -1,6 +1,5 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
-require_relative 'support/every_host_local'
 
 # A worker's global is its kind's global scope (HTML §10.2.1), generated from the IDL: its prototype chain
 # DedicatedWorkerGlobalScope's → WorkerGlobalScope's (WindowOrWorkerGlobalScope's members there) → EventTarget's, no
@@ -81,8 +80,7 @@ RSpec.describe 'Worker global scope' do
     ])
   end
 
-  # (…service Workers are modeled only in a universal-server context)
-  it "makes a service worker's ServiceWorker one object, the one its registration holds", :every_host_local do
+  it "makes a service worker's ServiceWorker one object, the one its registration holds" do
     session.visit '/'
     got = session.evaluate_async_script(<<~JS)
       const done = arguments[0];

@@ -4,7 +4,6 @@ require 'capybara/simulated'
 require 'zlib'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # Web fonts: a family the document declares an `@font-face` for is FETCHED the first time text
 # needs it (Chrome loads a web font on first use) and measured with the downloaded file's own
@@ -677,18 +676,16 @@ RSpec.describe 'web fonts' do
       else [200, {'content-type' => 'text/html'}, [page]]
       end
     }
-    every_host_local do   # Service Workers are modeled only in a universal-server context
-      s = simulated_session(a)
-      s.visit '/'
-      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
-      s.execute_script(<<~JS)
-        document.head.appendChild(document.createElement('style')).textContent = 'p { color: red }';
-        document.querySelector('p').style.fontFamily = 'Late';
-        document.body.getBoundingClientRect();
-        navigator.serviceWorker.controller.postMessage('seen');
-      JS
-      expect(poll_until { s.evaluate_script('window.seen') }).to eq(['/ahem.ttf'])
-    end
+    s = simulated_session(a)
+    s.visit '/'
+    expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
+    s.execute_script(<<~JS)
+      document.head.appendChild(document.createElement('style')).textContent = 'p { color: red }';
+      document.querySelector('p').style.fontFamily = 'Late';
+      document.body.getBoundingClientRect();
+      navigator.serviceWorker.controller.postMessage('seen');
+    JS
+    expect(poll_until { s.evaluate_script('window.seen') }).to eq(['/ahem.ttf'])
   end
 
   # CSS Font Loading §2.2: a CSS-connected face's attributes are its rule's descriptors. A CSSOM edit of the rule is read

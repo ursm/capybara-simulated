@@ -5,7 +5,6 @@ require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # The service-worker UPDATE lifecycle: registering a new script at a scope that already has an
 # active worker must NOT hand the new worker the running documents. HTML's "try activate" holds it
@@ -13,7 +12,7 @@ require_relative 'support/every_host_local'
 # `skipWaiting()`. `registration.waiting` being non-null is how every "a new version is available,
 # reload?" banner detects an update — before this it was always null, so that whole flow was
 # invisible.
-RSpec.describe 'Service Worker update lifecycle', :every_host_local do
+RSpec.describe 'Service Worker update lifecycle' do
   let(:app) {
     Rack::Builder.new {
       run lambda {|env|

@@ -5,7 +5,6 @@ require 'timeout'
 require 'zlib'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # Resource Timing Level 2: every resource a document fetches is a `PerformanceResourceTiming`
 # entry — scripts, stylesheets, `@import`s, images, frames, fetch / XHR / beacon — that the page
@@ -378,20 +377,18 @@ RSpec.describe 'resource timing' do
       self.addEventListener('fetch', (e) => { if (e.request.url.includes('/answered')) e.respondWith(new Response('abcdef')); });
     JS
     page = '<!DOCTYPE html><meta charset=utf-8><body><script>navigator.serviceWorker.register("/sw.js"); setInterval(() => {}, 50);</script>'
-    every_host_local do   # Service Workers are modeled only in a universal-server context
-      s = simulated_session(lambda {|env|
-        env['PATH_INFO'] == '/sw.js' ? [200, {'content-type' => 'text/javascript'}, [worker]] : [200, {'content-type' => 'text/html'}, [page]]
-      }).tap {|session| session.visit '/' }
-      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
-      s.evaluate_async_script(<<~'JS')
-        const done = arguments[0];
-        const xhr = new Promise((resolve) => { const x = new XMLHttpRequest(); x.open('GET', '/answered?xhr'); x.onload = resolve; x.send(); });
-        Promise.all([fetch('/answered?fetch').then((r) => r.text()), xhr]).then(() => done());
-      JS
-      expect(s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.name.includes('answered')).map((e) => [e.initiatorType, e.encodedBodySize, e.responseStatus]).sort()")).to eq([
-        ['fetch', 6, 200], ['xmlhttprequest', 6, 200]
-      ])
-    end
+    s = simulated_session(lambda {|env|
+      env['PATH_INFO'] == '/sw.js' ? [200, {'content-type' => 'text/javascript'}, [worker]] : [200, {'content-type' => 'text/html'}, [page]]
+    }).tap {|session| session.visit '/' }
+    expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
+    s.evaluate_async_script(<<~'JS')
+      const done = arguments[0];
+      const xhr = new Promise((resolve) => { const x = new XMLHttpRequest(); x.open('GET', '/answered?xhr'); x.onload = resolve; x.send(); });
+      Promise.all([fetch('/answered?fetch').then((r) => r.text()), xhr]).then(() => done());
+    JS
+    expect(s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.name.includes('answered')).map((e) => [e.initiatorType, e.encodedBodySize, e.responseStatus]).sort()")).to eq([
+      ['fetch', 6, 200], ['xmlhttprequest', 6, 200]
+    ])
   end
 
   # …and where the client followed redirects the worker answered with (its own chain of hops), the entry is
@@ -409,18 +406,16 @@ RSpec.describe 'resource timing' do
       });
     JS
     page = '<!DOCTYPE html><meta charset=utf-8><body><script>navigator.serviceWorker.register("/sw.js"); setInterval(() => {}, 50);</script>'
-    every_host_local do   # Service Workers are modeled only in a universal-server context
-      s = simulated_session(lambda {|env|
-        next [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*'}, ['xfinal']] if env['PATH_INFO'] == '/xfinal'
-        next [200, {'content-type' => 'text/javascript'}, [worker]] if env['PATH_INFO'] == '/sw.js'
+    s = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*'}, ['xfinal']] if env['PATH_INFO'] == '/xfinal'
+      next [200, {'content-type' => 'text/javascript'}, [worker]] if env['PATH_INFO'] == '/sw.js'
 
-        [200, {'content-type' => 'text/html'}, [page]]
-      }).tap {|session| session.visit '/' }
-      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
-      s.evaluate_async_script("const d = arguments[0]; Promise.all([fetch('/hop').then((r) => r.text()), fetch('/xhop').then((r) => r.text())]).then(() => d())")
-      entries = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => /hop$/.test(e.name)).map((e) => [e.name.split('/').pop(), e.redirectStart > 0, e.encodedBodySize])")
-      expect(entries.sort).to eq([['hop', true, 5], ['xhop', false, 0]])
-    end
+      [200, {'content-type' => 'text/html'}, [page]]
+    }).tap {|session| session.visit '/' }
+    expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
+    s.evaluate_async_script("const d = arguments[0]; Promise.all([fetch('/hop').then((r) => r.text()), fetch('/xhop').then((r) => r.text())]).then(() => d())")
+    entries = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => /hop$/.test(e.name)).map((e) => [e.name.split('/').pop(), e.redirectStart > 0, e.encodedBodySize])")
+    expect(entries.sort).to eq([['hop', true, 5], ['xhop', false, 0]])
   end
 
   it 'gives an image the document already holds no second entry' do
@@ -686,25 +681,23 @@ RSpec.describe 'resource timing' do
       else [200, {'content-type' => 'text/html'}, [doc]]
       end
     }
-    every_host_local do   # Service Workers are modeled only in a universal-server context
-      s = simulated_session(a)
-      s.visit '/'
-      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
-      s.execute_script(<<~JS)
-        document.head.appendChild(document.createElement('style')).textContent =
-          '.t { background-image: url("/css.png?late") } .u { background-image: url("/css.png?answered") }';
-        document.body.appendChild(document.createElement('div')).className = 't';
-        document.body.appendChild(document.createElement('div')).className = 'u';
-      JS
-      entries = poll_until do
-        ns = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.initiatorType === 'css').map((e) => [e.name.split('/').pop(), e.responseStatus, e.encodedBodySize > 0])")
-        ns.length >= 2 ? ns.sort : nil
-      end
-      s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
-      expect([poll_until { s.evaluate_script('window.seen') }.sort, served, entries]).to eq([
-        ['?answered', '?late'], ['late'], [['css.png?answered', 200, true], ['css.png?late', 200, true]]
-      ])
+    s = simulated_session(a)
+    s.visit '/'
+    expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
+    s.execute_script(<<~JS)
+      document.head.appendChild(document.createElement('style')).textContent =
+        '.t { background-image: url("/css.png?late") } .u { background-image: url("/css.png?answered") }';
+      document.body.appendChild(document.createElement('div')).className = 't';
+      document.body.appendChild(document.createElement('div')).className = 'u';
+    JS
+    entries = poll_until do
+      ns = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.initiatorType === 'css').map((e) => [e.name.split('/').pop(), e.responseStatus, e.encodedBodySize > 0])")
+      ns.length >= 2 ? ns.sort : nil
     end
+    s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
+    expect([poll_until { s.evaluate_script('window.seen') }.sort, served, entries]).to eq([
+      ['?answered', '?late'], ['late'], [['css.png?answered', 200, true], ['css.png?late', 200, true]]
+    ])
   end
 
   it 'fetches an image an @import-ed sheet declares on every page that links it' do
@@ -787,28 +780,26 @@ RSpec.describe 'resource timing' do
       else [200, {'content-type' => 'text/html'}, [doc]]
       end
     }
-    every_host_local do   # Service Workers are modeled only in a universal-server context
-      s = simulated_session(a)
-      s.visit '/'
-      s.execute_script(<<~JS)
-        document.body.append(Object.assign(document.createElement('video'), { src: '/m.webm?before' }));
-      JS
-      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
-      s.execute_script(<<~JS)
-        document.body.append(Object.assign(document.createElement('video'), { src: '/m.webm?through' }));
-        document.body.append(Object.assign(document.createElement('audio'), { src: '/m.webm?answered' }));
-      JS
-      entries = poll_until do
-        ns = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.name.includes('m.webm')).map((e) => [e.name.split('/').pop(), e.initiatorType, e.encodedBodySize])")
-        ns.length >= 3 ? ns.sort : nil
-      end
-      s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
-      expect([poll_until { s.evaluate_script('window.seen') }.sort, served, entries]).to eq([
-        ['audio?answered', 'video?through'],
-        ['before', 'through'],
-        [['m.webm?answered', 'audio', 6], ['m.webm?before', 'video', video.bytesize], ['m.webm?through', 'video', video.bytesize]]
-      ])
+    s = simulated_session(a)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      document.body.append(Object.assign(document.createElement('video'), { src: '/m.webm?before' }));
+    JS
+    expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
+    s.execute_script(<<~JS)
+      document.body.append(Object.assign(document.createElement('video'), { src: '/m.webm?through' }));
+      document.body.append(Object.assign(document.createElement('audio'), { src: '/m.webm?answered' }));
+    JS
+    entries = poll_until do
+      ns = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.name.includes('m.webm')).map((e) => [e.name.split('/').pop(), e.initiatorType, e.encodedBodySize])")
+      ns.length >= 3 ? ns.sort : nil
     end
+    s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
+    expect([poll_until { s.evaluate_script('window.seen') }.sort, served, entries]).to eq([
+      ['audio?answered', 'video?through'],
+      ['before', 'through'],
+      [['m.webm?answered', 'audio', 6], ['m.webm?before', 'video', video.bytesize], ['m.webm?through', 'video', video.bytesize]]
+    ])
   end
 
   it 'fetches no media data a src attribute or preload rules out, nor anything in a document with no browsing context' do

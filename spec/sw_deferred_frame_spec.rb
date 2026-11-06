@@ -3,12 +3,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A frame navigated into a scope whose service worker is still activating waits for it (Handle Fetch waits for
 # `activated`): its build is parked, and replayed once the worker activates — each parked frame of every realm, in the
 # order it was parked, the frames of a frame's document as the top's (frame_navigation.rs `takeSwDeferredFrames`).
-RSpec.describe 'a frame parked on an activating service worker', :every_host_local do
+RSpec.describe 'a frame parked on an activating service worker' do
   include PollUntil
 
   HTML_DEFERRED = {'content-type' => 'text/html; charset=utf-8'}.freeze

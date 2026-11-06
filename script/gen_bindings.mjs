@@ -830,8 +830,9 @@ for (const [spec, text] of Object.entries(EDITORS_DRAFT_REDEFINITIONS)) {
 // [CEReactions]: the custom element reactions its steps enqueue run as it returns — an element queue pushed as it
 // begins and popped as it returns (`withCEReactions`: webidl.js `ceEnter` / `ceLeave`). [Reflect]: the implementation reflects
 // the content attribute. [SameObject] / [NewObject]: what the implementation returns. [Exposed]: the global the
-// interface object is put on — and, of a member, whether its interface's has it at all (membersOf). [SecureContext]: exposed in every realm for now,
-// whatever `isSecureContext` says (platform-globals.js): its gating is backlog. The rest the generator makes as Web IDL says.
+// interface object is put on — and, of a member, whether its interface's has it at all (membersOf). [SecureContext]: listed
+// (`SECURE_CONTEXT_INTERFACES`, `SECURE_CONTEXT_MEMBERS`), which a realm that is no secure context takes away: secure-context.js.
+// The rest the generator makes as Web IDL says.
 const HANDLED = {
   // ([Serializable] / [Transferable]: the structured clone's to honour — platform-globals.js `cloneInto` — no member's;
   // [LegacyWindowAlias]: the Window's other names for the interface object, its implementation's to put there;
@@ -1347,13 +1348,36 @@ function constantValue(m, where) {
 // The members, of an interface a worker has too, exposed in a Window alone — which a worker's realm takes off its
 // prototype (worker-globals.js): DOMMatrixReadOnly's stringifier, which parses CSS.
 const windowOnlyMembers = {};
+// What is [SecureContext] of what the interfaces generated have (Web IDL §3.3.16 "exposed"): an interface's object where
+// the interface itself is — its members go with it — else its members, each marked itself or by the partial or mixin that
+// adds it.
+const secureContextInterfaces = [], secureContextMembers = {};
+const isSecureContextOnly = (d) => (d.extAttrs || []).some((e) => e.name === 'SecureContext');
+function listSecureContext(def, memberList, addedSecure) {
+  if (isSecureContextOnly(def)) {
+    secureContextInterfaces.push(def.name);
+    return;
+  }
+  const names = new Set();
+  for (const m of memberList) {
+    if (!isSecureContextOnly(m) && !addedSecure.has(m)) continue;
+    if (m.special === 'static' || !m.name) throw new Error(`${def.name}.${m.name || m.type}: a [SecureContext] ${m.special || m.type} is not generated yet`);
+    names.add(m.name);
+  }
+  // (…a name one overload of which is exposed everywhere no name to take away)
+  for (const m of memberList) {
+    if (names.has(m.name) && !isSecureContextOnly(m) && !addedSecure.has(m)) throw new Error(`${def.name}.${m.name}: an overload of a [SecureContext] operation that is not is not generated yet`);
+  }
+  if (names.size) secureContextMembers[def.name] = [...names];
+}
+
 // The options the table gives an interface ({} for one it does not list).
 function interfaceOptions(name) {
   const entry = INTERFACES.find(([, n]) => n === name);
   return (entry && entry[2]) || {};
 }
 
-function membersOf(def, omit = {}, omitMembers = {}) {
+function membersOf(def, omit = {}, omitMembers = {}, addedSecure = new Set()) {
   const omitted = new Set();
   const gather = (d) => {
     checkExtAttrs(d.extAttrs, 'interface', d.name);
@@ -1361,10 +1385,16 @@ function membersOf(def, omit = {}, omitMembers = {}) {
     for (const a of additions.get(d.name) || []) {
       const key = a.mixin || a.partial;
       if (Object.hasOwn(omit, key)) { omitted.add(key); continue; }
-      if (a.partial) { found.push(...a.def.members); continue; }
+      if (a.partial) {
+        found.push(...a.def.members);
+        if (isSecureContextOnly(a.def)) for (const m of a.def.members) addedSecure.add(m);
+        continue;
+      }
       const mixin = mixins.get(a.mixin);
       if (!mixin) throw new Error(`${def.name}: includes ${a.mixin}, which no spec defines`);
-      found.push(...gather(mixin));
+      const added = gather(mixin);
+      found.push(...added);
+      if (isSecureContextOnly(mixin)) for (const m of added) addedSecure.add(m);
     }
     return found;
   };
@@ -1430,7 +1460,9 @@ function generateInterface(def, options = {}) {
   // (…and where its toString goes: an unforgeable stringifier attribute's an own property too — Location's `href`)
   let stringifierOut = null;
   const constructors = [];
-  const memberList = membersOf(def, options.omit, options.omitMembers);
+  const addedSecure = new Set();
+  const memberList = membersOf(def, options.omit, options.omitMembers, addedSecure);
+  listSecureContext(def, memberList, addedSecure);
   if (options.event) {
     const { steps = [], slots = {}, init = [] } = options.event;
     for (const attribute of [...steps, ...Object.keys(slots), ...init]) {
@@ -2310,6 +2342,13 @@ export const WINDOW_ONLY_INTERFACES = ${JSON.stringify(windowOnly.sort())};
 
 // …and the members exposed in a Window alone, of an interface a worker has too.
 export const WINDOW_ONLY_MEMBERS = ${JSON.stringify(windowOnlyMembers)};
+
+// The interfaces exposed in a secure context alone ([SecureContext]), which a realm that is none has no interface object
+// of…
+export const SECURE_CONTEXT_INTERFACES = ${JSON.stringify(secureContextInterfaces.sort())};
+
+// …and the members exposed in one alone, of an interface exposed everywhere, by that interface (secure-context.js).
+export const SECURE_CONTEXT_MEMBERS = ${JSON.stringify(secureContextMembers)};
 
 // The Window's other names for an interface object ([LegacyWindowAlias]), of every spec.
 export const LEGACY_WINDOW_ALIASES = ${JSON.stringify(legacyWindowAliases)};

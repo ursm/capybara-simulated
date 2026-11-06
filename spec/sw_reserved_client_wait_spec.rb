@@ -5,7 +5,6 @@ require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A navigation fetch handler that waits on `clients.get(event.resultingClientId)` — Service Workers §4.4.1: until the
 # reserved client is execution ready, after the response — keeps its own response whichever way it makes it: at once,
@@ -13,7 +12,7 @@ require_relative 'support/every_host_local'
 # response itself waiting on that get, the worker able to do nothing more — is broken, as Firefox 159 has it: the get
 # resolved early to the reserved client (Chrome 156 never loads such a document), the worker's own response then made,
 # its request sent once (workers.js `__csim_swBreakSelfWait`).
-RSpec.describe "a navigation fetch handler waiting on its reserved client's get", :every_host_local do
+RSpec.describe "a navigation fetch handler waiting on its reserved client's get" do
   HEAD_HTML = "<!doctype html><meta charset=utf-8><script>globalThis.__got=[];navigator.serviceWorker.onmessage=e=>__got.push(e.data)</script>"
 
   def worker(mode)

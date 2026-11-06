@@ -4,7 +4,6 @@ require 'capybara/simulated'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A message leaving a window carries the time of the agent's `Date` scale, not its document's (timers.js `agentShift`):
 # a next page's `Date` begins again at the wall clock, behind where the last page's had gone after a fast-forward, while
@@ -16,8 +15,7 @@ require_relative 'support/every_host_local'
 # its own `Date` 18 s ahead of the pop-up's (dDate 38,204 where the pop-up's read 20,301). Each shape here waits 5 s on
 # the opener before it navigates, and then measures, on the pop-up's clock, the round trip of a message to the worker and
 # how far the worker's `Date` stood from the pop-up's as it answered.
-# (…service workers are modeled only in a universal-server context)
-RSpec.describe "a worker's messages across an opener's navigation", :every_host_local do
+RSpec.describe "a worker's messages across an opener's navigation" do
   include PollUntil
 
   def app(popup_script, page_script = '')

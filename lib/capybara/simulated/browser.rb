@@ -5107,12 +5107,14 @@ module Capybara
         # A SharedWorker connects to the shared worker of its constructor URL and name in its storage key where one runs —
         # HTML "SharedWorker constructor" (worker_host.rs `shared_connect`) — no worker of its own spawned: its realm one
         # more of the worker's owners, its port posted to it as a connection (workers.js). One of another type or credentials
-        # mode fails the constructor's worker: an `error` event, no connection (Chrome 156 and Firefox 159 alike).
+        # mode fails the constructor's worker: an `error` event, no connection (Chrome 156 and Firefox 159 alike); and so
+        # does one whose secure context is not as the caller's (HTML, "If workerIsSecureContext is not callerIsSecureContext").
         if shared
-          found = @worker_host.shared_worker(handle, url.to_s, name.to_s, creator_key.to_s, site.to_s, worker_type(script_type), credentials.to_s, realm_id.to_i) do |h|
+          found = @worker_host.shared_worker(handle, url.to_s, name.to_s, creator_key.to_s, site.to_s, worker_type(script_type), credentials.to_s, secure == true, realm_id.to_i) do |h|
             !(w = @workers[h]) || !w[:thread]&.alive? || w[:stopping] == true
           end
-          return worker_fail(handle, 'The shared worker is of another type or credentials mode') if found.negative?
+          return worker_fail(handle, 'The shared worker is of another type or credentials mode') if found == -1
+          return worker_fail(handle, 'The shared worker is of a secure context where its caller is none, or the other way') if found == -2
           return found unless found == handle
         end
         ctrl = service ? 0 : worker_controller_handle(target, shared, controller_handle, site).to_i
@@ -5137,7 +5139,7 @@ module Capybara
           sw_body
         elsif !sw_script
           fetch_worker_script(target, parent_worker ? @workers.dig(parent_worker, :url) : frame_realm_url(realm_id),
-                              opaque: Native.opaque_origin_key?(creator_key.to_s), dest: shared ? 'sharedworker' : 'worker')
+                              client_origin: Native.opaque_origin_key?(creator_key.to_s) ? 'null' : creator_key, dest: shared ? 'sharedworker' : 'worker')
         end
         # Resource Timing for a DEDICATED worker's own main-script fetch — a browser files it in the
         # creating context's timeline (a classic worker as 'other', a module worker as 'script'; the
@@ -6073,9 +6075,8 @@ module Capybara
       # one, and the scope the worker `handle` serves or activates at.
       private def sw_regs = Native.sw_registrations(@sw_partition)
       # (…and whether there is any: none, and no navigation has a registration to match — what it asks before working
-      # out the storage key it would match by, rule 3 — none at all outside a universal-server context, where no
-      # registration is ever made: `sw_schedule_job`)
-      private def sw_registered? = all_hosts_local? && Native.sw_any(@sw_partition)
+      # out the storage key it would match by, rule 3)
+      private def sw_registered? = Native.sw_any(@sw_partition)
       private def sw_serving(site) = sw_regs.each_with_object({}) {|(scope, _, _, serving, _, s), out| out[scope] = serving if serving && s == site }
       private def sw_scope_of(handle) = sw_regs.find {|_, _, activating, serving| serving == handle || activating == handle }&.first
 
@@ -6122,13 +6123,9 @@ module Capybara
       # client's `base` and `origin`, Start Register's checks first), a registration's update() or unregister() ('update' /
       # 'unregister': its number and scope), scheduled: `['job', its number]` — an equivalent job joins the one before it
       # — or `[error name, message]`: update() of a registration with no worker an InvalidStateError.
-      # Service Workers are modeled only in a universal-server context (the WPT runner, where every host is served
-      # in-process): a real app keeps the "not supported" rejection, so its registration-failed branch runs rather than
-      # a half-modeled success path.
       # (…`site` the top-level site of the caller's storage key, its registration's: sw_registry.rs)
       # (…the host's to run, the realm by the session's number for it: `sw_realm_key`)
       def sw_schedule_job(kind, script_url, scope, update_via_cache, script_type, registration_id, base, origin, realm_id, creator_key, site)
-        return ['SecurityError', 'Service Workers not supported'] unless all_hosts_local?
         unless sw_host?
           realm = sw_realm_key(realm_id)
           return sw_host.sw_schedule_job(kind, script_url, scope, update_via_cache, script_type, registration_id, base, origin, realm, creator_key, site)
@@ -9762,9 +9759,7 @@ module Capybara
                 end
                 # Strict (unlike classic importScripts' allHostsLocal-gated check, the
                 # Mastodon-Tesseract concession): Chrome enforces JS MIME for module
-                # scripts unconditionally, and service workers only exist under the
-                # universal-server context anyway (register() rejects elsewhere), so
-                # the app-pragmatic concern that motivated the classic gate can't arise.
+                # scripts unconditionally.
                 raise "module import has an unsupported MIME type: #{abs}" unless js_mime_type?(ct)
 
                 sw_note_import(handle, abs, body2)
@@ -10233,7 +10228,8 @@ module Capybara
       # worker script", "fetch a single module script") — which fires the worker's `error`.
       # (…its client of an opaque origin — a sandboxed frame's — one no http(s) script is same-origin with: a network error,
       # the worker's `error`) — its destination `dest`, 'worker' or 'sharedworker'.
-      private def fetch_worker_script(url, client_url, opaque: false, dest: 'worker')
+      # (…`client_origin` its creator's, which an about:blank creator's URL does not say: not the page's, a frame's pop-up's)
+      private def fetch_worker_script(url, client_url, client_origin: nil, dest: 'worker')
         u = url.to_s
         # (…a NESTED worker's on its parent's thread, from the window's registry alone: the window's isolate is another
         # thread's — where the worker that made the URL entered its bytes, `__csimFillBlobMarkers` those of the page's
@@ -10257,7 +10253,7 @@ module Capybara
         # from a data: URL — its origin is opaque, so its blob: URLs serialize
         # with a 'null' origin). Decode inline; Rack can't serve a data: URL.
         return decode_data_url_body(u) if u.start_with?('data:')
-        rack_fetch_body(u, cors_mode: 'same-origin', client_url: client_url, client_origin: opaque ? 'null' : nil, dest: dest)
+        rack_fetch_body(u, cors_mode: 'same-origin', client_url: client_url, client_origin: client_origin, dest: dest)
       end
 
       # The decoded body of a `data:` URL, by Fetch's data: URL processor (the engine's, the page's too) — empty for one

@@ -6432,8 +6432,6 @@ service-workers/service-worker/clients-matchall-order.https.html:
 service-workers/service-worker/credentials.https.html:
 - Module with an imported statement should not have credentials
 - Script with service worker served as modules should not have credentials
-service-workers/service-worker/data-iframe.html:
-- 'navigator.serviceWorker is not available in a data: iframe'
 service-workers/service-worker/detached-context.https.html:
 - accessing a ServiceWorker object from a removed iframe
 service-workers/service-worker/embed-and-object-are-not-intercepted.https.html:
@@ -6476,8 +6474,6 @@ service-workers/service-worker/fetch-request-css-images.https.html:
 - Verify FetchEvent for css image-set (backgroundImage).
 - Verify FetchEvent for css image-set (shapeOutside).
 - "[harness] TIMEOUT"
-service-workers/service-worker/http-to-https-redirect-and-register.https.html:
-- register on a non-secure page after redirect from an non-secure url
 service-workers/service-worker/immutable-prototype-serviceworker.https.html:
 - worker prototype chain should be immutable
 service-workers/service-worker/local-url-inherit-controller.https.html:
@@ -6978,9 +6974,6 @@ web-locks/bfcache/contention.https.window.js:
 - "[harness] no subtests"
 - "[harness] no subtests"
 - "[harness] no subtests"
-web-locks/non-secure-context.any.js:
-- API presence in non-secure contexts
-- "[dedicatedworker] API presence in non-secure contexts"
 webmessaging/multi-globals/broadcastchannel-current.sub.html:
 - The current page being cross-origin must prevent the BroadcastChannel message from
   being seen

@@ -17706,37 +17706,6 @@ WebCryptoAPI/getPublicKey.tentative.https.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-WebCryptoAPI/historical.any.js:
-- name: Non-secure context window does not have access to CryptoKey
-  reason: Driver models localhost as a secure context (isSecureContext = true, matching
-    real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
-    are always exposed. This test asserts their ABSENCE in a non-secure context, which
-    the driver deliberately does not model. CLAUDE.md rule 1.
-- name: Non-secure context window does not have access to SubtleCrypto
-  reason: Driver models localhost as a secure context (isSecureContext = true, matching
-    real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
-    are always exposed. This test asserts their ABSENCE in a non-secure context, which
-    the driver deliberately does not model. CLAUDE.md rule 1.
-- name: Non-secure context window does not have access to crypto.subtle
-  reason: Driver models localhost as a secure context (isSecureContext = true, matching
-    real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
-    are always exposed. This test asserts their ABSENCE in a non-secure context, which
-    the driver deliberately does not model. CLAUDE.md rule 1.
-- name: "[dedicatedworker] Non-secure context window does not have access to CryptoKey"
-  reason: Driver models localhost as a secure context (isSecureContext = true, matching
-    real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
-    are always exposed. This test asserts their ABSENCE in a non-secure context, which
-    the driver deliberately does not model. CLAUDE.md rule 1.
-- name: "[dedicatedworker] Non-secure context window does not have access to SubtleCrypto"
-  reason: Driver models localhost as a secure context (isSecureContext = true, matching
-    real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
-    are always exposed. This test asserts their ABSENCE in a non-secure context, which
-    the driver deliberately does not model. CLAUDE.md rule 1.
-- name: "[dedicatedworker] Non-secure context window does not have access to crypto.subtle"
-  reason: Driver models localhost as a secure context (isSecureContext = true, matching
-    real browsers for http://localhost), so crypto.subtle / SubtleCrypto / CryptoKey
-    are always exposed. This test asserts their ABSENCE in a non-secure context, which
-    the driver deliberately does not model. CLAUDE.md rule 1.
 WebCryptoAPI/idlharness.tentative.https.any.js:
 - name: 'SubtleCrypto interface: calling decapsulateBits(AlgorithmIdentifier, CryptoKey,
     BufferSource) on crypto.subtle with too few arguments must throw TypeError'

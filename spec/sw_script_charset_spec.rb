@@ -4,14 +4,12 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A classic script a controlling service worker answers is decoded as a network one is — by its response's Content-Type
 # charset (script.rs `classic_script_encoding`) — whether the parser fetched it or a script inserted it: its bytes and
 # its Content-Type, not a text the host made of them — and refused as a network one is: a `nosniff` one of no JavaScript
 # type is a network error.
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'Service Worker script charset', :every_host_local do
+RSpec.describe 'Service Worker script charset' do
   include PollUntil
 
   let(:app) {

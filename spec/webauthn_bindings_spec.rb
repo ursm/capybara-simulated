@@ -256,7 +256,7 @@ RSpec.describe 'WebAuthn bindings' do
 
   it 'answers with a registration and assertions another verifier accepts' do
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator 'hasResidentKey' => true, 'hasUserVerification' => true, 'isUserVerified' => true
     out = run(session, <<~JS)
       #{base64url}
@@ -290,7 +290,7 @@ RSpec.describe 'WebAuthn bindings' do
     expect(JSON.parse(v.decode(created['clientData']))).to eq(
       'type'        => 'webauthn.create',
       'challenge'   => 'CQgH',
-      'origin'      => 'http://rp.example.test',
+      'origin'      => 'https://rp.example.test',
       'crossOrigin' => false
     )
 
@@ -308,7 +308,7 @@ RSpec.describe 'WebAuthn bindings' do
 
   it 'attests with the credential key where direct attestation is asked for, and to `none` otherwise' do
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
     out = run(session, <<~JS)
       #{base64url}
@@ -336,7 +336,7 @@ RSpec.describe 'WebAuthn bindings' do
   it 'signs with a credential the driver added, base64 or base64url, counting from its count' do
     key     = OpenSSL::PKey::EC.generate('prime256v1')
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     webauthn = session.driver.browser.webauthn
     handle   = webauthn.add_virtual_authenticator('transport' => 'internal')
     raw_id   = "\xfb\xff\x01\x02".b
@@ -383,7 +383,7 @@ RSpec.describe 'WebAuthn bindings' do
   # through an authenticator that has none, where §5.1.3 skips it.)
   it 'refuses what its authenticators cannot do, in the words the spec allows' do
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
     out = run(session, <<~JS)
       #{base64url}
@@ -414,7 +414,7 @@ RSpec.describe 'WebAuthn bindings' do
   # user's last on the RP (§6.3.2 "credentials map"; Chrome alike, measured; Firefox keeps both).
   it 'keeps credentials by RP ID and user' do
     session = simulated_session(app)
-    session.visit 'http://a.rp.example.test/'
+    session.visit 'https://a.rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator 'hasResidentKey' => true
     out = run(session, <<~JS)
       #{base64url}
@@ -438,7 +438,7 @@ RSpec.describe 'WebAuthn bindings' do
   # (§11.3), and the backup flags are the credential's from its authenticator's defaults (§11.2), not derived from it.
   it 'verifies the user as each ceremony requires' do
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     webauthn = session.driver.browser.webauthn
     handle   = webauthn.add_virtual_authenticator('hasResidentKey' => true, 'hasUserVerification' => true, 'automaticPresenceSimulation' => true)
     out = run(session, <<~JS)
@@ -485,7 +485,7 @@ RSpec.describe 'WebAuthn bindings' do
   # answered is, its virtual user choosing at once (Chrome alike); and a silent one is null (§2.5.1 "resolve p with null").
   it 'keeps a request pending as Credential Management says' do
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     webauthn = session.driver.browser.webauthn
     handle   = webauthn.add_virtual_authenticator('hasResidentKey' => true)
     out = run(session, <<~JS)
@@ -539,14 +539,14 @@ RSpec.describe 'WebAuthn bindings' do
       framed = '<!doctype html><meta charset="utf-8"><body><button id="go">go</button>'
       framing = <<~HTML
         <!doctype html><meta charset="utf-8"><body>
-        <iframe id="f" src="http://b.rp.example.test/" allow="publickey-credentials-create; publickey-credentials-get"></iframe>
-        <iframe id="plain" src="http://b.rp.example.test/"></iframe>
+        <iframe id="f" src="https://b.rp.example.test/" allow="publickey-credentials-create; publickey-credentials-get"></iframe>
+        <iframe id="plain" src="https://b.rp.example.test/"></iframe>
         <iframe id="narrowed" src="/leaf" allow="publickey-credentials-get 'none'"></iframe>
       HTML
       [200, {'content-type' => 'text/html'}, [env['SERVER_NAME'].start_with?('b.') || env['PATH_INFO'] == '/leaf' ? framed : framing]]
     }
     session = simulated_session(pages)
-    session.visit 'http://a.rp.example.test/'
+    session.visit 'https://a.rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
     session.within_frame('plain') do
       out = run(session, <<~JS)
@@ -581,8 +581,8 @@ RSpec.describe 'WebAuthn bindings' do
         return [new TextDecoder().decode(made.response.clientDataJSON), new TextDecoder().decode(got.response.clientDataJSON), await rejection(navigator.credentials.create(options()))];
       JS
       expect(out).to eq([
-        '{"type":"webauthn.create","challenge":"CQgH","origin":"http://b.rp.example.test","crossOrigin":true,"topOrigin":"http://a.rp.example.test"}',
-        '{"type":"webauthn.get","challenge":"AA","origin":"http://b.rp.example.test","crossOrigin":true,"topOrigin":"http://a.rp.example.test"}',
+        '{"type":"webauthn.create","challenge":"CQgH","origin":"https://b.rp.example.test","crossOrigin":true,"topOrigin":"https://a.rp.example.test"}',
+        '{"type":"webauthn.get","challenge":"AA","origin":"https://b.rp.example.test","crossOrigin":true,"topOrigin":"https://a.rp.example.test"}',
         'NotAllowedError'
       ])
     end
@@ -602,7 +602,7 @@ RSpec.describe 'WebAuthn bindings' do
   # effective domain, as the spec says.
   it 'takes its RP ID from the effective domain' do
     session = simulated_session(app)
-    session.visit 'http://a.rp.example.test/'
+    session.visit 'https://a.rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
     out = run(session, <<~JS)
       #{base64url}
@@ -611,7 +611,7 @@ RSpec.describe 'WebAuthn bindings' do
       return [b64(made.response.getAuthenticatorData()), await rejection(navigator.credentials.create(options({rp: {name: 'x', id: 'a.rp.example.test'}}))), JSON.parse(new TextDecoder().decode(made.response.clientDataJSON)).origin];
     JS
     expect(WebauthnVerifier.authenticator_data(WebauthnVerifier.decode(out[0]))[:rp_id_hash]).to eq(Digest::SHA256.digest('rp.example.test'))
-    expect(out[1..]).to eq(['SecurityError', 'http://a.rp.example.test'])
+    expect(out[1..]).to eq(['SecurityError', 'https://a.rp.example.test'])
   end
 
   # What is on offer follows the authenticators the driver added (§5.1.6): a user-verifying platform one, or none. Chrome
@@ -659,11 +659,11 @@ RSpec.describe 'WebAuthn bindings' do
   # document's base URL.
   it 'declares a frame origin as Permissions Policy says', :every_host_local do
     based = lambda {|env|
-      body = env['SERVER_NAME'].start_with?('b.') ? '<!doctype html><meta charset="utf-8"><p>b' : '<!doctype html><meta charset="utf-8"><base href="http://b.rp.example.test/"><body>'
+      body = env['SERVER_NAME'].start_with?('b.') ? '<!doctype html><meta charset="utf-8"><p>b' : '<!doctype html><meta charset="utf-8"><base href="https://b.rp.example.test/"><body>'
       [200, {'content-type' => 'text/html'}, [body]]
     }
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
     out = run(session, <<~JS)
       #{base64url}
@@ -691,7 +691,7 @@ RSpec.describe 'WebAuthn bindings' do
     expect(out).to eq(%w[none none none none none none NotAllowedError])
 
     session = simulated_session(based)
-    session.visit 'http://a.rp.example.test/'
+    session.visit 'https://a.rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
     session.execute_script(<<~JS)
       const frame = document.createElement('iframe');
@@ -712,7 +712,7 @@ RSpec.describe 'WebAuthn bindings' do
   # §5.1.4.1's opaque origin.
   it 'declares no origin for a data: frame' do
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
     out = run(session, <<~JS)
       const inner = `<!doctype html><meta charset="utf-8"><script>
@@ -739,7 +739,7 @@ RSpec.describe 'WebAuthn bindings' do
   # underscore, in the page's own host either (both browsers take it, measured: UseSTD3ASCIIRules is explicit).
   it 'checks the host an RP ID parses to' do
     session = simulated_session(app)
-    session.visit 'http://a.rp.example.test/'
+    session.visit 'https://a.rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
     out = run(session, <<~JS)
       #{base64url}
@@ -750,7 +750,7 @@ RSpec.describe 'WebAuthn bindings' do
     expect(WebauthnVerifier.authenticator_data(WebauthnVerifier.decode(out[0]))[:rp_id_hash]).to eq(Digest::SHA256.digest('RP.Example.TEST'))
     expect(out[1..]).to eq(%w[SecurityError SecurityError SecurityError SecurityError])
 
-    session.visit 'http://foo_bar.example.test/'
+    session.visit 'https://foo_bar.example.test/'
     out = run(session, <<~JS)
       #{base64url}
       return [location.hostname, await rejection(navigator.credentials.create(options())), await rejection(navigator.credentials.get({publicKey: {challenge: new Uint8Array(1)}}))];
@@ -763,7 +763,7 @@ RSpec.describe 'WebAuthn bindings' do
   it 'forgets a request with its document' do
     pages = ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']] }
     session = simulated_session(pages)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     session.driver.browser.webauthn.add_virtual_authenticator({})
     out = run(session, <<~JS)
       #{base64url}
@@ -784,7 +784,7 @@ RSpec.describe 'WebAuthn bindings' do
     expect(out).to eq(%w[none none])
 
     run(session, "navigator.credentials.get({mediation: 'conditional', publicKey: {challenge: new Uint8Array(1)}}); return 1;")
-    session.visit 'http://rp.example.test/again'
+    session.visit 'https://rp.example.test/again'
     out = run(session, <<~JS)
       #{base64url}
       return rejection(navigator.credentials.create(options()));
@@ -820,7 +820,7 @@ RSpec.describe 'WebAuthn bindings' do
         </script>
       HTML
       session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
-      session.visit 'http://rp.example.test/'
+      session.visit 'https://rp.example.test/'
       session.driver.browser.webauthn.add_virtual_authenticator(authenticator) if authenticator
       session.click_button 'go'
       if expected
@@ -836,7 +836,7 @@ RSpec.describe 'WebAuthn bindings' do
   # next request through, each its own way: the rule is explicit). Chrome answers a modal create so too, measured.
   it 'asks the authenticators again as they become available' do
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     webauthn = session.driver.browser.webauthn
     session.execute_script(<<~JS)
       globalThis.__conditional = 'pending';
@@ -880,7 +880,7 @@ RSpec.describe 'WebAuthn bindings' do
   # §15.1's longest; or till an abort.
   it 'runs a lifetime timer' do
     session = simulated_session(app)
-    session.visit 'http://rp.example.test/'
+    session.visit 'https://rp.example.test/'
     start = lambda {|name, call|
       session.execute_script(<<~JS)
         globalThis.#{name} = 'pending';

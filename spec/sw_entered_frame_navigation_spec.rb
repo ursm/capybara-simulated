@@ -4,13 +4,11 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A frame entered with `within_frame` navigates as any frame does: a controlling service worker's fetch event sees its
 # navigation request — a link's GET, a form's POST with its body — and what it answers with makes the frame's document
 # (Service Workers "Handle Fetch"; HTML "create navigation params by fetching").
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'Service Worker entered frame navigation', :every_host_local do
+RSpec.describe 'Service Worker entered frame navigation' do
   include PollUntil
 
   let(:app) {

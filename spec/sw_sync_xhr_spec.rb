@@ -3,15 +3,13 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # Handle Fetch applies to a controlled client's every request, a synchronous one's too: Fetch's "HTTP fetch" asks the
 # service worker whatever the caller waits on — XHR's synchronous flag only makes `send()` wait for the response. So a
 # controlled page's sync XHR and a controlled dedicated worker's are its service worker's to answer, as their async XHR,
 # fetch() and importScripts() are. Firefox answers all of them from the worker; Chrome all but the page's sync XHR
 # (measured 2026-11-02, Chrome 156 / Firefox 159) — a Blink departure from Fetch, which the spec outranks.
-# (…service workers are modeled only in a universal-server context)
-RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
+RSpec.describe 'a controlled client’s synchronous XHR' do
   include PollUntil
 
   let(:app) {

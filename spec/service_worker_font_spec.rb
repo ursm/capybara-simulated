@@ -3,13 +3,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A web font a controlling service worker answers is drawn from that answer's bytes — one the network has no file at
 # (404) too — whether a stylesheet's `@font-face` or a script's FontFace asked: the download and the face's fetch are
 # one dispatch, and the bytes it answered were thrown away, the network asked again.
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'a web font a service worker answers', :every_host_local do
+RSpec.describe 'a web font a service worker answers' do
   ahem = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
 
   let(:app) {

@@ -3,14 +3,12 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
-require_relative 'support/every_host_local'
 
 # A reload navigation of a controlled iframe (location.reload() / history.go(0)) routes through
 # the controlling service worker's fetch event with `request.isReloadNavigation === true` — the
 # initial load is not a reload. (The WPT surface lives in service-workers/service-worker/
 # fetch-event + cache-storage/cache-keys-attributes; this pins the mechanism directly.)
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'Service Worker reload-navigation interception', :every_host_local do
+RSpec.describe 'Service Worker reload-navigation interception' do
   let(:worker) {
     <<~JS
       self.addEventListener('fetch', e => {

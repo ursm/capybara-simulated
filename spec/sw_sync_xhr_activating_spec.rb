@@ -3,7 +3,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A client `clients.claim()` takes in its worker's `activate` event is controlled while the worker is still activating,
 # and Handle Fetch waits for the worker to become activated before it dispatches the client's request to it
@@ -11,8 +10,7 @@ require_relative 'support/every_host_local'
 # with it. Before, it went to the network, bypassing the worker. The page's test of its control and its XHR fell
 # between the claim and the end of `activate`, a race a loaded machine lost about once in forty runs of
 # sw_sync_xhr_spec; here `activate` stays open 300 ms after the claim, so the race is lost every time.
-# (…service workers are modeled only in a universal-server context)
-RSpec.describe 'a controlled client’s synchronous XHR while its worker activates', :every_host_local do
+RSpec.describe 'a controlled client’s synchronous XHR while its worker activates' do
   include PollUntil
 
   let(:app) {

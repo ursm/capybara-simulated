@@ -3,7 +3,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # The `Accept` a request carries where its header list has none: its destination's (Fetch "fetch" step 12) — an
 # image's image types, a sheet's CSS, a frame's documents (a form's navigation of one too), and `*/*` for every other: a
@@ -57,8 +56,7 @@ RSpec.describe 'a subresource request' do
 
   # (…and the network's leg of a service worker's race against its handler, the request the worker was handed: a frame
   # navigation's a document's, an image's image types)
-  # (…a service worker modeled in a universal-server context alone)
-  it "races a service worker's handler with the request's Accept", :every_host_local do
+  it "races a service worker's handler with the request's Accept" do
     races = {}
     session = simulated_session(lambda {|env|
       races[env['PATH_INFO']] = env['HTTP_ACCEPT'] if env['PATH_INFO'].start_with?('/race')

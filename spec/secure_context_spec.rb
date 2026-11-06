@@ -13,7 +13,11 @@ RSpec.describe 'a secure context' do
     lambda {|env|
       case env['PATH_INFO']
       when '/w.js' then [200, {'content-type' => 'text/javascript'}, ['postMessage(isSecureContext)']]
+      when '/reads.js' then [200, {'content-type' => 'text/javascript'}, ["postMessage([self.caches, navigator.serviceWorker, navigator.locks, crypto.subtle, crypto.randomUUID, self.Cache, self.Lock].map((v) => typeof v))"]]
+      when '/shared.js' then [200, {'content-type' => 'text/javascript'}, ['onconnect = (e) => e.ports[0].postMessage(isSecureContext)']]
       when '/frame' then [200, {'content-type' => 'text/html'}, ['<p>frame</p>']]
+      when '/framed-a' then [200, {'content-type' => 'text/html'}, ['<!doctype html><iframe name="fr" src="http://a.test/frame"></iframe>']]
+      when '/framed-local' then [200, {'content-type' => 'text/html'}, ['<!doctype html><iframe name="fr" src="http://localhost/frame"></iframe>']]
       else [200, headers, ['<!doctype html><iframe name="fr" src="/frame"></iframe>']]
       end
     }
@@ -71,6 +75,134 @@ RSpec.describe 'a secure context' do
     expect(session.evaluate_script('isSecureContext')).to be(true)
     session.visit('/')
     expect(session.evaluate_script('crossOriginIsolated')).to be(true)
+  end
+
+  # Web IDL "exposed": a [SecureContext] construct is absent where the environment is no secure context, not a getter
+  # answering undefined — as a member and as an interface object, on the global and on a prototype. Chrome and Firefox on a
+  # LAN IP alike: `serviceWorker`, `clipboard`, `credentials`, `locks`, `mediaDevices`, `subtle`, `randomUUID`, `caches`.
+  describe '[SecureContext] constructs' do
+    let(:members) {
+      [
+        ["'serviceWorker' in navigator", 'Navigator.prototype'],
+        ["'clipboard' in navigator", 'Navigator.prototype'],
+        ["'credentials' in navigator", 'Navigator.prototype'],
+        ["'locks' in navigator", 'Navigator.prototype'],
+        ["'mediaDevices' in navigator", 'Navigator.prototype'],
+        ["'registerProtocolHandler' in navigator", 'Navigator.prototype'],
+        ["'subtle' in crypto", 'Crypto.prototype'],
+        ["'randomUUID' in crypto", 'Crypto.prototype'],
+        ["'caches' in self", 'the global'],
+        ["'ServiceWorker' in self", 'the global'],
+        ["'ServiceWorkerContainer' in self", 'the global'],
+        ["'Cache' in self", 'the global'],
+        ["'CacheStorage' in self", 'the global'],
+        ["'SubtleCrypto' in self", 'the global'],
+        ["'CryptoKey' in self", 'the global'],
+        ["'Clipboard' in self", 'the global'],
+        ["'LockManager' in self", 'the global'],
+        ["'PublicKeyCredential' in self", 'the global'],
+        ["'DeviceMotionEvent' in self", 'the global']
+      ].map(&:first)
+    }
+    let(:reads) { "[#{members.join(', ')}]" }
+
+    it 'has none of them where it is none, its frame neither', :every_host_local do
+      session.visit('http://a.test/')
+      expect(session.evaluate_script(reads).uniq).to eq([false])
+      expect(session.evaluate_script("[Object.getOwnPropertyDescriptor(Navigator.prototype, 'locks'), Object.getOwnPropertyDescriptor(self, 'caches'), navigator.serviceWorker, crypto.subtle]")).to all(be_nil)
+      # (…all else as it was: what is exposed everywhere of the same interfaces)
+      expect(session.evaluate_script("[typeof crypto.getRandomValues, typeof navigator.userAgent, typeof fetch, typeof Crypto, typeof Navigator]")).to eq(%w[function string function function function])
+      session.within_frame('fr') { expect(session.evaluate_script(reads).uniq).to eq([false]) }
+    end
+
+    it 'has every one where it is one', :every_host_local do
+      session.visit('https://a.test/')
+      expect(session.evaluate_script(reads).uniq).to eq([true])
+    end
+
+    it 'has every one on the default host, which stands for the loopback' do
+      session.visit('/')
+      expect(session.evaluate_script(reads).uniq).to eq([true])
+    end
+
+    it 'has none of them in a worker of a page where it is none, and every one in a worker where it is one', :every_host_local do
+      read = "const w = new Worker('/reads.js'); w.onmessage = (e) => arguments[0](e.data)"
+      session.visit('http://a.test/')
+      expect(session.evaluate_async_script(read).uniq).to eq(['undefined'])
+      session.visit('https://a.test/')
+      expect(session.evaluate_async_script(read)).to eq(%w[object object object object function function function])
+    end
+
+    it 'has them in a realm a page made none of, the Window the next page makes a new one', :every_host_local do
+      session.visit('http://a.test/')
+      session.visit('https://a.test/')
+      expect(session.evaluate_script(reads).uniq).to eq([true])
+      session.visit('http://a.test/')
+      expect(session.evaluate_script(reads).uniq).to eq([false])
+    end
+
+    # (…a kept Window: its first document's environment of its own top-level creation URL, no longer its creator's; so the
+    # same realm has them after where it had none before, and the other way. Measured of Chrome 156 and Firefox 159, for a
+    # frame on `localhost` under a LAN IP's page: their initial about:blank reads as its document will, so what a realm is
+    # decided as never changes there. This engine's `isSecureContext` of it is the text's; what is exposed goes with that.)
+    it 'follows the document a kept Window goes on to, none before and one after', :every_host_local do
+      session.visit('http://a.test/framed-local')
+      session.within_frame('fr') do
+        session.execute_script("window.w = open('http://localhost/frame'); w.marker = 1; window.blank = [w.isSecureContext, w.location.href]; window.before = #{reads.gsub('navigator', 'w.navigator').gsub('crypto', 'w.crypto').gsub(' in self', ' in w')};")
+        expect(session.evaluate_script('blank')).to eq([false, 'about:blank'])
+        expect(session.evaluate_script('before').uniq).to eq([false])
+      end
+      session.within_window(session.windows.last) do
+        expect(session).to have_css('p')
+        expect(session.evaluate_script('[marker, isSecureContext]')).to eq([1, true])
+        expect(session.evaluate_script(reads).uniq).to eq([true])
+        expect(session.evaluate_script('typeof navigator.serviceWorker.register')).to eq('function')
+      end
+    end
+
+    it 'follows the document a kept Window goes on to, one before and none after', :every_host_local do
+      session.visit('http://localhost/framed-a')
+      session.within_frame('fr') do
+        session.execute_script("window.w = open('http://a.test/frame'); w.marker = 1; window.blank = [w.isSecureContext, w.location.href]; window.before = #{reads.gsub('navigator', 'w.navigator').gsub('crypto', 'w.crypto').gsub(' in self', ' in w')};")
+        expect(session.evaluate_script('blank')).to eq([true, 'about:blank'])
+        expect(session.evaluate_script('before').uniq).to eq([true])
+      end
+      session.within_window(session.windows.last) do
+        expect(session).to have_css('p')
+        expect(session.evaluate_script('[marker, isSecureContext]')).to eq([1, false])
+        expect(session.evaluate_script(reads).uniq).to eq([false])
+      end
+    end
+
+    # (…the holder as the bundle made it, whatever a page's name for it says since)
+    it 'takes them from what the bundle made, a page having renamed it', :every_host_local do
+      session.visit('http://localhost/framed-a')
+      session.within_frame('fr') { session.execute_script("window.w = open('http://a.test/frame'); w.Navigator = function () {}; w.Navigator.prototype = {};") }
+      session.within_window(session.windows.last) do
+        expect(session).to have_css('p')
+        expect(session.evaluate_script("'serviceWorker' in navigator")).to be(false)
+      end
+    end
+  end
+
+  # HTML "SharedWorker constructor": "If workerIsSecureContext is not callerIsSecureContext", `error` at the worker, no
+  # connection. A pop-up's initial about:blank of a frame on a.test under a secure top is one of a.test's site and a secure
+  # context; a page of a.test is none.
+  it 'fails a shared worker of a secure context where its caller is none', :every_host_local do
+    connect = lambda {|constructor|
+      "const done = arguments[0]; const s = new #{constructor}('http://a.test/shared.js', 'n'); s.onerror = () => done('error'); s.port.onmessage = (e) => done(e.data)"
+    }
+    session.visit('http://localhost/framed-a')
+    session.within_frame('fr') do
+      session.execute_script("window.w = open('')")
+      expect(session.evaluate_async_script(connect.call('w.SharedWorker'))).to be(true)
+      session.execute_script("open('http://a.test/frame')")
+    end
+    session.within_window(session.windows.last) do
+      expect(session).to have_css('p')
+      expect(session.evaluate_script('isSecureContext')).to be(false)
+      expect(session.evaluate_async_script(connect.call('SharedWorker'))).to eq('error')
+    end
   end
 
   # (…no stand-in where a suite names the same host itself)

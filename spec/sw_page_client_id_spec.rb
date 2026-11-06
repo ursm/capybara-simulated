@@ -5,7 +5,6 @@ require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # Each document of the page is a new environment (HTML "create and initialize a Document object": a new environment
 # settings object, its id a new unique one) — the page's realm is reused across its documents, its client id is not: the
@@ -13,7 +12,7 @@ require_relative 'support/every_host_local'
 # document it commits is then (`e.source.id`, `clients.get`), and the document it replaced is no client any more —
 # `clients.get` of its id finds none, `clients.matchAll()` lists it no more, and a message posted to it is delivered to
 # none. (Service Workers "Handle Fetch": the request's reserved client; "Handle Service Worker Client Unload".)
-RSpec.describe "the page's service-worker client", :every_host_local do
+RSpec.describe "the page's service-worker client" do
   let(:worker) {
     <<~JS
       self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));

@@ -4,13 +4,11 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 require_relative 'support/https_app_host'
-require_relative 'support/every_host_local'
 
 # A navigation a controlling service worker passes through (`fetch(event.request)`) reaches the server with the request
 # metadata of the navigation's own initiating document — an about:blank frame's its creator's, whose origin its POST's
 # Origin is — as one no worker controls does.
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'a service worker passthrough navigation', :every_host_local do
+RSpec.describe 'a service worker passthrough navigation' do
   include PollUntil
 
   it "carries the Origin of an about:blank frame's creator", :https do

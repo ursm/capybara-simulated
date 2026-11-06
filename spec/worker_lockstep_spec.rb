@@ -4,7 +4,6 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A worker's timers run on the window's virtual time (Browser#worker_due_within, `worker_now`): its clock starts where
 # the window's stands as `new Worker()` runs, a window step stops at a worker's timer, the worker runs it at that time,
@@ -12,7 +11,7 @@ require_relative 'support/every_host_local'
 # busy a worker's interval is, and what a worker posts on its interval reaches the page between the page's timers in the
 # same order every run, however loaded the machine. (Virtual time read as the driver keeps it, `__virtualNow`: a page's
 # `performance.now()` adds the real time the driver spent too — timers.js `platformDateNow`.)
-RSpec.describe 'a worker beside a page timer, on one virtual time', :every_host_local do
+RSpec.describe 'a worker beside a page timer, on one virtual time' do
   def fire_time(interval, delay)
     sw = "self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));" +
          (interval ? "setInterval(() => { self.n = (self.n || 0) + 1; }, #{interval});" : '')

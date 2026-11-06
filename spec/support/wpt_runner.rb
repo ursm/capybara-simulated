@@ -1388,10 +1388,13 @@ module WptRunner
   # Both cross origin off the default, and crossing origins on the shared session
   # leaves the NEXT file unable to complete — so a run at one of these origins is
   # isolated behind a fresh session on each side. Cheap: a handful of files.
-  def origin_for(rel, query = '')
+  # (…a `.any.js` test's page for a service worker `page`: a secure context's alone, which WPT's manifest gives it — a
+  # test of the `serviceworker` flag is served over TLS, whatever its name)
+  def origin_for(rel, query = '', page = rel)
     base = File.basename(rel)
     # (…a `.https.sub.` file at the HTTPS one: wptserve serves `.https.` over TLS alone, its substitution or not)
     return SUB_HTTPS_ORIGIN if base.include?('.https.') || query.include?('wpt_flags=https') || query.include?('wpt_flags=h2')
+    return SUB_HTTPS_ORIGIN if page.end_with?('.serviceworker.html', '.serviceworker-module.html')
     return SUB_ORIGIN if base.include?('.sub.')
     nil
   end
@@ -1426,7 +1429,7 @@ module WptRunner
   # Run a SINGLE (rel, variant-query) pair. `query` is '' for a no-variant file.
   # (`page` the one it is visited at — a JS test's wrapper for one of its globals)
   def run_one(rel, query = '', page = js_test?(rel) ? any_js_pages(rel).first.last : rel)
-    origin  = origin_for(rel, query)
+    origin  = origin_for(rel, query, page)
     cross   = !origin.nil?
     drop_session! if cross
     prepare_session!

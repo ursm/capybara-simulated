@@ -3,13 +3,12 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # An image a controlling service worker answers loads from its response's bytes — a network response passed on, and one
 # whose body is a stream the worker made (its chunks drained, then decoded) — its request carrying an image's `Accept`.
 # (…every host served in-process, which a service worker's job is scheduled under alone: browser.rb `sw_schedule_job`'s
 # `all_hosts_local?`)
-RSpec.describe 'a service worker image', :every_host_local do
+RSpec.describe 'a service worker image' do
   include PollUntil
 
   png = File.binread(File.expand_path('wpt/common/square.png', __dir__))

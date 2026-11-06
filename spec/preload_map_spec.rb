@@ -4,7 +4,6 @@ require 'capybara/simulated'
 require 'digest'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A document's map of preloaded resources (HTML `rel=preload`, preload_map.rs): a preload's response is kept for the
 # first fetch that matches it — its URL, destination, mode and credentials mode — which takes it before any service
@@ -260,29 +259,27 @@ RSpec.describe 'map of preloaded resources' do
       </script>
     HTML
     served = []
-    every_host_local do   # Service Workers are modeled only in a universal-server context
-      s = simulated_session(preload_app(served, page, worker)).tap {|session| session.visit '/' }
-      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
-      s.execute_script(<<~'JS')
-        window.preloads = 0;
-        for (const [as, href] of [['image', '/i.png?pre'], ['style', '/s.css'], ['script', '/a.js']]) {
-          const link = Object.assign(document.createElement('link'), { rel: 'preload', as, href });
-          link.onload = () => { window.preloads++; };
-          document.head.append(link);
-        }
-      JS
-      expect(poll_until { s.evaluate_script('preloads === 3') }).to be true
-      s.execute_script(<<~'JS')
-        window.img = Object.assign(new Image(), { src: '/i.png?pre' });
-        document.body.append(img);
-        document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/s.css' }));
-        document.head.append(Object.assign(document.createElement('script'), { src: '/a.js' }));
-      JS
-      expect(poll_until { s.evaluate_script('img.complete && window.ran === 1') }).to be true
-      s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
-      expect([poll_until { s.evaluate_script('window.seen') }, s.evaluate_script('img.naturalWidth > 0'), served]).to eq([
-        ['image?pre', 'style', 'script'], true, ['i.png?from-worker', 's.css', 'a.js']
-      ])
-    end
+    s = simulated_session(preload_app(served, page, worker)).tap {|session| session.visit '/' }
+    expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
+    s.execute_script(<<~'JS')
+      window.preloads = 0;
+      for (const [as, href] of [['image', '/i.png?pre'], ['style', '/s.css'], ['script', '/a.js']]) {
+        const link = Object.assign(document.createElement('link'), { rel: 'preload', as, href });
+        link.onload = () => { window.preloads++; };
+        document.head.append(link);
+      }
+    JS
+    expect(poll_until { s.evaluate_script('preloads === 3') }).to be true
+    s.execute_script(<<~'JS')
+      window.img = Object.assign(new Image(), { src: '/i.png?pre' });
+      document.body.append(img);
+      document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/s.css' }));
+      document.head.append(Object.assign(document.createElement('script'), { src: '/a.js' }));
+    JS
+    expect(poll_until { s.evaluate_script('img.complete && window.ran === 1') }).to be true
+    s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
+    expect([poll_until { s.evaluate_script('window.seen') }, s.evaluate_script('img.naturalWidth > 0'), served]).to eq([
+      ['image?pre', 'style', 'script'], true, ['i.png?from-worker', 's.css', 'a.js']
+    ])
   end
 end

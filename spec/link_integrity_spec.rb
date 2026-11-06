@@ -4,7 +4,6 @@ require 'capybara/simulated'
 require 'digest'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A link's `integrity` is its request's integrity metadata (HTML "create link options from element"), whatever the
 # link's type, and a response that does not match it is a network error (Fetch "main fetch", SRI "does response match
@@ -103,20 +102,18 @@ RSpec.describe 'link integrity' do
       });
     JS
     page = '<!DOCTYPE html><meta charset=utf-8><body><p>p</p><script>navigator.serviceWorker.register("/sw.js"); setInterval(() => {}, 50);</script>'
-    every_host_local do   # Service Workers are modeled only in a universal-server context
-      s = simulated_session(lambda {|env|
-        env['PATH_INFO'] == '/sw.js' ? [200, {'content-type' => 'text/javascript'}, [worker]] : [200, {'content-type' => 'text/html'}, [page]]
-      }).tap {|session| session.visit '/' }
-      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
-      s.execute_script(<<~JS)
-        const link = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/latin.css', integrity: '#{digest}' });
-        link.onload = () => { window.result = 'load'; };
-        link.onerror = () => { window.result = 'error'; };
-        document.head.append(link);
-      JS
-      expect(poll_until { s.evaluate_script('window.result') }).to eq('load')
-      expect(s.evaluate_script("getComputedStyle(document.querySelector('p')).color")).to eq('rgb(255, 0, 0)')
-    end
+    s = simulated_session(lambda {|env|
+      env['PATH_INFO'] == '/sw.js' ? [200, {'content-type' => 'text/javascript'}, [worker]] : [200, {'content-type' => 'text/html'}, [page]]
+    }).tap {|session| session.visit '/' }
+    expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
+    s.execute_script(<<~JS)
+      const link = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/latin.css', integrity: '#{digest}' });
+      link.onload = () => { window.result = 'load'; };
+      link.onerror = () => { window.result = 'error'; };
+      document.head.append(link);
+    JS
+    expect(poll_until { s.evaluate_script('window.result') }).to eq('load')
+    expect(s.evaluate_script("getComputedStyle(document.querySelector('p')).color")).to eq('rgb(255, 0, 0)')
   end
 
   # …a shadow tree's `<link>` too, each under its own: two of one URL, one of a bad digest and one of a good one, the

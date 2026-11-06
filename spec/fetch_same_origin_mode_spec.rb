@@ -4,14 +4,12 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # Fetch "main fetch" refuses a `same-origin` request for an http(s) URL of another origin than its CLIENT's — the
 # document's origin, which a srcdoc or about:blank frame inherits whatever its location says (fetch_rules.rs
 # `same_origin_mode_refused`): such a frame of a controlled page fetches its own origin through the service worker, and
 # is refused another.
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'a same-origin request', :every_host_local do
+RSpec.describe 'a same-origin request' do
   let(:app) {
     worker = <<~JS
       self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));

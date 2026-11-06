@@ -3,14 +3,12 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A version's lifecycle step tells every realm of each worker's new state in turn (Service Workers "Update Worker
 # State", a task per realm): a realm that first makes its ServiceWorker of a worker in a `statechange` listener of
 # another one in the same step makes it in the state before, and sees its own `statechange` after — a waiting worker
 # retired as a newer one is installed, its redundant listener taking the registration's new waiting worker.
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'Service Worker lifecycle order', :every_host_local do
+RSpec.describe 'Service Worker lifecycle order' do
   include PollUntil
 
   let(:app) {

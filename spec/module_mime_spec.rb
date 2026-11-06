@@ -3,7 +3,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A module script's response must be of the MIME type its kind's is — a JavaScript one for a script, a JSON one for a
 # JSON module, `text/css` for a CSS one, each that one alone — whoever answered it (HTML "fetch a single module
@@ -11,8 +10,7 @@ require_relative 'support/every_host_local'
 # preload is (`image`) fetches nothing and fails, and one whose `media` does not match fetches nothing — until a change
 # of its `media` matches; and a module a service worker answers as `text/plain` is no module either. (Chrome and the
 # upstream WPT preload/modulepreload.html: `module1.js` as `style` or `json` fails.)
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'a module script’s MIME type', :every_host_local do
+RSpec.describe 'a module script’s MIME type' do
   let(:app) {
     worker = <<~JS
       self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));

@@ -80,6 +80,7 @@ struct SharedWorker {
     key: SharedWorkerKey,
     worker_type: String,
     credentials: String,
+    secure: bool,
     owners: Vec<i64>,
 }
 
@@ -96,10 +97,14 @@ impl SharedWorker {
 }
 
 impl State {
-    fn connect_shared(&mut self, handle: i64, worker_type: &str, credentials: &str, realm: i64) -> i64 {
+    fn connect_shared(&mut self, handle: i64, worker_type: &str, credentials: &str, secure: bool, realm: i64) -> i64 {
         let Some((_, worker)) = self.shared.iter_mut().find(|(h, _)| *h == handle) else { return 0 };
         if !worker.accepts(worker_type, credentials) {
             return -1;
+        }
+        // (HTML "If workerIsSecureContext is not callerIsSecureContext": as a type or credentials mode of another's)
+        if worker.secure != secure {
+            return -2;
         }
         worker.connect(realm);
         handle
@@ -190,22 +195,23 @@ impl WorkerHost {
     }
 
     // ── Shared workers ──
-    // #shared_worker(handle, url, name, origin, site, type, credentials, realm) { |handle| closing? } -> what a SharedWorker
+    // #shared_worker(handle, url, name, origin, site, type, credentials, secure, realm) { |handle| closing? } -> what a SharedWorker
     // constructor comes to: the handle of the worker of its constructor URL, name and storage key — the block saying of each
     // whether its global's closing flag is set, which HTML's search skips — `realm` one more of its owners; -1 for one of
-    // another type or credentials mode, which fails the constructor's worker; and, none found, `handle`, the one it is to
+    // another type or credentials mode and -2 for one whose secure context is not as the caller's, each of which fails the
+    // constructor's worker; and, none found, `handle`, the one it is to
     // make, known by these from now on. (The block run with nothing locked: it is the host's, which may switch threads.)
     #[allow(clippy::too_many_arguments)]
-    fn shared_worker(ruby: &magnus::Ruby, rb_self: &Self, handle: i64, url: String, name: String, origin: String, site: String, worker_type: String, credentials: String, realm: i64) -> Result<i64, magnus::Error> {
+    fn shared_worker(ruby: &magnus::Ruby, rb_self: &Self, handle: i64, url: String, name: String, origin: String, site: String, worker_type: String, credentials: String, secure: bool, realm: i64) -> Result<i64, magnus::Error> {
         let key = SharedWorkerKey { url, name, origin, site };
         let found: Vec<i64> = rb_self.lock().shared.iter().filter(|(_, w)| w.key == key).map(|(h, _)| *h).collect();
         for h in found {
             let closing: bool = ruby.yield_value(h)?;
             if !closing {
-                return Ok(rb_self.lock().connect_shared(h, &worker_type, &credentials, realm));
+                return Ok(rb_self.lock().connect_shared(h, &worker_type, &credentials, secure, realm));
             }
         }
-        rb_self.lock().shared.push((handle, SharedWorker { key, worker_type, credentials, owners: vec![realm] }));
+        rb_self.lock().shared.push((handle, SharedWorker { key, worker_type, credentials, secure, owners: vec![realm] }));
         Ok(handle)
     }
     // #shared_forget(handle) — it was reaped.
@@ -401,7 +407,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("owed?", method!(WorkerHost::is_owed, 1))?;
     class.define_method("clear", method!(WorkerHost::clear, 0))?;
     class.define_method("reset", method!(WorkerHost::reset, 0))?;
-    class.define_method("shared_worker", method!(WorkerHost::shared_worker, 8))?;
+    class.define_method("shared_worker", method!(WorkerHost::shared_worker, 9))?;
     class.define_method("shared_forget", method!(WorkerHost::shared_forget, 1))?;
     class.define_method("shared_owners_left", method!(WorkerHost::shared_owners_left, 1))?;
     class.define_method("stream_opened", method!(WorkerHost::stream_opened, 3))?;
@@ -431,7 +437,7 @@ mod tests {
     fn hosting_one() -> WorkerHost {
         let host = WorkerHost::new();
         let key = SharedWorkerKey { url: "u".into(), name: "n".into(), origin: "o".into(), site: "s".into() };
-        host.lock().shared.push((7, SharedWorker { key, worker_type: "classic".into(), credentials: "same-origin".into(), owners: vec![1] }));
+        host.lock().shared.push((7, SharedWorker { key, worker_type: "classic".into(), credentials: "same-origin".into(), secure: true, owners: vec![1] }));
         host
     }
 
@@ -439,11 +445,12 @@ mod tests {
     fn a_shared_worker_found_takes_a_connection_only_of_its_type_and_credentials() {
         let host = hosting_one();
         let mut state = host.lock();
-        assert_eq!(state.connect_shared(7, "module", "same-origin", 2), -1);
-        assert_eq!(state.connect_shared(7, "classic", "include", 2), -1);
-        assert_eq!(state.connect_shared(7, "classic", "same-origin", 2), 7);
-        assert_eq!(state.connect_shared(7, "classic", "same-origin", 2), 7);
-        assert_eq!(state.connect_shared(9, "classic", "same-origin", 2), 0);
+        assert_eq!(state.connect_shared(7, "module", "same-origin", true, 2), -1);
+        assert_eq!(state.connect_shared(7, "classic", "include", true, 2), -1);
+        assert_eq!(state.connect_shared(7, "classic", "same-origin", false, 2), -2);
+        assert_eq!(state.connect_shared(7, "classic", "same-origin", true, 2), 7);
+        assert_eq!(state.connect_shared(7, "classic", "same-origin", true, 2), 7);
+        assert_eq!(state.connect_shared(9, "classic", "same-origin", true, 2), 0);
         assert_eq!(state.shared[0].1.owners, [1, 2]);
     }
 
@@ -451,7 +458,7 @@ mod tests {
     fn a_shared_worker_has_an_owner_left_until_the_last_goes() {
         let host = hosting_one();
         let mut state = host.lock();
-        state.connect_shared(7, "classic", "same-origin", 2);
+        state.connect_shared(7, "classic", "same-origin", true, 2);
         assert!(state.drop_owners(7, &[1]));
         assert!(!state.drop_owners(7, &[2]));
         assert!(!state.drop_owners(9, &[]));

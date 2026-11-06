@@ -4,7 +4,6 @@ require 'capybara/simulated'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A request a service worker answers is answered at the time its `fetch` event's work takes on the window's clock — one
 # virtual time for the window's event loop and its workers' (Browser#worker_due_within) — and a timeout the client set
@@ -16,8 +15,7 @@ require_relative 'support/every_host_local'
 # Before, the worker's thread took the request whenever it got to it, the window's clock run on meanwhile — a
 # fast-forward to the request's own timeout among it — and an answer due in 50 ms of a timeout of 100 came at 100, the
 # request aborted, or by however much a loaded machine's scheduler made it: 141, 100, 1016.
-# (…service workers are modeled only in a universal-server context)
-RSpec.describe 'a request a service worker answers, on the clock', :every_host_local do
+RSpec.describe 'a request a service worker answers, on the clock' do
   include PollUntil
 
   let(:app) {

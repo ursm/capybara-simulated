@@ -3,13 +3,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A navigation's hop that its service worker leaves to the network (no `respondWith`) sends the cookies the jar has as
 # that request is made — Fetch reads them in "HTTP-network-or-cache fetch", after the worker's leg — so one the hop's
 # navigation preload response set on the way is sent with it.
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'a navigation a service worker leaves to the network', :every_host_local do
+RSpec.describe 'a navigation a service worker leaves to the network' do
   include PollUntil
 
   let(:sent) { [] }
@@ -36,9 +34,9 @@ RSpec.describe 'a navigation a service worker leaves to the network', :every_hos
 
   it 'sends the cookie its preload response set' do
     session = simulated_session(app)
-    session.visit 'https://www.example.com/reg'
+    session.visit '/reg'
     expect(poll_until { session.title == 'ready' }).to be(true)
-    session.visit 'https://www.example.com/page'
+    session.visit '/page'
     expect(sent.select {|path, _| path == '/page' }.map {|_, kind, cookie| [kind, cookie] }).to eq([[:preload, nil], [:network, 'pre=1']])
   end
 end

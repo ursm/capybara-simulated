@@ -3,13 +3,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # An EventSource a service worker answers is announced at its response's head (HTML "announce the connection": open and
 # its `open` in one task) — never OPEN with no `open` fired while the body is read — and a status other than 200, or no
 # `text/event-stream`, fails it (event_source_state.rs `served`).
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'an EventSource a service worker answers', :every_host_local do
+RSpec.describe 'an EventSource a service worker answers' do
   let(:app) {
     worker = <<~JS
       self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));

@@ -5,15 +5,13 @@ require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # ServiceWorker, ServiceWorkerRegistration, ServiceWorkerContainer and NavigationPreloadManager, generated from their
 # IDL: made by the platform alone, their state in slots — the client's objects and the service worker's own view of
 # itself and its registration alike, which are the same interfaces' objects. A service worker posting to itself gets
 # the message, from its own ServiceWorker; a registration with no active worker yet has no navigation preload to enable
 # (an InvalidStateError, Service Workers §3.5), and a header value has no leading or trailing whitespace (Fetch).
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'Service Worker bindings', :every_host_local do
+RSpec.describe 'Service Worker bindings' do
   let(:app) {
     Rack::Builder.new {
       run lambda {|env|

@@ -4,14 +4,12 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # `clients.claim()` claims for an active worker alone (Service Workers §4.3.4): one evaluating or installing is no
 # active worker yet — an InvalidStateError — where one activating is its registration's active worker already. And a
 # worker's activate event is Activate's to fire (§8): an update waiting while the worker before it controls a client runs
 # no activate handler — a cache cleanup the old version still serves from — and claims nothing.
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'Service Worker clients.claim()', :every_host_local do
+RSpec.describe 'Service Worker clients.claim()' do
   include PollUntil
 
   let(:app) {

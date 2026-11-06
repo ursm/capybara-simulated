@@ -1,11 +1,10 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A service worker's streamed response is open from its head to its terminal frame — its chunks between keep it open
 # (WorkerHost streams): a client's `reader.cancel()` after a chunk reaches the worker's source stream's `cancel()`.
-RSpec.describe "a service worker's streamed response", :every_host_local do
+RSpec.describe "a service worker's streamed response" do
   include PollUntil
   let(:app) {
     worker = <<~JS

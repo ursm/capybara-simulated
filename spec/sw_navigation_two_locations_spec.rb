@@ -4,14 +4,12 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
-require_relative 'support/every_host_local'
 
 # A navigation a service worker answers with a redirect follows it by the rule the network's redirects are followed by
 # (response_headers.rs `redirect_locations`): two different Location fields are a network error (Fetch "extract header
 # list values" step 2) — an opaque-redirect's the worker passed on from its own `redirect: 'manual'` fetch, and a
 # Response the worker makes with two `location` entries (headers.rs `HeaderList`: each header a field of its own).
-# (…service Workers are modeled only in a universal-server context)
-RSpec.describe 'a navigation a service worker answers with two Location fields', :every_host_local do
+RSpec.describe 'a navigation a service worker answers with two Location fields' do
   include PollUntil
 
   let(:app) {

@@ -3,7 +3,6 @@
 require 'capybara/simulated'
 require 'json'
 require_relative 'support/session_teardown'
-require_relative 'support/every_host_local'
 
 # A service worker outlives the page that started it, and its clock follows the window's event loop on into the next
 # page. The window's virtual clock runs on across the navigation, so the worker's timers keep their pace. The next
@@ -14,8 +13,7 @@ require_relative 'support/every_host_local'
 # next tick moved it on by the whole session's time (an interval started 5 s in had ticked 50 times a second later, not
 # 10). And a message of the worker's landed 4.8 s on the next page's `performance.now()`, lifted to the last page's
 # `Date`. The page asks 10 ms after it loads and again at 1,000.
-# (…service workers are modeled only in a universal-server context)
-RSpec.describe 'a service worker across a navigation', :every_host_local do
+RSpec.describe 'a service worker across a navigation' do
   let(:app) {
     sw = <<~JS
       self.addEventListener('install', () => self.skipWaiting());
