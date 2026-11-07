@@ -201,4 +201,14 @@ RSpec.describe 'document.write during parsing' do
     JS
     expect(got).to eq(%w[ba y k])
   end
+
+  # An `open()` from no script the page's parser runs — a frame's `load` fired as the parser inserts it — opens the
+  # document, and the page's parse builds nothing more into the document written: "stop loading" aborts it, and it is
+  # no longer the document's active parser (html_parse.rs `begin_script_created`). Chrome and Firefox `new` (measured
+  # 2026-11-07 — Firefox fires the frame's load after the parse).
+  it 'aborts the page’s parse that an open() from a frame’s load replaces' do
+    s = session_for(%(<iframe onload="if (!window.done) { window.done = 1; document.open(); ) +
+                    %(document.write('<!DOCTYPE html><p>new</p>'); document.close(); }"></iframe><p>old-after</p>))
+    expect(s.evaluate_script('document.body.textContent.trim()')).to eq('new')
+  end
 end

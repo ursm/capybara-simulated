@@ -78,7 +78,7 @@ struct DocumentTexts {
     base_url: Option<(u64, String, String)>,
 }
 const TEXTS: usize = 5;
-const TEXT_URL: usize = 0;
+pub(crate) const TEXT_URL: usize = 0;
 const TEXT_ENCODING: usize = 1;
 pub(crate) const TEXT_ABOUT_BASE: usize = 3;
 const TEXT_REFERRER: usize = 4;
@@ -298,7 +298,11 @@ fn set_doc_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     crate::dom::dom(scope).arena.document_states.set_text(doc, field, text);
 }
 impl DocumentStates {
-    // `doc`'s text `field` is `text` (none: none).
+    // `doc`'s text `field`, none where none is set.
+    pub(crate) fn text(&self, doc: NodeId, field: usize) -> Option<&str> {
+        self.1.get(&doc).and_then(|t| t.texts.get(field)).and_then(|t| t.as_deref())
+    }
+    // …and it is `text` (none: none).
     pub(crate) fn set_text(&mut self, doc: NodeId, field: usize, text: Option<String>) {
         let texts = self.1.entry(doc).or_default();
         texts.texts[field] = text;

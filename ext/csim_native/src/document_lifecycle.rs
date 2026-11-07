@@ -182,6 +182,9 @@ const MARKUP_OPEN_FIRST: u32 = 3;
 const MARKUP_THROW_XML: u32 = 4;
 const MARKUP_THROW_COUNTER: u32 = 5;
 const MARKUP_THROW_ORIGIN: u32 = 6;
+// …with, where it goes on, whether the document's script-created parser runs under the bindings' stream hooks: theirs
+// to run it with (html_parse.rs `ActiveParser::streaming`), as the engine decided as it made it.
+const MARKUP_STREAMING: u32 = 8;
 #[derive(Clone, Copy, Default)]
 struct MarkupFacts {
     xml: bool,
@@ -220,7 +223,7 @@ fn markup_steps(steps: u32, facts: MarkupFacts) -> u32 {
     }
 }
 // __dom.docMarkupSteps(docNid, steps, entryRealm) -> `markup_steps` of the document as it is — `entryRealm` the entry
-// settings object's (-1: no script's), which the open steps alone ask.
+// settings object's (-1: no script's), which the open steps alone ask — and `MARKUP_STREAMING`.
 fn markup_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_uint32(MARKUP_RETURN) };
     let steps = args.get(1).uint32_value(scope).unwrap_or(STEPS_OPEN);
@@ -228,26 +231,28 @@ fn markup_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let Some(cid) = crate::dom::dom(scope).arena.get(doc).map(|n| n.realm) else { return rv.set_uint32(MARKUP_RETURN) };
     let other_origin = steps == STEPS_OPEN && entry >= 0 && entry != cid && !crate::realm_location::realms_same_origin(scope, entry, cid);
     let parser = crate::dom::dom(scope).arena.document_states.parser(doc);
-    let (script_running, script_created) = crate::html_parse::insertion_points(scope, parser);
+    let active = crate::html_parse::active_parser(scope, parser);
     let arena = &crate::dom::dom(scope).arena;
     let (insertions, destructive_ignored) = arena.document_states.markup_state(doc);
     let facts = MarkupFacts {
         xml: !crate::document_state::is_html(arena, Some(doc)),
         counter_raised: insertions > 0,
         other_origin,
-        script_running,
-        script_created,
+        script_running: active.script_running,
+        script_created: active.script_created,
         unloading: arena.realm_document(cid) == Some(doc) && arena.unloading(cid),
         parser_aborted: arena.document_states.lifecycle(doc).aborted,
         destructive_ignored: destructive_ignored > 0,
     };
-    rv.set_uint32(markup_steps(steps, facts));
+    rv.set_uint32(markup_steps(steps, facts) | if active.streaming { MARKUP_STREAMING } else { 0 });
 }
 
-// What the document open steps answer (`docOpen`): its readiness changed, its URL moved.
+// What the document open steps answer (`docOpen`): its readiness changed, its URL moved, its script-created parser runs
+// under the bindings' stream hooks.
 const OPENED_READY_CHANGED: u32 = 1;
 const OPENED_URL_MOVED: u32 = 2;
-// __dom.docOpen(docNid, entryRealm) -> `OPENED_*`: HTML document open steps 11-17, once the bindings have stopped its
+const OPENED_STREAMING: u32 = 4;
+// __dom.docOpen(docNid, entryRealm) -> `OPENED_*`: HTML document open steps 12-18, once the bindings have stopped its
 // navigable's loading, erased its listeners and handlers and emptied it — `entryRealm` the entry settings object's. Its
 // URL the entry document's (`take_entry_url`); it no initial about:blank any more (a navigation of its window after makes
 // a Window of its own); its container's load muted where that container's "iframe load in progress" flag is set (its
@@ -264,17 +269,22 @@ fn open(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
         arena.set_state(doc, state & !crate::dom::STATE_INITIAL_ABOUT_BLANK);
     }
     let own = arena.realm_document(cid) == Some(doc);
-    let muted = own && arena.live_container(cid).is_some_and(|c| arena.frame_nav_has(c, crate::frame_navigation::LOAD_IN_PROGRESS));
+    // (…the container whose navigable's active document it is, which another's load does not mute)
+    let container = arena.live_container(cid).filter(|&c| own && arena.frame_realm(c) == Some(cid));
+    let muted = container.is_some_and(|c| arena.frame_nav_has(c, crate::frame_navigation::LOAD_IN_PROGRESS));
     arena.document_states.set_mode(doc, 0);
     let streaming = own && arena.document_states.has_browsing_context(doc);
-    let srcdoc = arena.document_url(doc, false) == "about:srcdoc";
+    // (…an iframe srcdoc document's: its URL `about:srcdoc` — the realm's own document's its realm's where it carries none)
+    let url = if own { Some(arena.document_url(doc, false)) } else { arena.document_states.text(doc, crate::document_state::TEXT_URL).map(str::to_owned) };
+    let srcdoc = url.as_deref() == Some("about:srcdoc");
     crate::html_parse::begin_script_created(scope, cid, doc, streaming, srcdoc);
     let states = &mut crate::dom::dom(scope).arena.document_states;
     let generation = states.next_generation();
     let changed = states.lifecycle_mut(doc).open(generation, muted);
-    rv.set_uint32(if changed { OPENED_READY_CHANGED } else { 0 } | if moved { OPENED_URL_MOVED } else { 0 });
+    let flag = |on: bool, bit: u32| if on { bit } else { 0 };
+    rv.set_uint32(flag(changed, OPENED_READY_CHANGED) | flag(moved, OPENED_URL_MOVED) | flag(streaming, OPENED_STREAMING));
 }
-// HTML document open steps 11: a fully active document a script of another one opens takes the URL of that one — the
+// HTML document open steps 12: a fully active document a script of another one opens takes the URL of that one — the
 // entry realm's document — its fragment excluded (WPT url.window.js, url-fragment.window.js; Chrome, Firefox), its
 // location's origin the URL's from then on but its own origin unchanged (`RealmLocation::take_document_url`), and no
 // about base URL; one no longer active, or opened by its own script, keeps its own. A frame's session history entry is

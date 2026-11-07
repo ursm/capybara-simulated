@@ -410,6 +410,9 @@ struct Parse {
     // `document.close()` inserts one (`closed`, `htmlClose`) — the input running out is where its insertion point is.
     script_created: bool,
     closed: bool,
+    // Whether its document has a browsing context and is its realm's own — a script-created parser's scripts run, as a
+    // page load's do, under the bindings' stream hooks (`ActiveParser::streaming`).
+    streaming: bool,
     // The nodes by handle the engine built (`htmlRunBuilt`), and what holds them while the parse goes on: one a script
     // took out of the tree is the parser's still (an open element, the form element pointer).
     handles: Vec<Option<crate::dom::NodeId>>,
@@ -425,6 +428,12 @@ struct Parse {
 }
 
 impl Parse {
+    // HTML "abort a parser": its input thrown away, nothing more of it built — ended, as one whose input ran out is.
+    fn abort(&mut self) {
+        self.ended = true;
+        self.pending = None;
+        self.blocking = None;
+    }
     // Tokenize until the input runs out (-1) or a script has to run first (its handle). The input running out with
     // none set aside is the end of the document.
     fn run(&mut self) -> i32 {
@@ -482,9 +491,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // Run a parser op, catching a panic (a bug in the parser, or one a page's input found) where it would otherwise unwind
-// into V8's callback frame and abort the process: the parse it was running is dropped — what it built so far stands,
-// the rest of its input is lost — the bug goes to stderr, and the op answers `panicked` (steps that end the parse, so
-// the page side winds it down as it would one whose input ran out).
+// into V8's callback frame and abort the process: the parse it was running is ended — what it built so far stands,
+// the rest of its input is lost (`Parse::abort`) — the bug goes to stderr, and the op answers `panicked` (steps that
+// end the parse, so the page side winds it down as it would one whose input ran out, `htmlDone` and all).
 fn parser_op(
     scope: &mut v8::PinScope<'_, '_>,
     id: Option<u32>,
@@ -495,8 +504,8 @@ fn parser_op(
     let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(scope, rv))) else { return };
     let what = panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned());
     eprintln!("csim: the HTML parser panicked: {}", what.unwrap_or_default());
-    if let Some(id) = id {
-        parses(scope).live.remove(&id);
+    if let Some(p) = id.and_then(|id| parses(scope).live.get_mut(&id)) {
+        p.abort();
     }
     let items: Vec<v8::Local<v8::Value>> = panicked.iter().map(|&n| v8::Integer::new(scope, n).into()).collect();
     let answer = v8::Array::new_with_elements(scope, &items);
@@ -514,18 +523,25 @@ fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
         let cid = crate::dom::realm_id(scope, &args);
-        let start = ParseStart { scripting: args.get(2).boolean_value(scope), iframe_srcdoc: args.get(3).boolean_value(scope), declarative: args.get(4).boolean_value(scope), script_created: false };
+        let start = ParseStart {
+            scripting: args.get(2).boolean_value(scope),
+            iframe_srcdoc: args.get(3).boolean_value(scope),
+            declarative: args.get(4).boolean_value(scope),
+            script_created: false,
+            streaming: true,
+        };
         let id = begin_parse(scope, cid, doc, html, standins, start);
         rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, id).into()]).into());
     });
 }
-// How a parse begins: with its scripting flag, as an iframe srcdoc document's, attaching declarative shadow roots, and
-// as a script-created parser's.
+// How a parse begins: with its scripting flag, as an iframe srcdoc document's, attaching declarative shadow roots, as a
+// script-created parser's, and under the bindings' stream hooks.
 struct ParseStart {
     scripting: bool,
     iframe_srcdoc: bool,
     declarative: bool,
     script_created: bool,
+    streaming: bool,
 }
 // A parse of `doc`, of `html`, begun: the document's active parser — its number.
 fn begin_parse(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::NodeId, html: String, standins: StandIns, start: ParseStart) -> u32 {
@@ -549,6 +565,7 @@ fn begin_parse(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::Node
         doc,
         script_created: start.script_created,
         closed: false,
+        streaming: start.streaming,
         handles: Vec::new(),
         held: Vec::new(),
         pending: None,
@@ -557,24 +574,40 @@ fn begin_parse(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::Node
     crate::dom::dom(scope).arena.document_states.set_parser(doc, id);
     id
 }
-// HTML document open steps 15-16: a script-created parser of `doc`'s, its active parser — the one it had dropped — from
-// no input, its insertion point at the end of its input stream, which `document.write` feeds and only `document.close`
-// ends. With `streaming` (a document with a browsing context, the realm's own) its scripts run at their end tags, as a
-// page load's do, and its declarative shadow roots attach; without, neither. An iframe srcdoc document's, which no
-// doctype written puts in quirks mode (Chrome; Firefox departs from it).
+// HTML document open steps 16-17: a script-created parser of `doc`'s, its active parser, from no input, its insertion
+// point at the end of its input stream, which `document.write` feeds and only `document.close` ends. The parser it had
+// is done with: an earlier script-created one dropped; a page load's — which `open()` from no script of its own leaves
+// on the stack (a custom element's callback, a frame's script as the parse built the frame) — aborted, as "stop
+// loading" aborts it, its run building nothing more into the document written. With `streaming` (a document with a
+// browsing context, the realm's own) its scripts run at their end tags, as a page load's do, and its declarative
+// shadow roots attach; without, neither. An iframe srcdoc document's, which no doctype written puts in quirks mode
+// (Chrome; Firefox departs from it).
 pub(crate) fn begin_script_created(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::NodeId, streaming: bool, iframe_srcdoc: bool) {
     let old = crate::dom::dom(scope).arena.document_states.parser(doc);
-    if parses(scope).live.get(&old).is_some_and(|p| p.script_created) {
-        parses(scope).live.remove(&old);
+    let all = parses(scope);
+    if all.live.get(&old).is_some_and(|p| p.script_created) {
+        all.live.remove(&old);
+    } else if let Some(p) = all.live.get_mut(&old) {
+        p.abort();
     }
-    let start = ParseStart { scripting: streaming, iframe_srcdoc, declarative: streaming, script_created: true };
+    let start = ParseStart { scripting: streaming, iframe_srcdoc, declarative: streaming, script_created: true, streaming };
     begin_parse(scope, cid, doc, String::new(), StandIns::default(), start);
 }
-// Where the active parser `id` lets markup be inserted (HTML §8.4.3 "insertion point"): whether a script it runs has one
-// — its script nesting level above zero — and whether it is a script-created parser, whose input's end is one: none for
-// a parse that is over.
-pub(crate) fn insertion_points(scope: &mut v8::PinScope<'_, '_>, id: u32) -> (bool, bool) {
-    parses(scope).live.get(&id).map_or((false, false), |p| (!p.set_aside.is_empty(), p.script_created))
+// What a document's active parser lets markup do (HTML §8.4.3 "insertion point"): whether a script it runs has an
+// insertion point — its script nesting level above zero — whether it is a script-created parser whose input's end is
+// one — until its parse is over ("stop parsing" makes it undefined) — and whether it runs under the stream hooks.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct ActiveParser {
+    pub(crate) script_running: bool,
+    pub(crate) script_created: bool,
+    pub(crate) streaming: bool,
+}
+pub(crate) fn active_parser(scope: &mut v8::PinScope<'_, '_>, id: u32) -> ActiveParser {
+    parses(scope).live.get(&id).map_or_else(ActiveParser::default, |p| ActiveParser {
+        script_running: !p.set_aside.is_empty(),
+        script_created: p.script_created && !p.ended,
+        streaming: p.script_created && p.streaming,
+    })
 }
 
 fn parse_id(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> u32 {
