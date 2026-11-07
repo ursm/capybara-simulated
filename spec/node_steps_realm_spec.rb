@@ -67,6 +67,27 @@ RSpec.describe "a node's steps, by the realm they are of" do
     )
   end
 
+  # …and a frame's node adopted into the parent's document is still the frame's: the text a step of it makes too
+  # (Chrome: the frame's).
+  it "makes an adopted frame node's text in the frame" do
+    session.visit '/'
+    expect(session.evaluate_script("document.getElementById('fr').contentDocument.body.textContent")).to eq('frame')
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const fw = document.getElementById('fr').contentWindow, fd = fw.document;
+        const proto = (o) => (Object.getPrototypeOf(o) instanceof fw.Object ? 'F' : 'P');
+        const e = fd.createElement('section'), t = fd.createElement('template');
+        document.body.append(e, t);
+        Object.getOwnPropertyDescriptor(Node.prototype, 'textContent').set.call(e, 'z');
+        const r = [proto(e.firstChild)];
+        Element.prototype.insertAdjacentText.call(e, 'beforeend', 'y');
+        r.push(proto(e.lastChild), proto(HTMLTemplateElement.prototype.__lookupGetter__('content').call(t)));
+        return r;
+      })()
+    JS
+    expect(got).to eq(%w[F F F])
+  end
+
   # …a removed frame's node too, kept by the parent: its realm's steps are the ones it was made with, gone frame or not.
   it "makes a removed frame's kept node's objects, from a parent's member" do
     session.visit '/'
