@@ -193,6 +193,38 @@ RSpec.describe 'internal members' do
     JS
   end
 
+  # …nor does a stack trace hand a page the bindings' functions or `this`: a page's `Error.prepareStackTrace` run while a
+  # binding calls something the page replaced — a sequence's iterator, here — gets each frame's function and receiver
+  # (`CallSite#getFunction`, `getThis`) only for a sloppy frame, and the bindings are strict, as the modules they are made
+  # of are (V8: undefined for a strict frame)
+  it "hands a page's stack trace none of the bindings' functions" do
+    expect(outcome(<<~JS)).to eq([])
+      (function probe() {
+        const seen = [], orig = Array.prototype[Symbol.iterator];
+        Array.prototype[Symbol.iterator] = function iter() {
+          Error.prepareStackTrace = (e, frames) => frames;
+          const frames = new Error().stack;
+          Error.prepareStackTrace = undefined;
+          for (let i = 1; i < frames.length; i++) {
+            const f = frames[i], self = f.getThis();
+            if (f.getFunction() !== undefined || (self !== undefined && self !== null && self !== globalThis)) seen.push(String(f.getFunctionName()));
+          }
+          return orig.call(this);
+        };
+        try {
+          new Blob(['a', 'b']);
+          new URLSearchParams([['a', 'b']]);
+          new Headers([['a', 'b']]);
+          document.body.append(...[document.createElement('i')]);
+        } finally {
+          Array.prototype[Symbol.iterator] = orig;
+        }
+        // (…but the page's own: this script, and the frames the driver runs it in as the page's, `eval`)
+        return seen.filter((name) => name !== 'probe' && name !== 'eval');
+      })()
+    JS
+  end
+
   # Every `_` name a page can see — on an interface object, its prototype, or an instance made here (own, for…in or
   # JSON: support/internal_names_probe.js) — and every brand keyed by a symbol of the agent's registry, which a page can
   # make and forge (`@csim:Name` for `Symbol.for('csim.Name')`), is one of these: the campaign's worklist, which only

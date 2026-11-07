@@ -27,6 +27,10 @@ await esbuild.build({
   outfile:     'lib/capybara/simulated/js/bridge.bundle.js',
   logLevel:    'warning',
   // (…one an engine lacks passed as undefined, as a bare reference to it would have thrown)
-  banner: {js: `((${INTRINSICS.join(', ')}) => {`},
-  footer: {js: `})(${INTRINSICS.map((name) => `typeof ${name} === 'undefined' ? undefined : ${name}`).join(', ')});`}
+  // Strict, as the ES modules it is made of are: in sloppy code a page's `Error.prepareStackTrace` reads each frame's
+  // function and `this` (`CallSite#getFunction` / `getThis`) whenever a binding calls something a page can replace —
+  // and so holds the bindings' own functions, which a strict frame answers undefined for. (…in a function of its own:
+  // the parameters' `eval` is no name a strict function may bind)
+  banner: {js: `((${INTRINSICS.join(', ')}) => (() => {\n'use strict';`},
+  footer: {js: `})())(${INTRINSICS.map((name) => `typeof ${name} === 'undefined' ? undefined : ${name}`).join(', ')});`}
 });
