@@ -2049,7 +2049,6 @@ custom-elements/htmlconstructor/newtarget.html:
 - If prototype is not object (undefined), derives the fallback from NewTarget's realm
   (autonomous custom elements)
 custom-elements/microtasks-and-constructors.html:
-- Microtasks evaluate immediately when the stack is empty inside the parser
 - Microtasks evaluate immediately when the stack is empty inside the parser, causing
   the checks on no attributes to fail
 custom-elements/perform-microtask-checkpoint-before-construction-xml-parser.xhtml:
@@ -67983,9 +67982,6 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-refresh-
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-while-navigating.window.js:
 - document.open() aborts documents that are navigating through iframe loading (image
   loading)
-html/webappapis/dynamic-markup-insertion/opening-the-input-stream/bailout-exception-vs-return-origin.sub.window.js:
-- document.open should throw an InvalidStateError when the throw-on-dynamic-markup-insertion
-  counter is incremented even if the document is cross-origin
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/document.open-02.html:
 - document.open should redirect to window.open when called with three arguments
 - document.open should throw when it has no window and is called with three arguments
