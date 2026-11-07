@@ -5369,6 +5369,7 @@ module Capybara
       # (see its comment). The raw wire hash, or nil when the SW never answered within budget (treated as fall-through);
       # validation and the redirect chain live in worker_main_script_fetch.
       private def sw_script_fetch_event(sw_handle, url, client_handle, shared:, creator_client:)
+        sw_host.sw_soft_update_later(sw_handle)
         req = JSON.generate(
           method:      'GET',
           url:         url.to_s,
@@ -5797,6 +5798,7 @@ module Capybara
         w = @workers[handle.to_i]
         # (…none to a worker whose thread is gone, which would never answer: the network's)
         return false if !w || sw_redundant?(handle) || !sw_live?(handle)
+        sw_soft_update_if_stale(handle)
         # Resolve BEFORE counting the fetch owed: a raise here must not strand it
         # (settle would then block for the full round-trip budget with no fetch ever queued to answer).
         req = sw_fetch_request(req_json.to_s)
@@ -6242,6 +6244,26 @@ module Capybara
       private def step_sw_jobs_in_place
         run_sw_job_events
         Native.sw_queued_jobs(@sw_partition).each {|id| sw_run_job(id) }
+      end
+
+      # A non-subresource request's Handle Fetch, whatever it comes to — a fetch event, a router's source, no listener to
+      # dispatch to — with the registration it matches: its Soft Update, once that has come to something ("If shouldSoftUpdate
+      # is true, then in parallel run the Soft Update algorithm").
+      def sw_soft_updating(url, site)
+        yield
+      ensure
+        handle, = Native.sw_match_worker(@sw_partition, site.to_s, url.to_s, 'served')
+        sw_soft_update_later(handle) if handle
+      end
+      # …a little after it, the page that navigation made under way, as SW's "the user agent may call this as often as it
+      # likes" leaves open: a timer of the worker's own (workers.js `__csim_swSoftUpdateLater`), on the clock of a window that
+      # may have gone on to another page by then.
+      def sw_soft_update_later(handle)
+        @workers[handle.to_i]&.dig(:inbox)&.push({kind: 'sw_told', fn: '__csim_swSoftUpdateLater', args: []})
+      end
+      # …a subresource request's, where the registration of the worker that answers it is stale.
+      private def sw_soft_update_if_stale(handle)
+        sw_run_here(Native.sw_soft_update_if_stale(@sw_partition, handle.to_i, cookie_now))
       end
 
       # …and run (`__csim_swRunJob`).
@@ -7459,7 +7481,7 @@ module Capybara
           rack_body = document = nil
           Native.sw_reserve_client(@sw_partition, rid, worker_site, target, url_origin(target), frame_type) if worker_site
           if worker_site &&
-             (sw = sw_host.service_worker_navigation_fetch(
+             (sw = sw_host.sw_soft_updating(target, worker_site) { sw_host.service_worker_navigation_fetch(
                target,
                site:                  worker_site,
                method:                meth,
@@ -7480,7 +7502,7 @@ module Capybara
                navigation_cross_site: fetch.cross_site?,
                cookie_context:        cookies,
                network_headers:       network_headers
-             ))
+             ) })
             break NavigationHop.new('fail') if sw['networkError']
 
             # (…its header list where the wire carries one — a redirect's, whose Location fields the combined headers would
@@ -9644,6 +9666,8 @@ module Capybara
           # with no fetch handler dispatchable (the has_fetch gates all consult it).
           # Recorded on the worker's own thread at post time, like skip_waiting.
           router:         ->                  { Native.sw_set_worker_flag(@sw_partition, handle, 'router', true) },
+          # …a Soft Update of its registration, come due (`sw_soft_update_later`).
+          soft_update:    ->                  { sw_run_here(Native.sw_soft_update(@sw_partition, handle)) },
           # An unsettled ExtendableMessageEvent.waitUntil EXTENDS this worker's lifetime:
           # while any are pending an installed successor keeps waiting (activation.https),
           # and the 0-transition re-runs try-activate to release it.

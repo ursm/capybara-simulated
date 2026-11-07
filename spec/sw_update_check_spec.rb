@@ -58,6 +58,45 @@ RSpec.describe 'a service worker update', :every_host_local do
     expect(requests['/sw.js'].size).to eq(asked + 1)
   end
 
+  # (…SW Handle Fetch: "If shouldSoftUpdate is true, then in parallel run the Soft Update algorithm" — a non-subresource
+  # request's, whatever it comes to; a subresource's where the registration is stale)
+  context 'with a Soft Update' do
+    def in_scope(path) = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = document.createElement('iframe');
+      f.src = #{path.to_json};
+      f.onload = () => setTimeout(() => done(true), 1200);
+      document.body.append(f);
+    JS
+
+    it "checks the script a second after a navigation in scope, a listener's or not, a new version found" do
+      script('/sw.js', '// one')
+      register
+      asked = requests['/sw.js'].size
+      script('/page', '<!doctype html>page', type: 'text/html')
+      in_scope('/page')
+      expect(requests['/sw.js'].size).to eq(asked + 1)
+      expect(session.evaluate_script('reg.waiting === null && reg.installing === null')).to be(true)
+      script('/sw.js', '// two')
+      in_scope('/page?again')
+      expect(requests['/sw.js'].size).to eq(asked + 2)
+      expect(session.evaluate_script('reg.active.scriptURL.endsWith("/sw.js") && (reg.installing || reg.waiting || reg.active.state) !== null')).to be(true)
+    end
+
+    it 'checks it for a subresource only where the registration is stale' do
+      script('/sw.js', "self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(self.clients.claim())); self.addEventListener('fetch', () => {});")
+      register
+      session.evaluate_async_script('const done = arguments[0]; const c = () => navigator.serviceWorker.controller ? done(true) : setTimeout(c, 10); c();')
+      asked = requests['/sw.js'].size
+      fetch_after_a_while = "const done = arguments[0]; fetch('/data').then(() => setTimeout(() => done(true), 50));"
+      session.evaluate_async_script(fetch_after_a_while)
+      expect(requests['/sw.js'].size).to eq(asked)
+      allow(Time).to receive(:now).and_wrap_original {|now| now.call + 90_000 }
+      session.evaluate_async_script(fetch_after_a_while)
+      expect(requests['/sw.js'].size).to eq(asked + 1)
+    end
+  end
+
   it 'installs nothing for a byte-identical script' do
     script('/sw.js', "importScripts('/a.js');")
     script('/a.js', 'self.a = 1;')

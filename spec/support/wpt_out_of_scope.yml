@@ -59549,18 +59549,18 @@ service-workers/service-worker/clients-matchall-frozen.https.html:
     out per CLAUDE.md rule 1. Re-audit if it advances to a ratified standard."
 service-workers/service-worker/fetch-event.https.html:
 - name: Service Worker responds to fetch event with an existing client id
-  reason: 'The test holds a resolution the spec never adopted, and #1832''s review rejected
-    (rule 1.3 in substance): it asserts "Client ID Not Found" for an iframe''s navigation,
-    wanderview''s 2018 inclination in a comment on w3c/ServiceWorker#1267, "keep navigation
-    clientId empty at first". The text before #1832 was already unconditional (client''s
-    id); the current draft, since #1832 (merged 2026-07-17), reads "If client is not
-    null, initialize e''s clientId attribute to client''s id", its note "the id of request''s
-    client when the request has an initiating service worker client, and the empty string
-    otherwise". HTML navigates an iframe "using element''s node document", whose settings
-    object is the request''s fetch client. Chrome (measured) gives a frame''s own later
-    navigations an id, its first ; Firefox always . The subtest''s second half, a subresource''s
-    "Client ID Found", spec/sw_handle_fetch_outcome_spec.rb holds. Re-check when the test
-    is updated.'
+  reason: 'The test holds a resolution the spec never adopted, and #1832''s review
+    rejected (rule 1.3 in substance): it asserts "Client ID Not Found" for an iframe''s
+    navigation, wanderview''s 2018 inclination in a comment on w3c/ServiceWorker#1267,
+    "keep navigation clientId empty at first". The text before #1832 was already unconditional
+    (client''s id); the current draft, since #1832 (merged 2026-07-17), reads "If
+    client is not null, initialize e''s clientId attribute to client''s id", its note
+    "the id of request''s client when the request has an initiating service worker
+    client, and the empty string otherwise". HTML navigates an iframe "using element''s
+    node document", whose settings object is the request''s fetch client. Chrome (measured)
+    gives a frame''s own later navigations an id, its first none; Firefox always none. The
+    subtest''s second half, a subresource''s "Client ID Found", spec/sw_handle_fetch_outcome_spec.rb
+    holds. Re-check when the test is updated.'
 service-workers/service-worker/partitioned-cookies.tentative.https.html:
 - name: 'Service Worker: Partitioned Cookies'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

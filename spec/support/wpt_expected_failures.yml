@@ -6565,14 +6565,6 @@ service-workers/service-worker/unregister-immediately.https.html:
 - Clear-Site-Data must unregister an activated registration with an update waiting.
 - Clear-Site-Data must unregister an activated registration with controlled clients.
 - "[harness] TIMEOUT"
-service-workers/service-worker/update-after-navigation-fetch-event.https.html:
-- Update should be triggered after a navigation (fetch event worker).
-- Update should be triggered after a navigation (network error).
-- Update should be triggered after a navigation (no fetch event worker).
-- "[harness] TIMEOUT"
-service-workers/service-worker/update-after-navigation-redirect.https.html:
-- "[harness] TIMEOUT"
-- service workers are updated on redirects during navigation
 service-workers/service-worker/update-after-oneday.https.html:
 - Update should be triggered after a functional event when last update time is over
   24 hours

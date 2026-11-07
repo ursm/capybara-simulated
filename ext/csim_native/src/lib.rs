@@ -368,6 +368,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_registrations", magnus::function!(sw_registry::registrations_for_ruby, 1))?;
     native.define_module_function("sw_versions", magnus::function!(sw_registry::versions_for_ruby, 2))?;
     native.define_module_function("sw_claim", magnus::function!(sw_registry::claim_for_ruby, 3))?;
+    native.define_module_function("sw_soft_update", magnus::function!(sw_registry::soft_update_for_ruby, 2))?;
+    native.define_module_function("sw_soft_update_if_stale", magnus::function!(sw_registry::soft_update_if_stale_for_ruby, 3))?;
     native.define_module_function("sw_may_claim", magnus::function!(sw_registry::may_claim_for_ruby, 2))?;
     native.define_module_function("sw_job_under_way", magnus::function!(sw_registry::job_under_way_for_ruby, 1))?;
     native.define_module_function("sw_worker_new", magnus::function!(sw_registry::worker_new_for_ruby, 7))?;

@@ -947,12 +947,14 @@ fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     rv.set_double(if min == f64::INFINITY { -1.0 } else { min.max(0.0) });
 }
 
-// __dom.timerOnceAwaited() -> whether the calling realm has a timer set that runs once: what may be the coming of something
-// it waits on, where one that repeats is a poll.
+// __dom.timerOnceAwaited(own) -> whether the calling realm has a timer set that runs once, past `own` of them that are the
+// platform's: what may be the coming of something it waits on, where one that repeats is a poll.
 fn timer_once_awaited(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
+    let own = args.get(0).uint32_value(scope).unwrap_or(0) as usize;
     let timers = dom(scope).arena.realm_state(cid).map(|s| &s.timers);
-    rv.set_bool(timers.is_some_and(|t| t.by_key.values().any(|timer| timer.period.is_none())));
+    let once = timers.map_or(0, |t| t.by_key.values().filter(|timer| timer.period.is_none()).count());
+    rv.set_bool(once > own);
 }
 
 // __dom.timersQueuedBy(mark) -> how many tasks of the event loop's queued by `mark` (`task_mark`'s number) are due now,

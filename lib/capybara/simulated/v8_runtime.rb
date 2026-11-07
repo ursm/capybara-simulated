@@ -2279,6 +2279,7 @@ module Capybara
         c.attach('__csim_swClientRecord', ->(client_id) { sw_hooks[:client_record].call(client_id) }) if sw_hooks[:client_record]
         c.attach('__csim_swMatchClients', ->(include_uncontrolled, type) { sw_hooks[:match_clients].call(include_uncontrolled, type) }) if sw_hooks[:match_clients]
         c.attach('__csim_swSkipWaitingRequest', ->             { sw_hooks[:skip_waiting]&.call; nil }) if sw_hooks[:skip_waiting]
+        c.attach('__csim_swSoftUpdate',         ->             { sw_hooks[:soft_update]&.call; nil }) if sw_hooks[:soft_update]
         c.attach('__csim_swNoteRouterRules',    ->             { sw_hooks[:router]&.call; nil }) if sw_hooks[:router]
         c.attach('__csim_swRaceNetwork', ->(fetch_id, realm_id, url, accept) { sw_hooks[:race_network]&.call(fetch_id, realm_id, url, accept); nil }) if sw_hooks[:race_network]
         c.attach('__csim_swExtendedChanged',    ->(n)          { sw_hooks[:extended]&.call(n); nil }) if sw_hooks[:extended]

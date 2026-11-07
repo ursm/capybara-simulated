@@ -23,6 +23,8 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use magnus::{IntoValue, IntoValueFromNative, Ruby, Value};
 
+// The `realm` of a job no client asked for (Soft Update's: its job's client null).
+const NO_CLIENT: i64 = i64::MIN;
 // SW "stale": a registration a day past its last update check.
 const STALE_AFTER_MS: f64 = 86_400_000.0;
 
@@ -894,6 +896,31 @@ pub(crate) fn schedule_job_for_ruby(
     }
     Some((id, out))
 }
+// Soft Update (Service Workers §8), which Handle Fetch runs for a non-subresource request: an Update job for the registration of
+// the worker `handle`, of its newest worker's script — none for a registration with no worker, or out of the map — asked by
+// no client, an equivalent one joined: what the host does.
+pub(crate) fn soft_update_for_ruby(partition: u64, handle: u32) -> Vec<Cmd> {
+    let scheduled = {
+        let mut reg = lock();
+        let Some(p) = reg.existing(partition) else { return Vec::new() };
+        let Some(id) = p.workers.get(&handle).map(|w| w.registration) else { return Vec::new() };
+        let Some((site, scope)) = p.mapped_scope(id) else { return Vec::new() };
+        let origin = ada_url::Url::parse(&scope, None).map_or_else(|_| String::new(), |u| u.origin().to_owned());
+        (id, site, scope, origin)
+    };
+    let (id, site, scope, origin) = scheduled;
+    schedule_job_for_ruby(partition, "update".to_owned(), site, scope, String::new(), None, String::new(), id, NO_CLIENT, origin).map_or_else(Vec::new, |(_, cmds)| cmds)
+}
+// …and, a subresource request's, only that of a stale registration (a read every controlled request makes).
+pub(crate) fn soft_update_if_stale_for_ruby(partition: u64, handle: u32, now: f64) -> Vec<Cmd> {
+    let stale = {
+        let mut reg = lock();
+        let Some(p) = reg.existing(partition) else { return Vec::new() };
+        let Some(id) = p.workers.get(&handle).map(|w| w.registration) else { return Vec::new() };
+        p.by_id(id).is_some_and(|r| r.last_update_check.is_some_and(|at| now - at > STALE_AFTER_MS))
+    };
+    if stale { soft_update_for_ruby(partition, handle) } else { Vec::new() }
+}
 // The job `id` run (`__csim_swRunJob`): what the host does.
 pub(crate) fn run_job_for_ruby(partition: u64, id: u32) -> Vec<Cmd> {
     let mut out = Vec::new();
@@ -1661,6 +1688,28 @@ mod tests {
         assert!(part(p, |q| q.clients.iter().any(|c| c.id == "using" && c.controller == Some(2))));
         note_client_for_ruby(p, "using".into(), 5, String::new(), "https://a.test/y".into(), "window".into(), "top-level".into(), None, None);
         assert!(part(p, |q| q.clients.iter().any(|c| c.id == "using" && c.controller.is_none())));
+        clear_for_ruby(p);
+    }
+
+    #[test]
+    fn a_soft_update_is_an_update_job_of_the_newest_worker_s_script_joining_an_equivalent() {
+        let p = partition_new_for_ruby();
+        let id = note_registered(p, "https://a.test/".into());
+        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), id);
+        assert!(soft_update_for_ruby(p, 9).is_empty());
+        // (…its registration has no version yet: no job)
+        assert!(soft_update_for_ruby(p, 1).is_empty());
+        install(p, id, 1);
+        let cmds = soft_update_for_ruby(p, 1);
+        let [Cmd::QueueJob(job)] = cmds[..] else { panic!("{cmds:?}") };
+        assert_eq!(job_for_ruby(p, job).map(|j| (j.1, j.2, j.4)), Some(("https://a.test/sw.js".to_owned(), None, "https://a.test".to_owned())));
+        assert!(soft_update_for_ruby(p, 1).is_empty());
+        // (…its client announced to no one: there is none)
+        assert_eq!(run_job_for_ruby(p, job), [Cmd::Fetch(job)]);
+        assert_eq!(job_fetched_for_ruby(p, job, None, true, Some(1000.0)).1, []);
+        job_spawned_for_ruby(p, job, None);
+        assert!(soft_update_if_stale_for_ruby(p, 1, 1000.0 + STALE_AFTER_MS).is_empty());
+        assert_eq!(soft_update_if_stale_for_ruby(p, 1, 1001.0 + STALE_AFTER_MS).len(), 1);
         clear_for_ruby(p);
     }
 
