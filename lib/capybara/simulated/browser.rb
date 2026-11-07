@@ -6182,8 +6182,8 @@ module Capybara
         scope, script_url, update_via_cache, script_type, creator_key, site = Native.sw_job(@sw_partition, id)
         return unless scope
 
-        fetched = sw_update_fetch(Native::ServiceWorkerUpdate.new(@sw_partition, id), script_url)
-        registration, cmds = Native.sw_job_fetched(@sw_partition, id, fetched['error'], !!fetched['changed'])
+        fetched = sw_update_fetch(Native::ServiceWorkerUpdate.new(@sw_partition, id, cookie_now), script_url)
+        registration, cmds = Native.sw_job_fetched(@sw_partition, id, fetched['error'], !!fetched['changed'], (cookie_now if fetched['checked']))
         sw_run(cmds)
         return unless registration
 

@@ -18,13 +18,13 @@ RSpec.describe 'a service worker update', :every_host_local do
       requests[path] << env['HTTP_SEC_FETCH_DEST']
       next [200, {'content-type' => 'text/html'}, ['<!doctype html><title>page</title>']] if path == '/'
 
-      type, body = scripts.fetch(path) { next [nil, nil] }
-      type ? [200, {'content-type' => type}, [body]] : [404, {'content-type' => 'text/plain'}, ['nope']]
+      type, body, headers = scripts.fetch(path) { next [nil, nil] }
+      type ? [200, {'content-type' => type, **headers.to_h}, [body]] : [404, {'content-type' => 'text/plain'}, ['nope']]
     })
   }
   after { session.reset_session! }
 
-  def script(path, body, type: 'text/javascript') = scripts[path] = [type, body]
+  def script(path, body, type: 'text/javascript', headers: {}) = scripts[path] = [type, body, headers]
 
   def register(options = '{}')
     session.visit('https://a.test/')
@@ -42,6 +42,21 @@ RSpec.describe 'a service worker update', :every_host_local do
 
   # Whether the update found a new version.
   def update = session.evaluate_async_script('const done = arguments[0]; reg.update().then((r) => done(r.installing !== null || r.waiting !== null));')
+
+  # (…SW "stale": a day past its last update check — "no-cache" whatever its mode, in the Update fetch's hook)
+  it 'asks the network, past the HTTP cache, for a stale registration' do
+    script('/sw.js', '// one', headers: {'cache-control' => 'max-age=31536000'})
+    register("{updateViaCache: 'all'}")
+    asked = requests['/sw.js'].size
+    expect(update).to be(false)
+    expect(requests['/sw.js'].size).to eq(asked)
+    allow(Time).to receive(:now).and_wrap_original {|now| now.call + 90_000 }
+    expect(update).to be(false)
+    expect(requests['/sw.js'].size).to eq(asked + 1)
+    # (…the check it made its last: a day from then, not stale)
+    expect(update).to be(false)
+    expect(requests['/sw.js'].size).to eq(asked + 1)
+  end
 
   it 'installs nothing for a byte-identical script' do
     script('/sw.js', "importScripts('/a.js');")

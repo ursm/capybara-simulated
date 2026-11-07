@@ -93,18 +93,21 @@ pub(crate) struct UpdateCheck {
     pub(crate) module: bool,
     // The newest worker's map, where that runs this script under this type — none otherwise, which is an update already.
     pub(crate) newest: Option<ScriptResources>,
+    // Whether its registration has a newest worker and is stale, its last update check over a day ago (SW "stale"): what
+    // no cache may answer for.
+    pub(crate) stale: bool,
 }
 
 impl UpdateCheck {
-    // The main script's request's cache mode: "no-cache" unless the mode is "all". (`registration is stale` not modelled: a
-    // test's session never gets 24 h old by its wall clock)
+    // The main script's request's cache mode: "no-cache" unless the mode is "all" and the registration is not stale. (The job's
+    // "force bypass cache flag" has no input: only a user agent's debugging tools set it.)
     fn script_cache_mode(&self) -> &'static str {
-        if self.update_via_cache == "all" { "default" } else { "no-cache" }
+        if self.update_via_cache == "all" && !self.stale { "default" } else { "no-cache" }
     }
-    // …an import's: "no-cache" where the mode is "none". A classic worker's a `script` request; a module worker's graph is of
+    // …an import's: "no-cache" where the mode is "none" or the registration stale. A classic worker's a `script` request; a module worker's graph is of
     // its worker's destination, a CORS request (HTML "fetch a module worker script graph").
     fn import_request(&self) -> (&'static str, Option<&'static str>, &'static str) {
-        let cache = if self.update_via_cache == "none" { "no-cache" } else { "default" };
+        let cache = if self.update_via_cache == "none" || self.stale { "no-cache" } else { "default" };
         if self.module { (cache, Some("cors"), "serviceworker") } else { (cache, None, "script") }
     }
     // The main script's response: whether its bytes make it an update, or what is wrong with it: "network" (a response that
@@ -147,6 +150,8 @@ impl UpdateCheck {
 struct ScriptResponse {
     loaded: bool,
     redirected: bool,
+    // Whether the HTTP cache answered it without asking the network (Fetch's cache state "local").
+    local: bool,
     status: i64,
     kind: Option<String>,
     tainted: bool,
@@ -165,6 +170,7 @@ impl ScriptResponse {
         let mut out = ScriptResponse {
             loaded: field("body_error").is_none_or(|v| !v.to_bool()),
             redirected: field("redirect_loc").is_some() || field("redirect_status").is_some(),
+            local: field("cached").map(String::try_convert).transpose()?.as_deref() == Some("cache"),
             status: field("status").map_or(Ok(0), |v| v.funcall("to_i", ()))?,
             kind: field("type").map(String::try_convert).transpose()?,
             tainted: field("tainted").is_some_and(|v| v.to_bool()),
@@ -225,8 +231,8 @@ impl ScriptResponse {
     }
 }
 
-// How far it has got: why the script failed, `hasUpdatedResources`, the next import to probe, the main script's response, and
-// the imports' as they came.
+// How far it has got: why the script failed, `hasUpdatedResources`, the next import to probe, the main script's response, the
+// imports' as they came, and whether one of them asked the network: its registration's last update check, now.
 #[derive(Default)]
 struct UpdateProgress {
     failure: Option<&'static str>,
@@ -234,6 +240,7 @@ struct UpdateProgress {
     next: usize,
     script: Option<ScriptResponse>,
     imports: Vec<(String, ScriptResponse)>,
+    checked: bool,
 }
 
 // Native::ServiceWorkerUpdate — a job's fetch of its worker's script, as the host makes it (browser.rb `sw_update_fetch`):
@@ -245,9 +252,10 @@ pub(crate) struct ServiceWorkerUpdate {
 }
 
 impl ServiceWorkerUpdate {
-    // ServiceWorkerUpdate.new(partition, job) -> its fetch; an error for a job that is gone, which the host just read.
-    fn new(ruby: &magnus::Ruby, partition: u64, job: u32) -> Result<Self, magnus::Error> {
-        let check = crate::sw_registry::update_check(partition, job).ok_or_else(|| magnus::Error::new(ruby.exception_arg_error(), "no such job"))?;
+    // ServiceWorkerUpdate.new(partition, job, now) -> its fetch, `now` the time in ms; an error for a job that is gone, which
+    // the host just read.
+    fn new(ruby: &magnus::Ruby, partition: u64, job: u32, now: f64) -> Result<Self, magnus::Error> {
+        let check = crate::sw_registry::update_check(partition, job, now).ok_or_else(|| magnus::Error::new(ruby.exception_arg_error(), "no such job"))?;
         Ok(ServiceWorkerUpdate { check, progress: Default::default() })
     }
     // #cache_mode -> the main script's request's.
@@ -259,7 +267,10 @@ impl ServiceWorkerUpdate {
         let response = ScriptResponse::read(ruby, response)?;
         let mut progress = rb_self.progress.borrow_mut();
         match rb_self.check.script_response(&response) {
-            Ok(changed) => progress.changed = changed,
+            Ok(changed) => {
+                progress.changed = changed;
+                progress.checked = !response.local;
+            }
             Err(failure) => progress.failure = Some(failure),
         }
         progress.script = Some(response);
@@ -283,12 +294,14 @@ impl ServiceWorkerUpdate {
         let mut progress = rb_self.progress.borrow_mut();
         let Some((url, stored)) = progress.next.checked_sub(1).and_then(|at| rb_self.check.newest.as_ref()?.imports.get(at)) else { return Ok(()) };
         progress.changed |= response.differs_from(stored);
+        progress.checked |= response.loaded && !response.local;
         progress.imports.push((url.clone(), response));
         Ok(())
     }
     // #outcome -> what the job does with it (`job_fetched`): `{'error' => class}` — 'network', 'redirect' (TypeErrors), 'mime',
     // 'scope' (SecurityErrors), which update() rejects with — or `{'changed' => false}`, or `{'changed' => true, 'body' => the
-    // main script's bytes, 'imports' => the new version's script resource map}`, nil where nothing is in it.
+    // main script's bytes, 'imports' => the new version's script resource map}`, nil where nothing is in it; `'checked'`
+    // whether that was an update check of the network's.
     fn outcome(ruby: &magnus::Ruby, rb_self: &Self) -> Result<magnus::RHash, magnus::Error> {
         let progress = rb_self.progress.borrow();
         let out = ruby.hash_new();
@@ -297,6 +310,7 @@ impl ServiceWorkerUpdate {
             return Ok(out);
         }
         out.aset("changed", progress.changed)?;
+        out.aset("checked", progress.checked)?;
         if progress.changed {
             let script = progress.script.as_ref();
             out.aset("body", ruby.str_from_slice(script.map_or(&[][..], |s| &s.body)))?;
@@ -319,7 +333,7 @@ impl ServiceWorkerUpdate {
 pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {
     use magnus::{function, method, Module, Object};
     let class = native.define_class("ServiceWorkerUpdate", ruby.class_object())?;
-    class.define_singleton_method("new", function!(ServiceWorkerUpdate::new, 2))?;
+    class.define_singleton_method("new", function!(ServiceWorkerUpdate::new, 3))?;
     class.define_method("cache_mode", method!(ServiceWorkerUpdate::cache_mode, 0))?;
     class.define_method("script_response", method!(ServiceWorkerUpdate::script_response, 1))?;
     class.define_method("next_import", method!(ServiceWorkerUpdate::next_import, 0))?;
@@ -333,7 +347,7 @@ mod tests {
     use super::*;
 
     fn check(mode: &str, module: bool, newest: Option<ScriptResources>) -> UpdateCheck {
-        UpdateCheck { scope: "https://a.test/app/".into(), script_url: "https://a.test/app/sw.js".into(), update_via_cache: mode.into(), module, newest }
+        UpdateCheck { scope: "https://a.test/app/".into(), script_url: "https://a.test/app/sw.js".into(), update_via_cache: mode.into(), module, newest, stale: false }
     }
     fn js(status: i64, body: &[u8]) -> ScriptResponse {
         ScriptResponse { loaded: true, status, content_type: Some("text/javascript".to_owned()), body: body.to_vec(), ..ScriptResponse::default() }
@@ -388,6 +402,9 @@ mod tests {
         assert_eq!(check("all", false, None).import_request(), ("default", None, "script"));
         assert_eq!(check("none", false, None).import_request(), ("no-cache", None, "script"));
         assert_eq!(check("imports", true, None).import_request(), ("default", Some("cors"), "serviceworker"));
+        let stale = |mode: &str| UpdateCheck { stale: true, ..check(mode, false, None) };
+        assert_eq!(stale("all").script_cache_mode(), "no-cache");
+        assert_eq!(stale("all").import_request(), ("no-cache", None, "script"));
     }
 
     #[test]

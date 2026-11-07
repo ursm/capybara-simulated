@@ -398,7 +398,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_schedule_job", magnus::function!(sw_registry::schedule_job_for_ruby, 10))?;
     native.define_module_function("sw_run_job", magnus::function!(sw_registry::run_job_for_ruby, 2))?;
     native.define_module_function("sw_job", magnus::function!(sw_registry::job_for_ruby, 2))?;
-    native.define_module_function("sw_job_fetched", magnus::function!(sw_registry::job_fetched_for_ruby, 4))?;
+    native.define_module_function("sw_job_fetched", magnus::function!(sw_registry::job_fetched_for_ruby, 5))?;
     native.define_module_function("sw_job_spawned", magnus::function!(sw_registry::job_spawned_for_ruby, 3))?;
     native.define_module_function("sw_job_evaluated", magnus::function!(sw_registry::job_evaluated_for_ruby, 4))?;
     native.define_module_function("sw_job_worker_gone", magnus::function!(sw_registry::job_worker_gone_for_ruby, 2))?;

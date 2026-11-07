@@ -23,6 +23,9 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use magnus::{IntoValue, IntoValueFromNative, Ruby, Value};
 
+// SW "stale": a registration a day past its last update check.
+const STALE_AFTER_MS: f64 = 86_400_000.0;
+
 #[derive(Default)]
 pub(crate) struct Registration {
     id: u32,
@@ -38,6 +41,8 @@ pub(crate) struct Registration {
     update_via_cache: Option<String>,
     preload_enabled: Option<bool>,
     preload_header: Option<String>,
+    // Its last update check time (ms), none before the first: a day past it, it is stale.
+    last_update_check: Option<f64>,
 }
 
 impl Registration {
@@ -759,10 +764,15 @@ impl Registry {
     // host, of the registration the map holds at the scope, made where it holds none: not one a client sees until the worker
     // evaluates (`job_evaluated`) but the one its `self.registration` is from the first. The registration to spawn it of,
     // none for no worker.
-    fn job_fetched(&mut self, partition: u64, id: u32, error: Option<&str>, changed: bool, out: &mut Vec<Cmd>) -> Option<u32> {
+    // (…`checked` the time, where that was an update check of the network's: the registration's last)
+    fn job_fetched(&mut self, partition: u64, id: u32, error: Option<&str>, changed: bool, checked: Option<f64>, out: &mut Vec<Cmd>) -> Option<u32> {
         let p = self.existing(partition)?;
         let j = p.job(id)?;
         let (site, scope, mode, registration, realm) = (j.site.clone(), j.scope.clone(), j.update_via_cache.clone(), j.registration, j.realm);
+        if error.is_none() && checked.is_some() {
+            self.at(partition, &site, &scope).last_update_check = checked;
+        }
+        let Some(p) = self.existing(partition) else { return None };
         match error {
             Some("mime") => p.fail(id, "SecurityError", "the script has an unsupported MIME type.", out),
             Some("scope") => p.fail(id, "SecurityError", "the scope is outside the script's max scope.", out),
@@ -878,15 +888,17 @@ pub(crate) fn run_job_for_ruby(partition: u64, id: u32) -> Vec<Cmd> {
     out
 }
 // What the host needs to make a fetch of its script's (service_worker.rs `ServiceWorkerUpdate`): its URLs, its mode — the job's
-// own, or its registration's, "imports" where neither says — and the map of the worker it is byte-checked against.
-pub(crate) fn update_check(partition: u64, id: u32) -> Option<crate::service_worker::UpdateCheck> {
+// own, or its registration's, "imports" where neither says — the map of the worker it is byte-checked against, and whether
+// its registration is stale at `now` (ms).
+pub(crate) fn update_check(partition: u64, id: u32, now: f64) -> Option<crate::service_worker::UpdateCheck> {
     let mut reg = lock();
     let p = reg.existing(partition)?;
     let j = p.job(id)?;
     let (scope, script_url, own, module, site, against) = (j.scope.clone(), j.script_url.clone(), j.update_via_cache.clone(), j.script_type == "module", j.site.clone(), j.against);
     let update_via_cache = own.or_else(|| p.mapped(&site, &scope).and_then(|r| r.update_via_cache.clone())).unwrap_or_else(|| "imports".to_owned());
     let newest = p.workers.get(&against).map(|w| w.resources.clone());
-    Some(crate::service_worker::UpdateCheck { scope, script_url, update_via_cache, module, newest })
+    let stale = p.mapped(&site, &scope).is_some_and(|r| !r.workers().is_empty() && r.last_update_check.is_some_and(|at| now - at > STALE_AFTER_MS));
+    Some(crate::service_worker::UpdateCheck { scope, script_url, update_via_cache, module, newest, stale })
 }
 // What the host spawns for it: `[scope, script URL, mode, type, creator key, the top-level site of its storage key]`, nil
 // for one finished.
@@ -897,9 +909,9 @@ pub(crate) fn job_for_ruby(partition: u64, id: u32) -> Option<(String, String, O
     Some((j.scope.clone(), j.script_url.clone(), j.update_via_cache.clone(), j.script_type.clone(), j.creator_key.clone(), j.site.clone()))
 }
 // …its script fetched (`job_fetched`): [the registration the host spawns its worker of, nil for none, what the host does].
-pub(crate) fn job_fetched_for_ruby(partition: u64, id: u32, error: Option<String>, changed: bool) -> (Option<u32>, Vec<Cmd>) {
+pub(crate) fn job_fetched_for_ruby(partition: u64, id: u32, error: Option<String>, changed: bool, checked: Option<f64>) -> (Option<u32>, Vec<Cmd>) {
     let mut out = Vec::new();
-    let spawn = lock().job_fetched(partition, id, error.as_deref(), changed, &mut out);
+    let spawn = lock().job_fetched(partition, id, error.as_deref(), changed, checked, &mut out);
     (spawn, out)
 }
 // …its worker spawned, as `handle` (none where the host could not start it): what the host does.
@@ -1826,7 +1838,7 @@ mod tests {
         // (…a Register job fetches its script, a changed one announcing its client and spawning its worker, which it waits on)
         assert_eq!(run_job_for_ruby(p, a), [Cmd::Fetch(a)]);
         assert_eq!(job_for_ruby(p, a), Some(("s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), String::new(), String::new())));
-        let (made, cmds) = job_fetched_for_ruby(p, a, None, true);
+        let (made, cmds) = job_fetched_for_ruby(p, a, None, true, None);
         assert!(made.is_some_and(|id| id != 0));
         assert_eq!(cmds, [Cmd::ReportClient(0)]);
         worker_new(p, 4, String::new(), "s/a.js".into(), "classic".into(), Vec::new(), 0);
@@ -1861,9 +1873,15 @@ mod tests {
         assert_eq!(job_for_ruby(p, u).map(|j| j.1), Some("s/a.js".to_owned()));
         // (…byte-checked against the newest worker's map: its imports as its own thread noted them)
         lock().existing(p).unwrap().workers.get_mut(&4).unwrap().resources.note_import("s/i.js".to_owned(), b"i".to_vec());
-        let check = update_check(p, u).unwrap();
+        let check = update_check(p, u, 0.0).unwrap();
         assert_eq!(check.newest.map(|n| n.imports), Some(vec![("s/i.js".to_owned(), b"i".to_vec())]));
-        assert_eq!(job_fetched_for_ruby(p, u, None, false), (None, vec![Cmd::Settled(u, id, "s/".into(), None, None, false)]));
+        assert_eq!(job_fetched_for_ruby(p, u, None, false, Some(1000.0)), (None, vec![Cmd::Settled(u, id, "s/".into(), None, None, false)]));
+        // (…stale a day past the check it made, which only a registration with a worker to compare with can be)
+        let (u2, _) = schedule("update", "s/", "", id, 0).expect("scheduled");
+        assert!(!update_check(p, u2, 1000.0 + STALE_AFTER_MS).unwrap().stale);
+        assert!(update_check(p, u2, 1001.0 + STALE_AFTER_MS).unwrap().stale);
+        run_job_for_ruby(p, u2);
+        job_fetched_for_ruby(p, u2, None, false, None);
         // (…a service worker's own unregister() is a job as a client's is, a client's joining it)
         let (r, _) = schedule("unregister", "s/", "", 0, -4).expect("scheduled");
         assert_eq!(schedule("unregister", "s/", "", 0, 0), Some((r, Vec::new())));
