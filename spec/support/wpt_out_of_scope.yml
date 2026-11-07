@@ -33093,19 +33093,19 @@ dom/events/EventListener-incumbent-global-1.sub.html:
   reason: 'The listener is itself an incumbent-reading operation, a bound postMessage
     (frames[0].postMessage.bind(...)), and the message must carry the origin of the
     realm that called addEventListener (subframe-1), not that of the realm whose bindings
-    dispatch the event (subsubframe). HTML "prepare to run a callback": "When bound is
-    converted to a Web IDL callback type, the incumbent settings object is ... stored
-    as the resulting callback value''s callback context", which invoking it "pushes
-    ... onto the backup incumbent settings object stack". A native operation finds
-    the incumbent as V8''s topmost JavaScript frame (navigables.rs incumbent_operation,
+    dispatch the event (subsubframe). HTML "prepare to run a callback": "When bound
+    is converted to a Web IDL callback type, the incumbent settings object is ...
+    stored as the resulting callback value''s callback context", which invoking it
+    "pushes ... onto the backup incumbent settings object stack". A native operation
+    finds the incumbent as V8''s topmost JavaScript frame (navigables.rs incumbent_operation,
     the GetIncumbentContext shim), here the dispatch code of the element''s realm,
     and V8 keeps no callback context with a listener: the same gap CLAUDE.md lists
     for a promise reaction job whose handler is such an operation. Passing needs the
     incumbent captured at every addEventListener and a native hop entering a backup
     incumbent scope around every listener call, on the dispatch hot path (rule 3).
-    Still failing (2026-11-07): the message''s origin is subsubframe''s
-    (http://www2...), not subframe-1''s (http://www1...). The document.domain writes
-    the test makes are modeled; they are not why it fails.'
+    Still failing (2026-11-07): the message''s origin is subsubframe''s (http://www2...),
+    not subframe-1''s (http://www1...). The document.domain writes the test makes
+    are modeled; they are not why it fails.'
 dom/events/EventListener-incumbent-global-2.sub.html:
 - name: Check the incumbent global EventListeners  are called with
   reason: Same callback-context requirement as EventListener-incumbent-global-1.sub.html
