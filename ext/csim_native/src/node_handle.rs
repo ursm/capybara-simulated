@@ -524,6 +524,8 @@ pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<
     crate::dom::register(scope, ns, "liveValue", live_value, context_id);
     crate::dom::register(scope, ns, "setLiveValue", set_live_value, context_id);
     crate::dom::register(scope, ns, "nodeDocument", node_document, context_id);
+    crate::dom::register(scope, ns, "nodeDocumentIsHtml", node_document_is_html, context_id);
+    crate::dom::register(scope, ns, "nodeDocumentNid", node_document_nid, context_id);
     crate::dom::register(scope, ns, "setNodeDocument", set_node_document, context_id);
     crate::dom::register(scope, ns, "setSubtreeDocument", set_subtree_document, context_id);
     let store = {
@@ -747,6 +749,29 @@ fn node_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     match unsafe { (*ptr.as_ref().document.get()).get(scope) } {
         Some(doc) => rv.set(doc.into()),
         None => rv.set_null(),
+    }
+}
+// `__dom.nodeDocumentIsHtml(node)`: whether the node document of the node `node` is the object of is an HTML document
+// (or it has none) — what an element's `tagName` asks, in one call: not through the document's object, a Proxy.
+fn node_document_is_html(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return rv.set_bool(true) };
+    // SAFETY: the main thread reads the reference; the handle lives while the object, an argument, does.
+    let doc = unsafe { (*ptr.as_ref().document.get()).get(scope) }.and_then(|d| nid_of(scope, d.into()));
+    rv.set_bool(crate::document_state::is_html(&crate::dom::dom(scope).arena, doc));
+}
+// `__dom.nodeDocumentNid(node)`: the slot of the node document of the node `node` is the object of — a document's its
+// own — or -1 for none: what a selector match reads the document's mode by, in one call.
+fn node_document_nid(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(ptr) = handle_of(scope, args.get(0)) else { return rv.set_int32(-1) };
+    // SAFETY: the handle lives while its object, an argument, does; the main thread reads the reference.
+    let h = unsafe { ptr.as_ref() };
+    let doc = match unsafe { (*h.document.get()).get(scope) } {
+        Some(d) => nid_of(scope, d.into()),
+        None => h.nid().filter(|&id| crate::dom::dom(scope).arena.get(id).is_some_and(|n| n.kind == NodeKind::Document)),
+    };
+    match doc {
+        Some(id) => rv.set(v8::Number::new(scope, id.to_f64()).into()),
+        None => rv.set_int32(-1),
     }
 }
 // `__dom.setNodeDocument(node, doc)` -> whether the node has a handle to keep it: its node document becomes `doc` (none

@@ -8,7 +8,7 @@ require_relative 'support/session_teardown'
 # identity — its type, its arena slot, the object a script holds of it, an element's name and attribute store — is
 # private fields (node-identity.js), and so is what a page's change of a prototype cannot reach.
 RSpec.describe 'internal members' do
-  let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><form id=f></form><select id=s></select>']] }) }
+  let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><form id=f></form><select id=s></select><iframe id=fr srcdoc="<p>x"></iframe>']] }) }
 
   before { session.visit '/' }
 
@@ -35,10 +35,34 @@ RSpec.describe 'internal members' do
     expect(outcome("(() => { const x = Reflect.construct(Text, ['x'], Attr); document.body.appendChild(x); return [x.nodeName, document.body.lastChild === x]; })()")).to eq(['#text', true])
   end
 
-  # (…and an object inheriting from an element is an instance of its interface by its prototype chain, which no
-  # private field of the element's is on)
-  it 'answers instanceof for an object inheriting from an element' do
+  # `instanceof` an element interface is ECMAScript's own, by the prototype chain an element is born with (Chrome's and
+  # Firefox's, 2026-11-07): an object inheriting from an element is an instance, an element given another interface's
+  # prototype is that one's alone, and another realm's element is none of this realm's.
+  it 'answers instanceof by the prototype chain' do
     expect(outcome("(() => { const o = Object.create(document.createElement('div')); return [o instanceof HTMLDivElement, o instanceof HTMLElement, o instanceof Element]; })()")).to eq([true, true, true])
+    expect(outcome("(() => { const s = document.createElement('span'); Object.setPrototypeOf(s, HTMLDivElement.prototype); return [s instanceof HTMLSpanElement, s instanceof HTMLDivElement]; })()")).to eq([false, true])
+    expect(outcome("(() => { const b = document.getElementById('fr').contentDocument.body; return [b instanceof HTMLElement, b instanceof Element, b instanceof Node]; })()")).to eq([false, false, false])
+  end
+
+  # (…and an object inheriting from a node is no EventTarget: its members' `this` is checked, Web IDL's TypeError)
+  it "refuses EventTarget's members an object inheriting from a node" do
+    expect(outcome("Object.create(document.body).dispatchEvent(new Event('x'))")).to eq('TypeError: Illegal invocation')
+    expect(outcome("Object.create(document.body).addEventListener('x', () => {})")).to eq('TypeError: Illegal invocation')
+  end
+
+  # A custom element "create an element" constructs synchronously has the prefix it was created with — its arena node's
+  # too, which its serialization, clone and namespace lookup read.
+  it "gives a custom element constructed synchronously its prefix" do
+    expect(outcome(<<~JS)).to eq(['p', 'P:X-FOO', 'p', '<p:x-foo xmlns:p="http://www.w3.org/1999/xhtml"></p:x-foo>', 'p', 'q', 'q'])
+      (() => {
+        customElements.define('x-foo', class extends HTMLElement {});
+        const e = document.createElementNS('http://www.w3.org/1999/xhtml', 'p:x-foo');
+        customElements.define('q-form', class extends HTMLFormElement {}, { extends: 'form' });
+        const f = document.createElementNS('http://www.w3.org/1999/xhtml', 'q:form', { is: 'q-form' });
+        return [e.prefix, e.tagName, e.lookupPrefix('http://www.w3.org/1999/xhtml'), new XMLSerializer().serializeToString(e),
+          e.cloneNode().prefix, f.prefix, f.cloneNode().prefix];
+      })()
+    JS
   end
 
   # Every `_` name a page can see — on an interface object, its prototype, or an instance made here (own, for…in or
@@ -49,7 +73,7 @@ RSpec.describe 'internal members' do
       __aboutBaseURL _activeElement _adoptNode _alreadyStarted _appendChild _appendData _appendValid __applyAsyncImage
       __arriveAsyncImage _attachShadow _attributeMap _attrNodeFor _attrValue _baseURI _bindAttrNode _blur
       _ceInitialized _ceRegistry _checkedness _children _click _cloneNode _cloneShell _close _compareDocumentPosition
-      _compatMode _contains _contentType _createElement __csimIsNode _currentScript _data _detachAttrNode
+      _compatMode _contains _contentType _createElement _currentScript _data _detachAttrNode
       _directionality _dropSheet _encoding _execCommand _files _fireImgEvent _focus _focusUpdate _fontFaceSet
       _forceAsync _getAttribute _getAttributeNS _getRootNode _hasAttribute _host _hoverElement _imageFetchAborted
       _imageResourceSrc _imageSource _implementation _importNode _inertTemplateDoc _innerHTML _insertAdjacent

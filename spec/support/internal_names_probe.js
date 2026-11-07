@@ -39,6 +39,13 @@
   for (const [name, make] of Object.entries(instances)) {
     let o;
     try { o = make(); } catch (e) { found.add(`${name}: threw ${e.message}`); continue; }
+    // (…every attribute of its interfaces read first, so what a member makes lazily — `document.forms`' collection —
+    // is there to be seen)
+    for (let p = Object.getPrototypeOf(o); p !== null && p !== Object.prototype; p = Object.getPrototypeOf(p)) {
+      for (const [k, d] of Object.entries(Object.getOwnPropertyDescriptors(p))) {
+        if (typeof d.get === 'function' && !internal(k)) try { d.get.call(o); } catch (_) {}
+      }
+    }
     for (const k of Object.getOwnPropertyNames(o)) if (internal(k)) found.add(`${name} own ${k}`);
     for (const k in o) if (internal(k)) found.add(`${name} for-in ${k}`);
     let json;
