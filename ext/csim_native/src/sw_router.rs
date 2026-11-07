@@ -1,11 +1,18 @@
 // A service worker's static router (ServiceWorker Static Routing API): the rules `InstallEvent.addRoutes` registers —
-// each a condition and a source — verified and kept here, for the worker's realm, and the source of the first one a
-// request matches chosen as Handle Fetch evaluates them, before any fetch event exists. A rule's URL pattern is a
-// URLPattern (url_pattern.rs), the worker's script URL its base URL.
+// each a condition and a source — verified and kept here, for the worker's realm, and what the source of the first one a
+// request matches makes of it chosen as Handle Fetch evaluates them, before any fetch event exists. A rule's URL pattern
+// is a URLPattern (url_pattern.rs), the worker's script URL its base URL.
 
 use std::borrow::Cow;
 
 use urlpattern::quirks::StringOrInit;
+
+// What Handle Fetch does with a request a rule's source routed (constants.js): dispatch its fetch event with the network
+// racing it ("race-network-and-fetch-handler"), leave it to the network, or answer it from the worker's caches
+// (`cacheName`'s, where the source names one). No rule, or a "fetch-event" source: the fetch event.
+const ROUTE_RACE: u32 = 1;
+const ROUTE_NETWORK: u32 = 2;
+const ROUTE_CACHE: u32 = 3;
 
 // The spec's limits: the rules a worker registers in all, and how deep a condition nests.
 const MAX_RULES: usize = 1024;
@@ -176,7 +183,7 @@ impl Condition {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "swAddRoutes", add_routes_op, context_id);
-    crate::dom::register(scope, ns, "swRouterSource", router_source_op, context_id);
+    crate::dom::register(scope, ns, "swFetchRoute", fetch_route_op, context_id);
 }
 
 // __dom.swAddRoutes(rules, hasFetchHandler, scriptURL) — `InstallEvent.addRoutes` of `rules` the bindings converted: each
@@ -203,25 +210,51 @@ fn add_routes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     kept.extend(rules);
 }
 
-// __dom.swRouterSource(url, method, mode, destination) -> the source of the realm's first rule a request of these
-// matches — its RouterSourceEnum, or `{cacheName}` — or null for none (the fetch event, as without a router).
-fn router_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [url, method, mode, destination] = [0, 1, 2, 3].map(|i| text(scope, args.get(i)));
+impl Source {
+    // What Handle Fetch makes of a request of `method` this source routes (Handle Fetch, its steps on `source`), and the
+    // name of the cache that answers it: none for the fetch event — a "fetch-event" source's, and that of a race of
+    // another method than GET, which only a GET's is ("Else if source is race-network-and-fetch-handler and request's
+    // method is `GET`").
+    fn route(&self, method: &str) -> Option<(u32, Option<&str>)> {
+        match self {
+            Source::Cache(name) => Some((ROUTE_CACHE, Some(name))),
+            Source::Named(name) => match name.as_str() {
+                "network" => Some((ROUTE_NETWORK, None)),
+                "cache" => Some((ROUTE_CACHE, None)),
+                "race-network-and-fetch-handler" if method == "GET" => Some((ROUTE_RACE, None)),
+                _ => None,
+            },
+        }
+    }
+}
+
+// __dom.swFetchRoute(url, method, mode, destination) -> `[route, cache name]` (`Source::route`) of the realm's first rule
+// a request of these matches, null where the request goes to the fetch event as without a router.
+fn fetch_route_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(rules) = crate::dom::dom(scope).sw_router_rules.remove(&cid) else { return rv.set_null() };
-    let found = rules.iter().find(|r| r.condition.matches(scope, &url, &method, &mode, &destination)).map(|r| match &r.source {
-        Source::Named(name) => (name.clone(), false),
-        Source::Cache(name) => (name.clone(), true),
-    });
+    let [url, method, mode, destination] = [0, 1, 2, 3].map(|i| text(scope, args.get(i)));
+    let found = rules.iter().find(|r| r.condition.matches(scope, &url, &method, &mode, &destination)).and_then(|r| r.source.route(&method));
+    let found = found.map(|(route, name)| (route, name.map(str::to_owned)));
     crate::dom::dom(scope).sw_router_rules.insert(cid, rules);
-    let Some((name, cache)) = found else { return rv.set_null() };
-    let Some(name) = v8::String::new(scope, &name) else { return };
-    if !cache {
-        return rv.set(name.into());
+    let Some((route, name)) = found else { return rv.set_null() };
+    let name: v8::Local<'_, v8::Value> = name.and_then(|n| v8::String::new(scope, &n)).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    let items = [v8::Integer::new_from_unsigned(scope, route).into(), name];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_source_routes_a_request_and_only_a_get_is_raced() {
+        let named = |name: &str| Source::Named(name.to_owned());
+        assert_eq!(named("network").route("POST"), Some((ROUTE_NETWORK, None)));
+        assert_eq!(named("cache").route("GET"), Some((ROUTE_CACHE, None)));
+        assert_eq!(Source::Cache("v1".to_owned()).route("GET"), Some((ROUTE_CACHE, Some("v1"))));
+        assert_eq!(named("race-network-and-fetch-handler").route("GET"), Some((ROUTE_RACE, None)));
+        assert_eq!(named("race-network-and-fetch-handler").route("POST"), None);
+        assert_eq!(named("fetch-event").route("GET"), None);
     }
-    let dict = v8::Object::new(scope);
-    if let Some(key) = v8::String::new(scope, "cacheName") {
-        dict.create_data_property(scope, key.into(), name.into());
-    }
-    rv.set(dict.into());
 }

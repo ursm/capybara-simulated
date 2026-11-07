@@ -640,6 +640,7 @@ module Capybara
         initiator: nil,
         origin_null: false,
         initiator_cross_site_ancestor: false,
+        client_id: nil,
         user_activated: initiator.nil?,
         replace: false
       )
@@ -658,6 +659,7 @@ module Capybara
           initiator:                     initiator,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
+          client_id:                     client_id,
           user_activated:                user_activated,
           replace:                       replace
         )
@@ -3650,6 +3652,7 @@ module Capybara
         replace: false,
         origin_null: false,
         initiator_cross_site_ancestor: false,
+        client_id: nil,
         origin: nil,
         user_activated: false,
         reloaded_cross_site: nil
@@ -3666,6 +3669,7 @@ module Capybara
           initiator:                     initiator,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
+          client_id:                     client_id,
           replace:                       replace,
           origin:                        origin,
           user_activated:                user_activated,
@@ -5907,15 +5911,9 @@ module Capybara
       # in (its leg by realm 0). Direct-reply fids (worker main-script fetches)
       # are not raced.
       # (…its `Accept` the request's, the one Fetch gave it: a navigation's a document's, an image's image types)
-      private def sw_race_network(handle, fetch_id, realm_id, url, method, accept)
+      private def sw_race_network(handle, fetch_id, realm_id, url, accept)
         fid = fetch_id.to_i
         return if WorkerHost.direct?(fid)
-        # Only GET/HEAD race: the leg re-issues the request WITHOUT the original
-        # body/headers (but its Accept), so racing a POST would run its side effect twice — once
-        # mutilated. (Chromium's race source is effectively GET-shaped too; a
-        # non-GET race-matched request simply behaves as fetch-event.)
-        m = method.to_s.empty? ? 'GET' : method.to_s.upcase
-        return unless %w[GET HEAD].include?(m)
         # Run the network leg RIGHT HERE, on the worker's own thread, before the
         # fetch event dispatches (this hook fires at the top of
         # __csim_swDispatchFetch). Sequential-on-one-thread makes the race
@@ -5928,7 +5926,7 @@ module Capybara
         # loop all ask the same `race_winner`). Its dispatch start is stamped
         # HERE, on the worker thread just before dispatch.
         r = begin
-          rack_fetch(m, url.to_s, '', accept.to_s.empty? ? {} : {'Accept' => accept.to_s}, 'follow')
+          rack_fetch('GET', url.to_s, '', accept.to_s.empty? ? {} : {'Accept' => accept.to_s}, 'follow')
         rescue StandardError
           nil
         end
@@ -7091,8 +7089,7 @@ module Capybara
       # session's first window): the id it ADOPTED (`sw_adopt_client_id`), the page's realm 0 one per document though the
       # realm is reused across them; `client-<realm>` for a realm that adopted none (a frame built outside a navigation's
       # chain). The same spellings are produced JS-side by sw-client.js's clientId() (which prefers the adopted client id,
-      # realm_identity.rs) and the FetchEvent clientKey (js/src/workers.js), and read back by the client-message router
-      # below — so they must be minted in exactly one place.
+      # realm_identity.rs), and read back by the client-message router below — so they must be minted in exactly one place.
       def sw_client_id(realm_id)
         @worker_host.client_of(realm_id.to_i) || "client-#{@client_space}#{realm_id.to_i}"
       end
@@ -7299,6 +7296,7 @@ module Capybara
           dest:         dest,
           frame_type:   dest == 'document' ? 'auxiliary' : 'nested',
           origin_url:   origin_url,
+          client_id:    initiating[:client_id],
           is_reload:    is_reload,
           coop_realm:   coop_realm
         )
@@ -7368,6 +7366,7 @@ module Capybara
         dest:,
         frame_type:,
         origin_url:,
+        client_id: nil,
         is_reload: false,
         is_history: false,
         coop_realm: nil,
@@ -7399,6 +7398,7 @@ module Capybara
                referrer_policy:       ref_policy,
                site_seed:             seed,
                origin_null:           tainted,
+               client_id:             client_id,
                resulting_client_id:   rid,
                cookie_cross_site:     cookie_cross,
                navigation_cross_site: fetch.cross_site?,
@@ -7498,6 +7498,7 @@ module Capybara
         dest: 'iframe',
         cookie_cross_site: false,
         navigation_cross_site: false,
+        client_id: nil,
         resulting_client_id:,
         origin_url: referrer_source
       )
@@ -7577,6 +7578,9 @@ module Capybara
           # navigation's request and is judged as it was; a rewrite resets it, the request
           # then the worker's own.
           navigationCrossSite: navigation_cross_site,
+          # The request's client's id (`event.clientId`): the document that began the navigation, HTML's source snapshot
+          # params' fetch client — none of a user's, by the address bar.
+          clientId:            client_id,
           # The navigation's RESERVED client id (`event.resultingClientId`): one per navigation
           # chain, re-minted across a cross-origin redirect hop, adopted by the committed
           # document (mint_resulting_client_id / sw_adopt_client_id).
@@ -8457,7 +8461,8 @@ module Capybara
           initiator:                     planned[:initiator],
           origin_null:                   planned[:origin_null],
           user_activated:                planned[:activated],
-          initiator_cross_site_ancestor: planned[:initiator_cross_site_ancestor]
+          initiator_cross_site_ancestor: planned[:initiator_cross_site_ancestor],
+          client_id:                     planned[:client_id]
         }
         if (blob = planned[:blob])
           fail_blob_document(url) unless @driver.respond_to?(:load_blob_document) && @driver.load_blob_document(self, url, *blob)
@@ -9548,7 +9553,7 @@ module Capybara
           # A race-network-and-fetch-handler route matched: run the network leg on a
           # host thread concurrently with the fetch-event dispatch the worker is
           # about to (possibly synchronously-blocking) run. See sw_race_network.
-          race_network:   ->(fetch_id, realm_id, url2, method, accept) { sw_race_network(handle, fetch_id, realm_id, url2, method, accept) },
+          race_network:   ->(fetch_id, realm_id, url2, accept) { sw_race_network(handle, fetch_id, realm_id, url2, accept) },
           # The install handler registered Static Routing API rules (addRoutes) — the
           # rules themselves live in the worker isolate (evaluated at its dispatch
           # point); the host records only their EXISTENCE, which keeps a router SW
@@ -11669,8 +11674,9 @@ module Capybara
       # session_history.rs `Initiator`): its URL and whether its origin is opaque, read at once — the page's for a realm
       # gone since (`initiating_realm`).
       def navigation_initiator(realm)
-        url, _policy, opaque, _realm, _source, cross_site_ancestor = request_client(initiating_realm(realm))
-        {initiator: url, origin_null: opaque == true, initiator_cross_site_ancestor: cross_site_ancestor == true}
+        realm = initiating_realm(realm)
+        url, _policy, opaque, _realm, _source, cross_site_ancestor = request_client(realm)
+        {initiator: url, origin_null: opaque == true, initiator_cross_site_ancestor: cross_site_ancestor == true, client_id: sw_client_id(realm)}
       end
       def frame_realm_url(realm_id)
         return @runtime.loading_frame_realm_url(realm_id) unless @runtime.frame_realm_alive?(realm_id)
@@ -12011,6 +12017,7 @@ module Capybara
         # Origin alone)
         traversal   = is_history && !is_reload
         initiating  = initiating_document(initiator || realm_id)
+        client_id   = initiating[:client_id]
         initiating  = initiating.slice(:initiator_cross_site_ancestor) if traversal
         opaque      = initiating[:origin_null] == true
         origin_null = true if opaque
@@ -12051,6 +12058,7 @@ module Capybara
           dest:         'iframe',
           frame_type:   'nested',
           origin_url:   origin_url,
+          client_id:    client_id,
           is_reload:    is_reload,
           is_history:   is_history,
           # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
@@ -12389,7 +12397,7 @@ module Capybara
         return {} unless realm.zero? || @runtime.frame_realm_present?(realm)
 
         _url, _policy, opaque, _realm, _source, cross_site_ancestor = request_client(realm)
-        {origin_null: opaque == true, initiator_cross_site_ancestor: cross_site_ancestor == true}
+        {origin_null: opaque == true, initiator_cross_site_ancestor: cross_site_ancestor == true, client_id: sw_client_id(realm)}
       end
       # …realm `realm` where its document is still there — loaded or loading — else the page's, whose script began the
       # navigation as the source snapshot names it: another window's plan is never left an address bar's, of no
@@ -12545,6 +12553,7 @@ module Capybara
         initiator: page_url,
         origin_null: false,
         initiator_cross_site_ancestor: false,
+        client_id: nil,
         replace: false,
         blob: nil,
         user_activated: false,
@@ -12562,6 +12571,7 @@ module Capybara
           initiator:                     initiator,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
+          client_id:                     client_id,
           replace:                       replace,
           blob:                          blob,
           user_activated:                user_activated,
@@ -12593,6 +12603,7 @@ module Capybara
         initiator:,
         origin_null:,
         initiator_cross_site_ancestor:,
+        client_id:,
         replace:,
         user_activated:,
         reloaded_cross_site:,
@@ -12625,6 +12636,7 @@ module Capybara
               initiator:,
               origin_null:,
               initiator_cross_site_ancestor:,
+              client_id:,
               replace:,
               user_activated:,
               reloaded_cross_site:,
@@ -12778,6 +12790,7 @@ module Capybara
             dest:         'document',
             frame_type:   'top-level',
             origin_url:   origin || initiator,
+            client_id:    client_id || (sw_client_id(0) if traversed),
             is_reload:    is_reload,
             is_history:   from_history && !is_reload,
             coop_realm:   0,

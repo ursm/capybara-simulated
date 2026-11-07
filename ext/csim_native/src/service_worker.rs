@@ -347,6 +347,19 @@ mod tests {
     }
 
     #[test]
+    fn a_fetch_event_s_outcome() {
+        assert_eq!(dispatched_outcome(false, false), OUTCOME_NETWORK);
+        assert_eq!(dispatched_outcome(false, true), OUTCOME_NETWORK_ERROR);
+        assert_eq!(dispatched_outcome(true, true), OUTCOME_WAIT);
+        assert_eq!(fulfilled_outcome(None, false, false, 0), OUTCOME_NETWORK_ERROR);
+        assert_eq!(fulfilled_outcome(Some("error"), true, false, 0), OUTCOME_NETWORK_ERROR);
+        assert_eq!(fulfilled_outcome(Some("default"), false, false, 0), OUTCOME_BUFFERED);
+        assert_eq!(fulfilled_outcome(Some("default"), true, false, 0), OUTCOME_STREAMED);
+        assert_eq!(fulfilled_outcome(Some("default"), true, true, 0), OUTCOME_BUFFERED);
+        assert_eq!(fulfilled_outcome(Some("default"), true, false, -3), OUTCOME_BUFFERED);
+    }
+
+    #[test]
     fn a_script_s_response_fails_in_the_hook_s_order() {
         let c = check("imports", false, None);
         assert_eq!(c.script_response(&ScriptResponse { loaded: false, ..js(200, b"") }), Err("network"));
@@ -439,6 +452,35 @@ mod tests {
     }
 }
 
+// What a fetch event comes to (Service Workers "Create Fetch Event and Dispatch"), its realm's to carry out (constants.js):
+// the network's to answer, a network error, the promise `respondWith` was given waited for, and — that fulfilled — its
+// Response delivered: buffered whole, or streamed frame by frame. A response whose body is a stream goes incrementally to
+// a realm's fetch whose answer rides the event loop; not to a thread waiting for it in place (`in_place`: a navigation's,
+// a synchronous request's), nor to a worker client (`realm` negative: the frames route to realms alone).
+const OUTCOME_NETWORK: u32 = 0;
+const OUTCOME_NETWORK_ERROR: u32 = 1;
+const OUTCOME_WAIT: u32 = 2;
+const OUTCOME_BUFFERED: u32 = 3;
+const OUTCOME_STREAMED: u32 = 4;
+
+// …its dispatch over: `respondWith` entered, it waits; else a canceled one's a network error, another's the network's.
+fn dispatched_outcome(responded: bool, canceled: bool) -> u32 {
+    match (responded, canceled) {
+        (true, _) => OUTCOME_WAIT,
+        (false, true) => OUTCOME_NETWORK_ERROR,
+        (false, false) => OUTCOME_NETWORK,
+    }
+}
+// …and what `respondWith`'s promise fulfilled with, of response type `kind` — none for no Response, or for a network
+// error's: that is a network error ("respond-with error flag"; Fetch's HTTP fetch, a response of type "error").
+fn fulfilled_outcome(kind: Option<&str>, stream: bool, in_place: bool, realm: i32) -> u32 {
+    match kind {
+        None | Some("error") => OUTCOME_NETWORK_ERROR,
+        Some(_) if stream && !in_place && realm >= 0 => OUTCOME_STREAMED,
+        Some(_) => OUTCOME_BUFFERED,
+    }
+}
+
 // Whether `clients.claim()` of the registration at `scope` claims a client whose URL is `href` (Service Workers §4.3.4):
 // the client's in that scope — its URL starts with it — and that is its LONGEST matching registration: where a strictly
 // longer one of `scopes`, the origin's registrations, covers it too, a more specific worker controls it, not the claiming
@@ -484,6 +526,20 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "swGlobal", global_op, context_id);
     crate::dom::register(scope, ns, "swInstalled", installed_op, context_id);
     crate::dom::register(scope, ns, "swClaims", claims_op, context_id);
+    crate::dom::register(scope, ns, "swDispatchedOutcome", dispatched_outcome_op, context_id);
+    crate::dom::register(scope, ns, "swFulfilledOutcome", fulfilled_outcome_op, context_id);
+}
+
+// __dom.swDispatchedOutcome(responded, canceled) -> `dispatched_outcome`.
+fn dispatched_outcome_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(dispatched_outcome(args.get(0).boolean_value(scope), args.get(1).boolean_value(scope)));
+}
+// __dom.swFulfilledOutcome(responseType, stream, inPlace, realm) -> `fulfilled_outcome`, `responseType` undefined for what
+// is no Response.
+fn fulfilled_outcome_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let kind = (!args.get(0).is_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
+    let realm = args.get(3).int32_value(scope).unwrap_or(0);
+    rv.set_uint32(fulfilled_outcome(kind.as_deref(), args.get(1).boolean_value(scope), args.get(2).boolean_value(scope), realm));
 }
 
 // __dom.swGlobalInit(scope, updateViaCache, importsJson, previousUrl, previousHandle): the calling realm a service worker's,

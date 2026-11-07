@@ -319,9 +319,10 @@ struct Initiator {
     url: Option<String>,
     opaque: bool,
     cross_site_ancestor: bool,
+    client_id: Option<String>,
 }
 impl Initiator {
-    // …of `{initiator:, origin_null:, initiator_cross_site_ancestor:}`, none for nil.
+    // …of `{initiator:, origin_null:, initiator_cross_site_ancestor:, client_id:}`, none for nil.
     fn from_ruby(ruby: &magnus::Ruby, hash: Option<RHash>) -> Result<Self, magnus::Error> {
         let Some(hash) = hash else { return Ok(Initiator::default()) };
         let get = |key: &str| hash.aref::<_, magnus::Value>(ruby.to_symbol(key));
@@ -329,13 +330,15 @@ impl Initiator {
             url: Option::<String>::try_convert(get("initiator")?)?,
             opaque: get("origin_null")?.to_bool(),
             cross_site_ancestor: get("initiator_cross_site_ancestor")?.to_bool(),
+            client_id: Option::<String>::try_convert(get("client_id")?)?,
         })
     }
     // …into `hash` by those names.
     fn into_ruby(self, ruby: &magnus::Ruby, hash: RHash) -> Result<(), magnus::Error> {
         hash.aset(ruby.to_symbol("initiator"), self.url)?;
         hash.aset(ruby.to_symbol("origin_null"), self.opaque)?;
-        hash.aset(ruby.to_symbol("initiator_cross_site_ancestor"), self.cross_site_ancestor)
+        hash.aset(ruby.to_symbol("initiator_cross_site_ancestor"), self.cross_site_ancestor)?;
+        hash.aset(ruby.to_symbol("client_id"), self.client_id)
     }
 }
 // …a URL fetched with a GET; a `blob:` URL's blob — its bytes and type — as the sender's Location parsed it (HTML: the
@@ -1410,7 +1413,7 @@ impl SessionHistory {
         asking(&mut self.lock(), |t| t.asked.planned.take())
     }
     // #take_planned -> {url:, replace:, activated:, referrer:, policy:, initiator:, origin_null:,
-    // initiator_cross_site_ancestor:} and one of blob: [bytes, type], post: [body, content_type] — or nil for none
+    // initiator_cross_site_ancestor:, client_id:} and one of blob: [bytes, type], post: [body, content_type] — or nil for none
     // (`take_planned`).
     fn take_planned_for_ruby(ruby: &magnus::Ruby, rb_self: &Self) -> Result<Option<RHash>, magnus::Error> {
         let Some(p) = rb_self.take_planned() else { return Ok(None) };
