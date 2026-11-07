@@ -84,6 +84,22 @@ RSpec.describe 'internal members' do
     JS
   end
 
+  # …and no expando of a page's names one of its own objects: an element given `_pseudo` / `_origin` is no generated box's
+  # holder, which a private stamp tells (Chrome, Firefox: `[true, true, 'rgb(1, 2, 3)']`).
+  it "takes no page's expando for a generated box" do
+    expect(outcome(<<~JS)).to eq([true, true, 'rgb(1, 2, 3)'])
+      (() => {
+        const a = document.createElement('div'), b = document.createElement('div');
+        a._pseudo = 'before';
+        b._pseudo = 1;
+        b._origin = document.head;
+        a.style.color = 'rgb(1, 2, 3)';
+        document.body.append(a, b);
+        return [document.body.contains(a), document.body.contains(b), getComputedStyle(a).color];
+      })()
+    JS
+  end
+
   # A custom element "create an element" constructs synchronously has the prefix it was created with — its arena node's
   # too, which its serialization, clone and namespace lookup read.
   it "gives a custom element constructed synchronously its prefix" do
