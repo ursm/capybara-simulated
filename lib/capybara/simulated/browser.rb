@@ -9832,6 +9832,8 @@ module Capybara
             sw_note_worker_client(handle, url, shared, controller)
           end
         end
+        # (…the hooks this host calls in it made read-only first: engine.js `sealHostHooks`)
+        V8Runtime.engine_call(rt, 'sealHostHooks')
         # Booted: its script runs from here, what a window's wait on it is counted against (`worker_deadline`).
         record[:running_since] = Process.clock_gettime(Process::CLOCK_MONOTONIC) if record
         # …and its clock from its time origin, the time it was made at — its high resolution time beginning a step of its
