@@ -136,8 +136,7 @@ enum Step {
 // A Register, Update or Unregister job (Service Workers §8 "Create Job"), queued at its scope until the jobs before it
 // there have finished: what it asks — the script (an Update job's: its registration's newest worker's, as update() found
 // it), the updateViaCache mode (none for an Update job's) and the worker type — and, for the host running it, the client
-// realm that asked (0: the window; a service worker's: the negative of its handle), the service workers whose own
-// unregister() it answers (the equivalent jobs' included) and its origin key. As it runs: its run's place among the
+// realm that asked (0: the window; a worker's: the negative of its handle) and its origin key. As it runs: its run's place among the
 // tasks queued (none where it is not queued), the registration Update found (0 for none yet), what it waits for, the
 // worker its script is byte-checked against, and whether its promises settled.
 pub(crate) struct Job {
@@ -150,7 +149,6 @@ pub(crate) struct Job {
     script_type: String,
     registration: u32,
     realm: i64,
-    asking_workers: Vec<u32>,
     creator_key: String,
     queued: Option<u32>,
     waits: Option<JobWait>,
@@ -353,17 +351,17 @@ pub(crate) fn versions_for_ruby(partition: u64, id: u32) -> (Option<u32>, Option
     let [installing, waiting, active] = lock().existing(partition).and_then(|p| p.by_id(id)).map_or([None; 3], |r| r.versions());
     (installing, waiting, active)
 }
-// A service worker of the session, spawned: its script's URL, type and bytes, 'parsed' until a registration holds it.
-pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, site: String, script_url: String, script_type: String, script: magnus::RString) {
-    worker_new(partition, handle, site, script_url, script_type, crate::fetch_rules::ruby_bytes(script));
+// A service worker of the session, spawned: its script's URL, type and bytes, 'parsed' until its registration holds it.
+pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, site: String, script_url: String, script_type: String, script: magnus::RString, registration: u32) {
+    worker_new(partition, handle, site, script_url, script_type, crate::fetch_rules::ruby_bytes(script), registration);
 }
-fn worker_new(partition: u64, handle: u32, site: String, script_url: String, script_type: String, script: Vec<u8>) {
+fn worker_new(partition: u64, handle: u32, site: String, script_url: String, script_type: String, script: Vec<u8>, registration: u32) {
     let worker = Worker {
         site,
         script_url,
         script_type,
         state: "parsed".to_owned(),
-        registration: 0,
+        registration,
         lifecycle: Lifecycle::default(),
         resources: crate::service_worker::ScriptResources { script, imports: Vec::new() },
         fetch: None,
@@ -387,7 +385,7 @@ pub(crate) fn note_import_for_ruby(partition: u64, handle: u32, url: String, bod
         }
     }
 }
-// The worker `handle`: `[script URL, type, state, registration]` (0 for none yet), nil for none.
+// The worker `handle`: `[script URL, type, state, registration]`, nil for none.
 pub(crate) fn worker_for_ruby(partition: u64, handle: u32) -> Option<(String, String, String, u32)> {
     let mut reg = lock();
     let w = reg.existing(partition)?.workers.get(&handle)?;
@@ -620,17 +618,16 @@ impl Partition {
         }
         out.push(Cmd::QueueJob(id));
     }
-    // Resolve / Reject Job Promise: every realm's promises waiting on the job (an equivalent job's joined it) settled as
-    // `outcome`, and each service worker's own unregister() among them answered — once.
+    // Resolve / Reject Job Promise: every global's promises waiting on the job (an equivalent job's joined it) settled as
+    // `outcome` — once.
     fn answer(&mut self, id: u32, outcome: Outcome, out: &mut Vec<Cmd>) {
         let Some(j) = self.job(id).filter(|j| !j.settled) else { return };
         j.settled = true;
         let Outcome { registration, error, unregistered } = outcome;
         let (name, message) = error.unzip();
-        out.push(Cmd::Settled(id, registration, j.scope.clone(), name, message, unregistered));
-        // (…the answer may never be read: an uncontrolled registration's uninstall clears at once, terminating that very
+        // (…a worker's may never be read: an uncontrolled registration's uninstall clears at once, terminating that very
         // worker — the promise dies with the isolate, like a real terminated worker's)
-        out.extend(j.asking_workers.iter().map(|&h| Cmd::Answer(h, unregistered)));
+        out.push(Cmd::Settled(id, registration, j.scope.clone(), name, message, unregistered));
     }
     // Finish Job: the job `id` out of its queue — the next one there queued to run. Committed at once: a realm's
     // promise settles in a task after it (each realm runs its microtasks after the broadcast here), and a page's next
@@ -649,10 +646,14 @@ impl Partition {
         self.finish(id, out);
         out.extend(answers);
     }
-    // …rejected with an error `name`: "Failed to register a ServiceWorker: `what`" (or update, or unregister).
+    // …rejected with an error `name`: "Failed to register a ServiceWorker: `what`" (or update, or unregister) — what it
+    // made at its scope for its worker's view (`at`), which no version holds, none any more (Update: "If newestWorker is
+    // null, then remove registration map[…]").
     fn fail(&mut self, id: u32, name: &'static str, what: &str, out: &mut Vec<Cmd>) {
         let Some(j) = self.job(id) else { return };
         let message = format!("Failed to {} a ServiceWorker: {what}", j.kind);
+        let (site, scope) = (j.site.clone(), j.scope.clone());
+        self.registrations.retain(|r| r.registered || !r.mapped || r.site != site || r.scope != scope);
         self.conclude(id, Outcome { error: Some((name, message)), ..Outcome::default() }, out);
     }
     // Run Job. The Unregister job: the registration the map holds at the scope out of it — its clear waiting until no
@@ -733,10 +734,13 @@ impl Registry {
     // The job `id`'s script fetched (`error`: "mime", "scope", or another failure; `changed`: its bytes differ from the
     // newest worker's): a redirect, a non-JS MIME type or a scope past the script's max scope rejects, an unchanged one
     // resolves — committing the job's mode — and a changed one runs: the client announced first (a worker may enumerate
-    // its clients while its script evaluates), then its worker spawned by the host. Whether to spawn it.
-    fn job_fetched(&mut self, partition: u64, id: u32, error: Option<&str>, changed: bool, out: &mut Vec<Cmd>) -> bool {
-        let Some(p) = self.existing(partition) else { return false };
-        let Some(j) = p.job(id) else { return false };
+    // its clients while its script evaluates; a worker client's the host's own record), then its worker spawned by the
+    // host, of the registration the map holds at the scope, made where it holds none: not one a client sees until the worker
+    // evaluates (`job_evaluated`) but the one its `self.registration` is from the first. The registration to spawn it of,
+    // none for no worker.
+    fn job_fetched(&mut self, partition: u64, id: u32, error: Option<&str>, changed: bool, out: &mut Vec<Cmd>) -> Option<u32> {
+        let p = self.existing(partition)?;
+        let j = p.job(id)?;
         let (site, scope, mode, registration, realm) = (j.site.clone(), j.scope.clone(), j.update_via_cache.clone(), j.registration, j.realm);
         match error {
             Some("mime") => p.fail(id, "SecurityError", "the script has an unsupported MIME type.", out),
@@ -749,11 +753,13 @@ impl Registry {
                 self.partition(partition).conclude(id, Outcome { registration, ..Outcome::default() }, out);
             }
             None => {
-                out.push(Cmd::ReportClient(realm));
-                return true;
+                if realm >= 0 {
+                    out.push(Cmd::ReportClient(realm));
+                }
+                return Some(self.at(partition, &site, &scope).id);
             }
         }
-        false
+        None
     }
     // The job's worker `handle` evaluated its script ("Run Service Worker" gates the job): one whose evaluation failed
     // (an importScripts that 404s, a top-level throw, a script that does not parse) ended and the job rejected, with no
@@ -807,7 +813,6 @@ pub(crate) fn schedule_job_for_ruby(
     } else {
         (script_url, script_type)
     };
-    let asking_workers: Vec<u32> = (realm < 0).then(|| realm.unsigned_abs() as u32).into_iter().collect();
     let last = p.jobs.iter_mut().rev().find(|j| j.site == site && j.scope == scope);
     let runs = last.is_none();
     if let Some(last) = last.filter(|j| {
@@ -815,7 +820,6 @@ pub(crate) fn schedule_job_for_ruby(
             && j.kind == kind
             && (kind == "unregister" || (j.script_url == script_url && j.script_type == script_type && j.update_via_cache == update_via_cache))
     }) {
-        last.asking_workers.extend(asking_workers);
         return Some((last.id, Vec::new()));
     }
     reg.next_job += 1;
@@ -830,7 +834,6 @@ pub(crate) fn schedule_job_for_ruby(
         script_type,
         registration: 0,
         realm,
-        asking_workers,
         creator_key,
         queued: None,
         waits: None,
@@ -872,8 +875,8 @@ pub(crate) fn job_for_ruby(partition: u64, id: u32) -> Option<(String, String, O
     let j = reg.existing(partition)?.job(id)?;
     Some((j.scope.clone(), j.script_url.clone(), j.update_via_cache.clone(), j.script_type.clone(), j.creator_key.clone(), j.site.clone()))
 }
-// …its script fetched (`job_fetched`): [whether the host spawns its worker, what the host does].
-pub(crate) fn job_fetched_for_ruby(partition: u64, id: u32, error: Option<String>, changed: bool) -> (bool, Vec<Cmd>) {
+// …its script fetched (`job_fetched`): [the registration the host spawns its worker of, nil for none, what the host does].
+pub(crate) fn job_fetched_for_ruby(partition: u64, id: u32, error: Option<String>, changed: bool) -> (Option<u32>, Vec<Cmd>) {
     let mut out = Vec::new();
     let spawn = lock().job_fetched(partition, id, error.as_deref(), changed, &mut out);
     (spawn, out)
@@ -1149,9 +1152,11 @@ pub(crate) enum Cmd {
     State(u32, &'static str),
     // The worker's isolate ended.
     Terminate(u32),
-    // The registration's `updatefound` fired.
-    UpdateFound(u32),
-    // The worker's activate event fired.
+    // The registration's `updatefound` fired, and its installing worker's install event: Install's order, a worker told
+    // first, and a client's listener's message behind its install event.
+    UpdateFound(u32, u32),
+    // The worker activating (Update Worker State, as `State`) and its activate event fired, its own global told that
+    // first — and, ahead of anything a client sends it once told it is activating, that event.
     Activate(u32),
     // Every realm told the worker is its registration's active one: its script URL, whether it intercepts.
     Activated(u32, String, bool),
@@ -1174,8 +1179,6 @@ pub(crate) enum Cmd {
     // Every realm's promises waiting on the job settled: the registration, its scope, the error's name and message,
     // whether an Unregister job unregistered one.
     Settled(u32, u32, String, Option<&'static str>, Option<String>, bool),
-    // A service worker's own unregister() answered: whether it unregistered one.
-    Answer(u32, bool),
 }
 
 impl IntoValue for Cmd {
@@ -1183,7 +1186,7 @@ impl IntoValue for Cmd {
         match self {
             Cmd::State(handle, state) => ("state", handle, state).into_value_with(ruby),
             Cmd::Terminate(handle) => ("terminate", handle).into_value_with(ruby),
-            Cmd::UpdateFound(id) => ("update_found", id).into_value_with(ruby),
+            Cmd::UpdateFound(id, handle) => ("update_found", id, handle).into_value_with(ruby),
             Cmd::Activate(handle) => ("activate", handle).into_value_with(ruby),
             Cmd::Activated(handle, script_url, intercepts) => ("activated", handle, script_url, intercepts).into_value_with(ruby),
             Cmd::QueueStep(handle) => ("queue_step", handle).into_value_with(ruby),
@@ -1197,7 +1200,6 @@ impl IntoValue for Cmd {
             Cmd::Settled(id, registration, scope, error, message, unregistered) => {
                 ("settled", id, registration, scope, error, message, unregistered).into_value_with(ruby)
             }
-            Cmd::Answer(handle, unregistered) => ("answer", handle, unregistered).into_value_with(ruby),
         }
     }
 }
@@ -1260,7 +1262,7 @@ impl Partition {
         }
         match taken {
             "updatefound" => {
-                out.push(Cmd::UpdateFound(id));
+                out.push(Cmd::UpdateFound(id, handle));
                 self.queue_step(handle, out);
             }
             "installed" => self.installed(id, handle, out),
@@ -1336,7 +1338,6 @@ impl Partition {
             self.set_version(id, "waiting", None);
         }
         out.push(Cmd::Activate(handle));
-        Self::tell_state(handle, "activating", out);
         if let Some(r) = self.registrations.iter_mut().find(|r| r.id == id && r.mapped) {
             r.activating = Some(handle);
         }
@@ -1536,7 +1537,7 @@ mod tests {
             r.serving = Some(1);
             r.id
         };
-        worker_new(p, 1, a.clone(), "https://other.test/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 1, a.clone(), "https://other.test/sw.js".into(), "classic".into(), Vec::new(), 0);
         part(p, |q| q.workers.get_mut(&1).expect("a worker made").registration = id);
         assert_eq!(registrations_of_origin_for_ruby(p, a.clone(), other.clone()), [(id, "https://other.test/".to_owned())]);
         assert_eq!(registrations_of_origin_for_ruby(p, other.clone(), other.clone()), []);
@@ -1555,24 +1556,24 @@ mod tests {
     fn has_the_host_take_each_lifecycle_step_in_order() {
         let p = partition_new_for_ruby();
         let id = note_registered(p, "https://a.test/".into());
-        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
         assert_eq!(install(p, id, 1), [Cmd::State(1, "installing"), Cmd::QueueStep(1)]);
         // (…one step a task: updatefound, then the install phase waited for, then installed and Try Activate)
-        assert_eq!(step_for_ruby(p, 1), [Cmd::UpdateFound(id), Cmd::QueueStep(1)]);
+        assert_eq!(step_for_ruby(p, 1), [Cmd::UpdateFound(id, 1), Cmd::QueueStep(1)]);
         assert!(step_for_ruby(p, 1).is_empty());
         assert!(resume_for_ruby(p, 1, "activation".into()).is_empty());
         note_phase_for_ruby(p, 1, "install".into(), true);
         assert_eq!(resume_for_ruby(p, 1, "install".into()), [Cmd::State(1, "installed"), Cmd::TryClear, Cmd::QueueStep(1)]);
         assert_eq!(
             step_for_ruby(p, 1),
-            [Cmd::Activate(1), Cmd::State(1, "activating"), Cmd::Activated(1, "https://a.test/sw.js".into(), true), Cmd::QueueStep(1)]
+            [Cmd::Activate(1), Cmd::Activated(1, "https://a.test/sw.js".into(), true), Cmd::QueueStep(1)]
         );
         assert!(step_for_ruby(p, 1).is_empty());
         note_phase_for_ruby(p, 1, "activated".into(), true);
         assert_eq!(resume_for_ruby(p, 1, "activation".into()), [Cmd::State(1, "activated"), Cmd::TryClear, Cmd::TryActivate]);
         assert_eq!(match_worker_for_ruby(p, String::new(), "https://a.test/x".into(), "navigation".into()).map(|m| m.0), Some(1));
         // (…an update replacing it: the outgoing worker retired before the versions move, the rest continued after)
-        worker_new(p, 2, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 2, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
         install(p, id, 2);
         step_for_ruby(p, 2);
         note_phase_for_ruby(p, 2, "install".into(), true);
@@ -1581,7 +1582,7 @@ mod tests {
         assert_eq!(versions_for_ruby(p, id), (None, Some(2), Some(1)));
         assert_eq!(
             continue_for_ruby(p, 2),
-            [Cmd::Activate(2), Cmd::State(2, "activating"), Cmd::Activated(2, "https://a.test/sw.js".into(), true), Cmd::QueueStep(2)]
+            [Cmd::Activate(2), Cmd::Activated(2, "https://a.test/sw.js".into(), true), Cmd::QueueStep(2)]
         );
         assert_eq!(versions_for_ruby(p, id), (None, None, Some(2)));
         assert_eq!(queued_steps_for_ruby(p), [2]);
@@ -1617,7 +1618,7 @@ mod tests {
         let p = partition_new_for_ruby();
         let scope = || "https://a.test/".to_owned();
         let id = note_registered(p, scope());
-        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
         set_version(p, id, "active".into(), Some(1));
         activated(p, scope(), 1);
         note_client_for_ruby(p, "c".into(), 0, String::new(), "https://a.test/".into(), "window".into(), "top-level".into(), None, Some(1));
@@ -1643,8 +1644,8 @@ mod tests {
         let p = partition_new_for_ruby();
         let scope = || "https://a.test/".to_owned();
         let id = note_registered(p, scope());
-        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new());
-        worker_new(p, 2, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
+        worker_new(p, 2, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
         set_version(p, id, "active".into(), Some(1));
         activated(p, scope(), 1);
         set_version(p, id, "waiting".into(), Some(2));
@@ -1679,8 +1680,8 @@ mod tests {
     fn matches_a_request_to_the_worker_its_longest_scope_routes_to() {
         let p = partition_new_for_ruby();
         let m = |url: &str, mode: &str| match_worker_for_ruby(p, String::new(), url.into(), mode.into()).map(|r| (r.0, r.3));
-        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new());
-        worker_new(p, 2, String::new(), "https://a.test/app/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
+        worker_new(p, 2, String::new(), "https://a.test/app/sw.js".into(), "classic".into(), Vec::new(), 0);
         activated(p, "https://a.test/".into(), 1);
         note_activating(p, "https://a.test/app/".into(), 2);
         // (…the longer scope's worker still activating: a client takes it, a navigation waits for it)
@@ -1692,7 +1693,7 @@ mod tests {
         assert_eq!(m("https://a.test/app/x", "navigation"), Some((2, "https://a.test/app/".into())));
         assert_eq!(m("https://a.test/app/x", "activating"), None);
         // (…an update activating at the same scope wins the tie over the outgoing one; a dead one routes nothing)
-        worker_new(p, 3, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 3, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
         note_activating(p, "https://a.test/".into(), 3);
         assert_eq!(m("https://a.test/y", "client"), Some((3, "https://a.test/".into())));
         set_worker_flag_for_ruby(p, 3, "dead".into(), true);
@@ -1711,7 +1712,7 @@ mod tests {
         let p = partition_new_for_ruby();
         // (…the worker's registration's storage key the clients' it sees: theirs, of no top-level site here)
         let id = note_registered(p, "https://a.test/".into());
-        worker_new(p, 5, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 5, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
         part(p, |q| q.workers.get_mut(&5).expect("a worker made").registration = id);
         let a = || Some("https://a.test".to_owned());
         note_client_for_ruby(p, "w".into(), 0, String::new(), "https://a.test/".into(), "window".into(), "top-level".into(), a(), Some(5));
@@ -1757,8 +1758,10 @@ mod tests {
         // (…a Register job fetches its script, a changed one announcing its client and spawning its worker, which it waits on)
         assert_eq!(run_job_for_ruby(p, a), [Cmd::Fetch(a)]);
         assert_eq!(job_for_ruby(p, a), Some(("s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), String::new(), String::new())));
-        assert_eq!(job_fetched_for_ruby(p, a, None, true), (true, vec![Cmd::ReportClient(0)]));
-        worker_new(p, 4, String::new(), "s/a.js".into(), "classic".into(), Vec::new());
+        let (made, cmds) = job_fetched_for_ruby(p, a, None, true);
+        assert!(made.is_some_and(|id| id != 0));
+        assert_eq!(cmds, [Cmd::ReportClient(0)]);
+        worker_new(p, 4, String::new(), "s/a.js".into(), "classic".into(), Vec::new(), 0);
         assert!(job_spawned_for_ruby(p, a, Some(4)).is_empty());
         assert_eq!(registered_at_for_ruby(p, String::new(), "s/".into()), 0);
         // (…evaluated, Install resolves its promises — and a register() now no longer joins it — and finishes it only once
@@ -1769,7 +1772,7 @@ mod tests {
         let (a2, cmds) = schedule("register", "s/", "s/a.js", 0, 0).expect("scheduled");
         assert_ne!(a2, a);
         assert!(cmds.is_empty());
-        assert_eq!(step_for_ruby(p, 4), [Cmd::UpdateFound(id), Cmd::QueueStep(4)]);
+        assert_eq!(step_for_ruby(p, 4), [Cmd::UpdateFound(id, 4), Cmd::QueueStep(4)]);
         assert!(step_for_ruby(p, 4).is_empty());
         note_phase_for_ruby(p, 4, "install".into(), true);
         assert_eq!(resume_for_ruby(p, 4, "install".into()), [Cmd::State(4, "installed"), Cmd::QueueJob(b), Cmd::TryClear, Cmd::QueueStep(4)]);
@@ -1792,13 +1795,13 @@ mod tests {
         lock().existing(p).unwrap().workers.get_mut(&4).unwrap().resources.note_import("s/i.js".to_owned(), b"i".to_vec());
         let check = update_check(p, u).unwrap();
         assert_eq!(check.newest.map(|n| n.imports), Some(vec![("s/i.js".to_owned(), b"i".to_vec())]));
-        assert_eq!(job_fetched_for_ruby(p, u, None, false), (false, vec![Cmd::Settled(u, id, "s/".into(), None, None, false)]));
-        // (…a service worker's own unregister() is answered in its inbox, a client's joining it in its realm)
+        assert_eq!(job_fetched_for_ruby(p, u, None, false), (None, vec![Cmd::Settled(u, id, "s/".into(), None, None, false)]));
+        // (…a service worker's own unregister() is a job as a client's is, a client's joining it)
         let (r, _) = schedule("unregister", "s/", "", 0, -4).expect("scheduled");
         assert_eq!(schedule("unregister", "s/", "", 0, 0), Some((r, Vec::new())));
         // (…answered before its registration clears, as Unregister has it)
         let cmds = run_job_for_ruby(p, r);
-        assert_eq!(cmds[..2], [Cmd::Settled(r, 0, "s/".into(), None, None, true), Cmd::Answer(4, true)]);
+        assert_eq!(cmds[0], Cmd::Settled(r, 0, "s/".into(), None, None, true));
         clear_for_ruby(p);
         let p = partition_new_for_ruby();
         assert_eq!(registered_at_for_ruby(p, String::new(), "s/".into()), 0);
@@ -1819,7 +1822,7 @@ mod tests {
     #[test]
     fn steps_a_version_from_installing_to_activated() {
         let p = partition_new_for_ruby();
-        worker_new(p, 3, String::new(), "a/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 3, String::new(), "a/sw.js".into(), "classic".into(), Vec::new(), 0);
         assert_eq!(advance(p, 3), "done");
         begin_lifecycle(p, 3);
         assert_eq!(advance(p, 3), "updatefound");
@@ -1829,7 +1832,7 @@ mod tests {
         assert!(awaits_activation(p, 3));
         // (…held at Try Activate while the active worker it replaces controls a client, let go once that one goes)
         let id = note_registered(p, "https://a.test/".into());
-        worker_new(p, 9, String::new(), "a/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 9, String::new(), "a/sw.js".into(), "classic".into(), Vec::new(), 0);
         set_version(p, id, "active".into(), Some(9));
         set_version(p, id, "waiting".into(), Some(3));
         note_client_for_ruby(p, "c".into(), 0, String::new(), "https://b.test/".into(), "window".into(), "top-level".into(), None, Some(9));
@@ -1841,13 +1844,13 @@ mod tests {
         assert_eq!(advance(p, 3), "activated");
         assert_eq!(advance(p, 3), "done");
         // A failed install ends it; a redundant worker takes no step.
-        worker_new(p, 4, String::new(), "a/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 4, String::new(), "a/sw.js".into(), "classic".into(), Vec::new(), 0);
         begin_lifecycle(p, 4);
         assert_eq!(advance(p, 4), "updatefound");
         note_phase_for_ruby(p, 4, "install".into(), false);
         assert_eq!(advance(p, 4), "install_failed");
         assert_eq!(advance(p, 4), "done");
-        worker_new(p, 5, String::new(), "a/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 5, String::new(), "a/sw.js".into(), "classic".into(), Vec::new(), 0);
         begin_lifecycle(p, 5);
         set_worker_state_for_ruby(p, 5, "redundant".into());
         assert_eq!(advance(p, 5), "done");
@@ -1858,7 +1861,7 @@ mod tests {
     fn keeps_a_registration_from_its_job_to_its_clear() {
         let p = partition_new_for_ruby();
         let id = note_registered(p, "a/".into());
-        worker_new(p, 7, String::new(), "a/sw.js".into(), "classic".into(), Vec::new());
+        worker_new(p, 7, String::new(), "a/sw.js".into(), "classic".into(), Vec::new(), 0);
         set_version(p, id, "installing".into(), Some(7));
         note_activating(p, "a/".into(), 7);
         assert_eq!(registrations_for_ruby(p), [("a/".into(), true, Some(7), None, id, String::new())]);

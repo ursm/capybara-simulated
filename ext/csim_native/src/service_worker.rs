@@ -489,16 +489,15 @@ pub(crate) fn claims(href: &str, scope: &str, scopes: &[String]) -> bool {
     !scope.is_empty() && href.starts_with(scope) && !scopes.iter().any(|s| s.len() > scope.len() && href.starts_with(s.as_str()))
 }
 
-// What a service worker's realm is spawned with (the host's, `run_worker`): its registration's scope, its updateViaCache
-// mode, the version active beside it as it installs (its script URL and handle), and the Update probe's responses of
-// the scripts it imports (its script resource map's — Service Workers §3.1.4 "Update", each a JSON record), which its
+// What a service worker's realm is spawned with (the host's, `run_worker`): its registration's number and scope, its
+// updateViaCache mode, and the Update probe's responses of the scripts it imports (its script resource map's — Service Workers §3.1.4 "Update", each a JSON record), which its
 // `importScripts` take, each once, in place of a fetch — and whether it is past installing (`swInstalled`), after which
 // it imports what its script resource map holds alone.
 #[derive(Default)]
 pub(crate) struct ServiceWorkerGlobal {
+    registration: u32,
     scope: String,
     update_via_cache: String,
-    previous_active: Option<(String, u32)>,
     probed_imports: std::collections::HashMap<String, String>,
     installed: bool,
 }
@@ -542,36 +541,31 @@ fn fulfilled_outcome_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     rv.set_uint32(fulfilled_outcome(kind.as_deref(), args.get(1).boolean_value(scope), args.get(2).boolean_value(scope), realm));
 }
 
-// __dom.swGlobalInit(scope, updateViaCache, importsJson, previousUrl, previousHandle): the calling realm a service worker's,
-// spawned with these (`ServiceWorkerGlobal`) — `importsJson` an object of the probe's records by URL, or null.
+// __dom.swGlobalInit(registration, scope, updateViaCache, importsJson): the calling realm a service worker's, spawned with
+// these (`ServiceWorkerGlobal`) — `importsJson` an object of the probe's records by URL, or null.
 fn global_init_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let text = |scope: &mut v8::PinScope<'_, '_>, i| (!args.get(i).is_null_or_undefined()).then(|| args.get(i).to_rust_string_lossy(scope));
-    let probed_imports = text(scope, 2)
+    let registration = args.get(0).uint32_value(scope).unwrap_or(0);
+    let probed_imports = text(scope, 3)
         .and_then(|json| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&json).ok())
         .map(|map| map.into_iter().map(|(url, record)| (url, record.to_string())).collect())
         .unwrap_or_default();
-    let previous_active = text(scope, 3).map(|url| (url, args.get(4).uint32_value(scope).unwrap_or(0)));
-    let global = ServiceWorkerGlobal { scope: text(scope, 0).unwrap_or_default(), update_via_cache: text(scope, 1).unwrap_or_default(), previous_active, probed_imports, ..Default::default() };
+    let global = ServiceWorkerGlobal { registration, scope: text(scope, 1).unwrap_or_default(), update_via_cache: text(scope, 2).unwrap_or_default(), probed_imports, ..Default::default() };
     let cid = crate::dom::realm_id(scope, &args);
     if let Some(s) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
         s.service_worker = Some(global);
     }
 }
-// __dom.swGlobal() -> `[scope, updateViaCache, previousUrl, previousHandle]` of the calling service worker's realm
-// ('' for a scope or a mode it was given none of, nulls for no previous version), or undefined for another realm.
+// __dom.swGlobal() -> `[scope, updateViaCache, registration]` of the calling service worker's realm ('' for a mode it was
+// given none of), or undefined for another realm.
 fn global_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(g) = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.service_worker.as_ref()) else { return };
-    let (sw_scope, uvc, previous) = (g.scope.clone(), g.update_via_cache.clone(), g.previous_active.clone());
+    let (sw_scope, uvc, registration) = (g.scope.clone(), g.update_via_cache.clone(), g.registration);
     fn string<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
         v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
     }
-    let items: [v8::Local<'_, v8::Value>; 4] = [
-        string(scope, &sw_scope),
-        string(scope, &uvc),
-        match &previous { Some((url, _)) => string(scope, url), None => v8::null(scope).into() },
-        match previous { Some((_, handle)) => v8::Integer::new_from_unsigned(scope, handle).into(), None => v8::null(scope).into() },
-    ];
+    let items: [v8::Local<'_, v8::Value>; 3] = [string(scope, &sw_scope), string(scope, &uvc), v8::Integer::new_from_unsigned(scope, registration).into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.swInstalled(): the calling service worker past installing — its install event's lifetime promises settled,

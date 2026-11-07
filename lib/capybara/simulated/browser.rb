@@ -5092,7 +5092,7 @@ module Capybara
       # (…`credentials` a shared one's credentials mode, which another connecting to it must be of)
       # (…`secure` whether the context that creates it is a secure context, which a dedicated or shared one is as its owner is
       # — HTML "is a secure context", of its owner set[0] — and a service worker always)
-      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil, credentials: nil,
+      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, sw_registration: 0, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil, credentials: nil,
                        sw_body: nil, sw_imports: nil, site: nil, isolated: false, secure: true, at: nil, epoch_at: nil, shift: nil, travel: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
@@ -5236,7 +5236,7 @@ module Capybara
         # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
         # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
         # (…its bytes the first of its script resource map, which an update is byte-checked against: sw_registry.rs)
-        Native.sw_worker_new(@sw_partition, handle, site.to_s, target, worker_type(script_type), body.to_s) if service
+        Native.sw_worker_new(@sw_partition, handle, site.to_s, target, worker_type(script_type), body.to_s, sw_registration.to_i) if service
         workers_store(handle, record)
         thread = Thread.new do
           Thread.current.report_on_exception = false
@@ -5253,6 +5253,7 @@ module Capybara
             service:     service,
             creator_key: creator_key,
             sw_scope:    sw_scope,
+            sw_registration: sw_registration.to_i,
             controller:  ctrl,
             sw_script:   sw_script,
             # `new Worker(url, {type: 'module'})` — the observable module/classic split
@@ -5264,12 +5265,7 @@ module Capybara
             # The registration's updateViaCache mode — its job's, which commits only once this
             # evaluation ran — a SERVICE worker's importScripts reads ('none' bypasses the HTTP cache).
             sw_uvc: service ? update_via_cache || sw_scope_update_via_cache(sw_scope, site) : nil,
-            sw_imports_map: sw_imports,
-            # The registration's CURRENT active version at spawn time — its script URL and handle, the new
-            # worker's `self.registration.active` snapshot during its own install phase (registration-attribute's
-            # newer worker) and what its navigation preload is keyed by. Resolved here, on the registry-owning
-            # thread.
-            sw_prev_active: service && (ah = sw_serving(site)[sw_scope.to_s]) && (prev = sw_controller(ah, live: false)) ? {url: prev[2], handle: ah} : nil
+            sw_imports_map: sw_imports
           )
         end
         # A nested spawn runs THIS method on a worker thread, so other threads can observe
@@ -5335,8 +5331,9 @@ module Capybara
       # `source` = the posting client. Counted as a message owed (released by the worker's
       # `swack`) so settle waits for the SW to process it and any client.postMessage reply.
       # (…the host's to deliver: `sw_host`)
-      def service_worker_post_message(handle, data, client_id = nil, client_url = nil)
-        return sw_host.service_worker_post_message(handle, sw_host.restamped(data.to_s, self), client_id, client_url) unless sw_host?
+      # (…`sender` the service worker posting it, 0 for a client: `__csim_swClientMessage`)
+      def service_worker_post_message(handle, data, client_id = nil, client_url = nil, sender = 0)
+        return sw_host.service_worker_post_message(handle, sw_host.restamped(data.to_s, self), client_id, client_url, sender) unless sw_host?
 
         w = @workers[handle.to_i]
         # (…none to a worker whose thread is gone, which would never dispatch it nor let its count go)
@@ -5349,7 +5346,7 @@ module Capybara
         # gate can run before the worker even popped it — counted by the registry, under
         # its lock against the worker thread's release (sw_registry.rs `hold`).
         Native.sw_hold(@sw_partition, handle.to_i, 'message', true)
-        w[:inbox] << {kind: 'sw_message', data: data.to_s, client: client_id, url: client_url}
+        w[:inbox] << {kind: 'sw_message', data: data.to_s, client: client_id, url: client_url, sender: sender.to_i}
         # (…taken at the time it was posted at, as a worker's message is: `worker_post_to_worker`)
         w[:asked] = true
       end
@@ -6118,12 +6115,14 @@ module Capybara
       # try_clear_uninstalls), and a `statechange` listener of theirs can reach it in between.
       private def sw_redundant?(handle) = sw_worker(handle)&.dig(2) == 'redundant'
 
-      # Update Worker State: the worker `handle` in `state`, which every realm's ServiceWorker of it takes, its
-      # `statechange` fired (and, activated, a client it now controls has its `ready`) — where that is a change.
+      # Update Worker State: the worker `handle` in `state`, which every global's ServiceWorker of it takes, its
+      # `statechange` fired (and, activated, a client it now controls has its `ready`) — where that is a change. Each a task of
+      # its own event loop: a worker's queued as it is told — the block's task queued behind it — a realm's run here.
       private def sw_update_worker_state(handle, state)
-        return unless Native.sw_set_worker_state(@sw_partition, handle.to_i, state.to_s)
-
-        sw_broadcast('__csim_swWorkerStateChanged', handle.to_i, state.to_s)
+        changed = Native.sw_set_worker_state(@sw_partition, handle.to_i, state.to_s)
+        sw_tell_workers('__csim_swWorkerStateChanged', handle.to_i, state.to_s) if changed
+        yield if block_given?
+        sw_tell_realms('__csim_swWorkerStateChanged', handle.to_i, state.to_s) if changed
         nil
       end
 
@@ -6134,7 +6133,9 @@ module Capybara
       # A client's register() (`kind` 'register': its script URL and scope — nil: the script's directory — against the
       # client's `base` and `origin`, Start Register's checks first), a registration's update() or unregister() ('update' /
       # 'unregister': its number and scope), scheduled: `['job', its number]` — an equivalent job joins the one before it
-      # — or `[error name, message]`: update() of a registration with no worker an InvalidStateError.
+      # — or `[error name, message]`: update() of a registration with no worker an InvalidStateError. Asked on the thread of
+      # the global that asks — a worker's own, the registry behind its lock — what it makes the host do on the main thread's
+      # (`sw_run_here`).
       # (…`site` the top-level site of the caller's storage key, its registration's: sw_registry.rs)
       # (…the host's to run, the realm by the session's number for it: `sw_realm_key`)
       def sw_schedule_job(kind, script_url, scope, update_via_cache, script_type, registration_id, base, origin, realm_id, creator_key, site)
@@ -6162,8 +6163,14 @@ module Capybara
         return ['InvalidStateError', 'Failed to update a ServiceWorker: the registration has no worker.'] unless scheduled
 
         id, cmds = scheduled
-        sw_run(cmds)
+        sw_run_here(cmds)
         ['job', id]
+      end
+      # What the registry makes the host do, on the main thread: at once there, from a worker's thread by the outbox.
+      private def sw_run_here(cmds)
+        return sw_run(cmds) if Thread.current == @main_thread
+
+        @worker_outbox << {handle: 0, kind: 'sw_run', cmds: cmds} unless cmds.empty?
       end
 
       # …and run (`__csim_swRunJob`).
@@ -6176,9 +6183,9 @@ module Capybara
         return unless scope
 
         fetched = sw_update_fetch(Native::ServiceWorkerUpdate.new(@sw_partition, id), script_url)
-        spawn, cmds = Native.sw_job_fetched(@sw_partition, id, fetched['error'], !!fetched['changed'])
+        registration, cmds = Native.sw_job_fetched(@sw_partition, id, fetched['error'], !!fetched['changed'])
         sw_run(cmds)
-        return unless spawn
+        return unless registration
 
         handle = worker_spawn(
           script_url,
@@ -6186,6 +6193,7 @@ module Capybara
           creator_key:      creator_key,
           site:             site,
           sw_scope:         scope,
+          sw_registration:  registration,
           script_type:      script_type,
           update_via_cache: update_via_cache,
           sw_body:          fetched['body'],
@@ -6226,21 +6234,23 @@ module Capybara
           case kind
           when 'state'         then sw_update_worker_state(n, *args)
           when 'terminate'     then worker_terminate(n)
-          when 'update_found'  then sw_broadcast('__csim_swRegistrationUpdateFound', n)
-          when 'activate'      then @workers[n]&.dig(:inbox)&.push({kind: 'sw_activate'})
+          when 'update_found'
+            sw_tell_workers('__csim_swRegistrationUpdateFound', n)
+            @workers[args[0]]&.dig(:inbox)&.push({kind: 'sw_install'})
+            sw_tell_realms('__csim_swRegistrationUpdateFound', n)
+          when 'activate'      then sw_update_worker_state(n, 'activating') { @workers[n]&.dig(:inbox)&.push({kind: 'sw_activate'}) }
           when 'activated'     then sw_broadcast('__csim_swRegistrationActivated', n, *args)
           when 'queue_step'    then @runtime.call('__csim_swQueueStep', n)
           when 'continue'      then sw_run(Native.sw_continue(@sw_partition, n))
           when 'try_clear'     then try_clear_uninstalls
           when 'try_activate'  then sw_try_activate
           when 'retry_navs'
-            sw_broadcast('__csim_swRetryDeferredNavs')
+            sw_tell_realms('__csim_swRetryDeferredNavs')
             sw_browsers.each(&:sw_navigations_due!)
           when 'queue_job'     then @runtime.call('__csim_swQueueJob', n)
           when 'fetch'         then sw_fetch_job(n)
           when 'report_client' then sw_report_client(n)
           when 'settled'       then sw_broadcast('__csim_swJobSettled', n, *args)
-          when 'answer'        then @workers[n]&.dig(:inbox)&.push({kind: 'unregister_result', ok: args[0]})
           end
         end
         nil
@@ -6497,7 +6507,7 @@ module Capybara
       # lasts as long as the session, every other window's Browser asking it. What a worker answers reaches the window
       # it is for by the session's number for the realm it is for (`sw_realm_key`, a client's the registry's: the realm
       # it noted itself as), which names that window (Driver#browser_of_window) — dropped where the window is gone — and
-      # what every realm is told every window's (`sw_broadcast`).
+      # what every realm is told every window's (`sw_tell_realms`).
       def sw_host = (@sw_host ||= (@driver.respond_to?(:sw_host) && @driver.sw_host) || self)
       private def sw_host? = sw_host.equal?(self)
       # The Browsers whose realms the session's service workers reach.
@@ -6572,7 +6582,20 @@ module Capybara
 
       # Call a host fn in every realm of every window's (`broadcast_to_realms`): what changes the registration state
       # each holds objects of.
-      private def sw_broadcast(fn, *args) = sw_browsers.each {|b| b.broadcast_to_realms(fn, *args) }
+      private def sw_broadcast(fn, *args)
+        sw_tell_workers(fn, *args)
+        sw_tell_realms(fn, *args)
+      end
+      private def sw_tell_realms(fn, *args) = sw_browsers.each {|b| b.broadcast_to_realms(fn, *args) }
+      # …the session's workers, a task of each one's own event loop: every global's objects are the registry's alike, and a
+      # worker's jobs settle as a window's do.
+      private def sw_tell_workers(fn, *args) = sw_browsers.each {|b| b.workers_told(fn, args) }
+      def workers_told(fn, args)
+        # Snapshot: a live worker thread can insert into @workers (a nested spawn) mid-walk.
+        @workers.to_a.each do |_h, w|
+          w[:inbox] << {kind: 'sw_told', fn: fn, args: args} if w[:thread]&.alive?
+        end
+      end
 
       # Call a host fn in EVERY live browsing context of this window — the main realm and each frame/window realm.
       # Service-worker registration state is per-realm (each has its own registration objects), so
@@ -6665,22 +6688,6 @@ module Capybara
       # request during a navigation.
       def nav_preload_enabled?(scope, site)
         scope ? Native.sw_navigation_preload(@sw_partition, site.to_s, scope.to_s).first : false
-      end
-
-      # A service worker's own `registration.unregister()` (rode the outbox as
-      # 'sw_unregister'): an Unregister job at its scope, the promise parked in the worker
-      # answered with the had-status when the job settles (sw_registry.rs `answer`).
-      private def process_worker_unregister(handle)
-        w = @workers[handle]
-        return unless w && w[:service]
-
-        scope = w[:sw_scope].to_s
-        scope = sw_scope_of(handle).to_s if scope.empty?
-        return w[:inbox] << {kind: 'unregister_result', ok: false} if scope.empty?
-
-        # (…of its registration's storage key: its top-level site the worker's own)
-        _id, cmds = Native.sw_schedule_job(@sw_partition, 'unregister', w[:partition].to_s, scope, '', nil, '', 0, -handle, '')
-        sw_run(cmds)
       end
 
       # Try Clear Registration for each registration unregistered (sw_registry.rs `try_clear`).
@@ -7833,7 +7840,7 @@ module Capybara
         port_msgs,   rest0c = rest0b.partition {|e| e[:kind] == 'port_msg' }
         sw_navs,     rest0c3 = rest0c.partition {|e| e[:kind] == 'sw_client_navigate' }
         skip_waits,  rest0d0 = rest0c3.partition {|e| e[:kind] == 'sw_skip_waiting' }
-        sw_unregs,   rest0d0b = rest0d0.partition {|e| e[:kind] == 'sw_unregister' }
+        sw_runs,     rest0d0b = rest0d0.partition {|e| e[:kind] == 'sw_run' }
         sw_evals,    rest0d1 = rest0d0b.partition {|e| e[:kind] == 'sw_eval' }
         sw_phases,   rest0d2 = rest0d1.partition {|e| e[:kind] == 'sw_phase' }
         sw_reaps,    rest0d2b = rest0d2.partition {|e| e[:kind] == 'sw_reaped' }
@@ -7864,12 +7871,10 @@ module Capybara
 
           sw_navigate_reply(e[:handle], e[:nav_id], '', '', 'the client is not a navigable browsing context')
         end
-        # A SERVICE WORKER's own `registration.unregister()` — an Unregister job at its scope,
-        # as the client-side call is. One its worker made while evaluating queues behind that
-        # worker's own Register job, so it unregisters the registration the job leaves there —
-        # the one that job made, or, the evaluation failed, the one there before. Scheduled
-        # BEFORE the outcomes below: a failed one ends its worker, whose scope this reads.
-        sw_unregs.each {|e| process_worker_unregister(e[:handle].to_i) }
+        # What a job a worker scheduled makes the host do (`sw_schedule_job`). One its worker made while evaluating queues
+        # behind that worker's own Register job, so it acts on the registration the job leaves there — the one that job
+        # made, or, the evaluation failed, the one there before.
+        sw_runs.each {|e| sw_run(e[:cmds]) }
         # A service worker's script-evaluation outcome — settles the Register / Update job
         # waiting on it (sw_job_evaluated), which makes the worker its registration's
         # installing worker. Delivered BEFORE skip_waits: a worker's install-phase skipWaiting()
@@ -9426,7 +9431,7 @@ module Capybara
       # Worker thread entry. Builds an isolate via `V8Runtime.build_worker`,
       # evaluates the worker script, then loops draining microtasks + timers +
       # inbox until `:terminate` lands or an exception propagates.
-      private def run_worker(handle, url, body, inbox, outbox, record: nil, name: '', shared: false, service: false, creator_key: nil, sw_scope: nil, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil, sw_prev_active: nil)
+      private def run_worker(handle, url, body, inbox, outbox, record: nil, name: '', shared: false, service: false, creator_key: nil, sw_scope: nil, sw_registration: 0, controller: 0, sw_script: nil, creator_client: nil, module_worker: false, sw_uvc: nil, sw_imports_map: nil)
         # Release the spawn-time `BOOTING` count exactly once, however
         # this method exits (normal start, `self.close()`, or an exception), so
         # worker_pending? doesn't stay stuck true forever.
@@ -9547,9 +9552,6 @@ module Capybara
             Native.sw_hold(@sw_partition, handle, 'skip_waiting', true)
             outbox << {handle: handle, kind: 'sw_skip_waiting'}
           },
-          # self.registration.unregister() — an Unregister job, scheduled on the main thread
-          # (process_worker_unregister); the reply rides this worker's inbox as 'unregister_result'.
-          unregister:     ->                  { outbox << {handle: handle, kind: 'sw_unregister'} },
           # A race-network-and-fetch-handler route matched: run the network leg on a
           # host thread concurrently with the fetch-event dispatch the worker is
           # about to (possibly synchronously-blocking) run. See sw_race_network.
@@ -9689,12 +9691,11 @@ module Capybara
         # script are distinct registrations; anything keyed on the scope, e.g. a
         # per-registration cache name, must not collide).
         if service
-          # …with its registration's updateViaCache mode (importScripts' cache decision: 'none' revalidates every
-          # import, 'imports' / 'all' read the HTTP cache), the Update probe's import responses (this version's script
-          # resource map, which importScripts take each once instead of fetching again) and its registration's active
-          # version at spawn (`self.registration.active` while THIS version installs) — the engine's
-          # (service_worker.rs `swGlobalInit`).
-          args = [sw_scope.to_s, sw_uvc, sw_imports_map && JSON.generate(sw_imports_map), sw_prev_active&.dig(:url), sw_prev_active&.dig(:handle).to_i]
+          # …with its registration's number in the registry (`self.registration`, which reads its versions from there), its
+          # updateViaCache mode (importScripts' cache decision: 'none' revalidates every import, 'imports' / 'all' read the
+          # HTTP cache) and the Update probe's import responses (this version's script resource map, which importScripts take
+          # each once instead of fetching again) — the engine's (service_worker.rs `swGlobalInit`).
+          args = [sw_registration, sw_scope.to_s, sw_uvc, sw_imports_map && JSON.generate(sw_imports_map)]
           rt.eval_void("globalThis.__dom.swGlobalInit(#{args.map { JSON.generate(_1) }.join(', ')});")
           rt.eval_void('__csim_installServiceWorkerScope();')
         end
@@ -9804,9 +9805,9 @@ module Capybara
           end
         end
         rt.drain_microtasks
-        # Drive the service worker's lifecycle: fire `install`, then — once the host's Activate
-        # step reaches it ('sw_activate': Try Activate let it, the outgoing worker no longer
-        # holding clients or it skipped waiting) — `activate`, each phase
+        # Drive the service worker's lifecycle: `install`, once the host's Install reaches it ('sw_install': its state and
+        # its registration's told it first), then — once the host's Activate step does ('sw_activate': Try Activate let it,
+        # the outgoing worker no longer holding clients or it skipped waiting) — `activate`, each phase
         # ADVANCING ONLY WHEN ITS `waitUntil` PROMISES HAVE ALL SETTLED — a promise parked on
         # a client message (extendable-event-waituntil's SYN/ACK, fetch-waits-for-activate's
         # 'ACTIVATE') settles from a later inbox dispatch, so the settle check runs at the
@@ -9834,13 +9835,13 @@ module Capybara
             rt.drain_microtasks
             rt.drain_timers(0)
           end
-          # 'install' pending → 'activation' (installed: waiting for the host's Activate step,
-          # its activate handler not run while the outgoing worker still serves — Service
-          # Workers "Activate" dispatches it) → 'activate' pending → nil (done, or install
-          # failed — a failed version fires no activate; the client terminates this worker).
-          sw_phase_pending = 'install'
+          # 'installation' (evaluated: waiting for the host's Install) → 'install' pending → 'activation' (installed:
+          # waiting for the host's Activate step, its activate handler not run while the outgoing worker still serves —
+          # Service Workers "Activate" dispatches it) → 'activate' pending → nil (done, or install failed — a failed version
+          # fires no activate; the client terminates this worker).
+          sw_phase_pending = 'installation'
           sw_check_phase = lambda do
-            while sw_phase_pending && sw_phase_pending != 'activation' && (t = rt.call('__csim_swPhaseTake'))
+            while %w[install activate].include?(sw_phase_pending) && (t = rt.call('__csim_swPhaseTake'))
               if t['phase'] == 'install'
                 ok = t['ok'] != false
                 outbox << {handle: handle, kind: 'sw_phase', phase: 'install', ok: ok}
@@ -9855,10 +9856,6 @@ module Capybara
             # check costs nothing for the rest of this worker's life.
             sw_check_phase = nil unless sw_phase_pending
           end
-          sw_fire_phase.call('install')
-          # The common no-waitUntil path settles install right here at boot, inside the
-          # `BOOTING` hold — its marker reaches the outbox before release_init.
-          sw_check_phase.call
         end
         # Fire any timer the initial script parked BEFORE releasing the init hold — the
         # same gated drain the poll loop runs per tick. `fetch()` defers its body to a
@@ -9942,7 +9939,7 @@ module Capybara
               # virtual clock fast-forwards past the caller's timeout before the reply lands. The
               # `ensure` keeps a raising handler from leaking the counter and hanging settle.
               begin
-                rt.call('__csim_swClientMessage', msg[:data], msg[:client], msg[:url])
+                rt.call('__csim_swClientMessage', msg[:data], msg[:client], msg[:url], msg[:sender])
                 # A synchronously-resolved waitUntil must settle NOW: its allSettled
                 # continuation flips the extended-lifetime counter back to 0 (the
                 # try-activate release), and nothing else drains this isolate's
@@ -9989,6 +9986,13 @@ module Capybara
               ensure
                 outbox << {handle: handle, kind: 'swack'}
               end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'sw_install'
+              # The host's Install reached this evaluated worker: its install event now.
+              if sw_phase_pending == 'installation'
+                sw_phase_pending = 'install'
+                sw_fire_phase.call('install')
+                sw_check_phase.call
+              end
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_activate'
               # The host's Activate step reached this installed worker: its activate event now.
               if sw_phase_pending == 'activation'
@@ -9996,17 +10000,15 @@ module Capybara
                 sw_fire_phase.call('activate')
                 sw_check_phase.call
               end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'sw_told'
+              # What the host tells every global of the registry's (`sw_tell_workers`): a worker's state, a registration's
+              # `updatefound`, a job settled — its listeners' and promises' continuations drained.
+              rt.call(msg[:fn], *msg[:args])
+              rt.drain_microtasks
             elsif msg.is_a?(Hash) && msg[:kind] == 'client_navigate_result'
               # The outcome of a WindowClient.navigate() this worker is awaiting — settles the
               # promise it is holding (js/src/workers.js __csim_swClientNavigateResult).
               rt.call('__csim_swClientNavigateResult', msg[:nav_id], msg[:url], msg[:client], msg[:error])
-            elsif msg.is_a?(Hash) && msg[:kind] == 'unregister_result'
-              # The main thread ran this worker's own `registration.unregister()` job — settle
-              # the parked promise. Drain: its continuation is what posts the test's reply
-              # (`unregister().then(() => port.postMessage(...))`), and nothing else drains
-              # this isolate's microtasks until the next timer-bearing tick.
-              rt.call('__csim_swUnregisterResult', msg[:ok])
-              rt.drain_microtasks
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_client_settled'
               # A reserved client execution ready, or discarded: the `clients.get` of it this worker waits on settled
               # (js/src/workers.js), its continuation drained as an unregister result's is.

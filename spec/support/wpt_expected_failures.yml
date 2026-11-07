@@ -6358,19 +6358,10 @@ service-workers/cache-storage/credentials.https.html:
 - Cache API matching includes credentials
 service-workers/service-worker/ServiceWorkerGlobalScope/error-message-event.https.html:
 - Verify error event is received
-service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event.https.html:
-- Post extendable messages among service workers
-- "[harness] TIMEOUT"
 service-workers/service-worker/ServiceWorkerGlobalScope/fetch-on-the-right-interface.https.any.js:
 - Fetch method on the right interface
-service-workers/service-worker/ServiceWorkerGlobalScope/postmessage.https.html:
-- Post messages among service workers
-- "[harness] TIMEOUT"
 service-workers/service-worker/ServiceWorkerGlobalScope/service-worker-error-event.https.html:
 - Error handlers inside serviceworker should see the attributes of ErrorEvent
-service-workers/service-worker/ServiceWorkerGlobalScope/update.https.html:
-- Update a registration on ServiceWorkerGlobalScope
-- "[harness] TIMEOUT"
 service-workers/service-worker/about-blank-replacement.https.html:
 - Initial about:blank is controlled, exposed to clients.matchAll(), and matches final
   Client.

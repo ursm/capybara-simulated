@@ -59552,12 +59552,12 @@ service-workers/service-worker/fetch-event.https.html:
   reason: 'The test holds a resolution the spec has since withdrawn: it asserts "Client
     ID Not Found" for an iframe''s navigation, w3c/ServiceWorker#1267''s "keep navigation
     clientId empty at first", where the current draft, since #1832 (merged 2026-07-17),
-    reads "If client is not null, initialize e''s clientId attribute to client''s id",
-    its note "the id of request''s client when the request has an initiating service
-    worker client, and the empty string otherwise". HTML makes the client of an iframe''s
-    navigation its node document''s (source snapshot params'' fetch client). Chrome (measured)
-    gives a frame''s own later navigations an id, its first ''; Firefox always ''. Re-check
-    when the test is updated.'
+    reads "If client is not null, initialize e''s clientId attribute to client''s
+    id", its note "the id of request''s client when the request has an initiating
+    service worker client, and the empty string otherwise". HTML makes the client
+    of an iframe''s navigation its node document''s (source snapshot params'' fetch
+    client). Chrome (measured) gives a frame''s own later navigations an id, its first
+    ''; Firefox always ''. Re-check when the test is updated.'
 service-workers/service-worker/partitioned-cookies.tentative.https.html:
 - name: 'Service Worker: Partitioned Cookies'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

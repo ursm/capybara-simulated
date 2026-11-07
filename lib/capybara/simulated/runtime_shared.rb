@@ -110,8 +110,8 @@ module Capybara
         '__csim_swScopeUpdateViaCache' => ->(b, *a) { b.sw_scope_update_via_cache(a[0], a[1].to_s) },
         '__csim_swNoteImport'          => ->(b, *a) { b.sw_note_import(a[0].to_i, a[1], a[2]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
-        # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
-        '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3]); nil },
+        # ServiceWorker.postMessage from a client, or a service worker → the SW's `message` event (source = the sender).
+        '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3], a[4].to_i); nil },
         # Cross-isolate MessagePort channels (a window or frame realm's side): the ends its ports take and give up, and
         # what they post.
         '__csimClientPortEndHere'  => ->(b, *a) { b.port_end_here(a[0], [:realm, a[1].to_i]); nil },
