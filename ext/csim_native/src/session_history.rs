@@ -1276,10 +1276,14 @@ impl SessionHistory {
     // page's document leaving no entry.
     pub(crate) fn end_page_navigation(&self, made: bool) {
         let mut t = self.lock();
-        if let Some(state) = t.saved[0].take().filter(|_| !made) {
-            t.state = state;
-            t.leaving = None;
+        let saved = t.saved[0].take();
+        if made {
+            return;
         }
+        if let Some(state) = saved {
+            t.state = state;
+        }
+        t.leaving = None;
     }
     // #take_leaving -> the entry the page's document leaves (`leaving`), taken as it unloads.
     fn take_leaving(&self) -> Option<u64> {

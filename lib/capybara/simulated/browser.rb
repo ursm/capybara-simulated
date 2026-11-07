@@ -12938,7 +12938,7 @@ module Capybara
           # as a response of it is, a PDF its viewer's: mime.rs `load`)
           if step[0] == 'blob'
             blob ||= blob_snapshot(url)
-            step = fetch.blob_commit(blob&.[](:type), blob && blob[:bytes].to_s.byteslice(0, 1445), &policy)
+            step = fetch.blob_commit(blob && blob[:type], blob && blob[:bytes].to_s.byteslice(0, 1445), &policy)
           end
           if step[0] == 'fetch'
             # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
