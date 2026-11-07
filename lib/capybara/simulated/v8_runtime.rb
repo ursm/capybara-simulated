@@ -1235,12 +1235,6 @@ module Capybara
       # state, point it at its own URL with the top frame as parent/top, then
       # load its document (running its scripts in the realm). Tracked for
       # event-loop draining + teardown.
-      # Browsers cap nested browsing-context depth; with eager frame building a
-      # self-referential or pathologically nested iframe (`<iframe src=self>`)
-      # would otherwise build realms without bound and stall the settle loop.
-      # Depth is one more than the parent realm's (the main frame is depth 0).
-      MAX_FRAME_DEPTH = 16
-
       # Whether frame realm `realm_id`'s document is the first its navigable had (`frame_realm_tree`).
       def first_frame_realm?(realm_id) = frame_realm_tree(realm_id)[3]
       # …and the navigable its document is the active document of, 0 for none.
@@ -1333,11 +1327,6 @@ module Capybara
         referrer_policy: nil,
         refresh: nil
       )
-        depth = frame_realm_tree(parent_id)[1] + 1
-        if depth > MAX_FRAME_DEPTH
-          @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
-          return nil
-        end
         realm = parent_ctx.create_context
         # (…its depth and its parent the engine's once its container's navigable is given it, before its document loads:
         # the frame's own scripts run during __csimLoadDocument below and may synchronously build NESTED frames, whose

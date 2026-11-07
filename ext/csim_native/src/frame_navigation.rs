@@ -1473,6 +1473,10 @@ fn frame_load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     if arena.frame_navigation(container).generation != generation {
         return;
     }
+    // (…none past the nesting limit, which makes it no document: navigables.rs `MAX_FRAME_DEPTH`)
+    if arena.realm_tree(cid).1 >= crate::navigables::MAX_FRAME_DEPTH {
+        return rv.set_uint32(DUE_PAID);
+    }
     // (…none, and none owed, for a document whose navigable planned another navigation while its parser was active — its
     // location set, a form submitted to it, its reload: HTML "navigate" aborts it ("abort a document and its
     // descendants" → "abort a parser"), and an aborted document completes no load. The navigation's document, where it makes one, owes

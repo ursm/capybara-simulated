@@ -29,7 +29,7 @@ RSpec.describe 'a link naming a frame the driver does not build' do
     session = simulated_session(app)
     session.visit '/'
     # (…frame n<k> is k deep: the first past the limit the driver builds a document for)
-    unbuilt = "n#{Capybara::Simulated::V8Runtime::MAX_FRAME_DEPTH + 1}"
+    unbuilt = "n#{Capybara::Simulated::Native::MAX_FRAME_DEPTH + 1}"
     session.execute_script("document.getElementById('deep').target = #{unbuilt.to_json}")
     session.find(:css, '#deep').click
     expect([session.title, session.windows.size]).to eq(['main', 1])
@@ -41,7 +41,7 @@ RSpec.describe 'a link naming a frame the driver does not build' do
     session.within_frame(0) do
       session.execute_script(<<~JS)
         const link = document.body.appendChild(Object.assign(document.createElement('a'), { id: 'deep', href: '/hit' }));
-        link.target = #{"n#{Capybara::Simulated::V8Runtime::MAX_FRAME_DEPTH + 1}".to_json};
+        link.target = #{"n#{Capybara::Simulated::Native::MAX_FRAME_DEPTH + 1}".to_json};
       JS
       session.find(:css, '#deep').click
     end
@@ -53,7 +53,7 @@ RSpec.describe 'a link naming a frame the driver does not build' do
     session.visit '/'
     session.execute_script(<<~JS)
       const link = document.getElementById('deep');
-      link.target = #{"n#{Capybara::Simulated::V8Runtime::MAX_FRAME_DEPTH + 1}".to_json};
+      link.target = #{"n#{Capybara::Simulated::Native::MAX_FRAME_DEPTH + 1}".to_json};
       link.addEventListener('click', () => { location.href = '/planned'; });
     JS
     session.find(:css, '#deep').click

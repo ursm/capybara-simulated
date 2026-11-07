@@ -46,6 +46,11 @@ fn frame_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         .and_then(|d| crate::node_handle::nid_of(scope, d.into()));
     let initial = args.get(2).is_true();
     let cid = realm_id(scope, &args);
+    // (…none past the nesting limit, nothing fetched for it: navigables.rs `MAX_FRAME_DEPTH`)
+    if realm(scope, cid).realm_tree(cid).1 >= crate::navigables::MAX_FRAME_DEPTH {
+        let code = v8::Integer::new_from_unsigned(scope, FRAME_KEPT).into();
+        return rv.set(v8::Array::new_with_elements(scope, &[code]).into());
+    }
     if let Ok(answer) = frame_response(scope, host, cid, container, doc, initial) {
         rv.set(answer);
     }

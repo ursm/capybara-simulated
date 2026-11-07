@@ -11,8 +11,12 @@ use std::collections::{HashMap, HashSet};
 
 use crate::dom::{nid_arg, realm_id, utf16_arg, NodeId, RealmArena};
 
-// How deep a walk of the navigable tree goes at most: past any nesting a page can build (the host caps it at 16,
-// v8_runtime.rb `MAX_FRAME_DEPTH`), so a corrupt chain ends rather than spins.
+// How deep frames nest: no HTML rule, and browsers differ (Firefox 159 makes a frame no window nor document past depth 9,
+// its `load` never fired, Chrome 157 went on to all 40 asked of it: measured 2026-11-07). A self-referential or
+// pathologically nested page would build realms without bound and stall the settle loop, so past it a frame is Firefox's.
+pub(crate) const MAX_FRAME_DEPTH: u32 = 16;
+// How deep a walk of the navigable tree goes at most: past any nesting a page can build, so a corrupt chain ends rather
+// than spins.
 pub(crate) const MAX_NESTING: usize = 64;
 
 struct Child {

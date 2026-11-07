@@ -275,6 +275,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("potentially_trustworthy_origin", magnus::function!(url_ops::potentially_trustworthy_for_ruby, 1))?;
     // A `data:` URL's MIME type and body, by Fetch's data: URL processor, the page's too (data_url.rs).
     native.define_module_function("data_url", magnus::function!(data_url::process_for_ruby, 1))?;
+    native.const_set("MAX_FRAME_DEPTH", navigables::MAX_FRAME_DEPTH)?;
     native.define_module_function("blob_url_key", magnus::function!(blob_urls::entry_key_for_ruby, 1))?;
     // (…and a window's blob URL registry, which its contexts enter and resolve their URLs in: blob_registry.rs)
     native.define_module_function("blob_window_new", magnus::function!(blob_registry::window_new, 1))?;
