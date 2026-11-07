@@ -479,6 +479,18 @@ fn realm_origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let key = other_realm(scope, args.get(0), |l, realm| l.origin_key(realm)).unwrap_or_default();
     rv.set(v8::String::new(scope, &key).unwrap().into());
 }
+// Whether two realms' origins are the same, as `sameOriginRealm` compares them: false for a realm gone.
+pub(crate) fn realms_same_origin(scope: &mut v8::PinScope<'_, '_>, a: i32, b: i32) -> bool {
+    let arena = &mut crate::dom::dom(scope).arena;
+    let mut key = |realm: i32| {
+        if arena.is_dropped(realm) {
+            return None;
+        }
+        arena.realm_state_mut(realm).map(|st| st.location.origin_key(realm))
+    };
+    let (a, b) = (key(a), key(b));
+    a.is_some() && a == b
+}
 // __dom.sameOriginRealm(realm) -> whether realm `realm`'s origin is the calling realm's — by their keys: an opaque
 // origin is the same with the realms that share it alone (one that inherited it), never with another opaque one; false
 // for a realm gone (fail CLOSED).

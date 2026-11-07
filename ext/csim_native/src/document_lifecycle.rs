@@ -124,6 +124,7 @@ impl Lifecycle {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "docLoadBegin", load_begin, context_id);
     crate::dom::register(scope, ns, "docOpen", open, context_id);
+    crate::dom::register(scope, ns, "docMarkupGate", markup_gate_op, context_id);
     crate::dom::register(scope, ns, "docTheEnd", the_end, context_id);
     crate::dom::register(scope, ns, "docContentLoadedDue", content_loaded_due, context_id);
     crate::dom::register(scope, ns, "docContentLoadedEnd", content_loaded_end, context_id);
@@ -160,6 +161,73 @@ fn load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let generation = arena.document_states.next_generation();
     arena.document_states.lifecycle_mut(doc).begin(generation);
     rv.set_uint32(generation);
+}
+
+// Which steps of dynamic markup insertion ask (HTML §8.4): the document open steps; the document write steps at their head,
+// and where no insertion point lets them write, as they are to open it; the document close steps.
+const STEPS_OPEN: u32 = 0;
+const STEPS_WRITE: u32 = 1;
+const STEPS_WRITE_OPENING: u32 = 2;
+const STEPS_CLOSE: u32 = 3;
+// What they do first: go on; return, nothing done; or throw — an InvalidStateError of an XML document or a raised
+// throw-on-dynamic-markup-insertion counter, a SecurityError of a document of another origin than the entry document's.
+const MARKUP_GO: u32 = 0;
+const MARKUP_RETURN: u32 = 1;
+const MARKUP_THROW_XML: u32 = 2;
+const MARKUP_THROW_COUNTER: u32 = 3;
+const MARKUP_THROW_ORIGIN: u32 = 4;
+#[derive(Default)]
+struct MarkupFacts {
+    xml: bool,
+    counter_raised: bool,
+    other_origin: bool,
+    parser_nested: bool,
+    unloading: bool,
+    parser_aborted: bool,
+    destructive_ignored: bool,
+}
+// The spec's order is the contract (bailout-exception-vs-return-origin): the throws first, an XML document's before the
+// counter's before the origin's; then what returns.
+fn markup_gate(steps: u32, facts: &MarkupFacts) -> u32 {
+    if steps == STEPS_WRITE_OPENING {
+        return if facts.unloading || facts.destructive_ignored { MARKUP_RETURN } else { MARKUP_GO };
+    }
+    if facts.xml {
+        return MARKUP_THROW_XML;
+    }
+    if facts.counter_raised {
+        return MARKUP_THROW_COUNTER;
+    }
+    match steps {
+        STEPS_OPEN if facts.other_origin => MARKUP_THROW_ORIGIN,
+        STEPS_OPEN if facts.parser_nested || facts.unloading || facts.parser_aborted => MARKUP_RETURN,
+        STEPS_WRITE if facts.parser_aborted => MARKUP_RETURN,
+        _ => MARKUP_GO,
+    }
+}
+// __dom.docMarkupGate(docNid, steps, entryRealm, parserNested) -> `markup_gate` of the document as it is — `entryRealm` the
+// entry settings object's (-1: no script's), `parserNested` whether its active parser has a script nesting level above
+// zero, which the bindings' parse knows.
+fn markup_gate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_uint32(MARKUP_GO) };
+    let steps = args.get(1).uint32_value(scope).unwrap_or(STEPS_OPEN);
+    let entry = args.get(2).int32_value(scope).unwrap_or(-1);
+    let parser_nested = args.get(3).is_true();
+    let Some(cid) = crate::dom::dom(scope).arena.get(doc).map(|n| n.realm) else { return rv.set_uint32(MARKUP_GO) };
+    let other_origin = entry >= 0 && entry != cid && !crate::realm_location::realms_same_origin(scope, entry, cid);
+    let parser_aborted = lifecycle_of(scope, doc).aborted;
+    let arena = &crate::dom::dom(scope).arena;
+    let state = arena.document_states.markup_state(doc);
+    let facts = MarkupFacts {
+        xml: !crate::document_state::is_html(arena, Some(doc)),
+        counter_raised: state.0 > 0,
+        other_origin,
+        parser_nested,
+        unloading: arena.realm_document(cid) == Some(doc) && arena.unloading(cid),
+        parser_aborted,
+        destructive_ignored: state.1 > 0,
+    };
+    rv.set_uint32(markup_gate(steps, &facts));
 }
 
 // __dom.docOpen(docNid, muted) -> whether the document's readiness changed as it is opened (`Lifecycle::open`), `muted`
@@ -440,5 +508,42 @@ mod tests {
         assert!(lc.mute_iframe_load);
         lc.begin(4);
         assert!(!lc.opened && !lc.mute_iframe_load);
+    }
+}
+
+#[cfg(test)]
+mod markup_tests {
+    use super::*;
+
+    #[test]
+    fn the_steps_throw_before_they_return_in_their_order() {
+        let every = MarkupFacts { xml: true, counter_raised: true, other_origin: true, parser_nested: true, unloading: true, parser_aborted: true, destructive_ignored: true };
+        assert_eq!(markup_gate(STEPS_OPEN, &every), MARKUP_THROW_XML);
+        assert_eq!(markup_gate(STEPS_OPEN, &MarkupFacts { xml: false, ..every }), MARKUP_THROW_COUNTER);
+        let foreign = MarkupFacts { other_origin: true, parser_nested: true, unloading: true, parser_aborted: true, ..Default::default() };
+        assert_eq!(markup_gate(STEPS_OPEN, &foreign), MARKUP_THROW_ORIGIN);
+        for returns in [
+            MarkupFacts { parser_nested: true, ..Default::default() },
+            MarkupFacts { unloading: true, ..Default::default() },
+            MarkupFacts { parser_aborted: true, ..Default::default() }
+        ] {
+            assert_eq!(markup_gate(STEPS_OPEN, &returns), MARKUP_RETURN);
+        }
+        assert_eq!(markup_gate(STEPS_OPEN, &MarkupFacts::default()), MARKUP_GO);
+    }
+
+    #[test]
+    fn write_and_close_ask_what_is_theirs() {
+        // (…no origin check of write's own: its open's; an aborted parser its one return, its unload and
+        // ignore-destructive-writes counters only where it is to open)
+        let foreign = MarkupFacts { other_origin: true, parser_nested: true, unloading: true, destructive_ignored: true, ..Default::default() };
+        assert_eq!(markup_gate(STEPS_WRITE, &foreign), MARKUP_GO);
+        assert_eq!(markup_gate(STEPS_WRITE, &MarkupFacts { parser_aborted: true, ..Default::default() }), MARKUP_RETURN);
+        assert_eq!(markup_gate(STEPS_WRITE_OPENING, &MarkupFacts { destructive_ignored: true, ..Default::default() }), MARKUP_RETURN);
+        assert_eq!(markup_gate(STEPS_WRITE_OPENING, &MarkupFacts { unloading: true, ..Default::default() }), MARKUP_RETURN);
+        assert_eq!(markup_gate(STEPS_WRITE_OPENING, &MarkupFacts::default()), MARKUP_GO);
+        assert_eq!(markup_gate(STEPS_CLOSE, &MarkupFacts { xml: true, ..Default::default() }), MARKUP_THROW_XML);
+        assert_eq!(markup_gate(STEPS_CLOSE, &MarkupFacts { counter_raised: true, ..Default::default() }), MARKUP_THROW_COUNTER);
+        assert_eq!(markup_gate(STEPS_CLOSE, &foreign), MARKUP_GO);
     }
 }

@@ -113,6 +113,10 @@ impl DocumentStates {
     // Whether `doc` has a browsing context — the realm's document and a frame's, not a `createHTMLDocument` /
     // DOMParser / XHR one (the bindings' flag, dom-nodes.js `DOC_NO_BROWSING_CONTEXT`).
     // A document's mode: 0 no-quirks, 1 limited-quirks, 2 quirks.
+    // Its throw-on-dynamic-markup-insertion and ignore-destructive-writes counters.
+    pub(crate) fn markup_state(&self, doc: NodeId) -> (u32, u32) {
+        self.0.get(&doc).map_or((0, 0), |s| (s.insertions, s.destructive_ignored))
+    }
     pub(crate) fn mode(&self, doc: NodeId) -> u32 {
         self.0.get(&doc).map_or(0, |s| s.mode)
     }
@@ -305,7 +309,7 @@ fn doc_is_html(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let doc = nid_arg(scope, &args, 0);
     rv.set_bool(is_html(&crate::dom::dom(scope).arena, doc));
 }
-fn is_html(arena: &RealmArena, doc: Option<NodeId>) -> bool {
+pub(crate) fn is_html(arena: &RealmArena, doc: Option<NodeId>) -> bool {
     !doc.and_then(|d| arena.get(d)).is_some_and(|n| n.state & crate::dom::STATE_XML_DOCUMENT != 0)
 }
 fn doc_is_html_fast(_receiver: v8::Local<v8::Value>, nid: f64, options: *mut v8::fast_api::FastApiCallbackOptions) -> bool {
