@@ -286,4 +286,38 @@ RSpec.describe 'Handle Fetch outcomes' do
     ids = session.evaluate_async_script("const done = arguments[0]; fetch('/ids').then(r => r.json()).then(done);")
     expect(ids).to eq([session.current_url, ''])
   end
+
+  it "gives a navigation the document it replaces, a script-made response \"basic\" as its type, and `handled` a stream's head" do
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        const seen = {};
+        self.addEventListener('fetch', e => {
+          const path = new URL(e.request.url).pathname;
+          if (e.request.mode === 'navigate') seen[path] = [e.clientId, e.replacesClientId];
+          if (path === '/made') e.respondWith(new Response('x'));
+          if (path === '/broken') {
+            e.respondWith(new Response(new ReadableStream({start(c) { c.error(new Error('x')); }}), {headers: {'content-type': 'text/html'}}));
+            e.handled.then(() => { seen.handled = 'resolved'; }, x => { seen.handled = x.name; });
+          }
+        });
+        self.addEventListener('message', e => e.ports[0].postMessage({me: e.source.id, seen}));
+      JS
+
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
+    })
+    session.visit '/'
+    session.execute_script("navigator.serviceWorker.addEventListener('controllerchange', () => { globalThis.__controlled = true; }); navigator.serviceWorker.register('/sw.js');")
+    expect(poll_until { session.evaluate_script('globalThis.__controlled === true') }).to be(true)
+    type = session.evaluate_async_script("const done = arguments[0]; fetch('/made').then(r => done(r.type));")
+    expect(type).to eq('basic')
+    me = ask(session)['me']
+    session.execute_script("location.href = '/next';")
+    expect(poll_until { session.evaluate_script('location.pathname') == '/next' }).to be(true)
+    expect(ask(session)['seen'].fetch('/next')).to eq([me, me])
+    session.visit '/broken'
+    session.visit '/'
+    expect(poll_until { ask(session)['seen']['handled'] }).to eq('resolved')
+  end
 end

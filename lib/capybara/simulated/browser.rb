@@ -585,10 +585,10 @@ module Capybara
       # own runs yet that could keep it, so only a hang reaches this; a loaded machine's slow boot is waited out, the round
       # trip's budget counted from when its script begins to run (`record[:running_since]`, `worker_deadline`).
       WORKER_BOOT_GUARD        = 10.0
-      # …and how long a request awaited in place (`sw_direct_reply`: a sync XHR, a worker's main script or import, a
-      # document's script; a navigation's) waits for its service worker's answer: the request is the worker's once asked — it may have
-      # fetched it already, or done what a POST does — so no network fall-through follows; only a hang reaches this, the
-      # request then a network error.
+      # …and how long a request awaited in place (a navigation's; `sw_direct_reply`: a sync XHR, a worker's main script or
+      # import, a document's script) waits for its service worker's answer. Only a hang reaches this, the worker then ended:
+      # `sw_direct_reply`'s request a network error — the worker's once asked, it may have fetched it already, or done what a
+      # POST does — a navigation's the network's, as Chrome and Firefox have one given up on.
       WORKER_ANSWER_GUARD      = 10.0
       # …and how far, in the worker's own time, a window waiting on it in place lets it run on — a worker that keeps setting
       # timers with no answer (one polling for what the waiting window cannot give it) runs to here, the wait then a
@@ -7364,14 +7364,15 @@ module Capybara
         failed = -> { {'error' => true, 'url' => fetch.target, 'coop_switch' => fetch.coop_switch?} }
         hop = run_navigation_fetch(
           fetch,
-          body:         body,
-          content_type: content_type,
-          dest:         dest,
-          frame_type:   dest == 'document' ? 'auxiliary' : 'nested',
-          origin_url:   origin_url,
-          client_id:    initiating[:client_id],
-          is_reload:    is_reload,
-          coop_realm:   coop_realm
+          body:               body,
+          content_type:       content_type,
+          dest:               dest,
+          frame_type:         dest == 'document' ? 'auxiliary' : 'nested',
+          origin_url:         origin_url,
+          client_id:          initiating[:client_id],
+          replaces_client_id: (sw_client_id(coop_realm) if coop_realm),
+          is_reload:          is_reload,
+          coop_realm:         coop_realm
         )
         target = fetch.target
         case hop.command
@@ -7440,6 +7441,7 @@ module Capybara
         frame_type:,
         origin_url:,
         client_id: nil,
+        replaces_client_id: nil,
         is_reload: false,
         is_history: false,
         coop_realm: nil,
@@ -7472,6 +7474,7 @@ module Capybara
                site_seed:             seed,
                origin_null:           tainted,
                client_id:             client_id,
+               replaces_client_id:    replaces_client_id,
                resulting_client_id:   rid,
                cookie_cross_site:     cookie_cross,
                navigation_cross_site: fetch.cross_site?,
@@ -7575,6 +7578,7 @@ module Capybara
         cookie_cross_site: false,
         navigation_cross_site: false,
         client_id: nil,
+        replaces_client_id: nil,
         resulting_client_id:,
         origin_url: referrer_source
       )
@@ -7657,6 +7661,9 @@ module Capybara
           # The request's client's id (`event.clientId`): the document that began the navigation, HTML's source snapshot
           # params' fetch client — none of a user's, by the address bar.
           clientId:            client_id,
+          # …the document it replaces (`event.replacesClientId`), HTML's request "replaces client id": its navigable's active
+          # document's, none of a frame's first.
+          replacesClientId:    replaces_client_id,
           # The navigation's RESERVED client id (`event.resultingClientId`): one per navigation
           # chain, re-minted across a cross-origin redirect hop, adopted by the committed
           # document (mint_resulting_client_id / sw_adopt_client_id).
@@ -12143,16 +12150,17 @@ module Capybara
         })
         hop = run_navigation_fetch(
           fetch,
-          body:         body,
-          content_type: content_type,
-          dest:         'iframe',
-          frame_type:   'nested',
-          origin_url:   origin_url,
-          client_id:    client_id,
-          is_reload:    is_reload,
-          is_history:   is_history,
+          body:               body,
+          content_type:       content_type,
+          dest:               'iframe',
+          frame_type:         'nested',
+          origin_url:         origin_url,
+          client_id:          client_id,
+          replaces_client_id: sw_client_id(realm_id),
+          is_reload:          is_reload,
+          is_history:         is_history,
           # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
-          redirected:   lambda {
+          redirected:         lambda {
             history, id = frame_entry(realm_id)
             history&.set_url(id, fetch.target)
           }
@@ -12875,16 +12883,17 @@ module Capybara
           awaited = navigation_mark(@session_history, 0)
           hop = run_navigation_fetch(
             fetch,
-            body:         req_body,
-            content_type: content_type,
-            dest:         'document',
-            frame_type:   'top-level',
-            origin_url:   origin || initiator,
-            client_id:    client_id || (sw_client_id(0) if traversed),
-            is_reload:    is_reload,
-            is_history:   from_history && !is_reload,
-            coop_realm:   0,
-            begun:        lambda {|_|
+            body:               req_body,
+            content_type:       content_type,
+            dest:               'document',
+            frame_type:         'top-level',
+            origin_url:         origin || initiator,
+            client_id:          client_id || (sw_client_id(0) if traversed),
+            replaces_client_id: (sw_client_id(0) if window_has_document?),
+            is_reload:          is_reload,
+            is_history:         from_history && !is_reload,
+            coop_realm:         0,
+            begun:              lambda {|_|
               @current_referer = fetch.referrer.to_s
               # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
               # cross-site, which a reload of it through a user interface element is judged by; a traversal's leaving it
@@ -12895,8 +12904,8 @@ module Capybara
             },
             # (…a hop into the scope of a worker still activating waiting for it, each hop's, before its request is made:
             # Handle Fetch)
-            ready:        ->(target) { await_sw_activation(target, Native.site(target).to_s) if sw_registered? },
-            redirected:   -> { redirect_history_entry(fetch.target, get: fetch.request_method == 'GET') }
+            ready:              ->(target) { await_sw_activation(target, Native.site(target).to_s) if sw_registered? },
+            redirected:         -> { redirect_history_entry(fetch.target, get: fetch.request_method == 'GET') }
           )
           target = fetch.target
           # (…none where a navigation begun as the response was awaited ended it, whose own plan the page then takes: HTML

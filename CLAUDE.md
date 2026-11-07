@@ -268,8 +268,14 @@ traversal or reload has replaced it as its navigable's ongoing one
 (session_history.rs `begin_navigation`) — except a
 redirect's later hop into such a scope, which waits what it can in place
 and, as no deferral can make a chain's hop again, goes on to the network
-where it can't. List and justify these explicitly; don't let them
-multiply.
+where it can't; and a request awaited in place — a navigation's, a sync XHR's —
+holds its window's event loop for as long as the service worker takes to answer, so a handler that
+needs the page's reply goes to the network as soon as it is known to be stalled (`worker_stalled?`,
+Chrome and Firefox would answer it in about 30 ms), a frame's wait holds its parent too (a 60 s handler
+in an iframe, the parent's timers at 60 s of its clock all at once), and a 400 s timer's answer is still
+taken, where Chrome gives up at about 300 s and Firefox at 60 s (`WORKER_ANSWER_VIRTUAL_MS`,
+`WORKER_ANSWER_GUARD`): the alternative is asynchronous navigation fetches. List and justify these
+explicitly; don't let them multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
 not say. Where the spec is silent or ambiguous, match Chromium / Firefox
