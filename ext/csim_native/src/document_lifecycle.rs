@@ -191,6 +191,7 @@ const MARKUP_THROW_ORIGIN: u32 = 6;
 // `MARKUP_PARSER_SHIFT` up, which parse its active parser is, the one to write into or close (0: none).
 const MARKUP_STREAMING: u32 = 8;
 const MARKUP_PARSER_SHIFT: u32 = 4;
+const _: () = assert!(crate::html_parse::MAX_PARSE_ID <= u32::MAX >> MARKUP_PARSER_SHIFT);
 #[derive(Clone, Copy, Default)]
 struct MarkupFacts {
     xml: bool,
@@ -238,7 +239,7 @@ fn markup_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let Some(cid) = crate::dom::dom(scope).arena.get(doc).map(|n| n.realm) else { return rv.set_uint32(MARKUP_RETURN) };
     let other_origin = steps == STEPS_OPEN && entry >= 0 && entry != cid && !crate::realm_location::realms_same_origin(scope, entry, cid);
     let state = crate::dom::dom(scope).arena.document_states.markup(doc);
-    let active = crate::html_parse::active_parser(scope, state.parser);
+    let active = crate::html_parse::active_parser(scope, doc, state.parser);
     let arena = &crate::dom::dom(scope).arena;
     let facts = MarkupFacts {
         xml: !crate::document_state::is_html(arena, Some(doc)),
@@ -260,6 +261,7 @@ const OPENED_READY_CHANGED: u32 = 1;
 const OPENED_URL_MOVED: u32 = 2;
 const OPENED_STREAMING: u32 = 4;
 const OPENED_PARSER_SHIFT: u32 = 3;
+const _: () = assert!(crate::html_parse::MAX_PARSE_ID <= u32::MAX >> OPENED_PARSER_SHIFT);
 // __dom.docOpen(docNid, entryRealm) -> `OPENED_*`: HTML document open steps 12-18, once the bindings have stopped its
 // navigable's loading, erased its listeners and handlers and emptied it — `entryRealm` the entry settings object's. Its
 // URL the entry document's (`take_entry_url`); it no initial about:blank any more (a navigation of its window after makes

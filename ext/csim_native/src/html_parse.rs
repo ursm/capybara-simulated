@@ -468,6 +468,31 @@ struct Parses {
     live: std::collections::HashMap<u32, Parse>,
 }
 
+// The highest number a parse is given: the bindings are answered a document's active parser packed with a step's flags
+// above it (document_lifecycle.rs `MARKUP_PARSER_SHIFT`), so the numbers wrap within it — 0 is none, and a number is
+// never given while a parse of it lives — and a number names a document's active parser only where that parse is of
+// the document (`Parses::active`), a stale one of a gone parse naming a later one of another's.
+pub(crate) const MAX_PARSE_ID: u32 = (1 << 28) - 1;
+
+impl Parses {
+    // The next number no live parse has.
+    fn next_id(&mut self) -> u32 {
+        loop {
+            self.next = if self.next >= MAX_PARSE_ID { 1 } else { self.next + 1 };
+            if !self.live.contains_key(&self.next) {
+                return self.next;
+            }
+        }
+    }
+    // Parse `id`, where it is `doc`'s.
+    fn active(&self, doc: crate::dom::NodeId, id: u32) -> Option<&Parse> {
+        self.live.get(&id).filter(|p| p.doc == doc)
+    }
+    fn active_mut(&mut self, doc: crate::dom::NodeId, id: u32) -> Option<&mut Parse> {
+        self.live.get_mut(&id).filter(|p| p.doc == doc)
+    }
+}
+
 fn parses<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Parses {
     if scope.get_slot::<Parses>().is_none() {
         scope.set_slot(Parses::default());
@@ -570,11 +595,10 @@ fn begin_parse(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::Node
     // page left open, which its next load replaces)
     let old = crate::dom::dom(scope).arena.document_states.parser(doc);
     let all = parses(scope);
-    if all.live.get(&old).is_some_and(|p| p.script_created) {
+    if all.active(doc, old).is_some_and(|p| p.script_created) {
         all.live.remove(&old);
     }
-    all.next += 1;
-    let id = all.next;
+    let id = all.next_id();
     all.live.insert(id, Parse {
         tokenizer,
         input,
@@ -605,7 +629,7 @@ fn begin_parse(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::Node
 // Its number — 0 where the parser panicked making it (`guarded`), and none was made.
 pub(crate) fn begin_script_created(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::NodeId, streaming: bool, iframe_srcdoc: bool) -> u32 {
     let old = crate::dom::dom(scope).arena.document_states.parser(doc);
-    if let Some(p) = parses(scope).live.get_mut(&old).filter(|p| !p.script_created) {
+    if let Some(p) = parses(scope).active_mut(doc, old).filter(|p| !p.script_created) {
         p.abort();
     }
     let start = ParseStart { scripting: streaming, iframe_srcdoc, declarative: streaming, script_created: true, streaming };
@@ -652,8 +676,8 @@ pub(crate) struct ActiveParser {
     pub(crate) script_created: bool,
     pub(crate) streaming: bool,
 }
-pub(crate) fn active_parser(scope: &mut v8::PinScope<'_, '_>, id: u32) -> ActiveParser {
-    parses(scope).live.get(&id).map_or_else(ActiveParser::default, |p| ActiveParser {
+pub(crate) fn active_parser(scope: &mut v8::PinScope<'_, '_>, doc: crate::dom::NodeId, id: u32) -> ActiveParser {
+    parses(scope).active(doc, id).map_or_else(ActiveParser::default, |p| ActiveParser {
         live: true,
         script_running: !p.set_aside.is_empty(),
         script_created: p.script_created && !p.ended,
@@ -920,7 +944,7 @@ fn html_done(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 fn doc_parser(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     let id = crate::dom::dom(scope).arena.document_states.parser(doc);
-    rv.set_uint32(if parses(scope).live.contains_key(&id) { id } else { 0 });
+    rv.set_uint32(if parses(scope).active(doc, id).is_some() { id } else { 0 });
 }
 
 // ── a fragment parse, built by the engine ───────────────────────────────────────────────────────────────────────────
@@ -1825,7 +1849,16 @@ impl<'s> Build<'s> {
 
 #[cfg(test)]
 mod tests {
-    use super::DocumentLines;
+    use super::{DocumentLines, Parses, MAX_PARSE_ID};
+
+    // A parse's number wraps within what the bindings' answers carry of it, past 0, which is none.
+    #[test]
+    fn parse_numbers_wrap_within_their_field() {
+        let mut all = Parses { next: MAX_PARSE_ID - 1, ..Default::default() };
+        assert_eq!(all.next_id(), MAX_PARSE_ID);
+        assert_eq!(all.next_id(), 1);
+        assert_eq!(all.next_id(), 2);
+    }
 
     // The breaks of written text as html5ever counts them: an LF, a CR and a CR LF one each — a CR LF split between two
     // writes one too.
