@@ -239,6 +239,15 @@ const TREES = [
                                        // half is reftests, which this gate renders (see the reftest
                                        // painter), so a transform that lands in the wrong place is visible
                                        // rather than merely un-asserted.
+  'clipboard-apis',                    // The Clipboard API: the asynchronous clipboard, the cut / copy / paste
+                                       // events and actions (clipboard.js, editing_commands.rs `commandPlan`).
+  'editing/plaintext-only',            // contenteditable=plaintext-only, execCommand's text commands in it.
+  'editing/whitespaces',               // White space an edit brings together (editing.rs `rebalance_space`).
+  'editing/other',                     // The editing commands' shapes outside the data-driven tables: an editor's
+                                       // own events, the empty inline left behind, a command in a text control.
+  'editing/run',                       // The Editing draft's data-driven tables, command by command — the bar the
+                                       // engine's commands (editing_commands.rs) are held to, however plain their
+                                       // shape still is: most of its failures are the styling algorithm's backlog.
   'selection',                         // The Selection API — getSelection / addRange / collapse / extend /
                                        // setBaseAndExtent / containsNode / deleteFromDocument / the
                                        // selectionchange events: the cursor every rich-text editor
@@ -296,6 +305,8 @@ const HARNESS_ONLY_TREES = ['css/css-flexbox'];
 // checks the IDL says, held against the page's — what the bindings generated from the same IDL must answer.
 const SUPPORT_TREES = [
   'common',
+  'editing/include',                   // editing/run's harness and the draft's own reference implementation…
+  'editing/data',                      // …and its tables.
   'html/browsers/browsing-the-web/resources', // navigating-across-documents' `../resources/helpers.js`
   'html/canvas/resources',
   'images',
@@ -333,10 +344,6 @@ const SUPPORT_FILES = [
   'html/cross-origin-embedder-policy/credentialless/resources/common.js',
   'html/cross-origin-embedder-policy/resources/script-factory.js',
   'html/anonymous-iframe/resources/common.js',
-  // input-events editing tests pull EditorTestUtils (send copy/cut/paste shortcut
-  // keys, set selection from markup) by absolute path from the editing/ tree,
-  // which we don't vendor wholesale; it's self-contained on top of testdriver.
-  'editing/include/editor-test-utils.js',
   // css/cssom's font-family-serialization test pulls the <generic-family> /
   // <family-name> keyword lists from the css-fonts tree, which we don't vendor;
   // the file is a plain array of keyword strings (no further includes).
