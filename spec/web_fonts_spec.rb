@@ -552,19 +552,20 @@ RSpec.describe 'web fonts' do
 
   # A sheet's faces are read from the cascade's own parse — its `@import`s' first, each against its own URL — and not
   # from a CSSOM built for the purpose: the one that declared a Redmine page's Noto Sans cost 4 ms a load. A sheet a
-  # script has built the CSSOM of is read from there, since the script may have edited it.
+  # script has built the CSSOM of is read from there, since the script may have edited it. (That none was built before is
+  # the driver's alone to see: no page can.)
   it 'finds a linked sheet\'s faces, and its imports\', without building its CSSOM' do
     s = session('/held.html')
     expect([width(s, 'imp'), width(s, 'outer')]).to eq([80, 80])
     got = s.evaluate_script(<<~JS)
       (() => {
         const link = document.querySelector('link');
-        const before = [link._sheet == null, Array.from(document.fonts).map((f) => f.family).sort().join(',')];
+        const before = Array.from(document.fonts).map((f) => f.family).sort().join(',');
         link.sheet.insertRule('@font-face { font-family: Late; src: url("ahem.ttf"); }', 1);
         return [before, Array.from(document.fonts).map((f) => f.family).sort().join(',')];
       })()
     JS
-    expect(got).to eq([[true, 'Imp,Outer'], 'Imp,Late,Outer'])
+    expect(got).to eq(['Imp,Outer', 'Imp,Late,Outer'])
   end
 
   # Each face is ONE FontFace, however many sheets share its text and however its rules were read: two `<style>`s of

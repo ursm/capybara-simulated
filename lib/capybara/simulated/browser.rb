@@ -1879,7 +1879,7 @@ module Capybara
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
-        # Set `document._hoverElement` so `:hover` pseudo-class matches
+        # Set the document's hovered element so `:hover` pseudo-class matches
         # resolve against this element (Redmine's gantt tooltips +
         # context-menu submenus rely on CSS `:hover`). The host fn
         # call into `__csimSetHover` does the slot update on the JS

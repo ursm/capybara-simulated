@@ -171,7 +171,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
     before = s.evaluate_script(read)
     s.evaluate_script("document.getElementById('p').classList.add('menu')")
     expect(s.evaluate_script(read)).to eq(before)
-    s.evaluate_script("document._hoverElement = document.getElementById('p')")
+    s.evaluate_script("__csimHoverElement(document.getElementById('p'))")
     expect(s.evaluate_script(read)).to eq(before + 40)
   end
 
@@ -734,7 +734,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
         JSON.stringify(['a2', 'l3'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.y, r.width, r.height]; }))
       JS
       closed = walk_session_for(body, css: css).evaluate_script(geo)
-      open   = walk_session_for(body, css: css).evaluate_script("(document._hoverElement = document.getElementById('a2'), #{geo.strip})")
+      open   = walk_session_for(body, css: css).evaluate_script("(__csimHoverElement(document.getElementById('a2')), #{geo.strip})")
       expect(open).not_to eq(closed)
       s = walk_session_for(body, css: css)
       got = s.evaluate_script(<<~JS)
@@ -742,9 +742,9 @@ RSpec.describe 'layout reuse across dynamic style state' do
           const geo = () => #{geo.strip};
           const out = [geo()];
           document.getElementById('p').firstChild.data = 'y'; out.push(geo());
-          document._hoverElement = document.getElementById('a2'); out.push(geo());
+          __csimHoverElement(document.getElementById('a2')); out.push(geo());
           document.getElementById('p').firstChild.data = 'z'; out.push(geo());
-          document._hoverElement = null; out.push(geo());
+          __csimHoverElement(null); out.push(geo());
           return out;
         })()
       JS

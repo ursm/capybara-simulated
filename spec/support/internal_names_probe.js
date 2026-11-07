@@ -32,7 +32,18 @@
     XMLSerializer: () => new XMLSerializer(), FormData: () => new FormData(), Headers: () => new Headers(),
     URL: () => new URL('http://a/'), URLSearchParams: () => new URLSearchParams(), Blob: () => new Blob([]),
     DOMRect: () => new DOMRect(), XMLHttpRequest: () => new XMLHttpRequest(), Image: () => new Image(), Audio: () => new Audio(),
-    Option: () => new Option(), Location: () => location, History: () => history, Navigator: () => navigator, Storage: () => localStorage
+    Option: () => new Option(), Location: () => location,
+    // (…and what an element or the document keeps once one of its members made it: a file input's FileList, a canvas's
+    // context, `document.all`'s collection of a name more than one element has)
+    'input[type=file]': () => Object.assign(document.createElement('input'), { type: 'file' }),
+    'canvas with a context': () => { const c = document.createElement('canvas'); c.getContext('2d'); return c; },
+    'document after document.all': () => {
+      const a = document.createElement('i'), b = document.createElement('i');
+      a.id = b.id = 'csim-dup';
+      document.body.append(a, b);
+      void document.all['csim-dup'];
+      return document;
+    }, History: () => history, Navigator: () => navigator, Storage: () => localStorage
   };
   for (const tag of ['a', 'audio', 'body', 'button', 'canvas', 'dialog', 'div', 'form', 'iframe', 'img', 'input', 'label', 'link', 'object',
     'option', 'p', 'script', 'select', 'slot', 'span', 'style', 'table', 'td', 'template', 'textarea', 'tr', 'video', 'x-custom']) {

@@ -1108,7 +1108,7 @@ module Capybara
       # document", URL about:blank, mode "quirks", as its response is `ABOUT_BLANK_RESPONSE`)
       def init_page_realm(c)
         init_realm(c)
-        c.eval_void("globalThis.__csimUpdateLocation('about:blank'); globalThis.document._compatMode = 'quirks';") unless @page_document
+        c.eval_void('globalThis.__csimMakeInitialAboutBlank();') unless @page_document
         adopt_client_id(c, @page_client_id || @browser.mint_resulting_client_id, realm_id: 0)
         @page_client_id = nil
         @page_document  = false

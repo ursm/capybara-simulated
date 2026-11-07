@@ -29,7 +29,7 @@ RSpec.describe 'cascade invalidation' do
     [
       ['hover',             '<div id="t">x</div>',
        '#t:hover { color: rgb(0, 128, 0) }',
-       "document._hoverElement = document.getElementById('t');",              'rgb(0, 128, 0)'],
+       "__csimHoverElement(document.getElementById('t'));",                    'rgb(0, 128, 0)'],
       ['focus',             '<input id="t">',
        '#t:focus { color: rgb(0, 128, 0) }',
        "document.getElementById('t').focus();",                               'rgb(0, 128, 0)'],
@@ -553,12 +553,12 @@ RSpec.describe 'cascade invalidation' do
     # that flips them is what has to relay them out.
     [
       ['#t { width: 40px } #t:hover { width: 300px }',
-       "document._hoverElement = document.getElementById('host').shadowRoot.getElementById('t');", 300],
+       "__csimHoverElement(document.getElementById('host').shadowRoot.getElementById('t'));", 300],
       ['#t { width: 40px } #t:focus { width: 300px }',
        "const el = document.getElementById('host').shadowRoot.getElementById('t'); el.setAttribute('tabindex', '0'); el.focus();", 300],
       # …and one that only PAINTS moves no box
       ['#t { width: 40px } #t:hover { background: red }',
-       "document._hoverElement = document.getElementById('host').shadowRoot.getElementById('t');", 40]
+       "__csimHoverElement(document.getElementById('host').shadowRoot.getElementById('t'));", 40]
     ].each do |css, mutation, after|
       s = simulated_session(shadow_page(css, '<div id="t">x</div>'))
       s.visit '/'
@@ -583,7 +583,7 @@ RSpec.describe 'cascade invalidation' do
         const t = document.getElementById('host').shadowRoot.getElementById('t');
         t.getBoundingClientRect();
         const before = globalThis.__csimLayoutEpoch();
-        document._hoverElement = t;
+        __csimHoverElement(t);
         t.getBoundingClientRect();
         return [before, globalThis.__csimLayoutEpoch()];
       })()
@@ -751,7 +751,7 @@ RSpec.describe 'cascade invalidation' do
         (() => {
           const t = document.getElementById('host').shadowRoot.getElementById('t');
           const before = t.getBoundingClientRect().width;
-          document._hoverElement = #{hover};
+          __csimHoverElement(#{hover});
           return [before, t.getBoundingClientRect().width];
         })()
       JS
@@ -826,7 +826,7 @@ RSpec.describe 'cascade invalidation' do
       (() => {
         const root = document.getElementById('host').shadowRoot, t = root.getElementById('t');
         const out = [getComputedStyle(root.getElementById('o')).width, getComputedStyle(t).width];
-        document._hoverElement = t;
+        __csimHoverElement(t);
         return [...out, getComputedStyle(t).width, t.getBoundingClientRect().width];
       })()
     JS
