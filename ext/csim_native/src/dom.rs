@@ -177,7 +177,8 @@ pub(crate) struct NodeData {
     // one for an element in no namespace), interned — what every matcher compares.
     pub(crate) local_name: LocalName,
     pub(crate) ns: Namespace,
-    // An element's namespace prefix (`prefix`; None for none) — fixed at creation.
+    // An element's namespace prefix (`prefix`; None for none) — fixed at creation, but for the one a custom element
+    // "create an element" constructs synchronously is given after its constructor returns (`setElementPrefix`).
     pub(crate) prefix: Option<Box<str>>,
     // …and, for the rare element whose local name, namespace or prefix carries a LONE SURROGATE (U+FFFD in the three
     // above), all three exactly — what a namespace lookup (`ns_units`, `prefix_units`) and `isEqualNode` compare.
@@ -1556,6 +1557,22 @@ impl RealmArena {
         self.mutations += 1;
         self.stamp_change(id);
         self.get_mut_quietly(id)
+    }
+    // The element `id`'s namespace prefix becomes `prefix` (and its exact units `units`, where it carries a lone
+    // surrogate).
+    pub(crate) fn set_prefix(&mut self, id: NodeId, prefix: Option<String>, units: Option<Vec<u16>>) {
+        let Some(n) = self.get_mut(id) else { return };
+        let exact = units.or_else(|| n.name_u16.as_ref().and(prefix.as_ref()).map(|p| p.encode_utf16().collect()));
+        if let Some(name) = n.name_u16.as_mut() {
+            name.prefix = exact;
+        } else if let Some(units) = exact {
+            n.name_u16 = Some(Box::new(ExactName {
+                local: n.local_name.encode_utf16().collect(),
+                ns: n.ns.encode_utf16().collect(),
+                prefix: Some(units),
+            }));
+        }
+        n.prefix = prefix.map(String::into_boxed_str);
     }
     // …and one that does not — a layout pass writing its boxes: a box is no input to any of those memos, and a pass
     // writing one per node would throw them all away every time.
@@ -3035,6 +3052,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     ns.set(scope, key.into(), id.into());
     // A node's making, and the id-level queries over the tree (query / matchesId).
     register(scope, ns, "importNode", import_node, context_id);
+    register(scope, ns, "setElementPrefix", set_element_prefix, context_id);
     // Every other node kind, character-data changes, and the parser's per-node tree steps.
     register(scope, ns, "createNode", create_node, context_id);
     register(scope, ns, "setData", set_data, context_id);
@@ -3580,6 +3598,21 @@ fn import_node(
     }
     crate::node_handle::bind(scope, args.get(5), id);
     set_nid(scope, &mut rv, id);
+}
+
+// __dom.setElementPrefix(node, prefix): the element `node` is the object of has the namespace prefix `prefix` (a string,
+// or none) — a custom element "create an element" constructed synchronously, given its prefix after its constructor
+// returns (DOM "create an element" 5.1.3.9).
+fn set_element_prefix(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let (prefix, units) = match args.get(1).is_string() {
+        true => {
+            let (lossy, exact) = read_v8_value(scope, args.get(1));
+            (Some(lossy), exact)
+        }
+        false => (None, None),
+    };
+    dom(scope).arena.set_prefix(id, prefix, units);
 }
 
 // __dom.createNode(nodeType, data, parentNid, target, systemId, node) -> nid. Adds any other node — a Text / CDATA /
