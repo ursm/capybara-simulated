@@ -63,6 +63,27 @@ RSpec.describe 'internal members' do
     expect(outcome("Object.create(document.body).addEventListener('x', () => {})")).to eq('TypeError: Illegal invocation')
   end
 
+  # The bindings reach none of their own steps through a prototype a page can change: a page's member of a form's
+  # interface is overridden by the control it names ([LegacyOverrideBuiltIns]), whatever its name — the driver's own
+  # `_`-prefixed members took precedence over such a control until they were functions — and a legacy factory's element
+  # is made with its prototype's chain cut (Chrome's and Firefox's, 2026-11-08: `['control', true, 'x.mp3', 'auto']`).
+  it "reaches none of its own steps through a prototype" do
+    expect(outcome(<<~JS)).to eq(['control', true, 'x.mp3', 'auto'])
+      (() => {
+        const r = [];
+        const f = document.getElementById('f'), i = document.createElement('input');
+        i.name = '_x';
+        f.append(i);
+        HTMLFormElement.prototype._x = 'proto';
+        r.push(f._x === i ? 'control' : String(f._x));
+        Object.setPrototypeOf(HTMLAudioElement.prototype, null);
+        const a = new Audio('x.mp3');
+        r.push(Object.getPrototypeOf(a) === HTMLAudioElement.prototype, Element.prototype.getAttribute.call(a, 'src'), Element.prototype.getAttribute.call(a, 'preload'));
+        return r;
+      })()
+    JS
+  end
+
   # A custom element "create an element" constructs synchronously has the prefix it was created with — its arena node's
   # too, which its serialization, clone and namespace lookup read.
   it "gives a custom element constructed synchronously its prefix" do
@@ -85,23 +106,6 @@ RSpec.describe 'internal members' do
   let(:still_visible) {
     %w[
       @csim:EventTarget
-      __aboutBaseURL _activeElement _adoptNode _alreadyStarted _appendChild _appendData _appendValid __applyAsyncImage
-      __arriveAsyncImage _attachShadow _attributeMap _attrNodeFor _attrValue _baseURI _bindAttrNode _blur
-      _ceInitialized _ceRegistry _checkedness _children _click _cloneNode _cloneShell _close _compareDocumentPosition
-      _compatMode _contains _contentType _createElement _currentScript _data _detachAttrNode
-      _directionality _dropSheet _encoding _execCommand _files _fireImgEvent _focus _focusUpdate _fontFaceSet
-      _forceAsync _getAttribute _getAttributeNS _getRootNode _hasAttribute _host _hoverElement _imageFetchAborted
-      _imageResourceSrc _imageSource _implementation _importNode _inertTemplateDoc _innerHTML _insertAdjacent
-      _insertAdjacentHTML _insertBefore _isCurrentLoad _isDefaultNamespace _isEqualNode _isShadowRoot _isValue
-      _isViewportElement _javascriptNavigation _keepNullRegistry _lastModified _listOfOptions _loadImageResource
-      _lookupNamespaceURI _lookupPrefix _markupInsertionCounter _name _nextSibling _noBrowsingContext _nodeValue
-      _normalize _open _outerHTML _ownerDoc _ownerDocument _parent _parentElement _parentNode
-      _parserInserted _piAttrs _piAttrsData _previousSibling _publicId _quirks _readyState _referrer _reloadFrame
-      _removeAttribute _removeAttributeNS _removeAttrKey _removeChild _renavigateFrameDocument _replaceAll
-      _replaceChild _replaceData __runFormSubmit _scriptRun _selectedness _setAttribute
-      _setAttributeNode _setAttributeNS _setAttrNodeValue _setAttrValueNullNS _setData _setHTML _shadowRoot _sheet
-      _submitForm _systemId _takeFocusFromFrame _target _templateContent _textContent _url _validatesForSubmission
-      _value _window _write _writeAttributes _xmlDocument
     ]
   }
 
