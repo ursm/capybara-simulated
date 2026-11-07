@@ -472,6 +472,30 @@ RSpec.describe 'Handle Fetch outcomes' do
     end
   end
 
+  # A browser's fetch resolves at the head, what a request's tainting filters as any other; csim's buffered the bytes it keeps
+  # for rendering first, so a stream that never closes never resolved it (Chrome and Firefox resolve it, measured 2026-11-07).
+  it 'resolves a no-cors fetch at the head of a stream that never closes' do
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        self.addEventListener('fetch', e => {
+          if (new URL(e.request.url).pathname === '/never') e.respondWith(new Response(new ReadableStream({start(c) { c.enqueue(new Uint8Array([1])); }})));
+        });
+      JS
+
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
+    })
+    session.visit '/'
+    session.execute_script("navigator.serviceWorker.addEventListener('controllerchange', () => { globalThis.__controlled = true; }); navigator.serviceWorker.register('/sw.js');")
+    expect(poll_until { session.evaluate_script('globalThis.__controlled === true') }).to be(true)
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      fetch('http://other.test/never', {mode: 'no-cors'}).then(r => done([r.type, r.status, r.body]));
+    JS
+    expect(got).to eq(['opaque', 0, nil])
+  end
+
   it "gives a frame's navigation the document it replaces, a cross-origin one's none" do
     session = simulated_session(lambda {|env|
       next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'

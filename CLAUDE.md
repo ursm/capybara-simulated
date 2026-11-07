@@ -271,7 +271,9 @@ and, as no deferral can make a chain's hop again, goes on to the network
 where it can't; and a request awaited in place — a navigation's, a sync XHR's —
 holds its window's event loop for as long as the service worker takes to answer, so a handler that
 needs the page's reply gives up as soon as it is known to be stalled (`worker_stalled?`: a navigation to
-the network, a sync XHR a network error, where Chrome and Firefox answer in about 30 ms), a frame's wait
+the network, a sync XHR a network error, where Chrome and Firefox answer in about 30 ms) — and likewise one
+that needs a lifecycle step, whose steps run in no wait: an unregister job queued behind an Install, a handler awaiting it after a
+changed script going to the network — a frame's wait
 holds its parent too (a 60 s handler in an iframe, the parent's timers at 60 s of its clock all at once),
 a 400 s timer's answer is still taken, where Chrome gives up at about 300 s and Firefox at 60 s
 (`WORKER_ANSWER_VIRTUAL_MS`), and a handler in its script past `WORKER_ANSWER_GUARD` (an 8 s compute
