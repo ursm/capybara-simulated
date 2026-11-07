@@ -107,13 +107,13 @@ impl Lifecycle {
     // HTML document open steps: a document of its own written into it from here, numbered `generation` — "the end" of its
     // parse owed nothing of what the last one had (a task of that one's still queued, for its number, fires nothing) —
     // its container's load muted where it was being fired as it was opened, and loading again: whether that changed its
-    // readiness.
+    // readiness. (…its active parser's "was aborted" none to reset: HTML never resets it, and an open of a document whose
+    // parser was aborted returns before it gets here — `markup_steps`)
     fn open(&mut self, generation: u32, muted: bool) -> bool {
         self.generation = generation;
         self.content_loaded = false;
         self.load_fired = false;
         self.completely_loaded = false;
-        self.aborted = false;
         self.opened = true;
         self.content_loaded_over = false;
         self.mute_iframe_load |= muted;
@@ -183,8 +183,10 @@ const MARKUP_THROW_XML: u32 = 4;
 const MARKUP_THROW_COUNTER: u32 = 5;
 const MARKUP_THROW_ORIGIN: u32 = 6;
 // …with, where it goes on, whether the document's script-created parser runs under the bindings' stream hooks: theirs
-// to run it with (html_parse.rs `ActiveParser::streaming`), as the engine decided as it made it.
+// to run it with (html_parse.rs `ActiveParser::streaming`), as the engine decided as it made it — and, from bit
+// `MARKUP_PARSER_SHIFT` up, which parse its active parser is, the one to write into or close (0: none).
 const MARKUP_STREAMING: u32 = 8;
+const MARKUP_PARSER_SHIFT: u32 = 4;
 #[derive(Clone, Copy, Default)]
 struct MarkupFacts {
     xml: bool,
@@ -223,35 +225,37 @@ fn markup_steps(steps: u32, facts: MarkupFacts) -> u32 {
     }
 }
 // __dom.docMarkupSteps(docNid, steps, entryRealm) -> `markup_steps` of the document as it is — `entryRealm` the entry
-// settings object's (-1: no script's), which the open steps alone ask — and `MARKUP_STREAMING`.
+// settings object's (-1: no script's), which the open steps alone ask — with `MARKUP_STREAMING` and its active parser.
+// (…a call per `document.write`, which a page may make thousands of: one lookup of the document's state)
 fn markup_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_uint32(MARKUP_RETURN) };
     let steps = args.get(1).uint32_value(scope).unwrap_or(STEPS_OPEN);
     let entry = args.get(2).int32_value(scope).unwrap_or(-1);
     let Some(cid) = crate::dom::dom(scope).arena.get(doc).map(|n| n.realm) else { return rv.set_uint32(MARKUP_RETURN) };
     let other_origin = steps == STEPS_OPEN && entry >= 0 && entry != cid && !crate::realm_location::realms_same_origin(scope, entry, cid);
-    let parser = crate::dom::dom(scope).arena.document_states.parser(doc);
-    let active = crate::html_parse::active_parser(scope, parser);
+    let state = crate::dom::dom(scope).arena.document_states.markup(doc);
+    let active = crate::html_parse::active_parser(scope, state.parser);
     let arena = &crate::dom::dom(scope).arena;
-    let (insertions, destructive_ignored) = arena.document_states.markup_state(doc);
     let facts = MarkupFacts {
         xml: !crate::document_state::is_html(arena, Some(doc)),
-        counter_raised: insertions > 0,
+        counter_raised: state.insertions > 0,
         other_origin,
         script_running: active.script_running,
         script_created: active.script_created,
         unloading: arena.realm_document(cid) == Some(doc) && arena.unloading(cid),
-        parser_aborted: arena.document_states.lifecycle(doc).aborted,
-        destructive_ignored: destructive_ignored > 0,
+        parser_aborted: state.parser_aborted,
+        destructive_ignored: state.destructive_ignored > 0,
     };
-    rv.set_uint32(markup_steps(steps, facts) | if active.streaming { MARKUP_STREAMING } else { 0 });
+    let parser = if active.live { state.parser } else { 0 };
+    rv.set_uint32(markup_steps(steps, facts) | if active.streaming { MARKUP_STREAMING } else { 0 } | parser << MARKUP_PARSER_SHIFT);
 }
 
 // What the document open steps answer (`docOpen`): its readiness changed, its URL moved, its script-created parser runs
-// under the bindings' stream hooks.
+// under the bindings' stream hooks — and, from bit `OPENED_PARSER_SHIFT` up, which parse that parser is (0: none made).
 const OPENED_READY_CHANGED: u32 = 1;
 const OPENED_URL_MOVED: u32 = 2;
 const OPENED_STREAMING: u32 = 4;
+const OPENED_PARSER_SHIFT: u32 = 3;
 // __dom.docOpen(docNid, entryRealm) -> `OPENED_*`: HTML document open steps 12-18, once the bindings have stopped its
 // navigable's loading, erased its listeners and handlers and emptied it — `entryRealm` the entry settings object's. Its
 // URL the entry document's (`take_entry_url`); it no initial about:blank any more (a navigation of its window after makes
@@ -277,12 +281,12 @@ fn open(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
     // (…an iframe srcdoc document's: its URL `about:srcdoc` — the realm's own document's its realm's where it carries none)
     let url = if own { Some(arena.document_url(doc, false)) } else { arena.document_states.text(doc, crate::document_state::TEXT_URL).map(str::to_owned) };
     let srcdoc = url.as_deref() == Some("about:srcdoc");
-    crate::html_parse::begin_script_created(scope, cid, doc, streaming, srcdoc);
+    let parser = crate::html_parse::begin_script_created(scope, cid, doc, streaming, srcdoc);
     let states = &mut crate::dom::dom(scope).arena.document_states;
     let generation = states.next_generation();
     let changed = states.lifecycle_mut(doc).open(generation, muted);
     let flag = |on: bool, bit: u32| if on { bit } else { 0 };
-    rv.set_uint32(flag(changed, OPENED_READY_CHANGED) | flag(moved, OPENED_URL_MOVED) | flag(streaming, OPENED_STREAMING));
+    rv.set_uint32(flag(changed, OPENED_READY_CHANGED) | flag(moved, OPENED_URL_MOVED) | flag(streaming, OPENED_STREAMING) | parser << OPENED_PARSER_SHIFT);
 }
 // HTML document open steps 12: a fully active document a script of another one opens takes the URL of that one — the
 // entry realm's document — its fragment excluded (WPT url.window.js, url-fragment.window.js; Chrome, Firefox), its

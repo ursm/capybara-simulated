@@ -231,6 +231,30 @@ RSpec.describe 'document.write during parsing' do
     expect(s.evaluate_async_script('setTimeout(() => arguments[0]([document.readyState, L]), 50)')).to eq(['complete', %w[dcl load]])
   end
 
+  # A script-created parser never closed goes with its document's realm — a frame navigated away, or removed — and with
+  # its document's next load: nothing reaches it from then on, and it held the nodes it built (html_parse.rs
+  # `drop_realm`, `begin_parse`).
+  it 'keeps no script-created parser of a document that is gone' do
+    s = session_for('<iframe id=f></iframe><iframe id=g></iframe>')
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], counts = [__dom.htmlLiveParses()];
+      const open = (id) => {
+        const d = document.getElementById(id).contentDocument;
+        d.open();
+        d.write('<p>x');
+        counts.push(__dom.htmlLiveParses());
+      };
+      open('f');
+      open('g');
+      document.getElementById('g').remove();
+      counts.push(__dom.htmlLiveParses());
+      const f = document.getElementById('f');
+      f.onload = () => setTimeout(() => done(counts.concat(__dom.htmlLiveParses())), 0);
+      f.src = 'data:text/html,<p>b';
+    JS
+    expect(got).to eq([0, 1, 2, 1, 0])
+  end
+
   # An `open()` from the connectedCallback of a custom element the parser made: HTML "create an element for a token"
   # raises the throw-on-dynamic-markup-insertion counter around creating the element alone, and "insert an element at
   # the adjusted insertion location" runs its insertion reactions with none. Chrome opens (`ok`, `opened`); Firefox throws

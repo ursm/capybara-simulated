@@ -404,8 +404,10 @@ struct Parse {
     standins: StandIns,
     ended: bool,
     // The document it is the active parser of (HTML "active parser": a page's load's, or the script-created parser the
-    // document open steps make — the document's `DocumentStates::parser` until the parse is over).
+    // document open steps make — the document's `DocumentStates::parser` until the parse is over), and its realm, which
+    // takes it with it (`drop_realm`).
     doc: crate::dom::NodeId,
+    realm: i32,
     // A script-created parser's (`document.open()`, HTML "document open steps"): its input stream has no end until
     // `document.close()` inserts one (`closed`, `htmlClose`) — the input running out is where its insertion point is.
     script_created: bool,
@@ -485,6 +487,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "htmlTakeBlockingScript", html_take_blocking_script, context_id);
     register(scope, ns, "htmlDone", html_done, context_id);
     register(scope, ns, "docParser", doc_parser, context_id);
+    register(scope, ns, "htmlLiveParses", html_live_parses, context_id);
     register(scope, ns, "htmlClose", html_close, context_id);
     register(scope, ns, "htmlParseFragment", html_parse_fragment, context_id);
     register(scope, ns, "htmlParseDocument", html_parse_document, context_id);
@@ -501,15 +504,25 @@ fn parser_op(
     panicked: &[i32],
     op: impl FnOnce(&mut v8::PinScope<'_, '_>, &mut v8::ReturnValue<'_, v8::Value>),
 ) {
-    let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(scope, rv))) else { return };
+    if guarded(scope, id, |scope| op(scope, rv)).is_some() {
+        return;
+    }
+    let items: Vec<v8::Local<v8::Value>> = panicked.iter().map(|&n| v8::Integer::new(scope, n).into()).collect();
+    let answer = v8::Array::new_with_elements(scope, &items);
+    rv.set(answer.into());
+}
+// …the catching of it, for an op of the engine's own that runs the parser: what `op` answered, none where it panicked.
+fn guarded<R>(scope: &mut v8::PinScope<'_, '_>, id: Option<u32>, op: impl FnOnce(&mut v8::PinScope<'_, '_>) -> R) -> Option<R> {
+    let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(scope))) {
+        Ok(answer) => return Some(answer),
+        Err(panic) => panic,
+    };
     let what = panic.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| panic.downcast_ref::<String>().cloned());
     eprintln!("csim: the HTML parser panicked: {}", what.unwrap_or_default());
     if let Some(p) = id.and_then(|id| parses(scope).live.get_mut(&id)) {
         p.abort();
     }
-    let items: Vec<v8::Local<v8::Value>> = panicked.iter().map(|&n| v8::Integer::new(scope, n).into()).collect();
-    let answer = v8::Array::new_with_elements(scope, &items);
-    rv.set(answer.into());
+    None
 }
 
 // __dom.htmlParse(html, wellFormed, scripting, srcdoc, declarative, docNid) -> [id]: a live document's parse, its active
@@ -553,7 +566,13 @@ fn begin_parse(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::Node
     let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, start.declarative, true), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
     let input = BufferQueue::default();
     input.push_back(StrTendril::from(html));
+    // (…a script-created parser the document had goes: nothing reaches it once it is no longer the document's — one a
+    // page left open, which its next load replaces)
+    let old = crate::dom::dom(scope).arena.document_states.parser(doc);
     let all = parses(scope);
+    if all.live.get(&old).is_some_and(|p| p.script_created) {
+        all.live.remove(&old);
+    }
     all.next += 1;
     let id = all.next;
     all.live.insert(id, Parse {
@@ -563,6 +582,7 @@ fn begin_parse(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::Node
         standins,
         ended: false,
         doc,
+        realm: cid,
         script_created: start.script_created,
         closed: false,
         streaming: start.streaming,
@@ -576,34 +596,47 @@ fn begin_parse(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::Node
 }
 // HTML document open steps 16-17: a script-created parser of `doc`'s, its active parser, from no input, its insertion
 // point at the end of its input stream, which `document.write` feeds and only `document.close` ends. The parser it had
-// is done with: an earlier script-created one dropped; a page load's — which `open()` from no script of its own leaves
-// on the stack (a custom element's callback, a frame's script as the parse built the frame) — aborted, as "stop
-// loading" aborts it, its run building nothing more into the document written. With `streaming` (a document with a
+// is done with: an earlier script-created one dropped (`begin_parse`); a page load's — which `open()` from no script of
+// its own leaves on the stack (a custom element's callback, a frame's load as the parse built the frame) — aborted, as
+// "stop loading" aborts it, its run building nothing more into the document written. With `streaming` (a document with a
 // browsing context, the realm's own) its scripts run at their end tags, as a page load's do, and its declarative
 // shadow roots attach; without, neither. An iframe srcdoc document's, which no doctype written puts in quirks mode
 // (Chrome; Firefox departs from it).
-pub(crate) fn begin_script_created(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::NodeId, streaming: bool, iframe_srcdoc: bool) {
+// Its number — 0 where the parser panicked making it (`guarded`), and none was made.
+pub(crate) fn begin_script_created(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::NodeId, streaming: bool, iframe_srcdoc: bool) -> u32 {
     let old = crate::dom::dom(scope).arena.document_states.parser(doc);
-    let all = parses(scope);
-    if all.live.get(&old).is_some_and(|p| p.script_created) {
-        all.live.remove(&old);
-    } else if let Some(p) = all.live.get_mut(&old) {
+    if let Some(p) = parses(scope).live.get_mut(&old).filter(|p| !p.script_created) {
         p.abort();
     }
     let start = ParseStart { scripting: streaming, iframe_srcdoc, declarative: streaming, script_created: true, streaming };
-    begin_parse(scope, cid, doc, String::new(), StandIns::default(), start);
+    guarded(scope, None, |scope| begin_parse(scope, cid, doc, String::new(), StandIns::default(), start)).unwrap_or(0)
+}
+// The parses of realm `realm` gone with it (its context reset for the next page, or dropped): a script-created one never
+// closed holds its nodes (`held`) for as long as it is kept.
+pub(crate) fn drop_realm(scope: &mut v8::PinScope<'_, '_>, realm: i32) {
+    if let Some(all) = scope.get_slot_mut::<Parses>() {
+        all.live.retain(|_, p| p.realm != realm);
+    }
+}
+// __dom.htmlLiveParses() -> how many parses the isolate keeps — a diagnostic: none is left of a realm that went.
+fn html_live_parses(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let count = parses(scope).live.len();
+    rv.set_uint32(u32::try_from(count).unwrap_or(u32::MAX));
 }
 // What a document's active parser lets markup do (HTML §8.4.3 "insertion point"): whether a script it runs has an
 // insertion point — its script nesting level above zero — whether it is a script-created parser whose input's end is
-// one — until its parse is over ("stop parsing" makes it undefined) — and whether it runs under the stream hooks.
+// one — until its parse is over ("stop parsing" makes it undefined) — and whether it runs under the stream hooks: none
+// of a parse that is gone (`live`).
 #[derive(Clone, Copy, Default)]
 pub(crate) struct ActiveParser {
+    pub(crate) live: bool,
     pub(crate) script_running: bool,
     pub(crate) script_created: bool,
     pub(crate) streaming: bool,
 }
 pub(crate) fn active_parser(scope: &mut v8::PinScope<'_, '_>, id: u32) -> ActiveParser {
     parses(scope).live.get(&id).map_or_else(ActiveParser::default, |p| ActiveParser {
+        live: true,
         script_running: !p.set_aside.is_empty(),
         script_created: p.script_created && !p.ended,
         streaming: p.script_created && p.streaming,

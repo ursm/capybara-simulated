@@ -83,6 +83,16 @@ const TEXT_ENCODING: usize = 1;
 pub(crate) const TEXT_ABOUT_BASE: usize = 3;
 const TEXT_REFERRER: usize = 4;
 
+// …its active parser, its throw-on-dynamic-markup-insertion and ignore-destructive-writes counters, and whether its
+// active parser was aborted.
+#[derive(Default)]
+pub(crate) struct MarkupState {
+    pub(crate) parser: u32,
+    pub(crate) insertions: u32,
+    pub(crate) destructive_ignored: u32,
+    pub(crate) parser_aborted: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct DocumentStates(HashMap<NodeId, DocumentState>, HashMap<NodeId, DocumentTexts>);
 
@@ -121,9 +131,14 @@ impl DocumentStates {
             state.command_running = false;
         }
     }
-    // Its throw-on-dynamic-markup-insertion and ignore-destructive-writes counters.
-    pub(crate) fn markup_state(&self, doc: NodeId) -> (u32, u32) {
-        self.0.get(&doc).map_or((0, 0), |s| (s.insertions, s.destructive_ignored))
+    // What the steps of dynamic markup insertion ask of it (document_lifecycle.rs `markup_steps`).
+    pub(crate) fn markup(&self, doc: NodeId) -> MarkupState {
+        self.0.get(&doc).map_or_else(MarkupState::default, |s| MarkupState {
+            parser: s.parser,
+            insertions: s.insertions,
+            destructive_ignored: s.destructive_ignored,
+            parser_aborted: s.lifecycle.is_aborted(),
+        })
     }
     pub(crate) fn mode(&self, doc: NodeId) -> u32 {
         self.0.get(&doc).map_or(0, |s| s.mode)
