@@ -128,7 +128,7 @@
     var caret = ctlCaret(target), s = caret[0], e = caret[1], cur = target.value || '';
     target.value = cur.slice(0, s) + insert + cur.slice(e);
     try { target.selectionStart = target.selectionEnd = s + insert.length; } catch (_) {}
-    W.__dom.changeEdited(target._nid, true);
+    W.__dom.changeEdited(W.__dom.nidOf(target), true);
   }
   // The editing-event envelope every editing key produces: fire the cancelable
   // beforeinput, run `mutate` (unless it was canceled), then fire the
@@ -186,7 +186,7 @@
         else if (forward && s < cur.length) { target.value = cur.slice(0, s) + cur.slice(s + 1); pos = s; }
         else if (!forward && s > 0)         { target.value = cur.slice(0, s - 1) + cur.slice(s); pos = s - 1; }
         try { target.selectionStart = target.selectionEnd = pos; } catch (_) {}
-        W.__dom.changeEdited(target._nid, true);
+        W.__dom.changeEdited(W.__dom.nidOf(target), true);
       } else if (sel && sel.rangeCount && !sel.isCollapsed) {
         sel.getRangeAt(0).deleteContents();
       }

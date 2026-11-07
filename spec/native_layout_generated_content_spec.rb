@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 # Native layout — GENERATED CONTENT as a BOX, held to recorded goldens. `::before` / `::after` are nodes the
 # flow lays out like any other (`flatTreeChildren` puts them first and last), but they are no part of the DOM
-# and had no arena node — and the walk read every box back by `_nid` (`boxOf`), so nine separate walk gates
+# and had no arena node — and the walk read every box back by its slot (`boxOf`), so nine separate walk gates
 # refused any pseudo that had to BE a box: a flex item, a grid item, a float, an out-of-flow box, a table row
 # or cell, an atomic inline. The walk makes it a slot now, the first time the pseudo actually renders
 # (`RealmArena::link_generated`), and the gates pass untouched.

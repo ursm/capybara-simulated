@@ -32,6 +32,13 @@ RSpec.describe 'internal members' do
     expect(outcome("(() => { const x = Reflect.construct(Text, ['x'], Comment); return [x.nodeType, x.nodeName]; })()")).to eq([3, '#text'])
     expect(outcome("(() => { const x = Reflect.construct(Text, ['x'], CDATASection); return [x.nodeType, x.nodeName]; })()")).to eq([3, '#text'])
     expect(outcome("(() => { const x = Reflect.construct(Text, ['x'], Object); return Object.getOwnPropertyDescriptor(Node.prototype, 'nodeType').get.call(x); })()")).to eq(3)
+    expect(outcome("(() => { const x = Reflect.construct(Text, ['x'], Attr); document.body.appendChild(x); return [x.nodeName, document.body.lastChild === x]; })()")).to eq(['#text', true])
+  end
+
+  # (…and an object inheriting from an element is an instance of its interface by its prototype chain, which no
+  # private field of the element's is on)
+  it 'answers instanceof for an object inheriting from an element' do
+    expect(outcome("(() => { const o = Object.create(document.createElement('div')); return [o instanceof HTMLDivElement, o instanceof HTMLElement, o instanceof Element]; })()")).to eq([true, true, true])
   end
 
   # Every `_` name a page can see — on an interface object, its prototype, or an instance made here (own, for…in or

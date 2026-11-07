@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-# Store-flip foundation: a NATIVE-BACKED `_attrs`. `__dom.attrsView(nid)` returns an object whose
+# Store-flip foundation: a NATIVE-BACKED attribute store (`attrsOf`). `__dom.attrsView(nid)` returns an object whose
 # attribute storage lives in the Rust arena, reached through a C++ named-property interceptor
 # (get / set / query / delete / enumerate / descriptor) — not a JS Proxy (no per-trap JS dispatch),
-# so it is a faithful stand-in for the native-backed-node endgame AND drop-in for the plain `_attrs`
+# so it is a faithful stand-in for the native-backed-node endgame AND drop-in for a plain JS store
 # object every DOM idiom uses. This pins that its object semantics match a plain JS object exactly:
 # named read/write, `in`, hasOwnProperty, delete, `for..in` / Object.keys ORDER, Object.assign.
 
@@ -11,7 +11,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 
-RSpec.describe 'native-backed _attrs view (store-flip foundation)' do
+RSpec.describe 'native-backed attribute store view (store-flip foundation)' do
   let(:app) { Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><title>t</title>']] } }.to_app }
   let(:session) { simulated_session(app) }
 
@@ -68,7 +68,7 @@ RSpec.describe 'native-backed _attrs view (store-flip foundation)' do
     expect(probe("JSON.stringify(Object.assign({}, v))")).to eq('{"class":"a b","id":"x","data-i":"5"}')
   end
 
-  it 'stays truthy (the `el._attrs && ...` guard contract) and round-trips a write' do
+  it 'stays truthy (the `attrsOf(el) && ...` guard contract) and round-trips a write' do
     expect(probe("!!v")).to be(true)
     expect(probe("typeof v")).to eq('object')
     # a write through the view is read back through it (set → arena → get)

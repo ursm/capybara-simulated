@@ -237,7 +237,7 @@ pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: 
     let Some(n) = arena.get(id) else { return 0 };
     let is = |name: &str| is_units(key, name);
     let chord = modifiers & (CTRL | META | ALT) != 0;
-    // (…by its local name, whatever its namespace, as the bindings' `_tag` is)
+    // (…by its local name, whatever its namespace, as the bindings' `tagOf` is)
     let tag = &*n.local_name;
     let input_type = if tag == "input" { n.input_type() } else { "" };
     let check_or_radio = matches!(input_type, "checkbox" | "radio");

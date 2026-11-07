@@ -24,7 +24,7 @@
 //
 // The `nid` that crosses the FFI is the `(index, gen)` pair PACKED into one JS Number (index in the
 // low `INDEX_BITS`, gen above — both fit exactly under 2^53); JS treats it as an opaque token and only
-// hands it back. `attrsView(nid)` is the native-backed `_attrs` (a named interceptor over a node's
+// hands it back. `attrsView(nid)` is the native-backed attribute store (`attrsOf`, a named interceptor over a node's
 // attributes Vec), installed by the Element constructor in place of the JS `{}`.
 
 use std::borrow::Cow;
@@ -2617,8 +2617,8 @@ pub(crate) struct Dom {
     pub(crate) reclaim: std::sync::Arc<crate::node_handle::Reclaim>,
     // Every realm's nodes, and each realm's state (`RealmArena`).
     pub(crate) arena: RealmArena,
-    // The store-flip's native-backed `_attrs`: a full named-interceptor view over a node's
-    // attributes Vec (get/set/query/delete/enumerate/descriptor), so `el._attrs.foo`, `for..in`,
+    // The store-flip's native-backed attribute store (`attrsOf`): a full named-interceptor view over a node's
+    // attributes Vec (get/set/query/delete/enumerate/descriptor), so `attrsOf(el).foo`, `for..in`,
     // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
     // JS Proxy and a faithful stand-in for the native-backed endgame.
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
@@ -3284,7 +3284,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::document_encoding::install(scope, ns, context_id);
     register(scope, ns, "nowNanos", now_nanos, context_id);
     // A node's attributes written wholesale, and their namespaces.
-    // The store-flip's native-backed `_attrs`: __dom.attrsView(nid) -> an interceptor object over
+    // The store-flip's native-backed attribute store: __dom.attrsView(nid) -> an interceptor object over
     // that node's attributes (the Element constructor installs it in place of the JS `{}`).
     register(scope, ns, "attrsView", attrs_view, context_id);
     register(scope, ns, "adoptSubtree", adopt_subtree, context_id);
@@ -6099,7 +6099,7 @@ fn now_nanos(
     rv.set(v8::Number::new(scope, ns).into());
 }
 
-// Build the native-backed `_attrs` instance template once per isolate. Reserves internal field 0 for
+// Build the native-backed attribute store's instance template once per isolate. Reserves internal field 0 for
 // the owner nid (packed) and field 1 for its realm's context_id (attrsView stamps both), so the
 // interceptors work in the RIGHT realm's state and on the RIGHT node generation — the template is
 // isolate-shared but its instances are per realm.
@@ -6130,9 +6130,9 @@ fn ensure_templates(scope: &mut v8::PinScope<'_, '_>) {
     }
 }
 
-// ── native-backed _attrs (store flip): a full named-interceptor view over a node's attributes ──
-// The Element constructor installs one of these in place of the JS `_attrs` object, so every
-// `el._attrs.foo` / `el._attrs[k]=v` / `k in el._attrs` / `delete` / `for..in` / `Object.keys` /
+// ── native-backed attribute store (store flip): a full named-interceptor view over a node's attributes ──
+// The Element constructor installs one of these as its attribute store (`attrsOf`) in place of a JS object, so every
+// `attrs.foo` / `attrs[k]=v` / `k in attrs` / `delete` / `for..in` / `Object.keys` /
 // `hasOwnProperty` runs against the arena in C++. Keys are matched EXACTLY (the JS side already
 // lowercases HTML attribute names before storing), and enumeration returns them in insertion
 // (Vec) order — the serialization / NamedNodeMap order contract.

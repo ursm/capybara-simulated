@@ -867,7 +867,7 @@ RSpec.describe 'root box + computed initial values' do
       <!DOCTYPE html>
       <html><body><constructor id="c">x</constructor></body></html>
     HTML
-    # `el._tag` is page-controlled, and the per-tag UA display table was the last property-keyed map
+    # an element's tag is page-controlled, and the per-tag UA display table was the last property-keyed map
     # still carrying Object.prototype.
     expect(s.evaluate_script("typeof getComputedStyle(document.getElementById('c')).display")).to eq('string')
   end
