@@ -50,18 +50,19 @@ pub(crate) struct Location {
     document: Option<String>,
 }
 
-// A form's submission a frame's document made that navigates the top-level document (its target `_top`, or a `_parent`
-// that is it): the frame's realm, the request as it was submitted, and the Referer it sends — the frame's document's
-// under its policy, `no-referrer` for its `rel=noreferrer` — taken as it was planned. The page's navigation planned last,
-// as its own are (Chrome: `location.href = …; frames[0].f.submit()` submits, the other order navigates).
+// A form's submission another document made that navigates a top-level document — the page from a frame of its (its target
+// `_top`, or a `_parent` that is it), a window of this isolate from any document, its own among them: the form document's
+// realm, the request as it was submitted, and the Referer it sends — that document's under its policy, `no-referrer` for its
+// `rel=noreferrer` — taken as it was planned. The navigable's navigation planned last, as its own are (Chrome:
+// `location.href = …; frames[0].f.submit()` submits, the other order navigates).
 pub(crate) struct FrameSubmission {
     realm: i32,
     request: v8::Global<v8::Value>,
     referrer: (String, String),
 }
 
-// A top-level document's location navigation, reload and a frame's submission to it — of the page, or of a window
-// `window.open` made in this isolate (whose frames' submissions to it are not modeled) — as a flush of the page's tasks
+// A top-level document's location navigation, reload and a submission to it (`FrameSubmission`) — of the page, or of a
+// window `window.open` made in this isolate — as a flush of the page's tasks
 // stashes them (`flushBegin`); and when the later of them was planned (`PLANNED`), which orders the windows' as the host
 // takes them.
 #[derive(Default)]
@@ -135,10 +136,10 @@ pub(crate) struct NavigationPlan {
     flushed: Option<Own>,
 }
 
-// A form's submission a frame's document made that navigates no frame, and so no navigable's to plan
-// (frame_navigation.rs `HostNavigation::Submit`) nor the page's (`FrameSubmission`): into a window of this isolate, or a new
-// one. Chosen as it was submitted, taken at the event loop's navigation turn in the order they were made, a form's later one
-// replacing its earlier (HTML "plan to navigate").
+// A form's submission a frame's document made into a new window, which no navigable has yet to plan it (a frame's:
+// frame_navigation.rs `HostNavigation::Submit`; a top-level one's: `FrameSubmission`). Chosen as it was submitted, taken at the
+// event loop's navigation turn in the order they were made, a form's later one replacing its earlier (HTML "plan to
+// navigate").
 #[derive(Default)]
 pub(crate) struct RoutedSubmissions {
     entries: Vec<RoutedSubmission>,
@@ -641,7 +642,7 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
             }
             own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
         }
-        if (own.location.is_some() || own.reload.is_some() || own.traversal.is_some()) && !crate::dom::dom(scope).arena.window_closing(w) {
+        if (own.location.is_some() || own.reload.is_some() || own.traversal.is_some() || own.submission.is_some()) && !crate::dom::dom(scope).arena.window_closing(w) {
             taken.push((own.planned, w, own));
         }
     }
@@ -666,6 +667,19 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     }
     for (_, w, own) in taken {
         let realm = v8::Integer::new(scope, w).into();
+        if let Some(FrameSubmission { realm: source, request, referrer }) = own.submission.filter(|_| own.location.is_none() && own.reload.is_none()) {
+            // (…a form's: `[window, "submit", formRealm, request, referrerSource, referrerPolicy]`)
+            let item = [
+                realm,
+                v8::String::new(scope, "submit").unwrap().into(),
+                v8::Integer::new(scope, source).into(),
+                v8::Local::new(scope, request),
+                v8::String::new(scope, &referrer.0).unwrap().into(),
+                v8::String::new(scope, &referrer.1).unwrap().into(),
+            ];
+            items.push(v8::Array::new_with_elements(scope, &item).into());
+            continue;
+        }
         let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload, own.traversal) {
             (Some(l), ..) => {
                 let kind = if l.document.is_some() { "javascript" } else { "location" };
@@ -775,22 +789,26 @@ fn plan_form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         crate::frame_navigation::plan_frame_submission(scope, cid, container, form, request, referrer, interactive);
         return rv.set_uint32(FORM_PLANNED_TURN);
     }
-    if !nested {
+    // (…a window's of this isolate — its own form's too — on that window's plan, which a later navigation of it replaces)
+    let window = match route {
+        Route::Window(w) => Some(w),
+        Route::SelfTarget if !nested && !arena.is_page(cid) => Some(cid),
+        _ => None,
+    };
+    if let Some(w) = window {
+        plan_top_level_submission(scope, w, cid, request, referrer);
+        return rv.set_uint32(FORM_PLANNED_TURN);
+    }
+    // (…the page's own plan, what a click returns to the driver: `takeSubmission`)
+    if arena.is_page(cid) {
         let top = realm(scope, cid);
-        if top.is_page(cid) {
-            top.navigation_plan.supersede();
-            begin_navigation_of(top, cid, None);
-        }
-        realm(scope, cid).navigation_plan.submission = Some(Submission(request));
+        top.navigation_plan.supersede();
+        begin_navigation_of(top, cid, None);
+        top.navigation_plan.submission = Some(Submission(request));
         return;
     }
     match route {
-        Route::Top => {
-            let top = realm(scope, 0);
-            top.navigation_plan.supersede();
-            begin_navigation_of(top, 0, None);
-            top.navigation_plan.own.submission = Some(FrameSubmission { realm: cid, request, referrer });
-        }
+        Route::Top => plan_top_level_submission(scope, 0, cid, request, referrer),
         Route::Blocked => return,
         route => {
             let entries = &mut crate::dom::dom(scope).arena.routed_submissions.entries;
@@ -799,6 +817,14 @@ fn plan_form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         }
     }
     rv.set_uint32(FORM_PLANNED_TURN);
+}
+// …into top-level realm `top`'s navigable, planned in its plan in place of what that planned.
+fn plan_top_level_submission(scope: &mut v8::PinScope<'_, '_>, top: i32, source: i32, request: v8::Global<v8::Value>, referrer: (String, String)) {
+    let arena = realm(scope, top);
+    arena.navigation_plan.supersede();
+    begin_navigation_of(arena, top, None);
+    arena.navigation_plan.own.submission = Some(FrameSubmission { realm: source, request, referrer });
+    arena.navigation_plan.own.planned = next_planned();
 }
 // __dom.holdRoutedSubmission(): the calling frame realm's document about to make way for another in place (a javascript:
 // URL's string result): what it planned into another navigable goes on past it, where it goes as the document goes

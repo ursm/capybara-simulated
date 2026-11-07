@@ -9,7 +9,7 @@ require_relative 'support/session_teardown'
 RSpec.describe 'a frame past the nesting limit' do
   # …a form into one holding nothing up either (Firefox at its limit, measured 2026-11-07).
   it "takes a form into it without holding its document's load" do
-    limit = 16
+    limit = Capybara::Simulated::Native::MAX_FRAME_DEPTH
     app = ->(env) {
       depth = Rack::Utils.parse_query(env['QUERY_STRING'])['d'].to_i
       submit = depth == limit ? '<form id=x action=/x target=n></form><script>x.submit()</script>' : ''
@@ -30,7 +30,7 @@ RSpec.describe 'a frame past the nesting limit' do
     }
     s = simulated_session(app)
     s.visit '/?d=0'
-    limit = 16
+    limit = Capybara::Simulated::Native::MAX_FRAME_DEPTH
     got = s.evaluate_script(<<~JS)
       (() => {
         const seen = [];

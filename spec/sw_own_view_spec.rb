@@ -40,15 +40,27 @@ RSpec.describe "a service worker's own view" do
     session.visit '/'
     session.execute_script(<<~JS)
       globalThis.__heard = [];
-      navigator.serviceWorker.onmessage = e => globalThis.__heard.push(e.data);
+      globalThis.__hearing = [];
+      navigator.serviceWorker.onmessage = (e) => {
+        globalThis.__heard.push(e.data);
+        for (const [count, done] of globalThis.__hearing.splice(0)) {
+          if (globalThis.__heard.length >= count) done(globalThis.__heard);
+          else globalThis.__hearing.push([count, done]);
+        }
+      };
     JS
     session
   end
 
   def heard(session) = session.evaluate_script('globalThis.__heard')
 
+  # …the first `count` messages, waited for as the page's event loop runs (`evaluate_async_script`), not the wall clock.
   def hear(session, count)
-    poll_until { (h = heard(session)).size >= count && h } || heard(session)
+    session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      if (globalThis.__heard.length >= #{count}) done(globalThis.__heard);
+      else globalThis.__hearing.push([#{count}, done]);
+    JS
   end
 
   def register(session, url, scope = '/s/')
@@ -210,7 +222,12 @@ RSpec.describe "a service worker's own view" do
       globalThis.__answer = null;
       new Worker('/w.js').onmessage = e => { globalThis.__answer = e.data; };
     JS
-    answer = poll_until { session.evaluate_script('globalThis.__answer') }
+    # (…waited for on the page's event loop, not the wall clock)
+    answer = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const look = () => (globalThis.__answer ? done(globalThis.__answer) : setTimeout(look, 10));
+      look();
+    JS
     expect(answer).to eq('scope' => '/s/', 'states' => %w[installing installed activating activated], 'ok' => true)
   end
 

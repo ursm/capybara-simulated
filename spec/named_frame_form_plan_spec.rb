@@ -285,6 +285,63 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     expect(session.evaluate_script('[frames[0].location.pathname, history.length]')).to eq(['/x', 2])
   end
 
+  # A window of this isolate's navigable plans a form's into it as a frame's does: the later of two, whichever documents
+  # made them (Firefox, measured 2026-11-07: one POST, the later's; Chrome blocked the pop-up).
+  {
+    "two of a frame's forms" => ['frames[0].x.submit(); frames[0].y.submit()', '/f2', 'POST /f1'],
+    "a frame's and the page's" => ['frames[0].x.submit(); z.submit()', '/pg', 'POST /f1']
+  }.each do |name, (js, lands, unsent)|
+    it "sends the later of #{name} into one window" do
+      hits = []
+      session = simulated_session(lambda {|env|
+        hits << "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
+        body = case env['PATH_INFO']
+               when '/top' then '<iframe src=/in></iframe><form id=z method=post action=/pg target=pw></form>'
+               when '/in' then '<form id=x method=post action=/f1 target=pw></form><form id=y method=post action=/f2 target=pw></form>'
+               else env['PATH_INFO']
+               end
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      session.visit '/top'
+      session.execute_script('window.w = open("/w", "pw")')
+      session.evaluate_script('1')
+      hits.clear
+      session.execute_script(js)
+      session.evaluate_script('1')
+      expect(session.evaluate_script('w.location.pathname')).to eq(lands)
+      expect(hits).not_to include(unsent)
+    end
+  end
+
+  # A frame's reload after its document was opened is of its session history entry, the URL it was at before (Chrome), a form
+  # planned before it replaced as by any reload.
+  it 'reloads an opened frame at its entry, in place of the form before it' do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    hits.clear
+    session.execute_script('f.submit(); const d = fr.contentDocument; d.open(); d.write("<p>w"); d.close(); fr.contentWindow.location.reload()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/blank')
+    expect(hits).to eq(['GET /blank'])
+  end
+
+  # A parent's `stop()` from a script of a frame still parsing aborts that frame's parser there (HTML "stop loading" its
+  # descendants; Chrome and Firefox parse none of the frame's markup after the script, and fire it no `load`).
+  it "aborts a frame's parser with its parent's stop() from its script" do
+    session = simulated_session(lambda {|env|
+      body = case env['PATH_INFO']
+             when '/top' then '<script>window.L = []</script><iframe id=f src=/in></iframe>'
+             when '/in' then '<script>parent.stop()</script><p id=rest>rest</p><script>top.L.push("ran")</script>'
+             else ''
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/top'
+    session.evaluate_script('1')
+    expect(session.evaluate_script('[L, f.contentDocument.getElementById("rest")]')).to eq([[], nil])
+  end
+
   # A GET to a fragment of the document the frame is at moves it within it, no request made (HTML "navigate to a fragment";
   # Chrome and Firefox, measured 2026-11-07).
   it "moves a frame within its document on a form's GET to a fragment of it" do

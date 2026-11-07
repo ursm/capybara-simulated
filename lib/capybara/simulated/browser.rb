@@ -1998,29 +1998,11 @@ module Capybara
       # select_option). Without this hop the planned submission (navigation_plan.rs)
       # is never taken and the form never actually navigates / POSTs.
       def consume_pending_form_submit
-        consume_window_form_submits
         pending = @runtime.call('__csimTakePendingFormSubmit')
         return unless pending.is_a?(Hash)
         # (…the main document's plan, which a frame's submission is routed past: its form submitted as that document's)
         in_top_context { submit_form_spec(pending) }
       end
-      # …and those a script planned in the windows `window.open` made in this isolate — each in its own realm's plan, as
-      # its location's are (`consume_pending_window_nav`): `form.submit()`, `requestSubmit()`, a timer's — submitted as
-      # that window's document's.
-      private def consume_window_form_submits
-        return if @runtime.window_realm_meta.empty?
-
-        @runtime.window_realm_meta.keys.each do |realm|
-          next unless @runtime.frame_realm_alive?(realm)
-
-          pending = @runtime.realm_call(realm, '__csimTakePendingFormSubmit')
-          next unless pending.is_a?(Hash)
-
-          invalidate_find_cache
-          from_document(realm) { submit_form_in_realm(realm, pending) }
-        end
-      end
-
       # Pin the URL the page is at as a user action BEGINS — the FIRST line of
       # every action entry (click / double_click / right_click / hover / set /
       # send_keys / select / unselect). A Turbo Drive Visit the action triggers
@@ -11314,6 +11296,11 @@ module Capybara
             next traverse_window_navigables(realm_id, *plan) if kind == 'traverse_navigables'
             # (…a `javascript:` URL's document, its URL and its markup: `planJavascriptDocument`)
             next commit_window_javascript_document(realm_id, *plan.values_at(0, 8)) if kind == 'javascript'
+            # (…a form's, of its own document or another's: its realm, its request and its Referer)
+            if kind == 'submit'
+              source, spec, *referrer = plan
+              next from_document(source) { submit_routed_form(source, spec, {to: source == realm_id ? :self : :window, window: realm_id, referrer: referrer}) }
+            end
 
             navigate_window_realm(realm_id, kind, plan)
           rescue StandardError => e
@@ -11623,10 +11610,14 @@ module Capybara
           # `iframe.contentWindow.location.reload()`, empty href, or a realm torn
           # down between flag and drain) re-navigate the owning iframe by realm id
           # JS-side, reusing the retained content so blob bytes survive a revoke.
-          # (…of the URL its document was at as `reload()` was called, whatever a `document.open()` did to it since)
+          # (…of its session history entry, HTML "reload" applying its step: the URL its document was at as it got there,
+          # whatever a `document.open()` did to the document's since — Chrome; Firefox goes on with a form planned before —
+          # else, of no entry, the one it was at as `reload()` was called)
           entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-          url   = entry && @runtime.frame_realm_alive?(realm_id) ? reload_url.to_s : ''
-          cur   = current_frame_history_entry(realm_id)&.merge(url: reload_url)
+          cur   = current_frame_history_entry(realm_id)
+          reload_url = cur[:url] if cur && cur[:url]
+          cur = cur&.merge(url: reload_url)
+          url = entry && @runtime.frame_realm_alive?(realm_id) ? reload_url.to_s : ''
           if entry && cur && cur[:body]
             navigate_frame_post(cur[:url], cur[:body], cur[:content_type], entry: entry, referrer: realm_referrer_initiator(realm_id), is_reload: true, initiator: realm_id)
           elsif entry && !url.empty?
@@ -12006,7 +11997,7 @@ module Capybara
         activated = spec['userActivated'] == true
         # (…a window's of this isolate — its own document's, or the one its target names — navigated as its own location
         # navigates it: `navigate_window_realm`)
-        window = to == :window ? route[:window] : (realm_id if to == :self && @runtime.window_realm_meta.key?(realm_id))
+        window = route[:window] || (realm_id if to == :self && @runtime.window_realm_meta.key?(realm_id))
         if window
           return navigate_window_realm(window, 'location', [url, spec['replace'] == true && to == :self, realm_id, *initiator, activated, nil], post: post)
         end

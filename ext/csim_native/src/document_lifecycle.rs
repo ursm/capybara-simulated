@@ -135,6 +135,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "docFinishLoading", finish_loading, context_id);
     crate::dom::register(scope, ns, "docCompletelyLoaded", completely_loaded, context_id);
     crate::dom::register(scope, ns, "docLoadFired", load_fired, context_id);
+    crate::dom::register(scope, ns, "docParsing", parsing, context_id);
     crate::dom::register(scope, ns, "docAbortParser", abort_parser_op, context_id);
     crate::dom::register(scope, ns, "docLoadAborted", load_aborted, context_id);
     crate::dom::register(scope, ns, "docAborts", aborts, context_id);
@@ -443,6 +444,12 @@ fn completely_loaded(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(crate::dom::dom(scope).arena.document_states.lifecycle(doc).completely_loaded);
 }
 
+// __dom.docParsing(docNid) -> whether its parser is at work still: its readiness `loading`, its parser not aborted.
+fn parsing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let lc = crate::dom::dom(scope).arena.document_states.lifecycle(doc);
+    rv.set_bool(lc.ready == READY_LOADING && !lc.aborted);
+}
 // __dom.docLoadFired(docNid) -> whether its load has fired, or begun to: nothing more delays it.
 fn load_fired(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
