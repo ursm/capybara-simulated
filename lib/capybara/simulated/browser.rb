@@ -3864,6 +3864,9 @@ module Capybara
         # with (its app reuses an immutable URL for new bytes) asks for it with
         # `Driver#clear_http_cache`.
         @@asset_cache.clear_volatile
+        # (…the next test's window a new browsing context's, of a group of its own: no origin's agent cluster keyed by a
+        # document of this one's)
+        new_browsing_context_group
         @runtime.reset_page
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
@@ -13281,6 +13284,11 @@ module Capybara
         @session_history.clear_name
         @runtime.call('__csimForgetPageOpenings')
         @runtime.page_left_group!
+        new_browsing_context_group
+      end
+      # …named anew: a group of no documents yet, the historical agent cluster key map it keeps an empty one
+      # (realm_location.rs `origin_keyed_cluster`) — a group left, or a session reset (`reset!`).
+      private def new_browsing_context_group
         @browsing_context_group = "g#{object_id}.#{@group_seq = @group_seq.to_i + 1}"
       end
       # Rebuild the JS Context and load `html` into it. Called from

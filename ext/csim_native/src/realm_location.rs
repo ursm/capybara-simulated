@@ -114,13 +114,6 @@ impl RealmLocation {
             None => self.document_origin = text,
         }
     }
-    // Its document's origin is a new record: a document of the window's next, which a realm kept for it (dom-nodes.js
-    // `__csimRenewDocument`), with no domain set.
-    fn renew_origin(&mut self) {
-        self.origin_record = new_origin_record();
-        self.domain = None;
-        self.origin_keyed = None;
-    }
     // Its origin's effective domain (`effective_domain`).
     pub(crate) fn effective_domain(&self) -> Option<String> {
         effective_domain(self.origin(), self.domain.as_deref())
@@ -222,6 +215,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sameOriginRealm", same_origin_realm, context_id);
     register(scope, ns, "sameOriginDomainRealm", same_origin_domain_realm, context_id);
     register(scope, ns, "renewOrigin", renew_origin, context_id);
+    register(scope, ns, "originDomainSet", origin_domain_set, context_id);
     register(scope, ns, "setOriginKey", set_origin_key, context_id);
     register(scope, ns, "setCrossOriginIsolation", set_cross_origin_isolation, context_id);
     register(scope, ns, "obtainAgentCluster", obtain_agent_cluster, context_id);
@@ -415,7 +409,8 @@ fn sandboxed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 // `frame_origins`), the record that document's origin is (`share_origin`), its domain with it.
 fn set_document_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let text = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
-    let creator = args.get(1).is_int32().then(|| args.get(1).int32_value(scope)).flatten();
+    // (…none inherited where no origin is given: the document's own, its URL's)
+    let creator = args.get(1).is_int32().then(|| args.get(1).int32_value(scope)).flatten().filter(|_| text.is_some());
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     arena.location.set_document_origin(text);
@@ -423,11 +418,19 @@ fn set_document_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         arena.inherit_origin(cid, creator);
     }
 }
-// __dom.renewOrigin() — the calling realm's document's origin a new record (`renew_origin`): a realm kept for a window's
-// next document.
+// __dom.renewOrigin() — the calling realm's document's origin a new record, with no domain set, and its agent to obtain
+// anew: the next document of a window, which a realm kept for it (dom-nodes.js `__csimRenewDocument`).
 fn renew_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    realm(scope, cid).location.renew_origin();
+    let arena = realm(scope, cid);
+    arena.location.origin_keyed = None;
+    arena.give_origin_record(cid, new_origin_record(), None);
+}
+// …and whether a `document.domain` write set its origin's domain: a window's initial about:blank whose creator's did is
+// no longer same origin-domain with a document of its origin, whose own is new (window.js `__csimKeepsWindowFor`).
+fn origin_domain_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(realm(scope, cid).location.domain.is_some());
 }
 
 // __dom.originKey() -> the key the calling realm's origin is matched by (`RealmLocation::origin_key`).
@@ -571,9 +574,17 @@ impl RealmArena {
             return;
         }
         let (record, domain) = (from.origin_record, from.domain.clone());
-        if let Some(state) = self.realm_state_mut(cid) {
-            state.location.origin_record = record;
-            state.location.domain = domain;
+        self.give_origin_record(cid, record, domain);
+    }
+    // Realm `cid`'s document's origin is the record `record`, of domain `domain` — the count of domain writes moved where
+    // that moves its domain, as a write does: what a WindowProxy's memo of same origin-domain keys on (`domain_writes`).
+    fn give_origin_record(&mut self, cid: i32, record: u64, domain: Option<String>) {
+        let Some(location) = self.realm_state_mut(cid).map(|s| &mut s.location) else { return };
+        let moved = location.domain != domain;
+        location.origin_record = record;
+        location.domain = domain;
+        if moved {
+            self.domain_writes.bump();
         }
     }
     // Realm `cid`'s origin's domain is `host` (HTML `document.domain` setter step 7) — every realm's whose document has

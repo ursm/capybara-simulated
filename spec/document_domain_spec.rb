@@ -50,12 +50,14 @@ RSpec.describe 'document.domain' do
   describe 'same origin-domain access', :every_host_local do
     let(:pages) do
       {
-        '/' => '<!DOCTYPE html><meta charset="utf-8"><iframe src="http://a.example.com/child"></iframe>',
-        '/child' => <<~HTML,
+        '/'      => '<!DOCTYPE html><meta charset="utf-8"><iframe src="http://a.example.com/child"></iframe>',
+        '/same'  => '<!DOCTYPE html><meta charset="utf-8"><iframe src="/child"></iframe><iframe></iframe>',
+        '/blank' => '<!DOCTYPE html><meta charset="utf-8">',
+
+        '/child' => <<~HTML
           <!DOCTYPE html><meta charset="utf-8"><title>child</title>
           <script>window.join = () => { document.domain = 'example.com'; };</script>
         HTML
-        '/same' => '<!DOCTYPE html><meta charset="utf-8"><iframe src="/child"></iframe><iframe></iframe>'
       }
     end
     let(:session) do
@@ -101,6 +103,29 @@ RSpec.describe 'document.domain' do
       JS
     end
 
+    # …but a document a frame or a window that inherited it goes on to — one of its URL's origin, a new origin — none
+    # of the domain the creator set: its about:blank's Window not kept for it (HTML "create and initialize a Document
+    # object": same origin-domain), no longer reached.
+    it "gives a document an inherited about:blank goes on to an origin of its own" do
+      session.visit '/blank'
+      session.execute_script(<<~JS)
+        window.frame = document.body.appendChild(document.createElement('iframe'));
+        window.popup = open();
+        void [frame.contentWindow.document, popup.document];
+        document.domain = 'example.com';
+        frame.src = '/child';
+        popup.location = '/child';
+      JS
+      poll_until { session.evaluate_script("(() => { try { return frames[0].document.title === 'child'; } catch (e) { return true; } })()") }
+      poll_until { session.evaluate_script("(() => { try { return popup.document.title === 'child'; } catch (e) { return true; } })()") }
+      expect(session.evaluate_script(<<~JS)).to eq(['SecurityError', true, 'SecurityError'])
+        (() => {
+          const read = (f) => { try { return f(); } catch (e) { return e.name; } };
+          return [read(() => frames[0].document.title), frame.contentDocument === null, read(() => popup.document.title)];
+        })()
+      JS
+    end
+
     # …and a Location a script took while the two were same origin-domain refuses it its members once they are not
     # (HTML: each getter's, `assign()`'s and `reload()`'s check against the entry settings object) — its `href` setter
     # and `replace()` none, which have no check.
@@ -132,8 +157,11 @@ RSpec.describe 'document.domain' do
     it "refuses to open a document same origin-domain but not same origin" do
       session.execute_script("document.domain = 'example.com'")
       session.within_frame(0) { session.execute_script('join()') }
-      expect(session.evaluate_script(<<~JS)).to eq('SecurityError')
-        (() => { try { frames[0].document.open(); return 'opened'; } catch (e) { return e.name; } })()
+      expect(session.evaluate_script(<<~JS)).to eq(['child', 'SecurityError'])
+        (() => {
+          const doc = frames[0].document;
+          try { doc.open(); return [doc.title, 'opened']; } catch (e) { return [doc.title, e.name]; }
+        })()
       JS
     end
   end
@@ -145,10 +173,10 @@ RSpec.describe 'document.domain' do
   describe 'in an origin-keyed agent cluster', :https, :every_host_local do
     let(:pages) do
       {
-        '/' => ['?1', '<!DOCTYPE html><meta charset="utf-8"><iframe src="/plain"></iframe><iframe src="https://a.example.com/keyed"></iframe>'],
+        '/'      => ['?1', '<!DOCTYPE html><meta charset="utf-8"><iframe src="/plain"></iframe><iframe src="https://a.example.com/keyed"></iframe>'],
         '/plain' => [nil, '<!DOCTYPE html><meta charset="utf-8"><title>plain</title><iframe src="https://b.example.com/keyed"></iframe>'],
         '/keyed' => ['?1', '<!DOCTYPE html><meta charset="utf-8"><title>keyed</title>'],
-        '/zero' => ['?0', '<!DOCTYPE html><meta charset="utf-8">']
+        '/zero'  => ['?0', '<!DOCTYPE html><meta charset="utf-8">']
       }
     end
     let(:session) do
@@ -170,6 +198,14 @@ RSpec.describe 'document.domain' do
     end
 
     it 'sets it where none asked' do
+      session.visit '/zero'
+      expect(session.evaluate_script(write)).to eq([false, 'www.example.com', 'example.com'])
+    end
+
+    # (…a session reset a new browsing context's, of a group of its own: what a test's documents asked none of the next's)
+    it "keys a reset session's documents afresh" do
+      session.visit '/'
+      session.reset!
       session.visit '/zero'
       expect(session.evaluate_script(write)).to eq([false, 'www.example.com', 'example.com'])
     end

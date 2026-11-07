@@ -671,7 +671,20 @@ module Capybara
       # the iframe element at the new id (`__csimRebindFrameRealm`).
       # `history_state` the `[state]` of the classic history API state its document starts with, a traversal's to its
       # entry (Browser#reload_frame_to_entry).
-      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id, seed, history_state: nil, referrer: nil, referrer_policy: nil, refresh: nil, origin_agent_cluster: false)
+      def reload_frame_realm(
+        old_id,
+        parent_id,
+        url,
+        body,
+        content_type,
+        client_id,
+        seed,
+        history_state: nil,
+        referrer: nil,
+        referrer_policy: nil,
+        refresh: nil,
+        origin_agent_cluster: false
+      )
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
         # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
@@ -680,8 +693,27 @@ module Capybara
         # Browser has unloaded already, as a navigation the page made unloads it: Browser#unload_frame_document.) The
         # WindowProxies of the frame kept, over the new document's window next.
         dispose_frame_realm_tree(old_id, keep_proxies: true)
-        create_frame_realm(ctx, url, body, content_type, parent_id, seed['container'], seed['docOrigin'], seed['locationOrigin'], nil, nil, seed['viewport'], client_id, seed['margins'], seed['sandbox'],
-                           history_state: history_state, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh, origin_agent_cluster: origin_agent_cluster)
+        create_frame_realm(
+          ctx,
+          url,
+          body,
+          content_type,
+          parent_id,
+          seed['container'],
+          seed['docOrigin'],
+          seed['locationOrigin'],
+          nil,
+          nil,
+          seed['viewport'],
+          client_id,
+          seed['margins'],
+          seed['sandbox'],
+          history_state:        history_state,
+          referrer:             referrer,
+          referrer_policy:      referrer_policy,
+          refresh:              refresh,
+          origin_agent_cluster: origin_agent_cluster
+        )
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a

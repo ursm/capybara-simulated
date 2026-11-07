@@ -956,9 +956,10 @@ pub(crate) struct RealmArena {
     // Whether some realm's observer observes another realm's node, read with no call by every realm's bindings
     // (`__dom.foreignObserved`): a change in any realm then asks those realms for their observations too.
     pub(crate) foreign_observed: SharedWord,
-    // How many `document.domain` writes some realm's document made, read with no call by every realm's bindings
-    // (`__dom.domainWrites`): what a WindowProxy's memo of whether its window is same origin-domain keys on — none, the
-    // common page's, keeps it a load of a word (realm_location.rs `set_origin_domain`).
+    // How many times some realm's origin's domain moved — a `document.domain` write, a document's origin given another
+    // record — read with no call by every realm's bindings (`__dom.domainWrites`): what a WindowProxy's memo of whether
+    // its window is same origin-domain keys on — none, the common page's, keeps it a load of a word (realm_location.rs
+    // `set_origin_domain`, `give_origin_record`).
     pub(crate) domain_writes: SharedWord,
     // Each browsing context group's historical agent cluster key map (HTML): by group and origin, whether the agent
     // cluster of the documents of that origin in it is origin-keyed — the first one's to decide (realm_location.rs
