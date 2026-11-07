@@ -87,10 +87,11 @@ struct Worker {
     router: bool,
     dead: bool,
     // …and what holds it, set as it runs: `skipWaiting()` called, an extendable message event's `waitUntil` unsettled,
-    // and the messages queued to it it has not finished dispatching.
+    // the messages queued to it it has not finished dispatching, and the fetch events it took and has not answered.
     skip_waiting: bool,
     extended: bool,
     messages: u32,
+    fetches: u32,
     // …and, for the host, whether its next lifecycle step is queued as a task, what a step it took waits for ("install",
     // "activation", "try_activate"), and whether its activating step retired the worker it replaces already.
     step_queued: bool,
@@ -104,9 +105,9 @@ impl Worker {
         self.fetch != Some(false) || self.router
     }
     // Whether it has events pending that extend its lifetime — a message it has not finished, an unsettled `waitUntil` of
-    // one — none for one whose thread is gone.
+    // one, a fetch event unanswered — none for one whose thread is gone.
     fn extended(&self) -> bool {
-        !self.dead && (self.extended || self.messages > 0)
+        !self.dead && (self.extended || self.messages > 0 || self.fetches > 0)
     }
     // …or a lifecycle event of its own: its install event's, from its job's end until the step its outcome makes is
     // taken, or its activate event's, from its activating step until its activated one — none for one waiting at Try
@@ -375,6 +376,7 @@ fn worker_new(partition: u64, handle: u32, site: String, script_url: String, scr
         skip_waiting: false,
         extended: false,
         messages: 0,
+        fetches: 0,
         step_queued: false,
         waits: None,
         retired_outgoing: false,
@@ -414,7 +416,8 @@ pub(crate) fn worker_live_for_ruby(partition: u64, handle: u32) -> bool {
 }
 // …a hold of it set or let go, from whichever thread (`what` "skip_waiting": it called `skipWaiting()`; "extended": an
 // extendable message event's `waitUntil` unsettled, `on`, or not; "message": a message queued to it, `on`, or one it
-// finished dispatching): whether it has none of the last two left — a release that may let a successor activate.
+// finished dispatching; "fetch": a fetch event it took, `on`, or one it answered): whether it has none of the last three
+// left — a release that may let a successor activate.
 pub(crate) fn hold_for_ruby(partition: u64, handle: u32, what: String, on: bool) -> bool {
     let mut reg = lock();
     let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return true };
@@ -423,9 +426,15 @@ pub(crate) fn hold_for_ruby(partition: u64, handle: u32, what: String, on: bool)
         "extended" => w.extended = on,
         "message" if on => w.messages += 1,
         "message" => w.messages = w.messages.saturating_sub(1),
+        "fetch" if on => w.fetches += 1,
+        "fetch" => w.fetches = w.fetches.saturating_sub(1),
         _ => {}
     }
-    !w.extended && w.messages == 0
+    !w.extended && w.messages == 0 && w.fetches == 0
+}
+// …whether `clients.claim()` is its to call: an active worker, activating or activated (§4.3.4).
+pub(crate) fn may_claim_for_ruby(partition: u64, handle: u32) -> bool {
+    lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| matches!(w.state.as_str(), "activating" | "activated"))
 }
 // …whether its own activation finished (`note_phase` "activated").
 pub(crate) fn worker_activated_for_ruby(partition: u64, handle: u32) -> bool {
@@ -690,8 +699,10 @@ impl Partition {
     // map holds no registration at its scope (an unregister got there first) or that registration's newest worker runs
     // another script than the one update() found. Then the host fetches the script and byte-checks it against the newest
     // worker — where that runs the same script under the same type — (`job_fetched`).
+    // (…none that is not queued: its task finding it run already, by a window that could not wait for that task: browser.rb
+    // `step_sw_jobs_in_place`)
     fn run_job(&mut self, id: u32, out: &mut Vec<Cmd>) {
-        let Some(j) = self.job(id) else { return };
+        let Some(j) = self.job(id).filter(|j| j.queued.is_some()) else { return };
         j.queued = None;
         let (kind, site, scope, script_url, script_type, mode) =
             (j.kind.clone(), j.site.clone(), j.scope.clone(), j.script_url.clone(), j.script_type.clone(), j.update_via_cache.clone());
@@ -838,6 +849,10 @@ pub(crate) fn schedule_job_for_ruby(
 ) -> Option<(u32, Vec<Cmd>)> {
     let mut reg = lock();
     let p = reg.partition(partition);
+    // (…update() of a service worker's own, while it is installing, none either: update() step 4)
+    if kind == "update" && realm < 0 && p.workers.get(&(realm.unsigned_abs() as u32)).is_some_and(|w| w.state == "installing") {
+        return None;
+    }
     let (script_url, script_type) = if kind == "update" {
         let w = p.newest(registration).and_then(|h| p.workers.get(&h))?;
         (w.script_url.clone(), w.script_type.clone())
@@ -940,6 +955,10 @@ pub(crate) fn job_worker_gone_for_ruby(partition: u64, handle: u32) -> Vec<Cmd> 
         p.install_ended(handle, &mut out);
     }
     out
+}
+// Whether a job has yet to settle its promises: what a worker answering on one may be waiting for.
+pub(crate) fn job_under_way_for_ruby(partition: u64) -> bool {
+    lock().existing(partition).is_some_and(|p| p.jobs.iter().any(|j| !j.settled))
 }
 // The jobs whose run is queued, in the order queued — the outgoing page's tasks, the new page's to run.
 pub(crate) fn queued_jobs_for_ruby(partition: u64) -> Vec<u32> {

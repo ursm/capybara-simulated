@@ -429,6 +429,13 @@ module Capybara
         @worker_seq    = 0
         @workers       = {}
         @worker_outbox = Thread::Queue.new
+        # …and what of a service worker job a worker's thread leaves to the main one (`run_sw_job_events`), in a queue of its
+        # own: a window waiting in place for that worker's answer takes it, and none of what the outbox holds, which waits
+        # for the window's next step.
+        @sw_job_events = Thread::Queue.new
+        # …and, while a window waits so, nothing of its realms able to run, what they are told meanwhile (`sw_tell_realms`).
+        @sw_waiting_in_place = false
+        @sw_realm_tells = []
         # One-slot head buffer for the settle wait: an event popped while blocking on the outbox
         # is parked here (a push-back would reorder it behind concurrent worker pushes) and
         # consumed first by the next deliver_worker_messages.
@@ -1238,8 +1245,9 @@ module Capybara
       # the host's, which its own settle runs, nor while the host is busy: `window_busy?`)
       private def sw_host_work_pending? = !sw_host? && sw_registered? && sw_host.sw_work_pending?
       private def deliver_sw_host_work = sw_host_work_pending? ? sw_host.step_sw_work : 0
+      private def sw_task_queued? = !Native.sw_queued_jobs(@sw_partition).empty? || !Native.sw_queued_steps(@sw_partition).empty?
       def sw_work_pending?
-        worker_drive_pending? || !Native.sw_queued_jobs(@sw_partition).empty? || !Native.sw_queued_steps(@sw_partition).empty?
+        worker_drive_pending? || sw_task_queued?
       end
       def step_sw_work
         return 0 if window_busy?
@@ -3007,9 +3015,12 @@ module Capybara
           result = dom_call('__pollAsyncResult')
           return result['value'] if result.is_a?(Hash) && result.key?('value')
           break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
-          # (…awake the moment a worker posts, what the script may be waiting on, where one runs)
-          if @workers.empty? then sleep 0.01
-          else @worker_outbox_head ||= pop_with_timeout(@worker_outbox, 0.01)
+          # (…awake the moment a worker posts, what the script may be waiting on, where one runs; none of it waited for a job's
+          # or a lifecycle step's task queued here, this tick's to run)
+          unless sw_task_queued?
+            if @workers.empty? then sleep 0.01
+            else @worker_outbox_head ||= pop_with_timeout(@worker_outbox, 0.01)
+            end
           end
           tick_real_time
         end
@@ -5245,15 +5256,15 @@ module Capybara
             # isolate takes long enough (a fresh context plus ~20 host-fn attaches) for a frame
             # discarded in that window to leave the lookup empty. A worker whose record it never
             # found could publish no runtime and would never see the stop flag.
-            record:      record,
-            name:        name,
-            shared:      shared,
-            service:     service,
-            creator_key: creator_key,
-            sw_scope:    sw_scope,
+            record:          record,
+            name:            name,
+            shared:          shared,
+            service:         service,
+            creator_key:     creator_key,
+            sw_scope:        sw_scope,
             sw_registration: sw_registration.to_i,
-            controller:  ctrl,
-            sw_script:   sw_script,
+            controller:      ctrl,
+            sw_script:       sw_script,
             # `new Worker(url, {type: 'module'})` — the observable module/classic split
             # (importScripts is classic-only) rides into the isolate as a flag.
             module_worker: script_type.to_s == 'module',
@@ -5640,6 +5651,7 @@ module Capybara
       ensure
         if fid
           @worker_host.forget_reply(fid)
+          sw_fetch_event_over(sw_handle.to_i, realm, fid)
           # (…none where the host let go of everything owed meanwhile, a reset's: what this released would be another's)
           @worker_host.release_from(WorkerHost::FETCH, 1, epoch)
         end
@@ -5680,8 +5692,17 @@ module Capybara
         stalled  = 0
         began    = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         deadline = began + budget
+        # (…the window's event loop stopped, the jobs the worker may be waiting on run here, a poll a short one while one is
+        # under way, and what the worker scheduled reaches them: `step_sw_jobs_in_place`)
+        in_place = stops_window && !waiting && Thread.current == @main_thread
+        was_in_place = @sw_waiting_in_place
+        @sw_waiting_in_place = true if in_place
         while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
-          reply = @worker_host.await_reply(fetch_id, [left, WORKER_POLL_INTERVAL].min)
+          step_sw_jobs_in_place if in_place
+          job_under_way = in_place && Native.sw_job_under_way(@sw_partition)
+          reply = @worker_host.await_reply(fetch_id, [left, job_under_way ? WORKER_RESUME_POLL : WORKER_POLL_INTERVAL].min)
+          # (…a worker waiting on the network — its own fetch, on its own thread — is no hang, however long an app takes)
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + budget if worker&.dig(:on_network)
           # (…none from a worker whose thread is gone — a request it never took answered as it was reaped, so this one it
           # took and dropped)
           break if !reply && worker && worker[:thread] && !worker[:thread].alive?
@@ -5699,11 +5720,21 @@ module Capybara
           break if spent >= limit
 
           # (…seen so twice running, a poll apart: its state read between its steps)
-          stalled = stops_window && !waiting && worker_stalled?(worker) ? stalled + 1 : 0
+          stalled = stops_window && !waiting && !job_under_way && worker_stalled?(worker) ? stalled + 1 : 0
           break if stalled >= 2
         end
+        # A worker that took none of the budget's time to answer, its thread still in there: a hang, a handler spinning. Its
+        # isolate ended, so no later request waits it out too: a dead worker routes nothing (a user agent's own "the service
+        # worker is unresponsive": Chrome after 62 s, Firefox after 60 s, measured). A wait a worker's thread makes leaves it
+        # to the window.
+        worker_terminate(@workers.key(worker)) if in_place && worker && left <= 0 && worker[:service] && @workers.key(worker)
         nil
       ensure
+        if in_place
+          @sw_waiting_in_place = was_in_place
+          # (…a navigation's window, no script on its stack, told at once; a script's at its next step)
+          tell_held_realms unless follower
+        end
         if waiting
           waiting[:awaiting] = nil
           waiting[:blocked] -= 1
@@ -6056,6 +6087,7 @@ module Capybara
       # on by: sw-client.js)
       private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox, realm_id = 0, spent = 0.0, took = 0.0)
         fid = fetch_id.to_i
+        sw_fetch_event_over(handle, realm_id.to_i, fid)
         if fid.negative? || WorkerHost.direct?(fid)
           # (…a worker waiting on it in place let go on, which a step of the window's waits for: `await_resumed_workers`)
           @workers.values.each {|w| w[:resuming] = true if w[:awaiting] == fid }
@@ -6073,6 +6105,20 @@ module Capybara
         win  = @worker_host.race_winner(realm_id.to_i, fid, resp)
         resp = win if win
         outbox << {handle: handle, kind: 'fetch_response', fetch_id: fetch_id, resp: resp, realm_id: realm_id, spent: spent, took: took}
+      end
+
+      # A fetch event the worker `handle` holds as it takes it, until it answers (its response's head, for a stream) or the
+      # request gives up on it: an event pending, which holds a successor at Try Activate and the registration at Try Clear
+      # (Service Worker Has No Pending Events) — a handler's own `unregister()` still answers its request.
+      private def sw_fetch_event_begun(handle, record, realm, fid)
+        (record[:fetch_events] ||= {})[[realm, fid]] = true
+        Native.sw_hold(@sw_partition, handle, 'fetch', true)
+      end
+      private def sw_fetch_event_over(handle, realm, fid)
+        events = @workers.dig(handle.to_i, :fetch_events)
+        return unless events&.delete([realm, fid])
+
+        sw_job_event({try_activate: true}) if Native.sw_hold(@sw_partition, handle.to_i, 'fetch', false)
       end
 
       # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
@@ -6159,17 +6205,43 @@ module Capybara
           realm_id.to_i,
           creator_key.to_s
         )
-        return ['InvalidStateError', 'Failed to update a ServiceWorker: the registration has no worker.'] unless scheduled
+        return ['InvalidStateError', 'Failed to update a ServiceWorker: the registration has no worker, or the worker asking is installing.'] unless scheduled
 
         id, cmds = scheduled
         sw_run_here(cmds)
         ['job', id]
       end
-      # What the registry makes the host do, on the main thread: at once there, from a worker's thread by the outbox.
+      # What the registry makes the host do, on the main thread: at once there, from a worker's thread as a job event.
       private def sw_run_here(cmds)
         return sw_run(cmds) if Thread.current == @main_thread
 
-        @worker_outbox << {handle: 0, kind: 'sw_run', cmds: cmds} unless cmds.empty?
+        sw_job_event({cmds: cmds}) unless cmds.empty?
+      end
+
+      # …left on a worker's thread, the window's wait on its outbox woken (no message: the marker is dropped as it is drained),
+      # a wait in place polling for it instead, its outbox to stand as it is.
+      private def sw_job_event(event)
+        @sw_job_events << event
+        @worker_outbox << {kind: 'sw_job_event'} unless @sw_waiting_in_place
+      end
+      # What a worker's thread left of a job — the commands of one it scheduled, its worker's evaluation, a fetch event's end,
+      # a hold let go that Try Clear and Try Activate wait on — taken, in order.
+      private def run_sw_job_events
+        drain_queue(@sw_job_events).each do |e|
+          if e[:cmds] then sw_run(e[:cmds])
+          elsif e[:try_activate]
+            try_clear_uninstalls
+            sw_try_activate
+          else sw_job_evaluated(e[:handle], e[:ok], e[:msg])
+          end
+        end
+      end
+      # …and, a window waiting in place for a worker's answer that may be waiting on a job (`await_worker_reply`), the jobs
+      # run there: a job's run is a task of the window's, which cannot run — and needs none of it, what it tells the window
+      # told it after (`sw_tell_realms`). The task, where one is queued, then finds it run (sw_registry.rs `run_job`).
+      private def step_sw_jobs_in_place
+        run_sw_job_events
+        Native.sw_queued_jobs(@sw_partition).each {|id| sw_run_job(id) }
       end
 
       # …and run (`__csim_swRunJob`).
@@ -6205,7 +6277,7 @@ module Capybara
       # worker client's a task of its own event loop.
       private def sw_controller_told(key, handle, intercepts, script_url)
         browser, realm = sw_window_realm(key)
-        browser&.sw_controller_changed(realm, handle, intercepts, script_url)
+        sw_with_realms { browser&.sw_controller_changed(realm, handle, intercepts, script_url) }
       end
       def sw_controller_changed(realm, *controller)
         return realm_told(realm, '__csim_swSetControllerDirect', *controller) unless realm.negative?
@@ -6257,7 +6329,7 @@ module Capybara
           when 'try_activate'  then sw_try_activate
           when 'retry_navs'
             sw_tell_realms('__csim_swRetryDeferredNavs')
-            sw_browsers.each(&:sw_navigations_due!)
+            sw_with_realms { sw_browsers.each(&:sw_navigations_due!) }
           when 'queue_job'     then @runtime.call('__csim_swQueueJob', n)
           when 'fetch'         then sw_fetch_job(n)
           when 'report_client' then sw_report_client(n)
@@ -6597,7 +6669,21 @@ module Capybara
         sw_tell_workers(fn, *args)
         sw_tell_realms(fn, *args)
       end
-      private def sw_tell_realms(fn, *args) = sw_browsers.each {|b| b.broadcast_to_realms(fn, *args) }
+      private def sw_tell_realms(fn, *args) = sw_with_realms { sw_browsers.each {|b| b.broadcast_to_realms(fn, *args) } }
+      # …whatever tells a realm of them: at once, or, its window waiting in place, none of whose tasks can run, a script perhaps
+      # on its stack, as that wait ends.
+      private def sw_with_realms(&told)
+        return told.call unless @sw_waiting_in_place
+
+        @sw_realm_tells << told
+      end
+      private def tell_held_realms
+        return if @sw_waiting_in_place || @sw_realm_tells.empty?
+
+        tells = @sw_realm_tells
+        @sw_realm_tells = []
+        tells.each(&:call)
+      end
       # …the session's workers, a task of each one's own event loop: every global's objects are the registry's alike, and a
       # worker's jobs settle as a window's do.
       private def sw_tell_workers(fn, *args) = sw_browsers.each {|b| b.workers_told(fn, args) }
@@ -7585,6 +7671,7 @@ module Capybara
           await_worker_reply(fetch_id, w, budget: WORKER_ANSWER_GUARD, stops_window: true)
         ensure
           @worker_host.forget_reply(fetch_id)
+          sw_fetch_event_over(handle, 0, fetch_id)
         end
         # A race-network-and-fetch-handler route's pre-fetched network leg (the worker fetched it just before dispatching
         # the handler — see sw_race_network) wins where the server's modeled delay undercuts the handler's measured span,
@@ -7811,9 +7898,12 @@ module Capybara
       def deliver_worker_messages
         head = @worker_outbox_head
         @worker_outbox_head = nil
+        tell_held_realms
+        run_sw_job_events
         return 0 if head.nil? && @workers.empty? && @worker_outbox.empty?
         events = drain_queue(@worker_outbox)
         events.unshift(head) if head
+        events.reject! {|e| e[:kind] == 'sw_job_event' }
         return 0 if events.empty?
         # A worker-originated BroadcastChannel post ('broadcast') is fanned out on the main thread and
         # is NOT a reply. A 'bcack' acknowledges a broadcast the worker just delivered → release one
@@ -7823,9 +7913,7 @@ module Capybara
         port_msgs,   rest0c = rest0b.partition {|e| e[:kind] == 'port_msg' }
         sw_navs,     rest0c3 = rest0c.partition {|e| e[:kind] == 'sw_client_navigate' }
         skip_waits,  rest0d0 = rest0c3.partition {|e| e[:kind] == 'sw_skip_waiting' }
-        sw_runs,     rest0d0b = rest0d0.partition {|e| e[:kind] == 'sw_run' }
-        sw_evals,    rest0d1 = rest0d0b.partition {|e| e[:kind] == 'sw_eval' }
-        sw_phases,   rest0d2 = rest0d1.partition {|e| e[:kind] == 'sw_phase' }
+        sw_phases,   rest0d2 = rest0d0.partition {|e| e[:kind] == 'sw_phase' }
         sw_reaps,    rest0d2b = rest0d2.partition {|e| e[:kind] == 'sw_reaped' }
         try_acts,    rest0d  = rest0d2b.partition {|e| e[:kind] == 'sw_try_activate' }
         sw_msgs,     rest1  = rest0d.partition {|e| e[:kind] == 'sw_client_msg' }
@@ -7854,16 +7942,13 @@ module Capybara
 
           sw_navigate_reply(e[:handle], e[:nav_id], '', '', 'the client is not a navigable browsing context')
         end
-        # What a job a worker scheduled makes the host do (`sw_schedule_job`). One its worker made while evaluating queues
-        # behind that worker's own Register job, so it acts on the registration the job leaves there — the one that job
-        # made, or, the evaluation failed, the one there before.
-        sw_runs.each {|e| sw_run(e[:cmds]) }
-        # A service worker's script-evaluation outcome — settles the Register / Update job
-        # waiting on it (sw_job_evaluated), which makes the worker its registration's
-        # installing worker. Delivered BEFORE skip_waits: a worker's install-phase skipWaiting()
+        # What a job a worker scheduled makes the host do (`sw_schedule_job`) — one its worker made while evaluating queues
+        # behind that worker's own Register job, so it acts on the registration the job leaves there — and a service worker's
+        # script-evaluation outcome, which settles the Register / Update job waiting on it (sw_job_evaluated) and makes the
+        # worker its registration's installing worker. Delivered BEFORE skip_waits: a worker's install-phase skipWaiting()
         # can land in the same drain batch, and its lifecycle must have begun to take it
         # (skip-waiting "both active and waiting" hang).
-        sw_evals.each {|e| sw_job_evaluated(e[:handle].to_i, e[:ok], e[:msg]) }
+        run_sw_job_events
         # What changes a client's control — a claim, a lifecycle phase — held for the window's next step, in the order the
         # workers made them (`hold_controller_changes`) — but for a message to a client posted after one, below. (…where
         # each event stood in the outbox, which the partitions above lost)
@@ -8076,7 +8161,8 @@ module Capybara
         @workers.each_value.filter_map {|r| r[:next_timer] if r[:timers_due] && !r[:stopping] && r[:next_timer] }.min || -1.0
       end
 
-      def worker_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || controller_changes_held? || @worker_host.owed?(OWED_ANY)
+      def worker_pending? = worker_outbox_pending? || controller_changes_held? || @worker_host.owed?(OWED_ANY)
+      private def worker_outbox_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || !@sw_job_events.empty? || !@sw_realm_tells.empty?
 
       # The subset of worker pendings whose outbox reply is CONTRACTUAL (bcack / swack /
       # fetch_response are posted under `ensure`, so they arrive even when the worker-side
@@ -8100,7 +8186,7 @@ module Capybara
       # `POSTED`: a listen-only worker holds that forever and would pin a drain
       # loop to its max-steps backstop.
       def worker_drive_pending?
-        !@worker_outbox.empty? || !@worker_outbox_head.nil? || controller_changes_held? ||
+        worker_outbox_pending? || controller_changes_held? ||
           worker_reply_pending? ||
           @worker_host.owed?(OWED_WORK) ||
           (!@workers.empty? && @workers.to_a.any? {|_h, w| !w[:inbox].empty? && w[:thread]&.alive? })
@@ -9521,7 +9607,13 @@ module Capybara
           # OUTCOME (final URL / cross-origin / refusal), so the reply comes back on this worker's
           # inbox keyed by nav_id.
           navigate_client: ->(client_id, url, nav_id) { outbox << {handle: handle, kind: 'sw_client_navigate', client: client_id, url: url.to_s, nav_id: nav_id.to_i} },
-          claim:          ->                  { outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch} },
+          # (…one no active worker yet claims none: sw_registry.rs `may_claim`)
+          claim:          ->                  {
+            next false unless Native.sw_may_claim(@sw_partition, handle)
+
+            outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch}
+            true
+          },
           # Its Clients: the registry's clients of its origin as it sees them (sw_registry.rs — behind its lock, so read
           # from this worker's own thread), `[id, url, type, frame type, controlled by it, focused]` each.
           client_record:  ->(client_id) { Native.sw_client(@sw_partition, handle, sw_origin, client_id.to_s)&.to_a },
@@ -9580,6 +9672,7 @@ module Capybara
                 next
               end
             end
+            sw_fetch_event_over(handle, realm_id.to_i, fid) if kind.to_s == 'start'
             outbox << {handle: handle, kind: "fr_#{kind}", fetch_id: fid, payload: payload.to_s, realm_id: realm_id.to_i, spent: spent.to_f, took: took.to_f}
           },
           # Cross-isolate MessagePort channels: the ends this worker takes and gives up, and what its ports post, ride
@@ -9598,9 +9691,13 @@ module Capybara
           }
         }
         worker_kind = if service then 'service' elsif shared then 'shared' else 'dedicated' end
-        rt          = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name, isolated: record&.dig(:isolated) == true, secure: record&.dig(:secure) != false)
-        # Hand the runtime to the session boundary (`stop_worker_js`) the moment it exists.
-        record[:rt_lock].synchronize { record[:rt] = rt } if record
+        # (…no kill lands until the runtime is the `ensure`'s to dispose, and the session boundary's (`stop_worker_js`) to stop:
+        # `stop_worker_wait` kills a worker with no runtime published, and an isolate a kill interrupted the making of is
+        # no one's, 21-26 MB of it per reset)
+        Thread.handle_interrupt(Object => :never) do
+          rt = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name, isolated: record&.dig(:isolated) == true, secure: record&.dig(:secure) != false)
+          record[:rt_lock].synchronize { record[:rt] = rt } if record
+        end
         # …and how its clock moves on by `ms`, nothing of its run — the time a worker's answer took, which its script
         # waited for inside a sync XHR (`await_worker_reply`): its time and its isolate's together.
         record[:clock_moved_by] = ->(ms) { worker_clock_step.call(worker_now + ms) && rt.call('__csimClockMovedBy', ms) } if record
@@ -9773,10 +9870,10 @@ module Capybara
               rt.eval_void(body)
             end
           rescue StandardError => e
-            outbox << {handle: handle, kind: 'sw_eval', ok: false, msg: "#{e.class}: #{e.message}"}
+            sw_job_event({handle: handle, ok: false, msg: "#{e.class}: #{e.message}"})
             return
           end
-          outbox << {handle: handle, kind: 'sw_eval', ok: true}
+          sw_job_event({handle: handle, ok: true})
         else
           # (…a module worker's graph of the worker's destination — HTML's fetch of its module worker script graph —
           # an `import()` of a script's, whatever script it is in)
@@ -9970,7 +10067,10 @@ module Capybara
                 outbox << {handle: handle, kind: 'swack'}
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_install'
-              # The host's Install reached this evaluated worker: its install event now.
+              # The host's Install reached this evaluated worker: its install event now. (…BUSY for its span, the jobs its
+              # handlers schedule, a waitUntil's, not out yet — and those of the activate event and of what it is told below)
+              @worker_host.owe(WorkerHost::BUSY, 1)
+              busy_held = true
               if sw_phase_pending == 'installation'
                 sw_phase_pending = 'install'
                 sw_fire_phase.call('install')
@@ -9978,6 +10078,8 @@ module Capybara
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_activate'
               # The host's Activate step reached this installed worker: its activate event now.
+              @worker_host.owe(WorkerHost::BUSY, 1)
+              busy_held = true
               if sw_phase_pending == 'activation'
                 sw_phase_pending = 'activate'
                 sw_fire_phase.call('activate')
@@ -9986,6 +10088,8 @@ module Capybara
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_told'
               # What the host tells every global of the registry's (`sw_tell_workers`): a worker's state, a registration's
               # `updatefound`, a job settled — its listeners' and promises' continuations drained.
+              @worker_host.owe(WorkerHost::BUSY, 1)
+              busy_held = true
               rt.call(msg[:fn], *msg[:args])
               rt.drain_microtasks
             elsif msg.is_a?(Hash) && msg[:kind] == 'client_navigate_result'
@@ -10016,6 +10120,7 @@ module Capybara
               fid        = msg[:fetch_id].to_i
               # (…one awaited in place taken now, its time the one its waiter counts from: `await_worker_reply`)
               record[:took][fid] = worker_now if record && (fid.negative? || WorkerHost.direct?(fid))
+              sw_fetch_event_begun(handle, record, msg[:realm_id].to_i, fid) if record
               begin
                 rt.call('__csim_swDispatchFetch', msg[:req], fid, msg[:realm_id], fid.negative? || WorkerHost.direct?(fid))
                 dispatched = true
@@ -10118,7 +10223,7 @@ module Capybara
         unless stopping.call
           # A SERVICE worker dying before its eval-outcome was posted (engine boot / script
           # fetch raise) must still settle the job waiting on it.
-          outbox << {handle: handle, kind: 'sw_eval', ok: false, msg: "#{e.class}: #{e.message}"} if service
+          sw_job_event({handle: handle, ok: false, msg: "#{e.class}: #{e.message}"}) if service
           outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
         end
       ensure
@@ -10132,7 +10237,7 @@ module Capybara
         # marker here: an unfinished install is a FAILED install (ok:false → redundant);
         # an unfinished activate still activates (the spec ignores activate failure).
         if service && sw_phase_pending
-          outbox << if sw_phase_pending == 'install'
+          outbox << if %w[installation install].include?(sw_phase_pending)
             {handle: handle, kind: 'sw_phase', phase: 'install', ok: false}
           else
             {handle: handle, kind: 'sw_phase', phase: 'activated'}
@@ -13566,6 +13671,18 @@ module Capybara
       # (…`transport` the caller's own, where it sends every hop the app does not serve itself — an event stream's, which
       # Net::HTTP would read whole: `event_stream_transport`; the app's own it answers as it answers any, on the caller's
       # thread, its body read as the app writes it)
+      # (…a worker's thread marked as it waits on the app: no hang of its own, `await_worker_reply`)
+      private def on_network
+        record = Thread.current[:csim_worker_record]
+        return yield unless record
+
+        begin
+          record[:on_network] = true
+          yield
+        ensure
+          record[:on_network] = false
+        end
+      end
       def dispatch_rack_or_http(url, env, method: 'GET', body: nil, transport: nil)
         # (…its Fetch Metadata sent to a potentially trustworthy URL alone — Fetch "append the Fetch metadata headers for a
         # request" — which the request's own verdicts read all the same: its SameSite cookies, already attached)
@@ -13595,7 +13712,7 @@ module Capybara
       # refused comes to it as well, for a 404, and what it raises of that is no error of the test's: it goes up to what asked, a
       # network error)
       def app_call(env, deferring: false, own_host: true)
-        return in_app_call { @app.call(env) } unless deferring
+        return on_network { in_app_call { @app.call(env) } } unless deferring
 
         in_app_call {
           Thread.handle_interrupt(EventSourceCancelled => :never) {

@@ -277,4 +277,38 @@ RSpec.describe "a service worker's own view" do
     origin = poll_until { session.evaluate_script('globalThis.__origin') }
     expect(origin).to eq([session.evaluate_script('location.origin'), true])
   end
+
+  # A worker gone between its evaluation and Install's step installs nothing: no phantom `installing` worker, its job over.
+  it 'fails the install of a worker that dies before its install event' do
+    scripts['/s/a.js'] = "globalThis.__csim_swRegistrationUpdateFound = 1;"
+    session = session_listening
+    register(session, '/s/a.js')
+    state = poll_until { session.evaluate_async_script(<<~JS) }
+      const d = arguments[0];
+      __reg.then(r => { const w = r.installing; d(w === null || w.state === 'redundant'); }, () => d(true));
+    JS
+    expect(state).to be(true)
+    session.execute_script("globalThis.__again = null; navigator.serviceWorker.register('/s/b.js', {scope: '/s/'}).then(() => { __again = 'ok'; }, e => { __again = e.name; });")
+    scripts['/s/b.js'] = '// fine'
+    expect(poll_until { session.evaluate_script('globalThis.__again') }).to eq('ok')
+  end
+
+  # (…a kill landing in the making of a worker's isolate left it no one's to dispose: 26.7 MB an iteration)
+  it 'leaves no isolate behind a worker a reset ends as it boots', :aggregate_failures do
+    scripts['/w.js'] = 'postMessage(1);'
+    rss = -> { File.read('/proc/self/statm').split[1].to_i * 4096 / 1_048_576 }
+    session = session_listening
+    12.times do
+      session.visit '/'
+      session.execute_script("new Worker('/w.js');")
+      session.reset_session!
+    end
+    before = rss.call
+    30.times do
+      session.visit '/'
+      session.execute_script("new Worker('/w.js');")
+      session.reset_session!
+    end
+    expect(rss.call - before).to be < 300
+  end
 end

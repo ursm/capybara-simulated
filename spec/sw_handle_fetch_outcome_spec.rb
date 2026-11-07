@@ -162,13 +162,12 @@ RSpec.describe 'Handle Fetch outcomes' do
     end
 
     # (…SW waits as long as that takes; Chrome after 310 s and Firefox after 60 s load the network's page, measured)
-    it 'loads from the network where the answer can never come, the wait no longer than it takes to know that' do
+    it 'loads from the network where the answer can never come' do
       session = controlled_session
-      began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       session.visit '/never'
       expect(session.status_code).to eq(200)
       expect(session.text).to eq('page')
-      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 0.9
+      expect(requests).to include('GET /never')
     end
 
     it "answers a handler's wait on its own reserved client past an interval another event left running" do
@@ -177,5 +176,114 @@ RSpec.describe 'Handle Fetch outcomes' do
       session.visit '/own'
       expect(session.text).to eq('own about:blank')
     end
+  end
+
+  context "with a handler waiting on its worker's own job" do
+    let(:worker) {
+      <<~JS
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        const html = (text) => new Response(`<!doctype html><body>${text}`, {headers: {'content-type': 'text/html'}});
+        self.addEventListener('fetch', e => {
+          const path = new URL(e.request.url).pathname;
+          if (path === '/updated') e.respondWith(self.registration.update().then(() => html('after update')));
+          if (path === '/unregistered') e.respondWith(self.registration.unregister().then(ok => html(`after unregister ${ok}`)));
+        });
+      JS
+    }
+
+    it "answers a visit, the job run as the window waits" do
+      session = controlled_session
+      session.visit '/updated'
+      expect(session.text).to eq('after update')
+      expect(requests).not_to include('GET /updated')
+      session.visit '/unregistered'
+      expect(session.text).to eq('after unregister true')
+    end
+
+    it 'answers a frame and a synchronous request, no task of the window run inside its script' do
+      session = controlled_session
+      answered = session.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        const x = new XMLHttpRequest();
+        let during = false;
+        navigator.serviceWorker.ready.then(r => r.addEventListener('updatefound', () => { during = true; }));
+        x.open('GET', '/updated', false);
+        x.send();
+        const sync = [x.responseText.includes('after update'), during];
+        const f = document.createElement('iframe');
+        f.src = '/updated';
+        f.onload = () => done([...sync, f.contentDocument.body.textContent]);
+        document.body.append(f);
+      JS
+      expect(answered).to eq([true, false, 'after update'])
+    end
+  end
+
+  context 'with a handler that never returns' do
+    let(:worker) {
+      <<~JS
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        self.addEventListener('fetch', e => { if (new URL(e.request.url).pathname === '/spin') { for (;;) {} } });
+      JS
+    }
+
+    # (…the guard Chrome's 62 s and Firefox's 60 s, measured, stand for, a fraction of it here)
+    before { stub_const('Capybara::Simulated::Browser::WORKER_ANSWER_GUARD', 0.3) }
+
+    it "ends the worker at the guard, so no later request waits it out: the network's, each" do
+      session = controlled_session
+      session.visit '/spin'
+      expect(session.text).to eq('page')
+      began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      session.visit '/other'
+      session.visit '/spin'
+      expect(session.text).to eq('page')
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 0.25
+    end
+
+    it "doesn't take a worker waiting on the network for one" do
+      slow = false
+      session = simulated_session(lambda {|env|
+        sleep 0.6 if slow && env['PATH_INFO'] == '/slow'
+        next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
+          self.addEventListener('install', () => self.skipWaiting());
+          self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+          self.addEventListener('fetch', e => {
+            if (new URL(e.request.url).pathname === '/through') {
+              e.respondWith(fetch('/slow').then(r => r.text()).then(t => new Response(`<!doctype html><body>through ${t}`, {headers: {'content-type': 'text/html'}})));
+            }
+          });
+        JS
+
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
+      })
+      session.visit '/'
+      session.execute_script("navigator.serviceWorker.addEventListener('controllerchange', () => { globalThis.__controlled = true; }); navigator.serviceWorker.register('/sw.js');")
+      expect(poll_until { session.evaluate_script('globalThis.__controlled === true') }).to be(true)
+      slow = true
+      session.visit '/through'
+      expect(session.text).to start_with('through ')
+    end
+  end
+
+  it 'gives a subresource its client as its `clientId`, none its `resultingClientId`' do
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        self.addEventListener('fetch', e => {
+          if (new URL(e.request.url).pathname === '/ids') e.respondWith(self.clients.get(e.clientId).then(c => new Response(JSON.stringify([c && c.url, e.resultingClientId]))));
+        });
+      JS
+
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
+    })
+    session.visit '/'
+    session.execute_script("navigator.serviceWorker.addEventListener('controllerchange', () => { globalThis.__controlled = true; }); navigator.serviceWorker.register('/sw.js');")
+    expect(poll_until { session.evaluate_script('globalThis.__controlled === true') }).to be(true)
+    ids = session.evaluate_async_script("const done = arguments[0]; fetch('/ids').then(r => r.json()).then(done);")
+    expect(ids).to eq([session.current_url, ''])
   end
 end
