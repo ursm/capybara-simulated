@@ -1283,10 +1283,14 @@ module Capybara
       def loading_frame_realms = (@loading_frame_realms ||= {})
       def loading_frame_realm_url(realm_id)
         realm = loading_frame_realms[realm_id] or return nil
-        realm.call('__csimLocationHref').to_s
+        realm.call(*REALM_URL).to_s
       rescue StandardError
         nil
       end
+      # The URL of realm `realm_id`'s document (0 the page's), as its engine has it — its location's href (url_ops.rs
+      # `parts`' first), read with none of its Location's security check, which is a script's.
+      REALM_URL = ['__dom.locationPart', 0].freeze
+      def realm_url(realm_id) = realm_call(realm_id, *REALM_URL).to_s
       # …and a call of `name` in realm `realm_id` (0 the page's), loading or loaded, made on its context directly — from
       # inside a V8 callback (the module resolver), where `call`'s script-cache warm must not run — nil where the realm is
       # gone.
@@ -1755,6 +1759,9 @@ module Capybara
           # document")
           realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
           realm.eval_void("__dom.takeOpenerOrigins(#{opener_id.to_i});") unless opener_id.nil?
+          # (…and its agent, obtained as its browsing context is made — HTML "create a new browsing context", no response
+          # its document's to ask for an origin-keyed one: realm_location.rs `origin_keyed_cluster`)
+          realm.call('__csimObtainAgentCluster', false)
         end
         realm.call('__csimSetWindowName', window_name.to_s) unless window_name.nil?
         # Register the realm as alive BEFORE its document loads: its inline scripts run

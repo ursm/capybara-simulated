@@ -32,7 +32,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // (its bytes, a srcdoc's text), its type, the script a javascript: URL runs in it, the base URL an about: document
 // inherits from its creator, the client id its navigation reserved, the Referer its request sent and the Referrer-Policy
 // and Refresh its response set (null for none), its origins (`frame_origins`), its sandboxing flags and whether its
-// response asked for an origin-keyed agent cluster (response_headers.rs `requests_origin_keying`).
+// response asked for an origin-keyed agent cluster (structured_field.rs `is_true`).
 fn frame_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     // (…a container of no node, or no host: no document made, as for a build parked)
     let deferred = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>| {
@@ -325,7 +325,7 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
         r.csp = header(scope, "content-security-policy").filter(|s| !s.is_empty());
         r.policy = header(scope, "referrer-policy");
         r.refresh = header(scope, "refresh");
-        r.origin_agent_cluster = header(scope, "origin-agent-cluster").is_some_and(|v| crate::response_headers::requests_origin_keying(&v));
+        r.origin_agent_cluster = header(scope, "origin-agent-cluster").is_some_and(|v| crate::structured_field::is_true(&v));
         if let Some(content_type) = header(scope, "content-type").filter(|s| !s.is_empty()) {
             r.content_type = content_type;
         }

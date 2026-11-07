@@ -143,6 +143,22 @@ RSpec.describe 'document.domain' do
       JS
     end
 
+    # …a check of the Location's members alone, a script's: what the bindings' own steps read of the document's URL —
+    # `pushState`'s, an XMLHttpRequest's, a host query's — no Location of its, which HTML puts no check on.
+    it "keeps the members it puts no check on to a script no longer same origin-domain with the window" do
+      session.visit '/same'
+      poll_until { session.evaluate_script("frames[0].document.title === 'child'") }
+      expect(session.within_frame(0) { session.evaluate_script(<<~JS) }).to eq(['pushed', 'opened', 'SecurityError'])
+        (() => {
+          const [history, xhr, loc] = [parent.history, new parent.XMLHttpRequest(), parent.location];
+          document.domain = document.domain;
+          const t = (f) => { try { return f(); } catch (e) { return e.name; } };
+          return [t(() => { history.pushState(null, '', '/x'); return 'pushed'; }), t(() => { xhr.open('GET', '/blank'); return 'opened'; }), t(() => loc.pathname)];
+        })()
+      JS
+      expect(session.evaluate_script('location.pathname')).to eq('/x')
+    end
+
     # …and a javascript: URL runs in a frame of another origin same origin-domain with the navigating document (HTML
     # "navigate" step: the initiator origin same origin-domain with the target's document's).
     it 'runs a javascript: URL in a frame same origin-domain with the document navigating it' do
@@ -203,11 +219,16 @@ RSpec.describe 'document.domain' do
     end
 
     # (…a session reset a new browsing context's, of a group of its own: what a test's documents asked none of the next's)
+    # (…nor a write counted: what a WindowProxy's memo keys on, and a Location's check skips nothing for, none again)
     it "keys a reset session's documents afresh" do
       session.visit '/'
       session.reset!
       session.visit '/zero'
       expect(session.evaluate_script(write)).to eq([false, 'www.example.com', 'example.com'])
+      expect(session.evaluate_script('__dom.domainWrites[0]')).to be_positive
+      session.reset!
+      session.visit '/zero'
+      expect(session.evaluate_script('__dom.domainWrites[0]')).to eq(0)
     end
 
     it 'keys a document by what the first of its origin in its group asked' do

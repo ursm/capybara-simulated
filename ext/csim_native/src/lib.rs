@@ -179,6 +179,7 @@ mod sheet_owners;
 mod sheets;
 mod slots;
 // The style engine: stylo over the arena.
+mod structured_field;
 mod style;
 mod style_fonts;
 mod sheet_feed;

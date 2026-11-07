@@ -1025,7 +1025,7 @@ module Capybara
       # pointed at it)
       def current_browsing_context_url
         return page_url unless @current_realm_id && @runtime.frame_realm_alive?(@current_realm_id)
-        href = dom_call('__csimLocationHref').to_s
+        href = @runtime.realm_url(@current_realm_id)
         href.empty? ? page_url : href
       end
 
@@ -3865,9 +3865,10 @@ module Capybara
         # `Driver#clear_http_cache`.
         @@asset_cache.clear_volatile
         # (…the next test's window a new browsing context's, of a group of its own: no origin's agent cluster keyed by a
-        # document of this one's)
+        # document of this one's, nor a domain any of them wrote counted — realm_location.rs `forgetOrigins`)
         new_browsing_context_group
         @runtime.reset_page
+        @runtime.call('__dom.forgetOrigins')
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
         # next visit.
@@ -8375,7 +8376,7 @@ module Capybara
       def window_realms_changed = @runtime.window_realms_changed
       private def window_realm_made(key) = @runtime.window_realm_meta.find {|_, meta| meta[:window_key] == key }&.first
       # Its URL and its title: its document's.
-      def window_realm_url(realm)   = @runtime.realm_call(realm, '__csimLocationHref').to_s
+      def window_realm_url(realm)   = @runtime.realm_url(realm)
       def window_realm_title(realm) = @runtime.realm_call(realm, '__csimDocumentTitle').to_s
       # The user's navigation of it (Capybara's `visit` in it): a new document at `url`, no document its initiator.
       def visit_window_realm(realm, url)
@@ -11324,7 +11325,7 @@ module Capybara
           how = replace ? 'replace' : 'push'
         when 'reload'
           activated, blob = plan
-          url      = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+          url      = @runtime.realm_url(realm_id)
           resource = @runtime.realm_call(realm_id, '__csimWindowEntryPost')
           how      = 'reload'
         when 'traverse'
@@ -11870,7 +11871,7 @@ module Capybara
       def frame_realm_url(realm_id)
         return @runtime.loading_frame_realm_url(realm_id) unless @runtime.frame_realm_alive?(realm_id)
 
-        @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+        @runtime.realm_url(realm_id)
       rescue StandardError
         nil
       end
@@ -11993,7 +11994,7 @@ module Capybara
         method, url, body, content_type = request
         post = method == 'GET' ? nil : [body, content_type]
         # (…a GET to a fragment of the document its frame is at moved within it: HTML "navigate to a fragment")
-        if frame && !post && @runtime.frame_realm_alive?(frame) && Native.url_fragment_navigation(@runtime.realm_call(frame, '__csimLocationHref').to_s, url.to_s)
+        if frame && !post && @runtime.frame_realm_alive?(frame) && Native.url_fragment_navigation(@runtime.realm_url(frame), url.to_s)
           return @runtime.realm_call(frame, '__csimFragmentNavigate', url, false)
         end
         initiator = route[:referrer]

@@ -216,6 +216,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sameOriginDomainRealm", same_origin_domain_realm, context_id);
     register(scope, ns, "renewOrigin", renew_origin, context_id);
     register(scope, ns, "originDomainSet", origin_domain_set, context_id);
+    register(scope, ns, "forgetOrigins", forget_origins, context_id);
     register(scope, ns, "setOriginKey", set_origin_key, context_id);
     register(scope, ns, "setCrossOriginIsolation", set_cross_origin_isolation, context_id);
     register(scope, ns, "obtainAgentCluster", obtain_agent_cluster, context_id);
@@ -425,6 +426,14 @@ fn renew_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let arena = realm(scope, cid);
     arena.location.origin_keyed = None;
     arena.give_origin_record(cid, new_origin_record(), None);
+}
+// __dom.forgetOrigins() — a session reset, its windows gone and its next one of a browsing context group of its own: no
+// group's historical agent cluster key map kept, and the count of domain moves none again — no WindowProxy of a realm
+// before it left to have memoized one (`domain_writes`).
+fn forget_origins(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let arena = &mut crate::dom::dom(scope).arena;
+    arena.agent_cluster_keys.clear();
+    arena.domain_writes.set(0);
 }
 // …and whether a `document.domain` write set its origin's domain: a window's initial about:blank whose creator's did is
 // no longer same origin-domain with a document of its origin, whose own is new (window.js `__csimKeepsWindowFor`).
@@ -637,7 +646,9 @@ impl RealmArena {
     // site), a cross-origin isolated group's always; else as its group's historical agent cluster key map has its origin,
     // which the first document of that origin the group made decided — so two documents of one origin in one group are
     // of one agent cluster, whatever the second asked. (Chrome keys by origin unless asked not to, `?0`; Firefox, as
-    // HTML, by site unless asked to — measured.)
+    // HTML, by site unless asked to — measured.) Every path a document is made by obtains it as its origin is seeded —
+    // the page's, a frame's, a window's, an initial about:blank's as its browsing context is made — so no ask comes
+    // first and keys it unasked.
     pub(crate) fn origin_keyed_cluster(&mut self, cid: i32, requests: bool) -> bool {
         if let Some(keyed) = self.realm_state(cid).and_then(|s| s.location.origin_keyed) {
             return keyed;

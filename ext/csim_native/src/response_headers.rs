@@ -26,17 +26,10 @@ pub(crate) struct ResponseFields {
     // The first Set-Cookie header's set-cookie-strings as they came: Rack 3's Array of them, Rack 2's one String of them
     // joined by newlines — none for an empty one.
     pub(crate) set_cookie: Vec<Vec<u8>>,
-    // Whether the first Origin-Agent-Cluster header asks for an origin-keyed agent cluster (`requests_origin_keying`).
+    // Whether the Origin-Agent-Cluster header asks for an origin-keyed agent cluster (HTML "create and initialize a
+    // Document object"): its fields, combined, a structured field Item whose value is the Boolean true, `?1`
+    // (structured_field.rs `is_true`).
     pub(crate) origin_agent_cluster: bool,
-}
-
-// Whether an Origin-Agent-Cluster header's value asks for an origin-keyed agent cluster (HTML "create and initialize a
-// Document object"): it parses as a structured header (RFC 8941) Item whose value is the Boolean true, `?1` — its
-// parameters, if any, whatever they say. Any other value — `?0`, a token, a list — asks nothing.
-pub(crate) fn requests_origin_keying(value: &str) -> bool {
-    let item = value.trim_matches(' ');
-    let (bare, params) = item.split_once(';').map_or((item, None), |(b, p)| (b, Some(p)));
-    bare == "?1" && params.is_none_or(|p| !p.contains(','))
 }
 
 
@@ -173,7 +166,7 @@ impl ResponseFields {
                 }
             } else if is("origin-agent-cluster") && !origin_agent_cluster {
                 origin_agent_cluster = true;
-                out.origin_agent_cluster = text(v)?.is_some_and(|value| requests_origin_keying(&value));
+                out.origin_agent_cluster = text(v)?.is_some_and(|value| crate::structured_field::is_true(&value));
             } else if is("set-cookie") && !cookie {
                 cookie = true;
                 out.set_cookie = set_cookie_lines(v)?;
@@ -270,19 +263,4 @@ pub(crate) fn redirect_locations_for_ruby(ruby: &Ruby, status: u32, headers: Opt
 // redirect is followed (Chrome: `/x\xFF` → `/x%FF`); a host that hands such a field to script decodes it first)
 fn field_text(ruby: &Ruby, field: &[u8]) -> RString {
     std::str::from_utf8(field).map_or_else(|_| ruby.str_from_slice(field), |s| ruby.str_new(s))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn origin_agent_cluster_asks_for_origin_keying_by_the_boolean_true_alone() {
-        for value in ["?1", " ?1 ", "?1;x=1"] {
-            assert!(requests_origin_keying(value), "{value}");
-        }
-        for value in ["?0", "1", "true", "?1, ?1", "?1;x=1, ?0", "", "?10"] {
-            assert!(!requests_origin_keying(value), "{value}");
-        }
-    }
 }

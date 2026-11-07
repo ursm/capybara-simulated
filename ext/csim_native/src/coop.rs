@@ -36,122 +36,6 @@ impl Value {
     }
 }
 
-// The token a structured header item's value is (RFC 9651 "get a structured field value", item), none for anything else,
-// parameters that do not parse among it: Chrome and Firefox alike take `same-origin;` and a repeated header for no policy
-// (WPT header-parsing-failures, header-parsing-repeated).
-fn token(header: &str) -> Option<&str> {
-    const TOKEN_CHARS: &str = "!#$%&'*+-.^_`|~:/";
-    let is_token = |c: char| c.is_ascii_alphanumeric() || TOKEN_CHARS.contains(c);
-    let item = header.trim_matches(' ');
-    let first = item.chars().next()?;
-    if !first.is_ascii_alphabetic() && first != '*' {
-        return None;
-    }
-    let end = item.find(|c| !is_token(c)).unwrap_or(item.len());
-    let (value, mut rest) = item.split_at(end);
-    while !rest.is_empty() {
-        rest = rest.strip_prefix(';')?.trim_start_matches(' ');
-        rest = parameter(rest)?;
-    }
-    Some(value)
-}
-
-// …one parameter off `input`, what is left of it: a key, and a bare item where it has `=`.
-fn parameter(input: &str) -> Option<&str> {
-    let first = input.chars().next()?;
-    if !first.is_ascii_lowercase() && first != '*' {
-        return None;
-    }
-    let end = input.find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || "_-.*".contains(c))).unwrap_or(input.len());
-    match input[end..].strip_prefix('=') {
-        Some(value) => bare_item(value),
-        None => Some(&input[end..]),
-    }
-}
-
-// …a bare item off `input`, what is left of it: a string, a byte sequence, a boolean, a number, a date, a display string or
-// a token (RFC 9651 §4.2.3.1).
-fn bare_item(input: &str) -> Option<&str> {
-    let first = input.chars().next()?;
-    match first {
-        '"' => string(&input[1..]),
-        ':' => byte_sequence(&input[1..]),
-        '?' => input[1..].strip_prefix(['0', '1']),
-        '-' | '0'..='9' => number(input, true),
-        '@' => number(&input[1..], false),
-        '%' => display_string(input[1..].strip_prefix('"')?),
-        c if c.is_ascii_alphabetic() || c == '*' => {
-            let end = input.find(|c: char| !(c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~:/".contains(c))).unwrap_or(input.len());
-            Some(&input[end..])
-        }
-        _ => None,
-    }
-}
-
-// A string's body, after its opening quote.
-fn string(input: &str) -> Option<&str> {
-    let mut chars = input.char_indices();
-    while let Some((at, c)) = chars.next() {
-        match c {
-            '"' => return Some(&input[at + 1..]),
-            '\\' => {
-                chars.next().filter(|(_, c)| matches!(c, '"' | '\\'))?;
-            }
-            ' '..='~' => {}
-            _ => return None,
-        }
-    }
-    None
-}
-
-// A byte sequence's body, after its opening colon: base64, padded only at its end, of no more than two, and a length no base64
-// can't have. Unpadded is fine: RFC 9651, "parsers SHOULD NOT fail when "=" padding is not present".
-fn byte_sequence(input: &str) -> Option<&str> {
-    let end = input.find(':')?;
-    let body = &input[..end];
-    let data = body.trim_end_matches('=');
-    let valid = data.len() % 4 != 1 && body.len() - data.len() <= 2 && data.chars().all(|c| c.is_ascii_alphanumeric() || "+/".contains(c));
-    valid.then(|| &input[end + 1..])
-}
-
-// An integer of at most 15 digits, or, where `decimal` allows, a decimal of at most 12 before its point and 1 to 3 after.
-fn number(input: &str, decimal: bool) -> Option<&str> {
-    let body = input.strip_prefix('-').unwrap_or(input);
-    let digits = |s: &str| s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
-    let whole = digits(body);
-    if whole == 0 {
-        return None;
-    }
-    match body[whole..].strip_prefix('.') {
-        Some(rest) if decimal => {
-            let fraction = digits(rest);
-            (whole <= 12 && (1..=3).contains(&fraction)).then(|| &rest[fraction..])
-        }
-        Some(_) => None,
-        None => (whole <= 15).then(|| &body[whole..]),
-    }
-}
-
-// A display string's body, after its opening `%"`: printable ASCII, a `%` and two lowercase hex digits for a byte of UTF-8.
-fn display_string(input: &str) -> Option<&str> {
-    let mut bytes = Vec::new();
-    let mut chars = input.char_indices();
-    while let Some((at, c)) = chars.next() {
-        match c {
-            '"' => return std::str::from_utf8(&bytes).is_ok().then(|| &input[at + 1..]),
-            '%' => {
-                let hex = |c: char| c.to_digit(16).filter(|_| !c.is_ascii_uppercase());
-                let high = hex(chars.next()?.1)?;
-                let low = hex(chars.next()?.1)?;
-                bytes.push((high * 16 + low) as u8);
-            }
-            ' '..='~' => bytes.push(c as u8),
-            _ => return None,
-        }
-    }
-    None
-}
-
 // HTML "obtain an opener policy" given a response's `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` and
 // whether its reserved environment is a secure context (none in one that is not): "same-origin" with an embedder policy
 // compatible with cross-origin isolation (`require-corp`, `credentialless`) "same-origin-plus-COEP", an unknown value
@@ -160,8 +44,8 @@ pub(crate) fn obtain(coop: Option<&str>, coep: Option<&str>, secure: bool) -> Va
     if !secure {
         return Value::UnsafeNone;
     }
-    let compatible = matches!(coep.and_then(token), Some("require-corp" | "credentialless"));
-    match coop.and_then(token) {
+    let compatible = matches!(coep.and_then(crate::structured_field::token), Some("require-corp" | "credentialless"));
+    match coop.and_then(crate::structured_field::token) {
         Some("same-origin") if compatible => Value::SameOriginPlusCoep,
         Some("same-origin") => Value::SameOrigin,
         Some("same-origin-allow-popups") => Value::SameOriginAllowPopups,
