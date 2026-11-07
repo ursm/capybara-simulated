@@ -11848,7 +11848,7 @@ module Capybara
         # origin either's the one it was first sent with.
         commit   = is_reload ? {} : {restore_state: entry[:form_state], history_state: [entry[:state]]}
         referrer = if is_reload then realm_referrer_initiator(realm_id)
-                   elsif entry.key?(:request_referrer) then [entry[:request_referrer], entry[:referrer_policy].to_s]
+                   elsif entry.key?(:referer) then [entry[:referer], entry[:referrer_policy].to_s]
                    # (…an entry of a document the container loaded, its referrer as it was determined, sent as it is)
                    elsif entry.key?(:referrer) then [entry[:referrer], 'unsafe-url']
                    else realm_referrer_initiator(realm_id)
@@ -12265,7 +12265,7 @@ module Capybara
         # body and initiator origin — which a traversal to it refers by and a reload or a traversal re-posts: HTML's
         # document state; the document's referrer beside them)
         history, id = frame_entry(realm_id)
-        history&.update(id, {referrer: fetch.referrer.to_s, request_referrer: hop.referrer_source.to_s, referrer_policy: hop.referrer_policy.to_s})
+        history&.update(id, {referrer: fetch.referrer.to_s, referer: hop.referrer_source.to_s, referrer_policy: hop.referrer_policy.to_s})
         tag_frame_entry_post(realm_id, body, content_type, origin) if fetch.request_method == 'POST'
         # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
         ctype, csp, document_policy, refresh, _, origin_agent_cluster = Native.document_params(hop.headers, '', false)
