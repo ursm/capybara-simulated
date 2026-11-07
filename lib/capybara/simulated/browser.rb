@@ -579,7 +579,7 @@ module Capybara
       # trip's budget counted from when its script begins to run (`record[:running_since]`, `worker_deadline`).
       WORKER_BOOT_GUARD        = 10.0
       # …and how long a request awaited in place (`sw_direct_reply`: a sync XHR, a worker's main script or import, a
-      # document's script) waits for its service worker's answer: the request is the worker's once asked — it may have
+      # document's script; a navigation's) waits for its service worker's answer: the request is the worker's once asked — it may have
       # fetched it already, or done what a POST does — so no network fall-through follows; only a hang reaches this, the
       # request then a network error.
       WORKER_ANSWER_GUARD      = 10.0
@@ -5663,7 +5663,9 @@ module Capybara
       # wait gives up on is judged by it: `timeout_ms` of it (a sync XHR's `timeout`, TIMEOUT_REPLY), WORKER_ANSWER_VIRTUAL_MS
       # of it; and, a window waiting inside its script (`follower`), a worker that can do nothing more on its own
       # (`worker_stalled?`): what it waits for that window's, which cannot run — the deadlock, ended at once.
-      private def await_worker_reply(fetch_id, worker = nil, budget: WORKER_ROUND_TRIP_BUDGET, follower: nil, timeout_ms: 0)
+      # (…`stops_window` a wait that holds up its window's event loop, nothing of the window's able to run meanwhile — a
+      # script's `follower`, a navigation's — so what the worker's time and a stall are said to do above go for it)
+      private def await_worker_reply(fetch_id, worker = nil, budget: WORKER_ROUND_TRIP_BUDGET, follower: nil, timeout_ms: 0, stops_window: !follower.nil?)
         waiting = Thread.current[:csim_worker_record] unless Thread.current == @main_thread
         if waiting
           waiting[:blocked]  = waiting[:blocked].to_i + 1
@@ -5672,10 +5674,9 @@ module Capybara
         end
         if worker && !waiting
           worker[:awaited] = worker[:awaited].to_i + 1
-          # (…a window waiting inside its script, which nothing of its own can end: the worker's time runs on for it, to its
-          # next timer at once, until its answer is out — run_worker; a navigation's wait goes on real time, its window's
-          # other documents able to give the worker what it waits for)
-          worker[:answering][fetch_id] = true if follower
+          # (…a window waiting, which nothing of its own can end: the worker's time runs on for it, to its next timer at once,
+          # until its answer is out — run_worker)
+          worker[:answering][fetch_id] = true if stops_window
         end
         limit    = WORKER_ANSWER_VIRTUAL_MS
         stalled  = 0
@@ -5700,7 +5701,7 @@ module Capybara
           break if spent >= limit
 
           # (…seen so twice running, a poll apart: its state read between its steps)
-          stalled = follower && !waiting && worker_stalled?(worker) ? stalled + 1 : 0
+          stalled = stops_window && !waiting && worker_stalled?(worker) ? stalled + 1 : 0
           break if stalled >= 2
         end
         nil
@@ -7466,7 +7467,10 @@ module Capybara
       # runs the handler and hands it over. Navigation ids are NEGATIVE so the response is handed
       # to this wait (sw_deliver_fetch_response), not the general outbox. Returns the parsed response
       # hash (SW served the document), or nil to load from the network (no controller, no
-      # respondWith, network error, or the SW didn't answer within the round-trip budget).
+      # respondWith, or one whose answer never comes: what it waits for can't — the window waits here — the worker's time
+      # past WORKER_ANSWER_VIRTUAL_MS, or a hang past WORKER_ANSWER_GUARD. SW says Handle Fetch waits as long as that takes;
+      # Chrome and Firefox give up and load from the network, measured 2026-11-07: Chrome after 310 s of a `respondWith` that
+      # never settles and 62 s of a handler that spins, Firefox after 60 s of either, the network's page committed).
       # (…`origin_url` the initiating document's URL where it is not the referrer source's — an about:blank one's creator's
       # — whose origin is the request's initiator and whose site the preload's Sec-Fetch-Site compares)
       def service_worker_navigation_fetch(
@@ -7580,7 +7584,7 @@ module Capybara
         fetch_id = @worker_host.await_navigation
         reply    = begin
           w[:inbox] << {kind: 'fetch', req:, fetch_id:}
-          await_worker_reply(fetch_id, w)
+          await_worker_reply(fetch_id, w, budget: WORKER_ANSWER_GUARD, stops_window: true)
         ensure
           @worker_host.forget_reply(fetch_id)
         end
@@ -10012,8 +10016,8 @@ module Capybara
               # (…its reply one a thread awaits in place — a navigation's, a direct one's — or the event loop's to deliver)
               dispatched = false
               fid        = msg[:fetch_id].to_i
-              # (…a direct one's taken now, its time the one its waiter counts from: `await_worker_reply`)
-              record[:took][fid] = worker_now if record && WorkerHost.direct?(fid)
+              # (…one awaited in place taken now, its time the one its waiter counts from: `await_worker_reply`)
+              record[:took][fid] = worker_now if record && (fid.negative? || WorkerHost.direct?(fid))
               begin
                 rt.call('__csim_swDispatchFetch', msg[:req], fid, msg[:realm_id], fid.negative? || WorkerHost.direct?(fid))
                 dispatched = true

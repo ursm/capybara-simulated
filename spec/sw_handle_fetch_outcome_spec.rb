@@ -134,4 +134,48 @@ RSpec.describe 'Handle Fetch outcomes' do
     session.evaluate_async_script("const done = arguments[0]; fetch('/raced').then(r => done(r.status));")
     expect(requests).to include('GET /raced')
   end
+
+  context 'with a navigation its worker answers late, or never' do
+    let(:worker) {
+      <<~JS
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        self.addEventListener('fetch', e => {
+          const path = new URL(e.request.url).pathname;
+          if (path === '/late') e.respondWith(new Promise(r => setTimeout(() => r(new Response('<!doctype html><body>late answer', {headers: {'content-type': 'text/html'}})), 5000)));
+          if (path === '/never') e.respondWith(new Promise(() => {}));
+          if (path === '/polled') { setInterval(() => {}, 100); }
+          if (path === '/own') {
+            e.respondWith(self.clients.get(e.resultingClientId).then(c => new Response(`<!doctype html><body>own ${c && c.url}`, {headers: {'content-type': 'text/html'}})));
+          }
+        });
+      JS
+    }
+
+    it 'waits for the answer, its timer run on the time the visit waits' do
+      session = controlled_session
+      began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      session.visit '/late'
+      expect(session.text).to eq('late answer')
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 4
+      expect(requests).not_to include('GET /late')
+    end
+
+    # (…SW waits as long as that takes; Chrome after 310 s and Firefox after 60 s load the network's page, measured)
+    it 'loads from the network where the answer can never come, the wait no longer than it takes to know that' do
+      session = controlled_session
+      began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      session.visit '/never'
+      expect(session.status_code).to eq(200)
+      expect(session.text).to eq('page')
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 0.9
+    end
+
+    it "answers a handler's wait on its own reserved client past an interval another event left running" do
+      session = controlled_session
+      session.visit '/polled'
+      session.visit '/own'
+      expect(session.text).to eq('own about:blank')
+    end
+  end
 end

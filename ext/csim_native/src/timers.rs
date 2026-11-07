@@ -499,6 +499,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "timersQueuedBy", timers_queued_by, context_id);
     register(scope, ns, "timerNextQueuedBy", timer_next_queued_by, context_id);
     register(scope, ns, "nextTimerDelay", next_timer_delay, context_id);
+    register(scope, ns, "timerOnceAwaited", timer_once_awaited, context_id);
     register(scope, ns, "timerTaskEnd", timer_task_end, context_id);
     register(scope, ns, "agentStep", agent_step, context_id);
     register(scope, ns, "agentNext", agent_next, context_id);
@@ -944,6 +945,14 @@ fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         }
     }
     rv.set_double(if min == f64::INFINITY { -1.0 } else { min.max(0.0) });
+}
+
+// __dom.timerOnceAwaited() -> whether the calling realm has a timer set that runs once: what may be the coming of something
+// it waits on, where one that repeats is a poll.
+fn timer_once_awaited(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let timers = dom(scope).arena.realm_state(cid).map(|s| &s.timers);
+    rv.set_bool(timers.is_some_and(|t| t.by_key.values().any(|timer| timer.period.is_none())));
 }
 
 // __dom.timersQueuedBy(mark) -> how many tasks of the event loop's queued by `mark` (`task_mark`'s number) are due now,
