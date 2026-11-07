@@ -867,9 +867,12 @@ impl Traversable {
     }
     // The first `n` queued, taken to be applied in order — the page's, a window's of this isolate alike: but those asked
     // of a document after a traversal that replaces it, which are let go with it, those still queued too. The first
-    // wins, as Chrome and Firefox have it — measured 2026-10-31, the page's own `go(-2); go(-1)` and another window's
-    // alike; WPT traverse_the_history_1-5 — HTML computing each one's step as it runs, which the traversal in flight
-    // before it leaves to the engines (an attempt to navigate a traversing navigable is ignored).
+    // wins — a recorded divergence from HTML's text: "traverse the history by a delta" computes each queued step as it
+    // runs ("Let currentStepIndex be … Let targetStepIndex be currentStepIndex plus delta"), its only early exits a
+    // step that does not exist, an initiator not allowed, and a `beforeunload` or `navigate` cancellation, so it would
+    // run both. The non-tentative WPT traverse_the_history_1 (`go(-2); go(-1)`: pages `[4, 2]`, page 2 alone) and
+    // Chrome and Firefox (measured 2026-10-31, the page's own and another window's alike) drop the later ones. (HTML
+    // navigate's "a navigable that is currently traversing … ignored" is about navigations, not queued traversals.)
     fn take_due(&mut self, n: usize) -> Vec<Queued> {
         let mut ended = HashSet::new();
         let taken: Vec<Queued> = self.queued.drain(..n).filter(|q| !ended.contains(&q.source) && (!q.replaces || ended.insert(q.source))).collect();

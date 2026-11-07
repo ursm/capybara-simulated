@@ -237,8 +237,11 @@ RSpec.describe 'a navigation whose server takes its time', :every_host_local do
   end
 
   # (…the first of them alone where it makes the page's document again: that document's later ones let go with it, as
-  # for any traversals a document asks for in one task — WPT traverse_the_history_1, `go(-2); go(-1)` opening page 2
-  # alone, Chrome and Firefox alike)
+  # for any traversals a document asks for in one task. A recorded divergence from HTML's text, which computes each
+  # queued step as it runs — "Let currentStepIndex be … Let targetStepIndex be currentStepIndex plus delta", its only
+  # early exits a missing step, an initiator not allowed and a `beforeunload` or `navigate` cancellation — and would run
+  # both: the non-tentative WPT traverse_the_history_1 (`go(-2); go(-1)` opening page 2 alone, `[4, 2]`), Chrome and
+  # Firefox (measured 2026-10-31) drop the later ones. session_history.rs `take_due`)
   it "runs the first of a document's traversals asked for as one was awaited, from the step it went to" do
     [['history.back(); history.back()', '/b'], ['history.go(-2); history.go(1)', '/a']].each do |script, at|
       session.visit('http://a.test/a')
