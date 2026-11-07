@@ -3414,13 +3414,19 @@ const IS_CONNECTED_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction:
         v8::fast_api::Int64Representation::Number,
     ),
 )];
-// __dom.relativeNode(node, kind) -> the node DOM's accessor of `kind` names of `node` (`relative`), as `node_value`
-// answers it — null for a node with no slot (an Attr); undefined for what is no node's object, which Node's tree
-// accessors take for their `this` check (`selfChecked`, gen_bindings.mjs).
+// __dom.relativeNode(node, kind) -> the node DOM's accessor of `kind` names of `node` (`relative`; the realm's document
+// by its slot: `node_arg`), as `node_value` answers it — null for a node with no slot (an Attr); undefined for what is no
+// node's object, which Node's tree accessors take for their `this` check (`selfChecked`, gen_bindings.mjs).
 fn relative_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(ptr) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
-    // SAFETY: the handle lives while its object, an argument, does.
-    let Some(id) = unsafe { ptr.as_ref() }.nid() else { return rv.set_null() };
+    let id = match args.get(0).is_number() {
+        true => crate::node_handle::node_arg(scope, args.get(0)),
+        false => {
+            let Some(ptr) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+            // SAFETY: the handle lives while its object, an argument, does.
+            unsafe { ptr.as_ref() }.nid()
+        }
+    };
+    let Some(id) = id else { return rv.set_null() };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
     let found = dom(scope).arena.relative(id, kind);
     rv.set(node_value(scope, found));

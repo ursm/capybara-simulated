@@ -757,9 +757,21 @@ fn node_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         None => rv.set_null(),
     }
 }
-// The node `value` is the object of, by its slot, and the slot of its node document — a document's its own — or none:
+// The node an op the bindings hand a node is handed: its object — or, the realm's document, its slot, as its object is a
+// Proxy that reading its handle would unwrap at every call (node-identity.js `nodeArgOf`).
+pub(crate) fn node_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
+    if value.is_number() {
+        return value.integer_value(scope).and_then(NodeId::from_i64);
+    }
+    nid_of(scope, value)
+}
+// The node `value` is (`node_arg`), by its slot, and the slot of its node document — a document's its own — or none:
 // what an op the bindings hand a node rather than its slot reads both by, from the node's handle.
 pub(crate) fn node_and_document(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<(NodeId, Option<NodeId>)> {
+    if value.is_number() {
+        let id = node_arg(scope, value)?;
+        return Some((id, Some(id)));
+    }
     let ptr = handle_of(scope, value)?;
     // SAFETY: the handle lives while its object, an argument, does; the main thread reads the reference.
     let h = unsafe { ptr.as_ref() };

@@ -188,7 +188,7 @@ const NAMED_GATES_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::
 // __dom.elementById(root, id) -> `getElementById`: the first element in tree order, the root node itself included, whose
 // id is `id` (exactly, as UTF-16) — none or it, as `nodes_value` answers.
 fn element_by_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(root) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let Some(root) = crate::node_handle::node_arg(scope, args.get(0)) else { return };
     let id = utf16_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);

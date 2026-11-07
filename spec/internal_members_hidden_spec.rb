@@ -44,6 +44,19 @@ RSpec.describe 'internal members' do
     expect(outcome("(() => { const b = document.getElementById('fr').contentDocument.body; return [b instanceof HTMLElement, b instanceof Element, b instanceof Node]; })()")).to eq([false, false, false])
   end
 
+  # (…a tree accessor's `this` the engine checks, from the node's handle: what is no node's object, a number too — which
+  # the engine is otherwise handed the realm's document's slot as — is a TypeError)
+  it "refuses Node's tree accessors what is no node" do
+    expect(outcome(<<~JS)).to eq(['TypeError'] * 5 + ['html', 'null'])
+      (() => {
+        const get = (name) => Object.getOwnPropertyDescriptor(Node.prototype, name).get;
+        const of = (name, self) => { try { const v = get(name).call(self); return v === null ? 'null' : v.nodeName; } catch (e) { return e.constructor.name; } };
+        return [of('firstChild', 5), of('parentNode', 0), of('textContent', 1), of('nextSibling', {}), of('firstChild', Object.create(document.body)),
+          of('firstChild', document), of('parentNode', document)];
+      })()
+    JS
+  end
+
   # (…and an object inheriting from a node is no EventTarget: its members' `this` is checked, Web IDL's TypeError)
   it "refuses EventTarget's members an object inheriting from a node" do
     expect(outcome("Object.create(document.body).dispatchEvent(new Event('x'))")).to eq('TypeError: Illegal invocation')
