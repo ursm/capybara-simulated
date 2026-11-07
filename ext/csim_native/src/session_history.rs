@@ -2365,6 +2365,11 @@ fn frame_entry(arena: &crate::dom::RealmArena, realm: i32, create: bool) -> Opti
     drop(guard);
     Some((frame, id))
 }
+// …made where frame realm `realm` has none: what a document its document's URL moves away from keeps (the document open
+// steps: document_lifecycle.rs `take_entry_url`).
+pub(crate) fn ensure_frame_entry(arena: &crate::dom::RealmArena, realm: i32) {
+    frame_entry(arena, realm, true);
+}
 
 // __dom.frameNavigable(realm) -> [navigable, parent navigable, parent realm, traversable] of frame realm `realm`
 // (`frame_navigable`), the host's — null for none.

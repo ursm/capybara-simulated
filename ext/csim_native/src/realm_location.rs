@@ -93,6 +93,16 @@ impl RealmLocation {
             }
         }
     }
+    // Its document's URL is `url`, which the document open steps take from the entry document: its location's, its
+    // location's origin that URL's — its document's origin unchanged, pinned where it followed its URL (WPT
+    // crbug-583445-regression: an about:blank URL taken so must not make the document its parent's origin).
+    pub(crate) fn take_document_url(&mut self, url: &str) {
+        if self.origin() != "null" {
+            self.document_origin = Some(self.origin().to_owned());
+        }
+        self.set_url(url);
+        self.origin_override = None;
+    }
     // The serialization of its document's origin: its own where it was given one, else its location's — "null" for an
     // opaque one.
     pub(crate) fn origin(&self) -> &str {

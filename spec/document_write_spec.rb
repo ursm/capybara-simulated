@@ -178,4 +178,27 @@ RSpec.describe 'document.write during parsing' do
     s = session_with_scripts(%(<div id=h><template shadowrootmode=open><script>document.write('<b>x</b>')</script>))
     expect(s.evaluate_script('document.getElementById("h") !== null')).to be true
   end
+
+  # What the steps of dynamic markup insertion do first is the engine's (document_lifecycle.rs `markup_steps`), of the
+  # document's active parser: an `open()` from a script the script-created parser runs returns (its script nesting level
+  # above zero), and that script's `write` goes in at its insertion point; a `write` once that parser's input has ended
+  # has no insertion point and opens the document anew; a `close()` with no script-created parser does nothing. Chrome
+  # and Firefox agree on each (measured 2026-11-07: `ba`, `y`, `k`).
+  it 'asks the document’s active parser where markup goes' do
+    s = session_for('<p>x</p>')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const run = (src) => {
+          const f = document.body.appendChild(document.createElement('iframe'));
+          try { return new f.contentWindow.Function(src)(); } finally { f.remove(); }
+        };
+        return [
+          run('document.open(); document.write("<script>document.open(); document.write(\\\\"b\\\\")<\\\\/script>a"); document.close(); return document.body.textContent;'),
+          run('document.open(); document.write("<p>x"); document.close(); document.write("y"); document.close(); return document.body.textContent;'),
+          run('document.body.append("k"); document.close(); return document.body.textContent;')
+        ];
+      })()
+    JS
+    expect(got).to eq(%w[ba y k])
+  end
 end

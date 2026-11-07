@@ -330,8 +330,11 @@ pub(crate) const STATE_LINK_MEDIA_SKIPPED: u32 = 1 << 21;
 // model: "fallback"): its resource failed to load, or it has none to process — the bindings' to note
 // (`setObjectFallback`).
 pub(crate) const STATE_OBJECT_FALLBACK: u32 = 1 << 22;
-// (…bits 23-24 a document's, the bindings' alone, which nothing here reads: native-query-shadow.js
-// `STATE_INITIAL_ABOUT_BLANK`, `STATE_HIDDEN`)
+// …and, on a document, that it is its navigable's initial about:blank (HTML "is initial about:blank") — which the document
+// open steps make it no more (document_lifecycle.rs `docOpen`); the bindings' too (native-query-shadow.js
+// `STATE_INITIAL_ABOUT_BLANK`).
+pub(crate) const STATE_INITIAL_ABOUT_BLANK: u32 = 1 << 23;
+// (…bit 24 a document's, the bindings' alone, which nothing here reads: native-query-shadow.js `STATE_HIDDEN`)
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward

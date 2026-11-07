@@ -24,6 +24,8 @@ struct DocumentState {
     // `document.write` that would open it then ignored.
     destructive_ignored: u32,
     current_script: Option<NodeId>,
+    // Its active parser (HTML §13.2): the number of the parse that is it, 0 for none (html_parse.rs `begin_parse`).
+    parser: u32,
     // Whether it will declaratively refresh (HTML: a `<meta http-equiv=refresh>` or a `Refresh` header said so already,
     // which no later one undoes): the engine's alone, which no binding writes (declarative_refresh.rs).
     will_refresh: bool,
@@ -42,6 +44,7 @@ impl Default for DocumentState {
             insertions: 0,
             destructive_ignored: 0,
             current_script: None,
+            parser: 0,
             will_refresh: false,
             command_running: false,
         }
@@ -77,7 +80,7 @@ struct DocumentTexts {
 const TEXTS: usize = 5;
 const TEXT_URL: usize = 0;
 const TEXT_ENCODING: usize = 1;
-const TEXT_ABOUT_BASE: usize = 3;
+pub(crate) const TEXT_ABOUT_BASE: usize = 3;
 const TEXT_REFERRER: usize = 4;
 
 #[derive(Default)]
@@ -124,6 +127,16 @@ impl DocumentStates {
     }
     pub(crate) fn mode(&self, doc: NodeId) -> u32 {
         self.0.get(&doc).map_or(0, |s| s.mode)
+    }
+    pub(crate) fn set_mode(&mut self, doc: NodeId, mode: u32) {
+        self.0.entry(doc).or_default().mode = mode;
+    }
+    // Its active parser's number, 0 for none — and it set.
+    pub(crate) fn parser(&self, doc: NodeId) -> u32 {
+        self.0.get(&doc).map_or(0, |s| s.parser)
+    }
+    pub(crate) fn set_parser(&mut self, doc: NodeId, parser: u32) {
+        self.0.entry(doc).or_default().parser = parser;
     }
     pub(crate) fn has_browsing_context(&self, doc: NodeId) -> bool {
         self.0.get(&doc).is_none_or(|s| s.flags & NO_BROWSING_CONTEXT == 0)
@@ -282,11 +295,17 @@ fn set_doc_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let Some(field) = args.get(1).uint32_value(scope).map(|f| f as usize).filter(|&f| f < TEXTS) else { return };
     let text = (!args.get(2).is_null_or_undefined()).then(|| args.get(2).to_rust_string_lossy(scope));
-    let texts = crate::dom::dom(scope).arena.document_states.1.entry(doc).or_default();
-    texts.texts[field] = text;
-    // (…its URL, encoding or inherited base each one the base URL is computed from)
-    if matches!(field, TEXT_URL | TEXT_ENCODING | TEXT_ABOUT_BASE) {
-        texts.base_url = None;
+    crate::dom::dom(scope).arena.document_states.set_text(doc, field, text);
+}
+impl DocumentStates {
+    // `doc`'s text `field` is `text` (none: none).
+    pub(crate) fn set_text(&mut self, doc: NodeId, field: usize, text: Option<String>) {
+        let texts = self.1.entry(doc).or_default();
+        texts.texts[field] = text;
+        // (…its URL, encoding or inherited base each one the base URL is computed from)
+        if matches!(field, TEXT_URL | TEXT_ENCODING | TEXT_ABOUT_BASE) {
+            texts.base_url = None;
+        }
     }
 }
 

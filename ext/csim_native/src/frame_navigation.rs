@@ -107,6 +107,9 @@ const CONTEXT_READY: u32 = 1 << 6;
 const SRC_REFUSED: u32 = 1 << 7;
 // Its element's `load` for the navigation under way still to fire (frame-nav.js `FN_LOAD_OWED`).
 const LOAD_OWED: u32 = 1 << 8;
+// Its element's `load` being dispatched (frame-nav.js `FN_LOAD_IN_PROGRESS`, HTML's "iframe load in progress" flag): a
+// `document.open()` of its document then mutes the load the written document would fire at it (document_lifecycle.rs).
+pub(crate) const LOAD_IN_PROGRESS: u32 = 1 << 9;
 // The navigation's document built on a task not run yet (frame-nav.js `FN_BUILD_QUEUED`): a read of the frame's window
 // meanwhile is answered with its initial about:blank document's.
 const BUILD_QUEUED: u32 = 1 << 10;

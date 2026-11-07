@@ -98,7 +98,7 @@ RSpec.describe 'internal members' do
       _normalize _open _outerHTML _ownerDoc _ownerDocument _parent _parentElement _parentNode
       _parserInserted _piAttrs _piAttrsData _previousSibling _publicId _quirks _readyState _referrer _reloadFrame
       _removeAttribute _removeAttributeNS _removeAttrKey _removeChild _renavigateFrameDocument _replaceAll
-      _replaceChild _replaceData __runFormSubmit _scriptCreatedParser _scriptRun _selectedness _setAttribute
+      _replaceChild _replaceData __runFormSubmit _scriptRun _selectedness _setAttribute
       _setAttributeNode _setAttributeNS _setAttrNodeValue _setAttrValueNullNS _setData _setHTML _shadowRoot _sheet
       _submitForm _systemId _takeFocusFromFrame _target _templateContent _textContent _url _validatesForSubmission
       _value _window _write _writeAttributes _xmlDocument
