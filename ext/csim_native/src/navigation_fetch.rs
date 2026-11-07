@@ -278,7 +278,7 @@ impl NavigationFetch {
     // cookies are judged by alone, Fetch's step 2; nil none), `traversable` (a top-level traversable's, by its number: the
     // opener policy of its document — session_history.rs `opener_policy_of` — is what its responses' are enforced against:
     // `response`; nil a frame's, none), `commit` (the page's navigation, of that traversable: {handling: 'push', 'replace',
-    // 'reload' or 'traverse', step: a traversal's, entry: the fields of the entry it makes — session_history.rs `Data` — leaving_origin: the
+    // 'reload' or 'traverse', traversal: a traversal's [step, entry id], entry: the fields of the entry it makes — session_history.rs `Data` — leaving_origin: the
     // origin of the document it leaves, serialized, a window's initial about:blank's its creator's, nil none} —
     // navigation_commit.rs `Commit`, `#begin_commit`; nil any other navigation).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
@@ -303,8 +303,8 @@ impl NavigationFetch {
             (Some(commit), Some(history)) => {
                 let field = |key: &str| commit.aref::<_, Value>(ruby.to_symbol(key));
                 let handling = String::try_convert(field("handling")?)?;
-                let step = Option::<i64>::try_convert(field("step")?)?;
-                let handling = Handling::named(&handling, step).ok_or_else(|| Error::new(ruby.exception_arg_error(), format!("no history handling {handling}")))?;
+                let traversal = Option::<(i64, u64)>::try_convert(field("traversal")?)?;
+                let handling = Handling::named(&handling, traversal).ok_or_else(|| Error::new(ruby.exception_arg_error(), format!("no history handling {handling}")))?;
                 let entry = Option::<RHash>::try_convert(field("entry")?)?.map(|e| crate::session_history::Data::of(ruby, e)).transpose()?;
                 Some(Commit::new(history, handling, entry, Option::<String>::try_convert(field("leaving_origin")?)?))
             }

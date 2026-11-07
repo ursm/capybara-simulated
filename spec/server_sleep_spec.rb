@@ -187,4 +187,27 @@ RSpec.describe 'a navigation whose server takes its time', :every_host_local do
     expect(session.evaluate_script('sessionStorage.n')).to eq('1 /a')
     expect(session.evaluate_script('history.length')).to eq(2)
   end
+
+  # (…a traversal's document made at its own entry, what the document it leaves pushed as it was awaited let go: HTML
+  # queues that push's "finalize a same-document navigation" behind the traversal, where it returns, the navigable's active
+  # entry no longer its)
+  it 'makes a traversal its own entry, a push the left document made as it was awaited let go' do
+    session.visit('http://a.test/a')
+    session.visit('http://a.test/slow')
+    session.go_back
+    session.execute_script("setTimeout(() => history.pushState('p', '', '/p'), 30)")
+    session.go_forward
+    expect(session.evaluate_script('[location.pathname, history.length, history.state]')).to eq(['/slow', 2, nil])
+    session.go_back
+    expect(session.evaluate_script('[location.pathname, document.title]')).to eq(['/a', '/a'])
+  end
+
+  # (…and the driver's URL its document's at once: what the document it left moved through as the response was awaited
+  # none of the intermediates a polling `current_url` walks)
+  it "reports its document's URL, none the left document moved through as it was awaited" do
+    session.visit('http://a.test/a')
+    session.execute_script("location = '/slow'; setTimeout(() => history.pushState(null, '', '/p'), 30)")
+    expect(poll_until { session.evaluate_script('location.pathname') == '/slow' }).to be(true)
+    expect(session.current_url).to eq('http://a.test/slow')
+  end
 end

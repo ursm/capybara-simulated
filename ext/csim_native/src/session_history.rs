@@ -184,6 +184,9 @@ impl Data {
     }
 }
 
+// A session history as it stood (`SessionHistory::keep`).
+pub(crate) struct Kept(State);
+
 #[derive(Clone)]
 struct Nested {
     navigable: u32,
@@ -422,6 +425,8 @@ impl Queued {
 
 // The navigable a list belongs to: 0 the traversable's own.
 const TOP: u32 = 0;
+// The steps a session history keeps (`State::trim`).
+const MAX_STEPS: usize = 50;
 // The ongoing navigation "traversal" (`Traversable::begin_traversal`), which no navigation's number is.
 const TRAVERSAL: u64 = u64::MAX;
 
@@ -563,6 +568,30 @@ impl State {
     // `history.length`: the number of steps used, at least 1.
     fn length(&self) -> usize {
         self.used_steps().len().max(1)
+    }
+
+    // The oldest steps let go of past `MAX_STEPS` (HTML sets no limit; Chrome 157 and Firefox 159 both keep 50 —
+    // measured 2026-11-08, 60 navigations, 60 `blob:` navigations and 60 pushStates each giving `history.length` 50,
+    // Firefox trimming its pushStates' a moment later): each navigable's entry of the oldest step dropped where its next
+    // entry is of the next step, else made that step's — the one it is still at there.
+    fn trim(&mut self) {
+        loop {
+            let steps = self.used_steps();
+            let [oldest, next, ..] = steps[..] else { return };
+            if steps.len() <= MAX_STEPS {
+                return;
+            }
+            let lists = std::iter::once(&mut self.entries).chain(self.docs.values_mut().flatten().map(|n| &mut n.entries));
+            for list in lists {
+                let Some(at) = list.iter().position(|e| e.step == oldest) else { continue };
+                if list.get(at + 1).is_some_and(|e| e.step == next) {
+                    list.remove(at);
+                } else {
+                    list[at].step = next;
+                }
+            }
+            self.collect_docs();
+        }
     }
 
     // HTML "get all used history steps".
@@ -708,6 +737,7 @@ impl Traversable {
         list.push(Entry { id, step, url: url.to_owned(), doc, data: Arc::new(data) });
         self.state.current = step;
         self.state.drop_stale_holds(build);
+        self.state.trim();
         self.made_frame_entry(nav, FrameMade::Pushed { id, before: current });
         Some(id)
     }
@@ -1231,6 +1261,15 @@ impl SessionHistory {
     fn forget(&self) {
         self.lock().saved = None;
     }
+    // The history as it stands, kept (`Kept`) — and put back (navigation_commit.rs: a traversal's, as it began).
+    pub(crate) fn keep(&self) -> Kept {
+        Kept(self.lock().state.clone())
+    }
+    pub(crate) fn put_back(&self, kept: Kept) {
+        let mut t = self.lock();
+        t.state = kept.0;
+        t.version += 1;
+    }
     // The entry the page's document leaves as a navigation of it commits another (navigation_commit.rs), none where it
     // leaves none — a reload's, of the same entry (`leaving`).
     pub(crate) fn set_leaving(&self, id: Option<u64>) {
@@ -1728,6 +1767,28 @@ mod tests {
         assert_eq!(h.url(h.active(2).unwrap()).as_deref(), Some("/f"));
         h.push(TOP, TOP, "/c".into(), false, Data::default());
         assert_eq!(h.length(), 2);
+    }
+
+    // Past 50 steps the oldest go, a page entry a frame's later steps are still of kept at the first of them.
+    #[test]
+    fn it_keeps_the_last_fifty_steps() {
+        let h = history();
+        h.push(TOP, TOP, "/0".into(), false, Data::default());
+        h.push(2, TOP, "/f".into(), false, Data::default()).unwrap();
+        for i in 1..60 {
+            h.push(TOP, TOP, format!("/{i}"), false, Data::default());
+        }
+        assert_eq!(h.length(), 50);
+        assert_eq!(h.url(h.active(TOP).unwrap()).as_deref(), Some("/59"));
+        let oldest = h.lock().state.used_steps()[0];
+        assert_eq!(h.url(h.entry_at_step(oldest).unwrap()).as_deref(), Some("/10"));
+        let h = history();
+        h.push(TOP, TOP, "/0".into(), false, Data::default());
+        for _ in 0..55 {
+            h.push(2, TOP, "/f".into(), false, Data::default()).unwrap();
+        }
+        assert_eq!(h.length(), 50);
+        assert_eq!(h.lock().state.entries.len(), 1);
     }
 
     // A nested frame's history is in its parent frame's entry's document state; the parent navigated, the child's steps

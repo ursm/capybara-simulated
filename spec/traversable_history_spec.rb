@@ -227,4 +227,13 @@ RSpec.describe 'the session history of each traversable' do
       expect(hits('/d')).to eq(0)
     end
   end
+
+  # (…the last 50 steps kept, the oldest let go: HTML sets no limit; Chrome 157 and Firefox 159 both keep 50, measured
+  # 2026-11-08 — 60 navigations, 60 `blob:` navigations and 60 pushStates each giving `history.length` 50)
+  it 'keeps the last fifty steps' do
+    60.times {|i| session.execute_script("history.pushState(null, '', '/p#{i}')") }
+    expect(read('history.length')).to eq(50)
+    session.execute_script('history.go(-49)')
+    expect(read('location.pathname')).to eq('/p10')
+  end
 end

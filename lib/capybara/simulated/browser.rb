@@ -2642,7 +2642,7 @@ module Capybara
       # client the page's document all the same, by whose origin its redirect-taint is walked (`navigate_top_level`): the
       # same step of HTML's, the navigable's active document's source snapshot params, "as if navigable navigated
       # itself".)
-      # (…`step` a traversal's, the step it goes to)
+      # (…`step` a traversal's, the step it goes to: the entry's document made again at it)
       def replay_history_entry(id, step: nil, is_reload: false, user_activated: false, through_ui: false)
         return unless id
 
@@ -2655,7 +2655,7 @@ module Capybara
         # measured: `location.reload()` sends the page's own URL, a re-posted `no-referrer` form none)
         # (…an entry reached by a POST keeps its body)
         referred = is_reload && !entry[:body] ? {} : {referer: entry[:referer], referrer_policy: entry[:referrer_policy]}
-        handling = {history_handling: is_reload ? 'reload' : 'traverse', history_step: step}
+        handling = {history_handling: is_reload ? 'reload' : 'traverse', traversal: step && [step, id]}
         # (…a `blob:` URL's document's the blob its entry kept, revoked since or not: navigation_commit.rs `keep_blob`)
         kept, type = @session_history.blob(id)
         if entry[:body]
@@ -3630,7 +3630,7 @@ module Capybara
         body,
         content_type,
         history_handling: 'push',
-        history_step: nil,
+        traversal: nil,
         referer: page_url,
         referrer_policy: nil,
         initiator: page_url,
@@ -3649,7 +3649,7 @@ module Capybara
           referer:                       referer,
           referrer_policy:               referrer_policy,
           history_handling:              history_handling,
-          history_step:                  history_step,
+          traversal:                     traversal,
           initiator:                     initiator,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
@@ -12768,14 +12768,14 @@ module Capybara
       # reached by was cross-site, its cookies judged by that — nil for any other navigation)
       # (…`origin_null` and `initiator_cross_site_ancestor` the initiating document's: `initiating_document`)
       # (…`history_handling` how it is of the page's session history: 'push' an entry after the current one, 'replace' one
-      # in its place, 'reload' and 'traverse' a replay of the entry the history is at — a traversal's step applied as it
-      # began, `perform_history_traverse`: navigation_commit.rs `Handling`)
+      # in its place, 'reload' and 'traverse' a replay — `traversal` a traversal's `[step, entry]`, the step it goes to and
+      # the entry it makes the document of again: navigation_commit.rs `Handling`)
       def navigate(
         url,
         referer: page_url,
         referrer_policy: nil,
         history_handling: 'push',
-        history_step: nil,
+        traversal: nil,
         initiator: page_url,
         origin_null: false,
         initiator_cross_site_ancestor: false,
@@ -12792,7 +12792,7 @@ module Capybara
           referer:                       referer,
           referrer_policy:               referrer_policy,
           history_handling:              history_handling,
-          history_step:                  history_step,
+          traversal:                     traversal,
           initiator:                     initiator,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
@@ -12834,7 +12834,7 @@ module Capybara
         client_id:,
         user_activated:,
         reloaded_cross_site:,
-        history_step: nil,
+        traversal: nil,
         blob: nil,
         origin: nil,
         ongoing: nil
@@ -12861,7 +12861,7 @@ module Capybara
               referer:,
               referrer_policy:,
               history_handling:,
-              history_step:,
+              traversal:,
               initiator:,
               origin_null:,
               initiator_cross_site_ancestor:,
@@ -12887,8 +12887,8 @@ module Capybara
         # (…a traversal's or a user's reload's, of no initiator: `replay_history_entry` — its client the document it leaves,
         # and its top-level navigation initiator origin the one its entry's document state keeps, Fetch's step 2)
         traversed = replay && !initiator
-        # (…the entry a replay goes to: a reload's the active one, a traversal's its step's)
-        replayed = history_step ? @session_history.entry_at_step(history_step) : @session_history.active(0) if replay
+        # (…the entry a replay goes to: a reload's the active one, a traversal's its own)
+        replayed = traversal ? traversal[1] : @session_history.active(0) if replay
         # (…the request as it is sent — a POST's body and origin, its referrer and referrer policy — what a reload or a
         # traversal refers by again, a POST's re-posts: HTML's document state; and its initiator origin, which a
         # traversal's step 2 reads: none of a user's)
@@ -12913,7 +12913,7 @@ module Capybara
           client_origin:                 (document_origin(0) if traversed),
           traversed_initiator:           (@session_history.entry(replayed)[:origin] if traversed),
           traversable:                   @session_history.id,
-          commit:                        {handling: history_handling, step: history_step, entry: entry, leaving_origin: (leaving_document_origin unless replay)}
+          commit:                        {handling: history_handling, traversal: traversal, entry: entry, leaving_origin: (leaving_document_origin unless replay)}
         })
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
@@ -12999,6 +12999,7 @@ module Capybara
       # scheme's (a `blob:` URL's `blob`, about:blank of initiator `initiator`'s origin) — or none.
       private def commit_page_navigation(fetch, (step, type, payload), hop, document, blob, initiator)
         url = fetch.target
+        forget_leaving_url_changes unless NO_DOCUMENT_STEPS.include?(step)
         case step
         when 'none'
           navigation_made_no_document
@@ -13046,6 +13047,14 @@ module Capybara
             boot_response_into_ctx(payload, opaque_origin: true)
           end
         end
+      end
+      # The steps of a navigation that make no document (navigation_commit.rs `Step`).
+      NO_DOCUMENT_STEPS = %w[none download].freeze
+      # The URLs the document a navigation leaves moved through as its response was awaited (a pushState of its timers'),
+      # let go as the next one commits: no intermediate of the document a polling `current_url` reads (`note_url_changes`).
+      private def forget_leaving_url_changes
+        @session_history.note_url_changes(@ticking || @navigating || @event_loop_running)
+        @recent_urls&.clear
       end
       # What says a navigation of the top-level document of realm `realm` began as a response was awaited, against the mark
       # taken before it: its number (`ongoing_navigation`), and what is planned that no number records yet (a reload, a form's:

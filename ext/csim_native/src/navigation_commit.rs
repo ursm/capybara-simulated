@@ -16,29 +16,30 @@ use crate::referrer::http_origin;
 use crate::session_history::{Data, SessionHistory};
 
 // How the navigation is of the session history (HTML's "history handling" and the navigation API's navigation type): a
-// new entry after the current one, one in its place, a reload of the active one, a traversal to a step.
+// new entry after the current one, one in its place, a reload of the active one, a traversal to a step — and the entry
+// at it whose document it makes again.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Handling {
     Push,
     Replace,
     Reload,
-    Traverse(i64),
+    Traverse(i64, u64),
 }
 
 impl Handling {
-    // …by its name, a traversal's of its step `step`.
-    pub(crate) fn named(name: &str, step: Option<i64>) -> Option<Self> {
-        Some(match (name, step) {
+    // …by its name, a traversal's of `traversal`, its step and entry.
+    pub(crate) fn named(name: &str, traversal: Option<(i64, u64)>) -> Option<Self> {
+        Some(match (name, traversal) {
             ("push", _) => Self::Push,
             ("replace", _) => Self::Replace,
             ("reload", _) => Self::Reload,
-            ("traverse", Some(step)) => Self::Traverse(step),
+            ("traverse", Some((step, id))) => Self::Traverse(step, id),
             _ => return None,
         })
     }
     // A reload or a traversal: the entry it goes to an entry already made, which it makes the document of again.
     fn replays(self) -> bool {
-        matches!(self, Self::Reload | Self::Traverse(_))
+        matches!(self, Self::Reload | Self::Traverse(..))
     }
 }
 
@@ -89,6 +90,10 @@ pub(crate) struct Commit {
     // window's initial about:blank's its creator's, none where no creator made it: a `noopener` window's, whose origin
     // is not known here, its target name left as it is (Chrome and Firefox).
     leaving_origin: Option<String>,
+    // A traversal's history as it began: what it is applied to where what was done to it since — a pushState's, a
+    // replaceState's, a fragment's of the document it leaves — took its entry away. HTML queues those on the traversal
+    // queue behind it, where "finalize a same-document navigation" returns, the navigable's active entry no longer theirs.
+    began: Option<crate::session_history::Kept>,
     // Whether it ended: once, whatever asks again.
     ended: bool,
 }
@@ -107,6 +112,7 @@ impl Commit {
             redirected: false,
             to_get: false,
             leaving_origin,
+            began: None,
             ended: false,
         }
     }
@@ -115,6 +121,9 @@ impl Commit {
     pub(crate) fn begin(&mut self, url: &str, start: &'static str) {
         url.clone_into(&mut self.url);
         self.start = start;
+        if let Handling::Traverse(..) = self.handling {
+            self.began = Some(self.history.keep());
+        }
     }
 
     // A hop begun, its cookies `cross` site or not: the request its own entry's document is reached by, which a reload
@@ -137,7 +146,7 @@ impl Commit {
     fn replayed(&self) -> Option<u64> {
         match self.handling {
             Handling::Reload => self.history.active(0),
-            Handling::Traverse(step) => self.history.entry_at_step(step),
+            Handling::Traverse(_, id) => Some(id),
             Handling::Push | Handling::Replace => None,
         }
     }
@@ -188,7 +197,10 @@ impl Commit {
         let same = |before: Option<&str>| before.is_some_and(|b| b != "null" && origin.as_deref() == Some(b));
         if self.handling.replays() {
             let Some(id) = self.replayed() else { return };
-            if let Handling::Traverse(step) = self.handling {
+            if let Handling::Traverse(step, _) = self.handling {
+                if let Some(began) = self.began.take().filter(|_| self.history.url(id).is_none()) {
+                    self.history.put_back(began);
+                }
                 self.history.set_leaving(active);
                 self.history.go_to(step);
             } else {
@@ -325,9 +337,23 @@ mod tests {
     fn a_traversal_goes_to_its_step_only_as_it_makes_a_document() {
         let history = page();
         history.record_page_entry("http://a.test/b".into(), false, Data::default());
-        commit(&history, Handling::Traverse(0), "http://a.test/").end(&Step::None, false);
+        let first = history.entry_at_step(0).unwrap();
+        commit(&history, Handling::Traverse(0, first), "http://a.test/").end(&Step::None, false);
         assert_eq!(history.url(history.active(0).unwrap()).as_deref(), Some("http://a.test/b"));
-        commit(&history, Handling::Traverse(0), "http://a.test/").end(&Step::Document(None), false);
+        commit(&history, Handling::Traverse(0, first), "http://a.test/").end(&Step::Document(None), false);
         assert_eq!(history.url(history.active(0).unwrap()).as_deref(), Some("http://a.test/"));
+    }
+
+    #[test]
+    fn a_traversal_is_applied_to_the_history_it_began_with_where_a_push_took_its_entry_away() {
+        let history = page();
+        let b = history.record_page_entry("http://a.test/b".into(), false, Data::default()).unwrap();
+        history.go_to(0);
+        let mut c = commit(&history, Handling::Traverse(1, b), "http://a.test/b");
+        history.record_page_entry("http://a.test/p".into(), false, Data::default());
+        assert_eq!(history.url(b), None);
+        c.end(&Step::Document(None), false);
+        assert_eq!(history.active(0), Some(b));
+        assert_eq!(history.length(), 2);
     }
 }
