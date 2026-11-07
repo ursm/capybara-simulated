@@ -500,6 +500,9 @@ pub(crate) fn without_fragment(url: &str) -> String {
 // HTML "navigate" (step "navigate to a fragment"): whether a navigation to `url` from a document at `current` is one to a
 // fragment of it — `url` has a fragment (an empty one too: `#`) and equals `current` but for their fragments. Not one
 // without a fragment: `/a#x` → `/a` loads the document again, as does assigning a fragmentless URL its own.
+pub(crate) fn fragment_navigation_for_ruby(current: String, url: String) -> bool {
+    is_fragment_navigation(&current, &url)
+}
 pub(crate) fn is_fragment_navigation(current: &str, url: &str) -> bool {
     let (Ok(mut current), Ok(mut url)) = (Url::parse(current, None), Url::parse(url, None)) else { return false };
     if !url.has_hash() {

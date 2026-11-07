@@ -128,7 +128,8 @@ pub(crate) enum HostNavigation {
     // (…of the URL its document was at as `reload()` was called: HTML appends its traversal steps then, and they apply to the
     // entry as it stood — a `document.open()` after it moves the document's URL, not that)
     Reload { url: String },
-    Submit { request: v8::Global<v8::Value>, source: i32, referrer: (String, String) },
+    // (…`held`: going on past its document, which made way for another in place)
+    Submit { request: v8::Global<v8::Value>, source: i32, referrer: (String, String), held: bool },
 }
 
 // What `planFrameLocation` made of a navigation: none (the frame has no navigable), one planned, or one to a fragment of
@@ -168,10 +169,6 @@ struct Plans {
 }
 
 impl FrameNavigations {
-    // The host's planned navigation of container `c`'s navigable, where the container has navigation state.
-    pub(crate) fn host_mut(&mut self, c: NodeId) -> Option<&mut Option<(u64, HostNavigation)>> {
-        self.0.get_mut(&c).map(|n| &mut n.host)
-    }
     // A form's submission into container `c`'s navigable begun: the container's `sandbox` attribute now what the document
     // it makes is sandboxed by (`frame_sandbox`) — as it is when the submission's navigation begins, not as an earlier
     // navigation that made no document (a download) began.
@@ -183,12 +180,14 @@ impl FrameNavigations {
     pub(crate) fn hosted(&self) -> bool {
         self.0.values().any(|n| n.host.as_ref().is_some_and(|&(at, _)| at <= self.1.through))
     }
-    // The forms' submissions a reload of realm `source`'s document takes with it, that document's into its frames: Chrome and
-    // Firefox send none (measured 2026-11-07).
-    pub(crate) fn drop_submissions_of(&mut self, source: i32) {
+    // The forms' submissions realm `source`'s document made let go: its reload (Chrome and Firefox send none, measured
+    // 2026-11-07), its `stop()`. Whether it had one.
+    pub(crate) fn drop_submissions_of(&mut self, source: i32) -> bool {
+        let mut dropped = false;
         for nav in self.0.values_mut() {
-            nav.host.take_if(|(_, h)| matches!(h, HostNavigation::Submit { source: s, .. } if *s == source));
+            dropped |= nav.host.take_if(|(_, h)| matches!(h, HostNavigation::Submit { source: s, .. } if *s == source)).is_some();
         }
+        dropped
     }
     // Whether a navigation planned in order `at` is due: the navigation turn has run since.
     pub(crate) fn due(&self, at: u64) -> bool {
@@ -199,10 +198,22 @@ impl FrameNavigations {
         self.0.values().filter_map(|n| n.host.as_ref().filter(|(_, h)| matches!(h, HostNavigation::Submit { .. })).map(|&(at, _)| at)).min()
     }
     // …and it taken, with the container it navigates.
-    pub(crate) fn take_submission(&mut self, at: u64) -> Option<(NodeId, v8::Global<v8::Value>, i32, (String, String))> {
+    pub(crate) fn take_submission(&mut self, at: u64) -> Option<(NodeId, v8::Global<v8::Value>, i32, (String, String), bool)> {
         let (&c, nav) = self.0.iter_mut().find(|(_, n)| n.host.as_ref().is_some_and(|&(planned, _)| planned == at))?;
-        let Some((_, HostNavigation::Submit { request, source, referrer })) = nav.host.take() else { return None };
-        Some((c, request, source, referrer))
+        let Some((_, HostNavigation::Submit { request, source, referrer, held })) = nav.host.take() else { return None };
+        Some((c, request, source, referrer, held))
+    }
+    // Whether a form's submission plans to navigate container `c`'s navigable.
+    pub(crate) fn submission_planned(&self, c: NodeId) -> bool {
+        self.0.get(&c).and_then(|n| n.host.as_ref()).is_some_and(|(_, h)| matches!(h, HostNavigation::Submit { .. }))
+    }
+    // …those realm `source`'s document made going on past it (`held`).
+    pub(crate) fn hold_submissions_of(&mut self, source: i32) {
+        for nav in self.0.values_mut() {
+            if let Some((_, HostNavigation::Submit { source: s, held, .. })) = &mut nav.host {
+                *held |= *s == source;
+            }
+        }
     }
     fn take_hosted(&mut self) -> Hosted {
         self.0.iter_mut().filter_map(|(&c, n)| n.host.take().map(|h| (c, h))).collect()
@@ -307,7 +318,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameSrcdocCommits", frame_srcdoc_commits, context_id);
     crate::dom::register(scope, ns, "frameLoadingSrcdoc", frame_loading_srcdoc, context_id);
     crate::dom::register(scope, ns, "frameTraversalSrcdoc", frame_traversal_srcdoc, context_id);
-    crate::dom::register(scope, ns, "planFrameSubmission", plan_frame_submission, context_id);
     crate::dom::register(scope, ns, "frameSubmissionPlanned", frame_submission_planned, context_id);
     crate::dom::register(scope, ns, "frameDestination", frame_destination, context_id);
     crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
@@ -551,21 +561,21 @@ fn set_frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     arena.frame_navigation(container).contents[slot] = content;
 }
 
-// __dom.planFrameSubmission(containerNid, formNid, request, interactive): the form's submission, its request as the
-// bindings made it, planned for the host to navigate the container's navigable to, replacing what that planned — and, for
-// an interactive submission (a submit button's, an implicit one — not `form.submit()`), the form's last plan on whichever
-// navigable it was for (form-double-submit; form.submit() to several frames navigates them all).
-fn plan_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(container), Some(form)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
-    let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(2)) else { return };
-    let interactive = args.get(3).is_true();
-    let cid = realm_id(scope, &args);
-    let rel = crate::dom::member(scope, object, "rel").map_or_else(String::new, |v| v.to_rust_string_lossy(scope));
-    crate::navigation_plan::note_activation(scope, cid, object);
-    let request = v8::Global::new(scope, args.get(2));
-    let aborted = abort_frame_document(scope, container);
-    let arena = crate::dom::realm(scope, cid);
-    let referrer = crate::navigation_plan::form_referrer(arena, cid, &rel);
+// A form's submission of realm `source`'s document, its request as the bindings made it, planned for the host to navigate
+// container `container`'s navigable to, replacing what that planned — and, for an interactive submission (a submit button's,
+// an implicit one — not `form.submit()`), the form's last plan on whichever navigable it was for (form-double-submit;
+// form.submit() to several frames navigates them all). Its parser goes on: HTML "plan to navigate" queues the navigation that
+// aborts it (Chrome and Firefox run the rest of a frame's script and its markup after).
+pub(crate) fn plan_frame_submission(
+    scope: &mut v8::PinScope<'_, '_>,
+    source: i32,
+    container: NodeId,
+    form: NodeId,
+    request: v8::Global<v8::Value>,
+    referrer: (String, String),
+    interactive: bool,
+) {
+    let arena = &mut crate::dom::dom(scope).arena;
     arena.stop_attribute_navigation(container);
     let navs = &mut arena.frame_navigations;
     if interactive {
@@ -577,21 +587,21 @@ fn plan_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
     let at = crate::navigation_plan::next_planned();
     let nav = navs.0.entry(container).or_default();
-    nav.host = Some((at, HostNavigation::Submit { request, source: cid, referrer }));
-    nav.aborted_document = aborted;
+    nav.host = Some((at, HostNavigation::Submit { request, source, referrer, held: false }));
+    nav.aborted_document = false;
     navs.1.last.insert(form, (at, container));
-    let arena = &mut crate::dom::dom(scope).arena;
-    let Some(frame) = arena.frame_realm(container) else {
+    match arena.frame_realm(container) {
+        // (…a `javascript:` URL's begun before it ended)
+        Some(frame) => {
+            crate::session_history::begin_navigation_of(arena, frame, None);
+        }
         // (…a frame with no document yet made one at its initial about:blank, none of its `src`, which this replaces)
-        let nav = arena.frame_navigation(container);
-        nav.flags |= SRC_REFUSED;
-        nav.src = None;
-        return;
-    };
-    // (…a `javascript:` URL's begun before it ended, and the submission of the frame's document the host routes taken out
-    // with its route: navigation_plan.rs)
-    crate::session_history::begin_navigation_of(arena, frame, None);
-    crate::navigation_plan::supersede_routed(scope, frame);
+        None => {
+            let nav = arena.frame_navigation(container);
+            nav.flags |= SRC_REFUSED;
+            nav.src = None;
+        }
+    }
 }
 // __dom.frameDestination(realm) -> the destination of a navigation of frame realm `realm`'s navigable: its container's (HTML
 // "create navigation params by fetching": "frame" for a `<frame>`, else "iframe").
@@ -605,8 +615,7 @@ fn frame_destination(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 fn frame_submission_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
-    let planned = crate::dom::realm(scope, cid).frame_navigations.0.get(&container).and_then(|n| n.host.as_ref());
-    rv.set_bool(planned.is_some_and(|(_, h)| matches!(h, HostNavigation::Submit { .. })));
+    rv.set_bool(crate::dom::realm(scope, cid).frame_navigations.submission_planned(container));
 }
 
 // __dom.hostCommitBegins(containerNid) -> whether a navigation its attributes began was under way: the document the host's
@@ -653,13 +662,6 @@ fn frame_traversal_srcdoc(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 pub(crate) fn abort_document(arena: &mut crate::dom::RealmArena, realm: i32) -> bool {
     arena.realm_document(realm).is_some_and(|doc| arena.document_states.lifecycle_mut(doc).abort_parser(false))
 }
-// …the document of the container's navigable's: none where it has no realm made yet (its initial about:blank, which a
-// navigation replaces as no document that loaded).
-fn abort_frame_document(scope: &mut v8::PinScope<'_, '_>, container: NodeId) -> bool {
-    let arena = &mut crate::dom::dom(scope).arena;
-    arena.frame_realm(container).is_some_and(|realm| abort_document(arena, realm))
-}
-
 // __dom.planFrameLocation(realm, url, replace, initiatorRealm, policy, activated) -> PLANNED_*: a navigation of frame
 // realm `realm`'s navigable — the calling realm's for undefined — to `url` planned for the host (`HostNavigation`),
 // replacing the one it planned (a form's of its parent's document among them), its Referer that of the document of
@@ -688,8 +690,6 @@ fn plan_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     nav.aborted_document = aborted;
     let host = HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated };
     nav.host = Some((crate::navigation_plan::next_planned(), host));
-    // (…and the submission of the frame's document the host routes, taken out with its route: navigation_plan.rs)
-    crate::navigation_plan::supersede_routed(scope, target);
     rv.set_uint32(PLANNED);
 }
 // __dom.planFrameReload(): a reload of the calling frame realm's document planned for the host, replacing the navigation
@@ -704,17 +704,15 @@ fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     nav.aborted_document = aborted;
     nav.host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload { url }));
     arena.frame_navigations.drop_submissions_of(cid);
-    crate::navigation_plan::supersede_routed(scope, cid);
 }
-// __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of, and the
-// submission of its document's it routes taken out with its route — a traversal making its document again.
+// __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of — a
+// traversal making its document again.
 fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let arena = &mut crate::dom::dom(scope).arena;
     if let Some(nav) = arena.live_container(realm).and_then(|c| arena.frame_navigations.0.get_mut(&c)) {
         nav.host = None;
     }
-    crate::navigation_plan::supersede_routed(scope, realm);
 }
 // __dom.navigationTurnQueued() -> whether the event loop's navigation turn is queued and not run yet (`Plans::turn`) — its
 // task gone with the realm that queued it is none. __dom.navigationTurnDelay() -> how long one queued now waits, its pace.
@@ -767,11 +765,6 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         taken.push((at, realm, host));
     }
     taken.sort_by_key(|&(at, ..)| at);
-    // (…each frame's navigable navigated now: the submission of its document the host routes taken out with its route
-    // first, before its realm makes way — navigation_plan.rs)
-    for &(_, realm, _) in &taken {
-        crate::navigation_plan::supersede_routed(scope, realm);
-    }
     let mut items = Vec::with_capacity(taken.len());
     for (_, realm, host) in taken {
         let realm = v8::Integer::new(scope, realm).into();

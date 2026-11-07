@@ -475,7 +475,7 @@ RSpec.describe 'Handle Fetch outcomes' do
   # A browser's fetch resolves at the head, what a request's tainting filters as any other; csim's buffered the bytes it keeps
   # for rendering first, so a stream that never closes never resolved it (Chrome and Firefox resolve it, measured 2026-11-07).
   # …an element's the bytes it renders as it is answered (Chrome and Firefox: the image loads).
-  it "loads an image of another origin a worker answers with a stream" do
+  it 'loads an image of another origin a worker answers with a stream' do
     png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
     session = simulated_session(lambda {|env|
       next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
@@ -500,6 +500,141 @@ RSpec.describe 'Handle Fetch outcomes' do
       i.src = 'http://other.test/i.png';
     JS
     expect(got).to eq(1)
+  end
+
+  # A navigation waiting for a worker to activate goes on only as its navigable's ongoing one, its entry recorded as it does:
+  # `stop()` ends it, a later navigation replaces it, one request sent (Chrome and Firefox, measured 2026-11-07).
+  context 'with a frame navigation waiting on an activating worker' do
+    let(:waiting) {
+      simulated_session(lambda {|env|
+        next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
+          let go, count = 0;
+          const gate = new Promise(r => { go = r; });
+          self.addEventListener('install', () => self.skipWaiting());
+          self.addEventListener('message', e => { if (e.data === 'go') go(); });
+          self.addEventListener('activate', e => e.waitUntil(gate));
+          self.addEventListener('fetch', e => {
+            const u = new URL(e.request.url);
+            if (u.pathname.startsWith('/sw/')) e.respondWith(new Response(`<!doctype html><body>n=${++count} ${u.pathname}${u.search}`, {headers: {'content-type': 'text/html'}}));
+          });
+        JS
+
+        body = env['PATH_INFO'] == '/' ? '<iframe id=f name=n src=/old></iframe><form id=x method=post action="/sw/x?1" target=n></form><form id=y method=post action="/sw/x?2" target=n></form>' : 'old'
+        [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+      })
+    }
+
+    def run_gated(js)
+      waiting.visit 'http://localhost/'
+      waiting.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        (async () => {
+          const r = await navigator.serviceWorker.register('/sw.js', {scope: '/sw/'});
+          const w = r.installing;
+          await new Promise(res => w.addEventListener('statechange', () => { if (w.state === 'activating') res(); }));
+          window.loads = 0;
+          f.addEventListener('load', () => loads++);
+          #{js}
+          await sleep(50);
+          w.postMessage('go');
+          await sleep(300);
+          done(true);
+        })();
+      JS
+      waiting.evaluate_script('[f.contentDocument.body.textContent, loads, history.length]')
+    end
+
+    {
+      'stop()' => 'x.submit(); await sleep(50); stop();',
+      "the frame's stop()" => 'x.submit(); await sleep(50); f.contentWindow.stop();'
+    }.each do |name, js|
+      it "ends a form's with #{name}" do
+        expect(run_gated(js)).to eq(['old', 0, 1])
+      end
+    end
+
+    it "ends a location's with stop()" do
+      expect(run_gated('f.contentWindow.location = "/sw/l"; await sleep(50); stop();')).to eq(['old', 0, 1])
+    end
+
+    it 'makes the later of two, one load and one entry' do
+      expect(run_gated('x.submit(); await sleep(50); y.submit();')).to eq(['n=1 /sw/x?2', 1, 2])
+    end
+
+    it 'records no entry of one a location replaces' do
+      got = run_gated('f.contentWindow.location = "/sw/l"; await sleep(50); y.submit();')
+      expect(got).to eq(['n=1 /sw/x?2', 1, 2])
+    end
+  end
+
+  # A stream's failure is only for what reads it: none on a page that does not, and the fetch's abort cancels it in the worker
+  # (Chrome and Firefox, measured 2026-11-07).
+  context 'with a no-cors fetch of a stream' do
+    let(:streaming) {
+      simulated_session(lambda {|env|
+        next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
+          self.addEventListener('install', () => self.skipWaiting());
+          self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+          const log = [];
+          self.addEventListener('message', e => e.source.postMessage(log.join()));
+          self.addEventListener('fetch', e => {
+            const path = new URL(e.request.url).pathname;
+            if (path === '/err') e.respondWith(new Response(new ReadableStream({start(c) { c.enqueue(new Uint8Array([1])); setTimeout(() => c.error(new Error('x')), 10); }})));
+            if (path === '/cancel') e.respondWith(new Response(new ReadableStream({start(c) { c.enqueue(new Uint8Array([1])); }, cancel() { log.push('cancelled'); }})));
+            if (path === '/never') e.respondWith(new Response(new ReadableStream({start(c) { c.enqueue(new Uint8Array([1])); }})));
+          });
+        JS
+
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
+      })
+    }
+
+    before do
+      streaming.visit '/'
+      streaming.execute_script("navigator.serviceWorker.addEventListener('controllerchange', () => { globalThis.__controlled = true; }); navigator.serviceWorker.register('/sw.js');")
+      expect(poll_until { streaming.evaluate_script('globalThis.__controlled === true') }).to be(true)
+    end
+
+    it 'raises no unhandledrejection where its stream errors' do
+      got = streaming.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        const seen = [];
+        addEventListener('unhandledrejection', (e) => seen.push(String(e.reason)));
+        fetch('http://other.test/err', {mode: 'no-cors'}).then((r) => setTimeout(() => done([r.type, seen]), 100));
+      JS
+      expect(got).to eq(['opaque', []])
+    end
+
+    it "cancels the worker's stream as it is aborted" do
+      got = streaming.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        (async () => {
+          const ac = new AbortController();
+          await fetch('http://other.test/cancel', {mode: 'no-cors', signal: ac.signal});
+          ac.abort();
+          await new Promise(r => setTimeout(r, 100));
+          navigator.serviceWorker.onmessage = (e) => done(e.data);
+          navigator.serviceWorker.controller.postMessage(1);
+        })();
+      JS
+      expect(got).to eq('cancelled')
+    end
+
+    # …a prefetch of one waits for its bytes (Chrome and Firefox: no `load` of one that never closes).
+    it "fires a prefetch's load at no head" do
+      got = streaming.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        const l = document.createElement('link');
+        l.rel = 'prefetch';
+        l.href = 'http://other.test/never';
+        l.onload = () => done('load');
+        l.onerror = () => done('error');
+        document.head.append(l);
+        setTimeout(() => done('none'), 300);
+      JS
+      expect(got).to eq('none')
+    end
   end
 
   it 'resolves a no-cors fetch at the head of a stream that never closes' do

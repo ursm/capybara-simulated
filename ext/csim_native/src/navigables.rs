@@ -11,9 +11,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::dom::{nid_arg, realm_id, utf16_arg, NodeId, RealmArena};
 
-// How deep frames nest: no HTML rule, and browsers differ (Firefox 159 makes a frame no window nor document past depth 9,
-// its `load` never fired, Chrome 157 went on to all 40 asked of it: measured 2026-11-07). A self-referential or
-// pathologically nested page would build realms without bound and stall the settle loop, so past it a frame is Firefox's.
+// How deep frames nest: an implementation limit, this driver's own. HTML's iframe chapter has none, its guard against a
+// page framing itself being by ancestor URL (`src_nested`), and browsers differ (Firefox 159 makes a frame no window nor
+// document past depth 9, its `load` never fired, Chrome 157 went on to all 40 asked of it: measured 2026-11-07). A pathologically
+// nested page of ever new URLs would build realms without bound and stall the settle loop, so past it a frame is Firefox's.
 pub(crate) const MAX_FRAME_DEPTH: u32 = 16;
 // How deep a walk of the navigable tree goes at most: past any nesting a page can build, so a corrupt chain ends rather
 // than spins.
@@ -1225,13 +1226,6 @@ impl RealmArena {
             Choice::Window(_) | Choice::New | Choice::Blocked => false,
         }
     }
-    // …the container of the frame's navigable it chooses where that container is in realm `current`'s document.
-    pub(crate) fn chosen_child_frame(&self, current: i32, target: &[u16]) -> Option<NodeId> {
-        match self.choose_navigable(current, target) {
-            Choice::Frame(c) if self.get(c).is_some_and(|n| n.realm == current) => Some(c),
-            _ => None,
-        }
-    }
     // Where `window.open(url, target)` called in realm `current` goes (`OpenRoute`; HTML "window open steps": an empty
     // target `_blank`, where a link's is its own navigable).
     pub(crate) fn open_route(&self, current: i32, target: &[u16]) -> OpenRoute {
@@ -1428,7 +1422,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "targetsOwnNavigable", targets_own_navigable, context_id);
     crate::dom::register(scope, ns, "openRoute", open_route, context_id);
-    crate::dom::register(scope, ns, "chosenChildFrame", chosen_child_frame, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
     crate::dom::register(scope, ns, "linkRoute", link_route, context_id);
     crate::dom::register(scope, ns, "navigationVerdict", navigation_verdict, context_id);
@@ -1733,14 +1726,6 @@ fn targets_own_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let target = utf16_arg(scope, args.get(0));
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).targets_own(cid, &target));
-}
-// __dom.chosenChildFrame(target) -> the container of the frame's navigable target `target` chooses from the calling
-// realm's (`RealmArena::choose_navigable`) where that container is in this realm's document — null for any other.
-fn chosen_child_frame(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let target = utf16_arg(scope, args.get(0));
-    let cid = realm_id(scope, &args);
-    let container = crate::dom::realm(scope, cid).chosen_child_frame(cid, &target);
-    rv.set(crate::dom::node_value(scope, container));
 }
 // __dom.childNavigables(docNid, limit) -> the containers of the document's document-tree child navigables, in tree order —
 // the first `limit` of them, where it is given (`window[n]` asks for n + 1) — as `nodes_value` answers.
@@ -2079,10 +2064,6 @@ mod tests {
         arena.location.sandbox = 0;
         assert!(arena.targets_own(1, &units("")) && arena.targets_own(1, &units("a")) && arena.targets_own(0, &units("_top")));
         assert!(arena.targets_own(0, &units("p")) && !arena.targets_own(1, &units("_top")) && !arena.targets_own(0, &units("a")));
-        assert_eq!(arena.chosen_child_frame(0, &units("a")), Some(a));
-        assert_eq!(arena.chosen_child_frame(1, &units("b")), Some(b));
-        assert_eq!(arena.chosen_child_frame(1, &units("a")), None);
-        assert_eq!(arena.chosen_child_frame(1, &units("_parent")), None);
         // (…and where `window.open` goes from either: its own window, another navigable, a new one named)
         assert_eq!(arena.open_route(1, &units("_self")), OpenRoute::Own);
         assert_eq!(arena.open_route(1, &units("_top")), OpenRoute::Navigable(Some(0), OpenWindow::Top));

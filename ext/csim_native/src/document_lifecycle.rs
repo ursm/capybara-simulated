@@ -28,7 +28,7 @@ pub(crate) struct Lifecycle {
     content_loaded: bool,
     load_fired: bool,
     page_showing: bool,
-    completely_loaded: bool,
+    pub(crate) completely_loaded: bool,
     // Opened (HTML document open steps) since it was loaded: what is written into it the document "the end" is owed for
     // from then on, whose load its container's follows — but where its mute iframe load flag is set: opened while its
     // container's `load` was being fired, the load its written document comes to fires none at that container.
@@ -329,6 +329,13 @@ fn load_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     // `load` for a document that set `location` to one as it parsed)
     if arena.navigation_plan.javascript_document_planned() {
         return;
+    }
+    // (…none of a frame's whose navigable a form's submission plans to navigate, its navigation due first, which aborts it:
+    // its parser ran on, there being no parallel here for it to run in — Firefox; Chrome fires it)
+    if arena.live_container(cid).is_some_and(|c| arena.frame_navigations.submission_planned(c)) {
+        lifecycle_of(scope, doc).aborted = true;
+        set_load_delay(scope, cid, 0);
+        return rv.set_uint32(LOAD_ABORTED);
     }
     if arena.load_delayed_here(cid) {
         if let Some(state) = arena.realm_state_mut(cid) {

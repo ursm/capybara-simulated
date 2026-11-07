@@ -66,7 +66,7 @@ RSpec.describe "a page form's planned navigation of a named frame" do
 
   # A POST to a URL no network answers: `data:` and about:blank answer it as they answer a GET (Chrome and Firefox, measured
   # 2026-11-07), and a blob: URL with a network error — Fetch's blob scheme takes a GET alone (Chrome; Firefox renders it).
-  it "posts to a data: or an about:blank URL as it gets them, and a blob: one fails" do
+  it 'posts to a data: or an about:blank URL as it gets them, and a blob: one fails' do
     session = session_with([])
     session.visit '/top'
     session.execute_script('window.loads = 0; fr.onload = () => loads++; f.action = "about:blank"; f.submit()')
@@ -96,7 +96,7 @@ RSpec.describe "a page form's planned navigation of a named frame" do
 
   # A frame whose navigation to its `src` has not got far makes none of it: the form's replaces it, in the entry of its
   # initial about:blank document (Chrome and Firefox, measured 2026-11-07: no script of it run, one `load`).
-  it "replaces the navigation to the src of a frame just inserted" do
+  it 'replaces the navigation to the src of a frame just inserted' do
     hits = []
     session = session_with(hits)
     session.visit '/top'
@@ -192,6 +192,137 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     expect(hits).not_to include('GET /src')
   end
 
+  # Every form that navigates a frame is planned by that frame's navigable as it is submitted, whichever document's it is — the
+  # navigable's one, a later navigation replacing it — so a sibling's and the page's into one frame send one request, and a
+  # location or a `javascript:` URL comes before or after it as any other navigation of the frame (Chrome and Firefox, measured
+  # 2026-11-07).
+  describe 'by whichever document' do
+    def siblings(hits)
+      simulated_session(lambda {|env|
+        hits << "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}#{"?#{env['QUERY_STRING']}" unless env['QUERY_STRING'].to_s.empty?}"
+        body = case env['PATH_INFO']
+               when '/top' then '<iframe id=a name=na src=/a></iframe><iframe id=b name=nb src=/b0></iframe><form id=x method=post action=/pg target=nb></form>'
+               when '/a' then '<form id=x method=post action=/sib target=nb></form><form id=own method=post action=/self></form>'
+               else env['PATH_INFO']
+               end
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+    end
+
+    {
+      'x.submit(); a.contentWindow.x.submit()' => ['/sib', 'POST /sib', 'POST /pg'],
+      'a.contentWindow.x.submit(); x.submit()' => ['/pg', 'POST /pg', 'POST /sib']
+    }.each do |js, (lands, sent, unsent)|
+      it "sends the later's alone into one frame: #{js}" do
+        hits = []
+        session = siblings(hits)
+        session.visit '/top'
+        session.execute_script(js)
+        session.evaluate_script('1')
+        expect(session.evaluate_script('b.contentWindow.location.pathname')).to eq(lands)
+        expect(hits).to include(sent)
+        expect(hits).not_to include(unsent)
+      end
+    end
+
+    {
+      'a.contentWindow.x.submit(); b.contentWindow.location = "/b1"' => '/b1',
+      'b.contentWindow.location = "/b1"; a.contentWindow.x.submit()' => '/sib'
+    }.each do |js, lands|
+      it "takes the later of a sibling's form and a location: #{js}" do
+        hits = []
+        session = siblings(hits)
+        session.visit '/top'
+        hits.clear
+        session.execute_script(js)
+        session.evaluate_script('1')
+        expect(session.evaluate_script('b.contentWindow.location.pathname')).to eq(lands)
+        expect(hits.size).to eq(1)
+      end
+    end
+
+    # …a `javascript:` URL of the frame none, whether the form is of the frame's own document or its sibling's.
+    {
+      'a.contentWindow.x.submit(); b.src = "javascript:parent.ran = true"' => ['b', '/b0'],
+      'a.contentWindow.own.submit(); a.contentWindow.location = "javascript:parent.ran = true"' => ['a', '/self']
+    }.each do |js, (frame, lands)|
+      it "runs no javascript: URL with a form planned: #{js}" do
+        session = siblings([])
+        session.visit '/top'
+        session.execute_script("window.ran = false; #{js}")
+        session.evaluate_script('1')
+        expect(session.evaluate_script('ran')).to be(false)
+        expect(session.evaluate_script("#{frame}.contentWindow.location.pathname")).to eq(lands) if frame == 'a'
+      end
+    end
+
+    # …and a frame's parser goes on past a script of its submitting a form into it, as the plan queues the navigation.
+    it "lets a frame's parser finish where its script submits its parent's form" do
+      session = simulated_session(lambda {|env|
+        body = case env['PATH_INFO']
+               when '/top' then '<script>window.L = []</script><form id=x action=/x target=n></form><iframe name=n src=/in></iframe>'
+               when '/in' then '<script>top.L.push(1); parent.x.submit(); top.L.push(2)</script><script>top.L.push(3)</script>'
+               else env['PATH_INFO']
+               end
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      session.visit '/top'
+      session.evaluate_script('1')
+      expect(session.evaluate_script('L')).to eq([1, 2, 3])
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/x')
+    end
+  end
+
+  # A traversal queued with it applies first, the form's navigation pushing from where that leaves it (Chrome and Firefox,
+  # measured 2026-11-07: one entry fewer than the other way about).
+  it 'pushes from the step a traversal queued with it goes to' do
+    session = session_with([])
+    session.visit '/top'
+    session.execute_script('frames[0].history.pushState(null, "", "/ps")')
+    session.evaluate_script('1')
+    session.execute_script('f.submit(); frames[0].history.back()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('[frames[0].location.pathname, history.length]')).to eq(['/x', 2])
+  end
+
+  # A GET to a fragment of the document the frame is at moves it within it, no request made (HTML "navigate to a fragment";
+  # Chrome and Firefox, measured 2026-11-07).
+  it "moves a frame within its document on a form's GET to a fragment of it" do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    hits.clear
+    session.execute_script('window.seen = 0; frames[0].kept = 1; frames[0].onhashchange = () => seen++; f.method = "get"; f.action = "/blank?#x"; fr.src = "/blank?"')
+    session.evaluate_script('1')
+    session.execute_script('frames[0].kept = 1; frames[0].onhashchange = () => seen++; f.submit()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('[frames[0].kept, frames[0].location.hash]')).to eq([1, '#x'])
+  end
+
+  # An entered frame's own: handed off from there too, and a `data:` URL's a document of it (Chrome and Firefox).
+  describe 'in an entered frame' do
+    it 'leaves the frame where it is on a mailto: form' do
+      session = simulated_session(lambda {|env|
+        body = env['PATH_INFO'] == '/top' ? '<iframe name=n src=/in></iframe>' : '<form action="mailto:a@b.test"><button id=go>go</button></form><p id=here>here</p>'
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      session.visit '/top'
+      session.within_frame('n') do
+        session.click_button('go')
+        expect(session).to have_css('#here')
+      end
+    end
+
+    it 'makes the document of a data: URL' do
+      session = session_with([])
+      session.visit '/top'
+      session.within_frame('n') do
+        session.execute_script('parent.frames[0].location = "data:text/html,<p id=made>made</p>"')
+        expect(session).to have_css('#made')
+      end
+    end
+  end
+
   # A link to a fragment of the frame's document moves it within it, fetching nothing (HTML "navigate to a fragment").
   it "fetches nothing for a link to the frame's own fragment" do
     hits = []
@@ -218,7 +349,7 @@ RSpec.describe "a page form's planned navigation of a named frame" do
   # the fragment there and then, and its own `load`'s navigation after it (Chrome: one GET of /slow, length 3; `#e` in
   # the script, `#z` at the end — which, its document not completely loaded in its `load`, replaces the entry: HTML
   # "Location-object navigate").
-  it "moves a frame still loading to the fragment a link asks for" do
+  it 'moves a frame still loading to the fragment a link asks for' do
     hits = []
     session = simulated_session(lambda {|env|
       hits << env['PATH_INFO']

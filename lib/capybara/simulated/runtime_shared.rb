@@ -48,7 +48,7 @@ module Capybara
         # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
         # document) so history.go(-1) can traverse back — and a controlling SW sees
         # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.
-        '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1], post: a[2] && {body: a[2], content_type: a[3].to_s, origin: a[4]}, srcdoc: a[5]); nil },
+        '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1], srcdoc: a[2]); nil },
         # …or the current one replaced by it: the navigation's history handling (frame_navigation.rs `frameAttributesNavigate`).
         '__csim_replaceFrameEntry'   => ->(b, *a) { b.replace_frame_entry(a[0].to_i, a[1], srcdoc: a[2]); nil },
         # …and the outgoing document unloaded (a[0] its realm, alive still): the entry takes its form state as its
@@ -162,7 +162,7 @@ module Capybara
         '__csim_swNavPreloadSet'      => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2], a[3].to_s); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
-        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body: a[5], content_type: a[6], defer_ok: !!a[7], dest: a[8] || 'iframe', container_realm: a[9], referrer_policy: a[10], initiator_realm: a[11], sandbox: [a[12]], user_activated: a[13] == true, link_policy: a[14], replaces_realm: a[15]) },
+        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], defer_ok: !!a[4], dest: a[5] || 'iframe', container_realm: a[6], referrer_policy: a[7], initiator_realm: a[8], sandbox: [a[9]], user_activated: a[10] == true, link_policy: a[11], replaces_realm: a[12]) },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         # The font FILES native text metrics read (font.rs): a family's system face, as fontconfig resolves it;
         # an `@font-face` url's, fetched (WOFF-decoded, cached) with the fetch's facts for its Resource Timing
