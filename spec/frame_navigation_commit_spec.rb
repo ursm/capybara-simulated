@@ -20,7 +20,7 @@ RSpec.describe 'a frame navigation’s session history entry' do
       next [204, {}, []] if path == '/nc'
       next [200, {'content-type' => 'application/octet-stream', 'content-disposition' => 'attachment; filename=x.bin'}, ['x']] if path == '/dl'
 
-      body = path == '/top' ? '<iframe src="/a"></iframe>' : "<a id=l href='/slow'>slow</a>#{path}"
+      body = {'/top' => '<iframe src="/a"></iframe>', '/blank' => '<iframe></iframe>'}.fetch(path) { "<a id=l href='/slow'>slow</a>#{path}" }
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><title>#{path}</title><body>#{body}"]]
     })
   }
@@ -58,6 +58,33 @@ RSpec.describe 'a frame navigation’s session history entry' do
       session.go_forward
       expect(frame_path).to eq('/b')
     end
+  end
+
+  # (…and in place of the frame's initial about:blank — HTML "navigate": a navigable whose active document is its initial
+  # about:blank replaces it — still where one before made no document there, or was ended by another)
+  ["frames[0].location = '/nc'", "frames[0].location = '/dl'", "frames[0].location = '/slow'; setTimeout(() => { frames[0].location = '/b'; }, 30)"].each do |first|
+    it "replaces the initial about:blank after #{first}" do
+      session.visit('/blank')
+      session.execute_script(first)
+      session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
+      session.execute_script("frames[0].location = '/b'") unless first.include?("'/b'")
+      expect(poll_until { frame_path == '/b' }).to be(true)
+      session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 400))')
+      expect([frame_path, length]).to eq(['/b', 1])
+    end
+  end
+
+  # (…and none of a navigation handed to another application from an entered frame, which no reload after makes either)
+  it 'is none of a URL handed off, a reload after it making none' do
+    session.visit('/top')
+    session.within_frame(0) do
+      session.execute_script("location = '/b'")
+      expect(poll_until { session.evaluate_script('location.pathname') == '/b' }).to be(true)
+      session.execute_script("location = 'mailto:x@example.com'")
+      session.execute_script('location.reload()')
+      session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
+    end
+    expect([frame_path, length]).to eq(['/b', 2])
   end
 
   # (…and the entry a navigation that ended another one makes is its own alone: the first one's never made)

@@ -881,7 +881,10 @@ impl Traversable {
     }
     // A navigation of navigable `nav` begun, its ongoing one now (HTML "set the ongoing navigation"): its number — and
     // whether the one numbered `id` still is.
+    // (…a frame's navigation under way before it ended with it, its entry never made: HTML "navigate", "this will abort
+    // other ongoing navigations")
     fn begin_navigation(&mut self, nav: u32) -> u64 {
+        self.navigations.remove(&nav);
         self.next_ongoing += 1;
         self.ongoing.insert(nav, self.next_ongoing);
         self.next_ongoing
@@ -2635,7 +2638,8 @@ fn frame_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // navigable to `url` begun (`Traversable::begin_frame_entry`), the entry it makes as its document is — "replace" in place
 // of the active one where `replace`, and where the frame is at its initial about:blank, which no traversal goes back to
 // (HTML "navigate": a navigable whose active document is its initial about:blank replaces it — its first document's,
-// about:blank, of no entry yet); "push" else, the active one made first where the frame has none (`frame_entry`) — of the
+// about:blank, of no entry yet, which a navigation that made none since, a 204's or one another ended, leaves it); "push"
+// else, the active one made first where the frame has none (`frame_entry`) — of the
 // markup `srcdoc` an about:srcdoc document is made of. Null for no frame, and for a `javascript:` URL, which runs in the
 // document the frame is at (HTML "navigate", its result at most replacing it): no entry is its.
 fn begin_frame_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -2651,8 +2655,13 @@ fn begin_frame_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let initial = frame_entry(arena, realm, false).is_none()
         && arena.realm_tree(realm).3
         && arena.realm_state(realm).and_then(|s| ada_url::Url::parse(s.location.href(), None).ok()).is_some_and(|u| crate::url_ops::matches_about_blank(&u));
-    let Some((frame, _)) = frame_entry(arena, realm, true) else { return rv.set_null() };
     let replace = replace || initial;
+    // (…the active entry made only where the next comes after it: one made for a navigation that then made no document
+    // would make a frame still at its initial about:blank one that has an entry)
+    if !replace {
+        frame_entry(arena, realm, true);
+    }
+    let Some(frame) = frame_navigable(arena, realm) else { return rv.set_null() };
     let data = Data { srcdoc: srcdoc.map(Into::into), ..Data::default() };
     let token = lock(&frame.traversable).begin_frame_entry(frame.nav, frame.parent_nav, url, replace, data);
     let Some(handling) = v8::String::new(scope, if replace { "replace" } else { "push" }) else { return };

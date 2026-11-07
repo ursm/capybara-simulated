@@ -12233,9 +12233,11 @@ module Capybara
           )
           # (…none where a navigation of the frame begun as the response was awaited ended it — a timer's `location`, a
           # link's — which goes on in its place: HTML "navigate", "this will abort other ongoing navigations")
-          unless ongoing.nil? || history.navigation_ongoing?(nav, ongoing[2])
+          # (…its reserved client discarded, as one of no document is)
+          unless navigation_ongoing?(ongoing)
             close_rack_body(hop.rack_body)
-            return
+            discard_reserved_client(hop.client_id) if hop.client_id
+            return frame_navigation_made_no_document(realm_id)
           end
           commit_frame_navigation(realm_id, entry, fetch, hop, req_body, content_type, origin_null ? 'null' : url_origin(origin_url), commit)
         ensure
@@ -12267,7 +12269,8 @@ module Capybara
         history, id = frame_entry(realm_id)
         history&.update(id, {referrer: fetch.referrer.to_s, referer: hop.referrer_source.to_s, referrer_policy: hop.referrer_policy.to_s})
         tag_frame_entry_post(realm_id, body, content_type, origin) if fetch.request_method == 'POST'
-        # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
+        # (…and what the caller's document state gives it — `restored`, a traversal's form state and history state — none
+        # where a redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
         ctype, csp, document_policy, refresh, _, origin_agent_cluster = Native.document_params(hop.headers, '', false)
         ctype = hop.document_type || ctype
         response = {
@@ -12617,7 +12620,8 @@ module Capybara
         origin_null: false,
         user_activated: false
       )
-        return unless entered_frame_navigates?(entry)
+        # (…none of a URL handed to another application: `navigate_realm_self_get`)
+        return if Native.navigation_hands_off(url.to_s) || !entered_frame_navigates?(entry)
 
         # (…an entry of the frame's session history, as a frame its realm navigates makes one: after the active one — or, a
         # location's, in place of it — made as its document is: `begin_frame_entry`)
@@ -12631,16 +12635,17 @@ module Capybara
 
           return commit_frame_document(entry[:realm_id], entry, url.to_s, verdict == 'inline' ? '' : bytes, verdict == 'inline' ? 'text/html' : mime, doc_origin: 'null')
         end
-        unless http_url?(url)
+        # (…about:blank's and a blob's made here, of no fetch: their entries `frame_navigation_made_document`'s)
+        if about_blank_url?(url)
           begin_frame_entry(entry[:realm_id], url, replace: handling == :replace) if handling
-          handling = nil
+          return reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
         end
-        return reload_current_frame_realm('about:blank', '', 'text/html', entry: entry) if about_blank_url?(url)
         # A `blob:` URL, which no server answers: the blob the container has its navigation load (`__csimTakeFrameNavBlob`:
         # the one it began with, a reload's the one the document was loaded of, else the one it names now in this window's
         # registry — no other window's partition) — none a failed load at the URL. (A redirect to one is followed to none:
         # navigation_fetch.rs `redirect`.)
         if url.to_s.match?(/\Ablob:/i)
+          begin_frame_entry(entry[:realm_id], url, replace: handling == :replace) if handling
           blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, is_reload || is_history))
           return reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry)
         end
