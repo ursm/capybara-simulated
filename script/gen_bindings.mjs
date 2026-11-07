@@ -343,7 +343,7 @@ const INTERFACES = [
     event: { init: ['touches', 'targetTouches', 'changedTouches'] },
     namedProperties: 'none: getModifierState is the plain operation Chrome and Firefox have, no named property of the event'
   }],
-  ['html', 'DataTransfer', { install: true, slots: [{ items: 'list', files: 'filesView' }] }],
+  ['html', 'DataTransfer', { install: true, shell: true, slots: [{ items: 'list', files: 'filesView' }] }],
   ['html', 'DataTransferItemList'],
   ['html', 'DataTransferItem', {
     omit: {
@@ -400,15 +400,15 @@ const INTERFACES = [
   ['html', 'CanvasGradient'],
   ['html', 'TextMetrics'],
   ['html', 'CanvasPattern'],
-  ['html', 'Path2D', { install: true }],
+  ['html', 'Path2D', { install: true, shell: true }],
   ['html', 'CanvasRenderingContext2D', { install: true, shell: true }],
   ['html', 'OffscreenCanvasRenderingContext2D', { install: true, shell: true }],
-  ['html', 'OffscreenCanvas', { install: true }],
+  ['html', 'OffscreenCanvas', { install: true, shell: true }],
   ['SVG', 'SVGAnimatedString'],
   ['clipboard-apis', 'ClipboardItem', { install: true, slots: ['presentationStyle', 'types'] }],
-  ['clipboard-apis', 'Clipboard', { install: true }],
+  ['clipboard-apis', 'Clipboard', { install: true, shell: true }],
   ['screen-orientation', 'ScreenOrientation', { install: true }],
-  ['html', 'MessageChannel', { install: true, slots: ['port1', 'port2'] }],
+  ['html', 'MessageChannel', { install: true, shell: true, slots: ['port1', 'port2'] }],
   ['html', 'MessagePort', {
     install: true,
     omitMembers: { onclose: 'withdrawn from the HTML Standard — no close event is fired at a port; Chrome and Firefox have none' }
@@ -550,7 +550,7 @@ const INTERFACES = [
   ['html', 'DOMParser', { install: true, shell: true }],
   ['html', 'XMLSerializer', { install: true, shell: true }],
   ['intersection-observer', 'IntersectionObserver', { install: true, slots: ['root', 'rootMargin', 'scrollMargin', 'thresholds', 'delay', 'trackVisibility'] }],
-  ['intersection-observer', 'IntersectionObserverEntry', { install: true, slots: ['time', 'rootBounds', 'boundingClientRect', 'intersectionRect', 'isIntersecting', 'isVisible', 'intersectionRatio', 'target'] }],
+  ['intersection-observer', 'IntersectionObserverEntry', { install: true, shell: true, slots: ['time', 'rootBounds', 'boundingClientRect', 'intersectionRect', 'isIntersecting', 'isVisible', 'intersectionRatio', 'target'] }],
   ['hr-time', 'Performance', {
     install: true,
     omit: {
@@ -580,8 +580,8 @@ const INTERFACES = [
   ['fetch', 'Response', { install: true, slots: ['type', 'url', 'redirected', 'status', 'ok', 'statusText', 'headers'] }],
   ['encoding', 'TextEncoder', { install: true, shell: true }],
   ['encoding', 'TextDecoder', { install: true, shell: true, slots: ['fatal', 'ignoreBOM'] }],
-  ['encoding', 'TextDecoderStream', { install: true, slots: ['fatal', 'ignoreBOM'] }],
-  ['encoding', 'TextEncoderStream', { install: true }],
+  ['encoding', 'TextDecoderStream', { install: true, shell: true, slots: ['fatal', 'ignoreBOM'] }],
+  ['encoding', 'TextEncoderStream', { install: true, shell: true }],
   ['FileAPI', 'Blob', { install: true, shell: true, slots: ['size', 'type'] }],
   ['FileAPI', 'File', { install: true, shell: true, slots: ['name', 'lastModified'] }],
   // (…made natively: a FileList is [Serializable], and V8's serializer takes no Proxy)
@@ -592,7 +592,7 @@ const INTERFACES = [
   ['dom', 'XPathExpression', { install: true, shell: true }],
   ['dom', 'XPathEvaluator', { install: true, shell: true }],
   ['dom', 'AbstractRange', { install: true }],
-  ['dom', 'StaticRange', { install: true }],
+  ['dom', 'StaticRange', { install: true, shell: true }],
   ['dom', 'Range', { install: true }],
   ['selection-api', 'Selection', { install: true, shell: true }],
   ['cssom', 'CSSStyleDeclaration', { install: true, indexedProperties: 'the Proxy each declaration is (style-proxy.js `makeDeclProxy`)' }],
@@ -631,7 +631,7 @@ const INTERFACES = [
   ['css-nesting', 'CSSNestedDeclarations', { install: true, shell: true }],
   ['css-anchor-position', 'CSSPositionTryRule', { install: true, shell: true }],
   ['dom', 'MutationObserver', { install: true, shell: true }],
-  ['cssom-view', 'MediaQueryList', { install: true, slots: ['media'] }],
+  ['cssom-view', 'MediaQueryList', { install: true, shell: true, slots: ['media'] }],
   ['geolocation', 'Geolocation'],
   ['geolocation', 'GeolocationPosition', { slots: ['coords', 'timestamp'] }],
   ['geolocation', 'GeolocationCoordinates'],
@@ -642,7 +642,7 @@ const INTERFACES = [
       'permissions-revoke': 'revoke: Relinquishing Permissions is a WICG proposal (headless Chrome exposes none)'
     }
   }],
-  ['permissions', 'PermissionStatus', { install: true, slots: ['state', 'name'] }],
+  ['permissions', 'PermissionStatus', { install: true, shell: true, slots: ['state', 'name'] }],
   ['cssom-view', 'CaretPosition', { install: true, shell: true, slots: ['offsetNode', 'offset'] }],
   ['dom', 'MutationRecord', { install: true, shell: true, slots: ['type', 'target', 'previousSibling', 'nextSibling', 'attributeName', 'attributeNamespace', 'oldValue'] }],
   ['dom', 'AbortController', { install: true, shell: true, slots: ['signal'] }],
