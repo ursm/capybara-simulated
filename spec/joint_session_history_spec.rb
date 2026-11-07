@@ -18,6 +18,8 @@ require_relative 'support/session_teardown'
 RSpec.describe 'the joint session history' do
   let(:app) do
     lambda {|env|
+      next [204, {}, []] if env['PATH_INFO'].start_with?('/204')
+
       body = case env['PATH_INFO']
              when '/top' then '<iframe src="/f1"></iframe><script>addEventListener("popstate", () => document.title += "P")</script>'
              when '/f1' then 'F1<script>addEventListener("popstate", () => parent.document.title += "F")</script>'
@@ -33,6 +35,37 @@ RSpec.describe 'the joint session history' do
 
   def frame_path = session.evaluate_script('frames[0].location.pathname')
   def length = session.evaluate_script('history.length')
+
+  # The traversals the tasks of a page being left ask for — run before the navigation that leaves it, the first moving its
+  # frame planned for the host, the second waiting for it — applied in order where the page stays after all: the
+  # navigation makes none (a 204), nor the one the same tasks planned after it.
+  it 'applies the traversals a page asked for as it was left, past two navigations that made no document' do
+    session.visit '/top'
+    session.execute_script('frames[0].location = "/f2"')
+    expect(frame_path).to eq('/f2')
+    session.execute_script('frames[0].location = "/b"')
+    expect(frame_path).to eq('/b')
+    session.execute_script(<<~JS)
+      setTimeout(() => {
+        setTimeout(() => { history.back(); history.back(); }, 0);
+        location.href = '/204b';
+      }, 0);
+      location.href = '/204a';
+    JS
+    session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 200))')
+    expect(session.evaluate_script('location.pathname')).to eq('/top')
+    expect(frame_path).to eq('/f1')
+  end
+
+  # …and the one a `javascript:` URL's script asked for, its document — which it waits for — not made after all, a
+  # location the tasks due before it planned going first and making none (a 204).
+  it 'applies a traversal its javascript: URL asked for where a location went first' do
+    session.visit '/top'
+    session.execute_script("history.pushState(null, '', '/top2'); setInterval(() => {}, 5)")
+    session.execute_script(%q(location.href = "javascript:setTimeout(() => { location.href = '/204' }, 0); history.back(); '<title>K</title>'"))
+    session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 200))')
+    expect(session.evaluate_script('location.pathname')).to eq('/top')
+  end
 
   it "counts a frame's navigation a step of the page's" do
     session.visit '/top'

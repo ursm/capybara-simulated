@@ -1031,8 +1031,10 @@ fn flushed_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 // plan anew, and what each window `window.open` made in this isolate planned, and the host of its frames (they run on
 // the page's event loop).
 // __dom.flushEnd(): …they ran — what they planned kept as flushed, what was planned before back.
-// __dom.flushRestore(drop) -> whether any was: the navigation committed no document — what the flushed tasks planned
-// put back where nothing was planned since — or (`drop`) what they planned let go. (One that commits a document drops
+// __dom.flushRestore(drop) -> [whether any was, realms]: the navigation committed no document — what the flushed tasks
+// planned put back where nothing was planned since — or (`drop`) what they planned let go, `realms` those of the
+// top-level documents whose traversal it let go so: the traversals queued behind it, which waited for it, have a task
+// no more, the bindings' to queue them one (history.js `__csimRequeueTraversals`). (One that commits a document drops
 // the page's with the rest of its plan: the page load's reset.)
 fn traversables(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Vec<i32> {
     let cid = realm_id(scope, args);
@@ -1061,9 +1063,16 @@ fn flush_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let drop = args.get(0).is_true();
     let mut restored = false;
+    let mut orphaned = Vec::new();
     for r in traversables(scope, &args) {
         let plan = &mut realm(scope, r).navigation_plan;
-        let Some(flushed) = plan.flushed.take().filter(|_| !drop) else { continue };
+        let Some(flushed) = plan.flushed.take() else { continue };
+        if drop {
+            if flushed.traversal.is_some() || flushed.frame_traversal.is_some() {
+                orphaned.push(r);
+            }
+            continue;
+        }
         restored |= plan.own.restore(flushed);
     }
     let arena = &mut crate::dom::dom(scope).arena;
@@ -1078,5 +1087,6 @@ fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
             }
         }
     }
-    rv.set_bool(restored);
+    let items = [v8::Boolean::new(scope, restored).into(), crate::navigables::realm_array(scope, &orphaned)];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

@@ -11104,6 +11104,9 @@ module Capybara
         commit_javascript_document!(url, markup)
       ensure
         @session_history.hold_traversals(false)
+        # (…those whose tasks found them held, where no document was made after all — a location the flush planned went
+        # first: a task again)
+        @runtime.call('__csimRequeueTraversals') if @session_history.queued?
       end
       private def commit_javascript_document!(url, markup)
         # (…what is due on the page run first, as before any navigation: `flush_outgoing_page_init`. The text asks no more of
