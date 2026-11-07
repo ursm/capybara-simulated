@@ -2409,118 +2409,59 @@ module Capybara
       # resets), and maximizing must not silently promote it to desktop — its "display" is the
       # viewport it was built with.
       def screen_size                     ; @default_viewport || SCREEN_SIZE ; end
-      # Capybara-initiated `page.go_back` runs from Ruby, not inside a
-      # JS call, so it's safe to rebuild the Context synchronously. The
-      # `force:` flag bypasses the deferral that `history_go` uses to
-      # avoid terminating the running JS context. A user action like any other: the URL the
-      # page is at as it begins its starting point, no intermediate a polling `current_url` walks
-      # — what the outgoing page's due timers do first included (`mark_action_baseline`).
+      # Capybara's `page.go_back` / `go_forward`, the user's back and forward buttons: the page's session history traversed
+      # as its `history.go(delta)` would (`traverse_history`). A user action like any other: the URL the page is at as it
+      # begins its starting point, no intermediate a polling `current_url` walks — what the outgoing page's due timers do
+      # first included (`mark_action_baseline`).
       def go_back
         mark_action_baseline
-        history_go(-1, force: true)
+        traverse_history(0, -1)
       end
       def go_forward
         mark_action_baseline
-        history_go(+1, force: true)
+        traverse_history(0, +1)
+      end
+      # The session history of realm `realm`'s document — the page's (0), or a window's `window.open` made in this isolate —
+      # traversed by `delta` (HTML "traverse the history by a delta", the user's as a script's): queued on its traversal
+      # queue as its `history.go(delta)` queues it (history.js `__csimTraverseHistory`), one that makes a document again
+      # applied as the driver takes what is planned (`drain_task_intents`), one within the documents as its task runs
+      # (`settle`) — then what the documents it made planned.
+      def traverse_history(realm, delta)
+        invalidate_find_cache
+        @runtime.realm_call(realm, '__csimTraverseHistory', delta.to_i)
+        drain_task_intents
+        settle
+        drain_task_intents
       end
 
-
-      # Traverse the page's session history by `delta` steps — the joint history of the page and its frames
-      # (session_history.rs), whichever navigable's `history` asked: each navigable whose active entry the step moves
-      # traverses to its entry, a same-document one (a pushState's, a fragment's) by its location updated and a
-      # `popstate` (HTML "update document for history step application"), another by the entry's document made again
-      # (a navigation from history, a re-POST its POST's). `force` where none of the page's script is on the stack: the
-      # driver's own (`go_back`).
-      def history_go(delta, force: false, realm: 0, token: nil)
-        delta = delta.to_i
-        return if delta == 0
-        return unless history_of_page?(realm)
-        return unless (plan = history_plan(delta))
-
-        step, changes = plan
-        # (…a navigable whose document it makes again its navigation planned before it no more: HTML "apply the history
-        # step" sets its ongoing navigation to "traversal" — Chrome and Firefox: `history.back(); location.href = '/x'`
-        # never commits /x, in either order, though either may request it first (measured 2026-10-31, another window's:
-        # Chrome for `w.location = '/x'; w.history.back()`, Firefox for the other order); this requests it in neither — one
-        # moved within its document keeping its own)
-        changes.each {|nav, _, same_document| cancel_navigations_for(nav) unless same_document }
-        if changes.all? {|(_, _, same_document)| same_document }
-          # …unless this is the page being navigated away from, running its last
-          # due-now step: the navigation already under way wins, and moving the
-          # step here would leave it pointing at an entry that isn't the document
-          # about to commit (see `flush_outgoing_page_init`).
-          #
-          # Hard to reach on purpose since the page's own init runs with the load
-          # (`flush_page_init`) and every find and action drains what is due as it
-          # goes: a traversal has to come due in the instant between the last of
-          # those and the navigation. It stays because the flush CAN still fire one
-          # — a timer that came due while the test was busy in Ruby — and the cost
-          # of being wrong there is a history step that doesn't describe the
-          # document.
-          # (A traversal the page asked for before the navigation began is its own and goes ahead: its task, which a
-          # browser would have run as the script that asked ended, comes due in the flush only because the driver
-          # takes the navigation first.)
-          return if @flushing_outgoing_page && !(token && token <= @flush_traversal_mark.to_i)
-          # Pure pushState traversal — no VM rebuild, safe to run
-          # inline; the popstate dispatch happens within the current
-          # call's JS context.
-          @session_history.go_to(step)
-          changes.each {|nav, id, _| traverse_same_document(@session_history, nav, id) }
-        elsif force
-          # No live JS call on THIS window's isolate to interrupt, safe to rebuild the Context synchronously.
-          perform_history_traverse(delta)
-        else
-          # JS-driven (`history.back()` from a page handler): replaying
-          # the history entry synchronously would call `rebuild_ctx`
-          # on the still-executing Context and terminate the current
-          # call with `ScriptTerminatedError` (terminating the
-          # in-flight call on the isolate). Stash the intent
-          # and drain after the call returns — as a location's
-          # navigation and a reload are (navigation_plan.rs).
-          # (…each of a task's, in order, each step judged as the one before it is applied: two `history.back()` that move
-          # a frame alone both apply — HTML "traverse the history by a delta", Chrome and Firefox measured 2026-11-01 —
-          # where one that makes the page's document again lets those asked of that document after it go,
-          # session_history.rs `take_due` — kept by the traversable, `stash_traversal`)
-          @session_history.stash_traversal(delta)
-        end
-      end
-
-      # A traversal a page's `history` asked for, appended to the traversable's session history traversal queue as it
-      # asked (session_history.rs `historyTraverse`), applied as the task it is runs (`apply_planned_traversal`) — or,
-      # before that, as the driver takes what the page planned (`drain_pending_navigation`): ahead of any navigation
-      # planned with it, which a traversal making a document again cancels (`cancel_navigations_for`). The traversal of
-      # `token` applied, and those queued before it: none where the driver took them already.
-      def apply_planned_traversal(token)
-        @session_history.take_queued(token).each do |queued, delta, realm|
-          history_go(delta, realm: realm, token: queued)
-        end
-      end
-      def apply_planned_traversals
-        @session_history.take_all_queued.each do |token, delta, realm|
-          history_go(delta, realm: realm, token: token)
-        end
-      end
-      # …those, as the driver takes the navigations the page planned with them — the traversal they make first, its
-      # cancelling of the ones it cancels in (HTML "apply the history step") — where one makes a document again (whose
-      # task would have gone ahead of the page's own navigations) or the host has a navigation of the page's to take; else
-      # they wait for their task, which runs after what is due now.
+      # The traversals the page's `history` queued (session_history.rs `historyTraverse`), each applied by the engine as its
+      # task runs (`applyTraversal`) — or, before that, as the driver takes what the page planned: ahead of any navigation
+      # planned with them, which one that makes a document again lets go of (HTML "apply the history step" sets the ongoing
+      # navigation to "traversal"), where one makes a document again — whose task would have gone ahead of the page's own
+      # navigations — or the host has a navigation of the page's to take; else they wait for their task, which runs after
+      # what is due now. Then the one the engine planned for the host applied (`consume_planned_traversal`).
       private def apply_planned_traversals_before_navigations
-        return unless @session_history.queued?
-        # (…behind a `javascript:` URL's document its script's traversal asked for: `commit_javascript_document`)
-        return if own_planned.anybits?(OWN_JAVASCRIPT_DOCUMENT)
-        return unless @session_history.queued_documents? || pending_navigation_besides_traversals?
-
-        apply_planned_traversals
-        consume_pending_history_traverse
+        if @session_history.queued? && (@session_history.queued_documents? || pending_navigation_besides_traversals?)
+          @runtime.call('__csimApplyOwnTraversals', true)
+        end
+        consume_planned_traversal
       end
 
-      # (…the traversals stashed, one at a time off the traversable's one queue — a traversal applied runs what the page
-      # planned, which may come back here for the next: `restore_flushed_nav_intents` — each failing alone)
-      def consume_pending_history_traverse
-        while (delta = @session_history.next_stashed)
+      # The traversal of the page's session history the engine planned for the host (navigation_plan.rs `takeTraversal`) —
+      # one that makes the page's document again (`perform_history_traverse`), or one that moves a frame of it
+      # (`traverse_navigables_of`) — applied, then those queued after it, which waited for it, from the step it went to:
+      # round after round while one is planned. (…each failing alone)
+      def consume_planned_traversal
+        while (planned = @runtime.call('__csimTakeTraversal'))
+          kind, *plan = planned
           invalidate_find_cache
           begin
-            perform_history_traverse(delta)
+            if kind == 'traverse_navigables'
+              traverse_navigables_of(0, *plan)
+            else
+              perform_history_traverse(plan[0].to_i)
+              @runtime.call('__csimApplyOwnTraversals', true)
+            end
           rescue StandardError => e
             log_console('warn', "history traversal failed: #{e.message}")
           end
@@ -2530,13 +2471,16 @@ module Capybara
       # The step a traversal by `delta` goes to, and the navigables' changes it makes (session_history.rs `traversal`).
       private def history_plan(delta) = @session_history.traversal(delta)
 
+      # A traversal of the page's session history by `delta` that makes its document again — judged anew once the tasks due
+      # on the page before it ran (`flush_outgoing_page_init`), as the history stands once what they did to it (a pushState
+      # dropping the forward steps) is in: the entry's document made again (a navigation from history, a re-POST its
+      # POST's), the page asked first whether it may be unloaded — or, those tasks having made it one that keeps the
+      # page's document, applied as such.
       private def perform_history_traverse(delta)
         return unless (plan = history_plan(delta))
 
         if plan[1].any? {|nav, _, same_document| nav.zero? && !same_document }
           if @timers_active
-            # Before the step below moves (see `flush_outgoing_page_init`) — and the step planned after it, as the history
-            # stands once what the page's timers did to it (a pushState dropping the forward steps) is in.
             flush_outgoing_page_init
             flushed = true
           end
@@ -2606,55 +2550,26 @@ module Capybara
         # (…those of a traversal it ran within — a frame's load taking another window's — as that one left them)
         @traversing_frames, @prompted_frames = outer
       end
-      # …one of a window's of this isolate, which its task planned for the host (navigation_plan.rs `FrameTraversal`:
-      # `changes` flat), the navigations planned for the frames whose documents it makes again let go of — then those
-      # queued after it, which waited for it, from the step it went to.
-      private def traverse_window_navigables(realm, step, *changes)
-        return unless (history = window_history(realm))
+      # …one the engine planned for the host of the page or a window of this isolate, realm `realm` (navigation_plan.rs
+      # `FrameTraversal`: `changes` flat — the navigations of the frames whose documents it makes again let go of as it
+      # was planned) — then those queued after it, which waited for it, from the step it went to.
+      private def traverse_navigables_of(realm, step, *changes)
+        return unless (history = realm.zero? ? @session_history : window_history(realm))
 
-        changes = changes.each_slice(3).to_a
-        changes.each {|nav, _, same_document| cancel_navigations_for(nav) unless same_document }
-        traverse_navigables(history, step, changes, top: realm)
-        @runtime.realm_call(realm, '__csimApplyOwnTraversals', true) if @runtime.frame_realm_alive?(realm)
-      end
-
-      # The navigations planned for navigable `nav` (0 the page) let go of: a traversal making its document again — the
-      # page's own, and the one another window planned of it (session_history.rs `Asked`).
-      private def cancel_navigations_for(nav)
-        if nav.zero?
-          # (…no `javascript:` URL's document, finalized ahead of the traversal: `commit_javascript_document`)
-          return if own_planned.anybits?(OWN_JAVASCRIPT_DOCUMENT)
-
-          @runtime.call('__csimSupersedePlanned')
-          @session_history.take_planned
-        elsif (realm = navigable_realm(nav))
-          # (…each finalized as it is let go of — frame-nav.js `frameNavigationFinalized` — its parent's load delayed by
-          # neither from here)
-          @runtime.call('__csimDropFrameNavigation', realm)
-          # (…a form's of its parent's document too, planned in that realm: frame_navigation.rs `planned`)
-          parent = @runtime.frame_realm_parent(realm)
-          handle = frame_container_handle(realm, parent)
-          frame_realm_host_call(parent, '__csimCancelFrameNavigation', handle) unless handle.zero?
-        end
+        traverse_navigables(history, step, changes.each_slice(3).to_a, top: realm)
+        @runtime.realm_call(realm, '__csimApplyOwnTraversals', true) if realm.zero? || @runtime.frame_realm_alive?(realm)
       end
 
       # Navigable `nav` of session history `history` (0 its top-level one: the page's, or window realm `top`'s) traversed
       # to its entry `id` of the document it is at: its location the entry's URL, a `popstate` with its state, and a
       # `hashchange` queued where the fragment moved.
       private def traverse_same_document(history, nav, id, top: 0)
-        entry = history.entry(id)
-        if nav.zero? && top.zero?
-          old_url = page_url
-          self.page_url = entry[:url]
-          @runtime.call('__csimUpdateLocation', entry[:url])
-          @runtime.call('__csimDispatchPopState', entry[:state])
-          @runtime.call('__csimQueueHashChange', old_url, entry[:url]) if fragment_of(old_url) != fragment_of(entry[:url])
-          return
-        end
         realm = nav.zero? ? top : navigable_realm(nav)
-        return unless realm && @runtime.frame_realm_alive?(realm)
+        return unless realm && (realm.zero? || @runtime.frame_realm_alive?(realm))
 
-        old_url = frame_realm_url(realm)
+        entry   = history.entry(id)
+        old_url = realm.zero? ? page_url : frame_realm_url(realm)
+        self.page_url = entry[:url] if realm.zero?
         @runtime.realm_call(realm, '__csimUpdateLocation', entry[:url])
         @runtime.realm_call(realm, '__csimDispatchPopState', entry[:state])
         @runtime.realm_call(realm, '__csimQueueHashChange', old_url, entry[:url]) if fragment_of(old_url) != fragment_of(entry[:url])
@@ -3513,7 +3428,7 @@ module Capybara
       # fired-timer signals can't see. Aux-window opens are intentionally excluded:
       # they build a separate Browser, not a hop in a same-page chain.
       private def pending_nav_intent?
-        @session_history.stashed? || @session_history.queued? || pending_navigation_besides_traversals? || window_asked?
+        @session_history.queued? || !own_planned.zero? || window_asked?
       end
       # Whether a window `window.open` made in this isolate has a navigation of its own planned, or a traversal queued that
       # plans one (`consume_pending_window_nav`) — none asked where it made none.
@@ -3521,7 +3436,7 @@ module Capybara
         !@runtime.window_realm_meta.empty? && @runtime.call('__csimWindowsPlanned') == true
       end
       private def pending_navigation_besides_traversals?
-        !own_planned.zero?
+        own_planned.anybits?(~OWN_TRAVERSAL)
       end
 
       # Pull every background async channel (Worker / EventSource / hijacked fetch
@@ -8388,13 +8303,7 @@ module Capybara
         navigate_window_realm(realm, 'reload', [true, nil], by_user: true)
         settle
       end
-      # …and a traversal of its session history (`go_back` / `go_forward`), applied as the task it queues runs.
-      def traverse_window_realm(realm, delta)
-        invalidate_find_cache
-        @runtime.realm_call(realm, '__csimTraverseHistory', delta.to_i)
-        settle
-        drain_task_intents
-      end
+      # …and a traversal of its session history (`go_back` / `go_forward`): `traverse_history`.
       # …and its viewport (`resize_to`), its resize steps run: as the page's (`set_viewport`), in its realm.
       def window_realm_viewport(realm) = @runtime.realm_call(realm, '__csimViewportSize').map(&:to_i)
       # …and the response its document was made of, `[status, headers]` — one no response made, 200.
@@ -11153,6 +11062,7 @@ module Capybara
       # submission to it — and whether the host plans a navigation of a frame.
       OWN_LOCATION = 1
       OWN_JAVASCRIPT_DOCUMENT = 32
+      OWN_TRAVERSAL = 64
       FRAMES_PLANNED = 8 | 16
       private def own_planned = @runtime.call('__csimOwnPlanned').to_i
       # The navigation of the page its `location` planned, taken: its URL, whether it replaces the current entry, the
@@ -11184,9 +11094,6 @@ module Capybara
       JAVASCRIPT_DOCUMENT_ENTRY_KEEPS = %i[referer referrer_policy referrer origin cross_site opener_policy].freeze
       private def commit_javascript_document(url, markup)
         invalidate_find_cache
-        # (…a traversal its script asked for goes on after it, the session history's queue not the document's: both browsers
-        # make the document, then traverse)
-        @session_history.stash_queued
         # (…what is due on the page run first, as before any navigation: `flush_outgoing_page_init`. The text asks no more of
         # the ongoing navigation as it finalizes this one, step 2 being behind it — both browsers end on it, a `void` or another
         # `javascript:` URL's begun after it — but where a task of the flush began a location navigation, the one the navigable
@@ -11203,8 +11110,11 @@ module Capybara
         self.page_url = url
         record_response(200, headers)
         @current_referer = ''
-        boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy, controlled: false)
-        consume_pending_history_traverse
+        # (…a traversal its script asked for goes on after it, the session history's queue not the document's — its task
+        # gone with the document, the host's to apply: both browsers make the document, then traverse)
+        boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy, controlled: false, keep_traversals: true)
+        @runtime.call('__csimApplyOwnTraversals', true)
+        consume_planned_traversal
       end
       # …the response it is made of, HTML's: `text/html;charset=utf-8` and, given here as its headers, the policy container of
       # realm `realm`'s document: the Content-Security-Policy its own response had (`headers`), the referrer policy it has now.
@@ -11273,8 +11183,8 @@ module Capybara
       # navigate") — taken in the order they were planned, each window's document made again in place: a location's to
       # its URL, by the document that began it (its own where no other did), a `blob:` one's of the blob it began with; a
       # reload's to the URL its document is at, a `blob:` one's of its blob; a traversal's of its session history to the
-      # URL of the entry it goes to, referred as that entry's document was (session_history.rs `applyWindowTraversal`) — or,
-      # one that keeps its document, its frames' each to theirs (`traverse_window_navigables`).
+      # URL of the entry it goes to, referred as that entry's document was (session_history.rs `applyTraversal`) — or,
+      # one that keeps its document, its frames' each to theirs (`traverse_navigables_of`).
       # Each one's entry of the window's session history its document's (history.js `__csimCommitWindowEntry`): a
       # location's after the current one, or in its place; a reload's the current one; a traversal's the one it goes to.
       # (None asked for where no window was opened.)
@@ -11297,7 +11207,7 @@ module Capybara
             # `run_queued_before_reload`)
             next run_queued_before_reload(realm_id, plan[0]) if kind == 'queued'
             # (…a traversal that keeps the window's document, moving a frame of it, applied as the page's frames' are)
-            next traverse_window_navigables(realm_id, *plan) if kind == 'traverse_navigables'
+            next traverse_navigables_of(realm_id, *plan) if kind == 'traverse_navigables'
             # (…a `javascript:` URL's document, its URL and its markup: `planJavascriptDocument`)
             next commit_window_javascript_document(realm_id, *plan.values_at(0, 8)) if kind == 'javascript'
             # (…a form's, of its own document or another's: its realm, its request and its Referer)
@@ -11514,12 +11424,14 @@ module Capybara
         elsif document_origin_opaque?(realm_id)
           made[:doc_origin] = 'null'
         end
-        new_id = replace_window_document(realm_id, url, markup, 'text/html;charset=utf-8', ['replace', nil, nil], made, reuses: true)
+        new_id = replace_window_document(realm_id, url, markup, 'text/html;charset=utf-8', ['javascript', nil, nil], made, reuses: true)
         return unless new_id
 
         @runtime.window_realm_meta[new_id][:response] = [200, headers]
         history.update(history.active(0), kept) if kept
         retarget_scope(realm_id, new_id)
+        # (…a traversal its script asked for applied after it, as the page's is: `commit_javascript_document`)
+        @runtime.realm_call(new_id, '__csimApplyOwnTraversals', true)
         new_id
       end
       # The session history of window realm `realm`'s document — its traversable's, a window `window.open` made in this
@@ -11682,7 +11594,7 @@ module Capybara
       # (session_history.rs) — the page's, or that of a window `window.open` made in this isolate: a nested history of its
       # parent's document state, by its navigable (navigables.rs's id for it: a container removed and inserted again has a
       # new one), each entry's form-control state captured for restoration (HTML "persisted user state" / bfcache). Its
-      # `history.back()` traverses that history, as its top-level document's does (`history_go`, `traverse_navigables`).
+      # `history.back()` traverses that history, as its top-level document's does (`traverse_navigables`).
       #
       # Navigable of frame realm `realm_id`, its parent's (0 the top-level one), the parent realm, and the session history
       # its entries are in — nil for a realm that is no frame (session_history.rs `frame_navigable`).
@@ -12457,7 +12369,6 @@ module Capybara
         consume_pending_page_submission
         consume_pending_frame_reload
         consume_pending_reload
-        consume_pending_history_traverse
         consume_pending_aux_window
         # (…and what the windows `window.open` made in this isolate planned meanwhile — a traversal a frame of one queued
         # as its document loaded above — taken in the same pass, as the page's frames' traversal is just before)
@@ -12494,9 +12405,6 @@ module Capybara
         replay_history_entry(@session_history.active(0), is_reload: true, user_activated: user_activated, through_ui: through_ui)
         restore_flushed_nav_intents
       end
-      # Whether realm `realm` (0 the page) is a document of this page's navigables: the page's, or a frame's of it — the
-      # engine's to say, as `history.length` asks it (session_history.rs `historyOfPage`).
-      private def history_of_page?(realm) = realm.to_i.zero? || @runtime.call('__csimHistoryOfPage', realm.to_i) == true
       # The host a URL names, or nil for one with none (about:blank / data: / a relative current_url before the first
       # navigate).
       def cookie_host(url)
@@ -13310,8 +13218,9 @@ module Capybara
       # (…`content_type` the type its body said where it did — MIME Sniffing's computed one — over the response's)
       # (…`inline` an inline content document's: `boot_inline_document`)
       # (…`client_id` the reserved client id of the navigation whose response it is: `run_navigation_fetch`)
-      # (…`controlled` false for one no fetch made, which Handle Fetch sets no worker of: `commit_javascript_document`)
-      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: false, inherited_coop: nil, content_type: nil, inline: false, client_id: nil, controlled: true)
+      # (…`controlled` false for one no fetch made, which Handle Fetch sets no worker of — and `keep_traversals`, the
+      # traversals the document it replaces queued going on after it: `commit_javascript_document`'s)
+      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: false, inherited_coop: nil, content_type: nil, inline: false, client_id: nil, controlled: true, keep_traversals: false)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -13326,9 +13235,9 @@ module Capybara
         # (…the document state the next one is of the one its `window.name` reads and writes from here on: the leaving
         # one's pagehide wrote its own)
         @session_history.show
-        @session_history.flush_restore(false)
-        # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone)
-        @session_history.clear_queued
+        # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone — but for those the
+        # host applies after it, `keep_traversals`: `commit_javascript_document`)
+        @session_history.clear_queued unless keep_traversals
         # The outgoing page's raced fetches die with its VM (fetch ids are per-VM) —
         # a leg delivering after this point would resolve the NEW page's same-
         # numbered fetch with the old page's response.
@@ -13534,7 +13443,7 @@ module Capybara
       #    `/arrived` loads at `/arrived`, and going back from it lands on
       #    `/pushed` — the outgoing document's entries are real, they just don't
       #    move the incoming document's URL. Running here reproduces that: the
-      #    history updates (pushState, replaceState, `history_go`, which all take
+      #    history updates (pushState, replaceState, a traversal's task, which all take
       #    effect IMMEDIATELY on the page URL and the session history) act on the outgoing
       #    entry, and this navigation's `record_history` / `self.page_url = url`
       #    then commit on top. Flushing AFTER the commit — where this used to
@@ -13568,52 +13477,41 @@ module Capybara
       # host's navigations of its frames and the frames' submissions it routes are stashed alike, in the engine:
       # navigation_plan.rs `flushBegin`.)
       def flush_outgoing_page_init
-        @flush_traversal_mark = @session_history.last_token
-        saved = @session_history.flush_begin
-        # A same-document `history.back()` from the flushed page takes effect INLINE
-        # (`history_go`), moving the history step under the navigation now committing —
-        # the document would end up being the incoming page while the step pointed at
-        # the entry the outgoing page stepped to, so a later `go_forward` replayed the
-        # wrong entry. Chrome resolves the race the other way (measured, 151: a
-        # `history.back()` fired while a slow document is in flight CANCELS that
-        # navigation and traverses), but a `visit` that silently doesn't happen is
-        # worse for a test driver than a dropped traversal, so the navigation wins and
-        # the traversal is discarded — the same last-wins rule planned navigations use.
+        # A same-document `history.back()` the flushed page asks for would move the history step under the navigation
+        # now committing — the document would end up being the incoming page while the step pointed at the entry the
+        # outgoing page stepped to, so a later `go_forward` replayed the wrong entry. Chrome resolves the race the other
+        # way (measured, 151: a `history.back()` fired while a slow document is in flight CANCELS that navigation and
+        # traverses), but a `visit` that silently doesn't happen is worse for a test driver than a dropped traversal, so
+        # the navigation wins and the traversal is let go — the same last-wins rule planned navigations use
+        # (session_history.rs `flush_mark`).
+        @session_history.flush_begin
         @flushing_outgoing_page = true
         begin
           @runtime.call('__csimFlushBegin')
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
           # (…and the traversals the page asked for before the navigation began, whose tasks a browser would have run by
           # now: the driver took the navigation first)
-          apply_planned_traversals
+          @runtime.call('__csimApplyOwnTraversals', true)
         rescue StandardError
           # Outgoing page is discarded by this navigation; its flush error is moot.
         ensure
           @flushing_outgoing_page = false
-          # What the flush itself stashed, kept for the paths that DON'T commit a new
+          # What the flush itself planned, kept for the paths that DON'T commit a new
           # document (a `Content-Disposition: attachment` response, a raise mid-fetch):
           # there the page lives on, so its `location.href = …` must still happen.
-          @session_history.flush_end(saved)
+          @session_history.flush_end
           @runtime.call('__csimFlushEnd')
         end
       end
 
       # Put back what `flush_outgoing_page_init` took from a page that turned out to
       # be staying (see above). `boot_response_into_ctx` drops the stash instead — a
-      # committed navigation really does discard the document that stashed it. The
-      # traversals the flush stashed go ahead of those the live page asked for since,
-      # in the order asked (session_history.rs `flush_restore`).
+      # committed navigation really does discard the document that stashed it
+      # (navigation_plan.rs `flushRestore`: a traversal the flush planned among them).
       def restore_flushed_nav_intents
-        # (…the page's own plan's, the engine's — let go with the rest where a restore is under way: navigation_plan.rs
-        # `flushRestore`)
-        if @restoring_flushed_nav_intents
-          @runtime.call('__csimFlushRestore', true) if @session_history.flush_restore(false)
-          return
-        end
-        return unless (traversals = @session_history.flush_restore(true))
-
-        own = @runtime.call('__csimFlushRestore', false) == true
-        return if traversals.zero? && !own
+        # (…let go with the rest where a restore is under way)
+        return @runtime.call('__csimFlushRestore', true) if @restoring_flushed_nav_intents
+        return unless @runtime.call('__csimFlushRestore', false) == true
 
         # And run them. The flush consumed the task that stashed them, so the
         # settle that follows a user action sees nothing left to do and would

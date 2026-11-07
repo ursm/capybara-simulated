@@ -56,7 +56,6 @@ module Capybara
         '__csim_frameUnloaded'       => ->(b, *a) { b.frame_document_unloaded(a[0].to_i); nil },
         '__setTimersActive'          => ->(b, *a) { b.timers_active = !!a[0]; nil },
         '__csim_navigationTurnQueued' => ->(b, *_a) { b.navigation_turn_queued = true; nil },
-        '__csimApplyTraversal'       => ->(b, *a) { b.apply_planned_traversal(a[0].to_i); nil },
         '__csimReadFilePick'         => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },
         '__getDocumentCookie'        => ->(b, *a) { b.document_cookie(a[0], a[1], a[2]) },
         '__setDocumentCookie'        => ->(b, *a) { b.write_document_cookie(a[0].to_s, a[1], a[2], a[3]); nil },

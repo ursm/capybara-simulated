@@ -227,15 +227,15 @@ struct Traversable {
     // as it is restored (`restore_frame`), which gives back the whole of it only where none of these happened since.
     version: u64,
     // The session history traversal queue (HTML §7.4.1.2): the traversals a page's `history` asked for, each applied as
-    // its task runs, in order — and the token the next one is given.
+    // its task runs, in order (`applyTraversal`) — and the token the next one is given.
     queued: Vec<Queued>,
     tokens: u64,
-    // …and those taken off it that make a document again, which the host applies once the script that asked returns —
-    // their deltas, in order, each step judged as it is applied (`stashed`) — and those a page's flush took from it as a
-    // navigation away began (`flushed`, none where no flush is pending): given back ahead of what was asked since where
-    // the page stays after all, let go of where the navigation commits (browser.rb `flush_outgoing_page_init`).
-    stashed: Vec<i64>,
-    flushed: Option<Vec<i64>>,
+    // …and, while the host runs the tasks of the page it is navigating away from (browser.rb `flush_outgoing_page_init`),
+    // the token of the last one queued before that navigation began: one queued after it that moves the page within its
+    // documents is let go, the navigation under way winning — its step would point at an entry that is not the document
+    // about to commit. (One that makes a document again is planned as any, the flush keeping what it planned apart:
+    // navigation_plan.rs `flushBegin`.)
+    flush_mark: Option<u64>,
     // Whether it closed: its window's browsing context discarded, which no opener of another window is then
     // (navigables.rs `opener_now`).
     closed: bool,
@@ -1079,10 +1079,12 @@ impl SessionHistory {
     fn traversal(&self, delta: i64) -> Option<(i64, Vec<Change>)> {
         self.lock().traversal(delta)
     }
-    // #take_queued(token) -> [[token, delta, realm], …] (`Traversable::take_queued`); #take_all_queued -> every one.
+    // …those queued up to and with the one of `token`, and every one (`Traversable::take_queued`), which the tests read.
+    #[cfg(test)]
     fn take_queued(&self, token: u64) -> Vec<(u64, i64, i32)> {
         self.lock().take_queued(token).into_iter().map(Queued::row).collect()
     }
+    #[cfg(test)]
     fn take_all_queued(&self) -> Vec<(u64, i64, i32)> {
         self.lock().take_all_queued().into_iter().map(Queued::row).collect()
     }
@@ -1111,54 +1113,13 @@ impl SessionHistory {
         let t = self.lock();
         t.state.current_entry(TOP, t.build).and_then(|e| e.data.post.clone())
     }
-    // #last_token -> the token of the traversal queued last, 0 for none ever: those up to it were asked for by now.
-    fn last_token(&self) -> u64 {
-        self.lock().tokens
-    }
-    // #stash_traversal(delta) — a traversal making a document again taken off the queue, to apply once the script returns.
-    fn stash_traversal(&self, delta: i64) {
-        self.lock().stashed.push(delta);
-    }
-    // #next_stashed -> the first of those, taken — one queue however its taking is re-entered (a traversal applied runs
-    // what the page planned, which may apply the next); #stashed? -> whether there are any.
-    fn next_stashed(&self) -> Option<i64> {
+    // #flush_begin / #flush_end: the host running the tasks of the page it navigates away from, and done (`flush_mark`).
+    fn flush_begin(&self) {
         let mut t = self.lock();
-        (!t.stashed.is_empty()).then(|| t.stashed.remove(0))
+        t.flush_mark = Some(t.tokens);
     }
-    fn take_stashed(&self) -> Vec<i64> {
-        std::mem::take(&mut self.lock().stashed)
-    }
-    fn has_stashed(&self) -> bool {
-        !self.lock().stashed.is_empty()
-    }
-    // #flush_begin -> those set aside as a page's flush begins, given back as it ends (`flush_end`), which keeps what the
-    // flush itself stashed apart (`flushed`).
-    fn flush_begin(&self) -> Vec<i64> {
-        self.take_stashed()
-    }
-    fn flush_end(&self, saved: Vec<i64>) {
-        let mut t = self.lock();
-        let flushed = std::mem::replace(&mut t.stashed, saved);
-        t.flushed = Some(flushed);
-    }
-    // #flush_restore(keep) -> how many the flush stashed, given back ahead of those stashed since (`keep`) or let go of
-    // (not `keep`: the navigation committed, or a restore is under way) — nil where no flush is pending.
-    fn flush_restore(&self, keep: bool) -> Option<usize> {
-        let mut t = self.lock();
-        let mut flushed = t.flushed.take()?;
-        let n = flushed.len();
-        if keep {
-            flushed.append(&mut t.stashed);
-            t.stashed = flushed;
-        }
-        Some(n)
-    }
-    // #stash_queued: the traversals its page asked for that no task of it applied made the host's to apply, its document about
-    // to be replaced with its session history's queue going on (a `javascript:` URL's: browser.rb `commit_javascript_document`).
-    fn stash_queued(&self) {
-        let mut guard = self.lock();
-        let t = &mut *guard;
-        t.stashed.extend(t.queued.drain(..).map(|q| q.delta));
+    fn flush_end(&self) {
+        self.lock().flush_mark = None;
     }
     // #clear_queued: the page's traversals let go — its document gone, whose traversals go with it.
     fn clear_queued(&self) {
@@ -1249,8 +1210,7 @@ impl SessionHistory {
         (t.closed, t.by_web_content, t.popup_sandbox) = (false, false, 0);
         t.opener_policy = crate::coop::Value::UnsafeNone;
         t.queued.clear();
-        t.stashed.clear();
-        t.flushed = None;
+        t.flush_mark = None;
         asking(&mut t, |t| t.asked = Asked::default());
     }
     // #session_storage = shed: its session storage's (`session_storage`), its Browser's.
@@ -1486,19 +1446,11 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("document_url=", method!(SessionHistory::set_document_url, 1))?;
     class.define_method("note_url_changes", method!(SessionHistory::note_url_changes, 1))?;
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
-    class.define_method("take_queued", method!(SessionHistory::take_queued, 1))?;
-    class.define_method("take_all_queued", method!(SessionHistory::take_all_queued, 0))?;
-    class.define_method("stash_traversal", method!(SessionHistory::stash_traversal, 1))?;
-    class.define_method("next_stashed", method!(SessionHistory::next_stashed, 0))?;
-    class.define_method("stashed?", method!(SessionHistory::has_stashed, 0))?;
     class.define_method("flush_begin", method!(SessionHistory::flush_begin, 0))?;
-    class.define_method("flush_end", method!(SessionHistory::flush_end, 1))?;
-    class.define_method("flush_restore", method!(SessionHistory::flush_restore, 1))?;
+    class.define_method("flush_end", method!(SessionHistory::flush_end, 0))?;
     class.define_method("queued?", method!(SessionHistory::is_queued, 0))?;
     class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
-    class.define_method("last_token", method!(SessionHistory::last_token, 0))?;
     class.define_method("clear_queued", method!(SessionHistory::clear_queued, 0))?;
-    class.define_method("stash_queued", method!(SessionHistory::stash_queued, 0))?;
     class.define_method("go_to", method!(SessionHistory::go_to, 1))?;
     class.define_method("hold", method!(SessionHistory::hold, 3))?;
     class.define_method("step", method!(SessionHistory::step, 0))?;
@@ -1540,24 +1492,19 @@ mod tests {
         assert_eq!(opener_policy_of(id), Value::UnsafeNone);
     }
 
-    // A page's flush sets aside the traversals stashed before it and keeps what it stashed apart: given back ahead of
-    // those stashed since where the page stays, let go of where the navigation commits.
+    // A page's flush marks the traversals queued before it — those after it that move the page within its documents let
+    // go as the navigation under way commits — and marks none once it is over.
     #[test]
-    fn a_flush_keeps_its_traversals_apart() {
+    fn a_flush_marks_the_traversals_queued_before_it() {
         let h = history();
-        h.stash_traversal(-1);
-        let saved = h.flush_begin();
-        h.stash_traversal(-2);
-        h.flush_end(saved);
-        h.stash_traversal(1);
-        assert_eq!(h.flush_restore(true), Some(1));
-        assert_eq!([h.next_stashed(), h.next_stashed(), h.next_stashed(), h.next_stashed()], [Some(-2), Some(-1), Some(1), None]);
-        assert_eq!(h.flush_restore(true), None);
-        let saved = h.flush_begin();
-        h.stash_traversal(-3);
-        h.flush_end(saved);
-        assert_eq!(h.flush_restore(false), Some(1));
-        assert!(!h.has_stashed());
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
+        let (before, _) = h.lock().queue(-1, 0);
+        h.flush_begin();
+        let (after, _) = h.lock().queue(-1, 0);
+        assert_eq!(h.lock().flush_mark, Some(before));
+        assert!(after > before);
+        h.flush_end();
+        assert_eq!(h.lock().flush_mark, None);
     }
 
     // Chrome, measured 2026-10-24: a frame navigated adds the page a step; the page's back takes the frame back, its
@@ -1615,7 +1562,7 @@ mod tests {
         assert!(h.take_queued(t1).is_empty());
         assert_eq!(h.take_all_queued(), vec![(t2, -1, 0)]);
         assert!(!h.is_queued());
-        assert_eq!(h.last_token(), t2);
+        assert_eq!(h.lock().tokens, t2);
         assert!(recordable("about:blank#x") && recordable("HTTPS://a.test/") && !recordable("about:blanky") && recordable("data:,x"));
         assert!(recordable("about:srcdoc") && !recordable("about:srcdocs") && !recordable("about:other"));
         assert!(recordable("blob:http://a.test/0d3c") && recordable("BLOB:null/x"));
@@ -1987,7 +1934,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "sessionStorageShed", session_storage_shed_op, context_id);
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
     crate::dom::register(scope, ns, "historyTraverse", history_traverse_op, context_id);
-    crate::dom::register(scope, ns, "applyWindowTraversal", apply_window_traversal_op, context_id);
+    crate::dom::register(scope, ns, "applyTraversal", apply_traversal_op, context_id);
     crate::dom::register(scope, ns, "windowsTraversing", windows_traversing_op, context_id);
     crate::dom::register(scope, ns, "destroyNavigableHistory", destroy_navigable_history_op, context_id);
     crate::dom::register(scope, ns, "windowEntryPost", window_entry_post_op, context_id);
@@ -1995,7 +1942,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "historyUpdate", history_update_op, context_id);
     crate::dom::register(scope, ns, "frameNavigable", frame_navigable_op, context_id);
     crate::dom::register(scope, ns, "frameEntry", frame_entry_op, context_id);
-    crate::dom::register(scope, ns, "historyOfPage", history_of_page_op, context_id);
 }
 
 // __dom.traversableClosing() -> whether the top-level traversable of the isolate's page is closing or closed (HTML's
@@ -2109,18 +2055,10 @@ fn history_length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_uint32(length as u32);
 }
 
-// __dom.historyOfPage(realm) -> whether realm `realm`'s `history` is its window's session history (`of_page`), the
-// host's to ask of a pushState or a traversal one asked for.
-fn history_of_page_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let realm = args.get(0).int32_value(scope).unwrap_or(0);
-    let cid = crate::dom::realm_id(scope, &args);
-    rv.set_bool(of_page(crate::dom::realm(scope, cid), realm));
-}
 
 // __dom.historyTraverse(delta) -> [token, delay]: a traversal by `delta` the calling realm's `history` asked for, appended
 // to its traversable's session history traversal queue (`traversable_of`, `Traversable::queue`) — [0, 0] for a realm of
-// none, which traverses nothing. Its task, which the bindings queue with that delay, applies it (`applyWindowTraversal`,
-// else the host's).
+// none, which traverses nothing. Its task, which the bindings queue with that delay, applies it (`applyTraversal`).
 fn history_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let delta = args.get(0).integer_value(scope).unwrap_or(0);
     let cid = crate::dom::realm_id(scope, &args);
@@ -2173,26 +2111,36 @@ fn windows_traversing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.applyWindowTraversal(token) -> the traversal of `token`, and those queued before it (`Traversable::take_due`),
-// applied to the session history of the calling realm's window — one `window.open` made in this isolate — in order:
-// [window, url, state, hashchange, …] — the window's realm, whose document is moved (a frame's `history` traverses its
-// window's), then of each traversal that moves it within its document its entry's URL and state and whether its
-// fragment changed (HTML "update document for history step application": its location the URL, then `popstate` with
-// the state, then a `hashchange`, which the bindings do); one that makes its document again planned in that document's
-// navigation plan (navigation_plan.rs `Traversal`), which the host takes as the task ends, those asked of it after it
-// let go — and one that moves a frame of it planned there too (`FrameTraversal`), those taken with it queued again for the
-// host to apply after it. Null for a realm of no such window: the page's traversals are the host's to apply.
+// __dom.applyTraversal(token, all) -> the traversal of `token`, and those queued before it (`Traversable::take_due`),
+// applied to the session history of the calling realm's traversable (`traversable_of`) — the page's, or a window's
+// `window.open` made in this isolate; a frame's `history` traverses its top-level one's — in order: [top, planned,
+// settled, url, state, hashchange, …] — the realm of the top-level document, which is moved; whether one was planned for
+// the host (below), which its navigation turn hands it (timers.js `queueNavigationTurn`); the realms whose load a frame's
+// navigation let go of delays no more (`traversal_cancels_frame`); then of each traversal that moves it within its
+// document its entry's URL and state and whether its fragment changed (HTML "update document for history step
+// application": its location the URL, then `popstate` with the state, then a `hashchange`, which the bindings do). One
+// that makes its document again is planned in that document's navigation plan (navigation_plan.rs `Traversal`), which
+// the host takes as the task ends — its navigable's ongoing navigation "traversal" from then on, which lets go of the
+// navigations planned of it, another window's too (HTML "apply the history step") — those asked of it after it let go;
+// one that moves a frame of it planned there too (`FrameTraversal`), the navigations of each frame whose document it
+// makes again let go of at once, as that frame's ongoing navigation is "traversal" from then on, and those taken with it
+// queued again for the host to apply after it. Null for a realm of no traversable (a frame removed, a window navigated
+// away from).
 // (…token 0: those up to the last that makes a document again, `take_documents_queued`; `all`, every one queued — the
-// host's, once it applied one that moved a frame)
-fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// host's, ahead of a navigation planned with them, and once it applied one that waited)
+fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let token = args.get(0).number_value(scope).map_or(0, |n| n as u64);
     let all = args.get(1).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    let Some((traversable, window)) = window_traversable(crate::dom::realm(scope, cid), cid) else { return rv.set_null() };
+    let Some((traversable, window)) = traversable_of(crate::dom::realm(scope, cid), cid) else { return rv.set_null() };
+    let top = window.unwrap_or(0);
     // (…none while one taken before waits for the host to apply it: those queued after it judged from the step it goes
-    // to, the host applying them after it — `all` — or letting them go with the document it replaces)
-    if crate::dom::realm(scope, window).navigation_plan.traversal_waiting() {
-        let items = [v8::Integer::new(scope, window).into()];
+    // to, the host applying them after it — `all` — or letting them go with the document it replaces; nor behind a
+    // `javascript:` URL's document its script asked them before, which goes first — both browsers make the document,
+    // then traverse: browser.rb `commit_javascript_document`)
+    let plan = &crate::dom::realm(scope, top).navigation_plan;
+    if plan.traversal_waiting() || plan.javascript_document_planned() {
+        let items = [v8::Integer::new(scope, top).into(), v8::Boolean::new(scope, false).into(), v8::Array::new(scope, 0).into()];
         return rv.set(v8::Array::new_with_elements(scope, &items).into());
     }
     let mut moves = Vec::new();
@@ -2211,15 +2159,17 @@ fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
         while let Some(q) = due.next() {
             let Some((step, changes)) = t.traversal(q.delta) else { continue };
             let from = t.state.current_entry(TOP, t.build).map(|e| e.url.clone()).unwrap_or_default();
-            let top = changes.iter().find(|c| c.0 == TOP).and_then(|c| t.state.entry(c.1).map(|e| (e.clone(), c.2)));
-            if let Some((entry, false)) = top {
+            let top_change = changes.iter().find(|c| c.0 == TOP).and_then(|c| t.state.entry(c.1).map(|e| (e.clone(), c.2)));
+            if let Some((entry, false)) = top_change {
                 let referrer = entry.data.text("referer").map(str::to_owned);
-                planned = Some(Traversal { step, url: entry.url, referrer, post: entry.data.post.clone() });
+                planned = Some(Traversal { step, delta: q.delta, url: entry.url, referrer, post: entry.data.post.clone() });
+                t.begin_navigation(TOP);
+                asking(&mut t, |t| t.asked.planned = None);
                 break;
             }
-            // (…one that moves a frame of it — its document made again, or moved within — the host's, as the page's
-            // frames' are, the window's own move within its document with them: those taken with it put back ahead of the
-            // rest, for the host to apply after it, from the step it goes to)
+            // (…one that moves a frame of it — its document made again, or moved within — the host's, the top-level
+            // document's own move within its document with them: those taken with it put back ahead of the rest, for the
+            // host to apply after it, from the step it goes to)
             if changes.iter().any(|c| c.0 != TOP) {
                 let rest: Vec<Queued> = due.collect();
                 asking(&mut t, |t| {
@@ -2228,21 +2178,34 @@ fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
                 frames_planned = Some(crate::navigation_plan::FrameTraversal { step, changes });
                 break;
             }
+            if t.flush_mark.is_some_and(|mark| q.token > mark) {
+                continue;
+            }
             t.go_to(step);
-            if let Some((entry, _)) = top {
+            if let Some((entry, _)) = top_change {
+                // (…the page's URL its traversable's, the host's to read: `move_url`'s, of no step noted)
+                if window.is_none() {
+                    t.url = Some(entry.url.clone());
+                }
                 let hashchange = fragment(&from) != fragment(&entry.url);
                 moves.push((entry.url, entry.data.state.clone(), hashchange));
             }
         }
     }
+    let mut settled = Vec::new();
+    let host_planned = planned.is_some() || frames_planned.is_some();
     if let Some(traversal) = frames_planned {
-        crate::dom::realm(scope, window).navigation_plan.plan_frame_traversal(traversal);
+        let arena = crate::dom::realm(scope, top);
+        settled.extend(traversal.changes.iter().filter(|&&(nav, _, same)| nav != TOP && !same).filter_map(|&(nav, ..)| arena.traversal_cancels_frame(nav)));
+        arena.navigation_plan.plan_frame_traversal(traversal);
     }
     if let Some(traversal) = planned {
-        crate::dom::realm(scope, window).navigation_plan.plan_traversal(traversal);
+        crate::dom::realm(scope, top).navigation_plan.plan_traversal(traversal);
     }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(moves.len() * 3 + 1);
-    items.push(v8::Integer::new(scope, window).into());
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(moves.len() * 3 + 3);
+    items.push(v8::Integer::new(scope, top).into());
+    items.push(v8::Boolean::new(scope, host_planned).into());
+    items.push(crate::navigables::realm_array(scope, &settled));
     for (url, state, hashchange) in moves {
         let Some(url) = v8::String::new(scope, &url) else { return rv.set_null() };
         items.push(url.into());
@@ -2259,10 +2222,11 @@ fn fragment(url: &str) -> Option<&str> {
 // __dom.commitWindowEntry(url, how, step, referrer, body, contentType) -> the classic history API state the calling realm's
 // document — a window's of this isolate, made by a navigation of it — starts with: its window's session history told of
 // it. `how` "push" a navigation's entry after the current one, "replace" one in place of it (a `location.replace`, or the
-// first navigation of a window at its initial about:blank, which has none: HTML "navigate"), each with the Referer the
-// request sent, a POST's `body` (a Uint8Array) and `contentType`, and no state; "reload" the current entry's document
-// made again; "step" the traversal to `step` applied (`Traversal`), the entry there's state its document's. Undefined
-// for a realm of no such window.
+// first navigation of a window at its initial about:blank, which has none: HTML "navigate"; "javascript" a `javascript:`
+// URL's document's, the traversals its script queued going on after it, as the page's do: browser.rb
+// `commit_javascript_document`), each with the Referer the request sent, a POST's `body` (a Uint8Array) and
+// `contentType`, and no state; "reload" the current entry's document made again; "step" the traversal to `step` applied
+// (`Traversal`), the entry there's state its document's. Undefined for a realm of no such window.
 fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let how = args.get(1).to_rust_string_lossy(scope);
@@ -2282,14 +2246,16 @@ fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         let mut t = lock(&traversable);
         // (…the traversals the document it replaces queued let go with it — one its `unload` asked for among them (WPT
         // traverse-during-unload.html) — as the page's are: `clear_queued`)
-        t.queued.clear();
+        if how != "javascript" {
+            t.queued.clear();
+        }
         // (…and its frames new navigables, as the page's are: `rebuilt`)
         t.rebuilt();
         match how.as_str() {
-            "push" | "replace" => {
+            "push" | "replace" | "javascript" => {
                 // (…its document state's navigable target name the window's as its document begins: HTML keeps it there)
                 let data = Data { post, texts: [None, referrer, None, None, None], name: Some(name), ..Data::default() };
-                let replace = how == "replace" && !t.state.entries.is_empty();
+                let replace = how != "push" && !t.state.entries.is_empty();
                 t.commit(TOP, 0, &url, false, replace, data);
                 None
             }

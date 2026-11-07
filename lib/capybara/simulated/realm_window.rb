@@ -59,8 +59,8 @@ module Capybara
       end
       def visit(url)      = host.visit_window_realm(realm!, host.resolve_visit_url(url, raw_current_url))
       def refresh         = host.refresh_window_realm(realm!)
-      def go_back         = host.traverse_window_realm(realm!, -1)
-      def go_forward      = host.traverse_window_realm(realm!, 1)
+      def go_back         = host.traverse_history(realm!, -1)
+      def go_forward      = host.traverse_history(realm!, 1)
       def viewport_width  = host.window_realm_viewport(realm!)[0]
       def viewport_height = host.window_realm_viewport(realm!)[1]
       def screen_size     = host.screen_size

@@ -338,7 +338,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::view_word(scope, ns, "navigationTurnDue", turn_due);
     crate::dom::register(scope, ns, "frameNavigationBegins", frame_navigation_begins, context_id);
     crate::dom::register(scope, ns, "frameNavAsks", frame_nav_asks, context_id);
-    crate::dom::register(scope, ns, "dropFrameNavigation", drop_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameNavigationFinalized", frame_navigation_finalized, context_id);
     crate::dom::register(scope, ns, "takeFrameNavigations", take_frame_navigations, context_id);
     crate::dom::register(scope, ns, "frameContent", frame_content, context_id);
@@ -707,15 +706,6 @@ fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     nav.aborted_document = aborted;
     nav.host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload { url }));
     arena.frame_navigations.drop_submissions_of(cid);
-}
-// __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of — a
-// traversal making its document again.
-fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let realm = args.get(0).int32_value(scope).unwrap_or(0);
-    let arena = &mut crate::dom::dom(scope).arena;
-    if let Some(nav) = arena.live_container(realm).and_then(|c| arena.frame_navigations.0.get_mut(&c)) {
-        nav.host = None;
-    }
 }
 // __dom.navigationTurnQueued() -> whether the event loop's navigation turn is queued and not run yet (`Plans::turn`) — its
 // task gone with the realm that queued it is none. __dom.navigationTurnDelay() -> how long one queued now waits, its pace.
@@ -1224,6 +1214,19 @@ impl RealmArena {
         self.frame_navigation(container).flags &= !(COMMIT_PENDING | BUILD_QUEUED | PROMPT_OWED);
         self.supersede_frame_nav(container);
         true
+    }
+    // …and every navigation of the frame of navigable `nav`, a traversal making its document again — HTML "apply the
+    // history step" sets its ongoing navigation to "traversal": the one its attributes began and the one the host plans of
+    // it (a `location`'s, a link's, a form's of its parent's document), each finalized as it is let go of
+    // (`frameNavigationFinalized`): the realm of its container's document, whose load it delays no more — none for a
+    // navigable of no live frame.
+    pub(crate) fn traversal_cancels_frame(&mut self, nav: u32) -> Option<i32> {
+        let container = self.navigable_realms(nav).into_iter().rev().find_map(|r| self.live_container(r))?;
+        self.stop_attribute_navigation(container);
+        if let Some(n) = self.frame_navigations.0.get_mut(&container) {
+            n.host = None;
+        }
+        self.get(container).map(|node| node.realm)
     }
     pub(crate) fn supersede_frame_nav(&mut self, container: NodeId) {
         let nav = self.frame_navigation(container);

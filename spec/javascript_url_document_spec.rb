@@ -59,6 +59,16 @@ RSpec.describe 'a top-level javascript: URL' do
       expect(requests.count {|_, path, _| path == '/target' }).to eq(1)
     end
 
+    # (…Chrome and Firefox make it, then traverse.)
+    it 'makes the document ahead of a traversal its script asked for' do
+      go('/target')
+      run("location.href = '/second'")
+      expect(poll_until { read('location.pathname') == '/second' && read('document.readyState') == 'complete' }).to be(true)
+      run(%q(location.href = "javascript:history.back(); '<script>sessionStorage.made = 1<\\/script><title>K</title>'"))
+      expect(poll_until { read('location.pathname') == '/target' }).to be(true)
+      expect(read('sessionStorage.made')).to eq('1')
+    end
+
     it 'makes none of a result that is no string, nor of a throw' do
       go('/target')
       run("location.href = 'javascript:void(window.ran = 1)'")
@@ -144,16 +154,6 @@ RSpec.describe 'a top-level javascript: URL' do
 
     # (…its opener policy the active document's, HTML "evaluate a javascript: URL": no group left, the windows it opened
     # their opener still, and cross-origin isolated as it was. Chrome and Firefox: no switch.)
-    # (…Chrome and Firefox make it, then traverse.)
-    it 'makes the document ahead of a traversal its script asked for' do
-      session.visit('/target')
-      session.visit('/second')
-      session.execute_script("sessionStorage.removeItem('made')")
-      session.execute_script(%q(location.href = "javascript:history.back(); '<script>sessionStorage.made = 1<\\/script><title>K</title>'"))
-      expect(poll_until { session.evaluate_script('location.pathname') == '/target' }).to be(true)
-      expect(session.evaluate_script('sessionStorage.made')).to eq('1')
-    end
-
     # (…no `load` of a document that set it as it parsed, in its parse or at its DOMContentLoaded: Chrome and Firefox.)
     {
       'as it parsed'           => 'location.href = J',
