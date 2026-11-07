@@ -4,7 +4,7 @@
 // `STATE_XML_DOCUMENT`), whether a scoped custom element registry initialized it, its throw-on-dynamic-markup-insertion
 // counter (HTML §8.4.1), and its currently executing script (`currentScript`, HTML §3.1.5: the script element running,
 // null in a shadow tree or a module) — and the texts that describe it (DOM §4.5: its URL, its encoding, its content type;
-// HTML: its `document.domain`, the base URL an about: one inherits from its creator) and when it was last modified
+// HTML: the base URL an about: one inherits from its creator, its referrer) and when it was last modified
 // (`docText`) — kept by the document's node, let go of with it. The bindings read and write each (`docState`, the
 // Document's `_quirks`, `_readyState`, … accessors: dom-nodes.js), and the parser sets the mode it finds.
 
@@ -74,12 +74,11 @@ struct DocumentTexts {
     // computed against — none once a text is set.
     base_url: Option<(u64, String, String)>,
 }
-const TEXTS: usize = 6;
+const TEXTS: usize = 5;
 const TEXT_URL: usize = 0;
 const TEXT_ENCODING: usize = 1;
-const TEXT_DOMAIN: usize = 3;
-const TEXT_ABOUT_BASE: usize = 4;
-const TEXT_REFERRER: usize = 5;
+const TEXT_ABOUT_BASE: usize = 3;
+const TEXT_REFERRER: usize = 4;
 
 #[derive(Default)]
 pub(crate) struct DocumentStates(HashMap<NodeId, DocumentState>, HashMap<NodeId, DocumentTexts>);
@@ -105,13 +104,6 @@ impl DocumentStates {
     // `doc`'s referrer (`document.referrer`), none until its load gave it one.
     pub(crate) fn referrer(&self, doc: NodeId) -> Option<&str> {
         self.1.get(&doc).and_then(|t| t.texts[TEXT_REFERRER].as_deref())
-    }
-    // The domain a `document.domain` write set on `doc`, none until one did.
-    pub(crate) fn domain(&self, doc: NodeId) -> Option<&str> {
-        self.1.get(&doc).and_then(|t| t.texts[TEXT_DOMAIN].as_deref())
-    }
-    pub(crate) fn set_domain(&mut self, doc: NodeId, domain: String) {
-        self.1.entry(doc).or_default().texts[TEXT_DOMAIN] = Some(domain);
     }
     // Whether `doc` has a browsing context — the realm's document and a frame's, not a `createHTMLDocument` /
     // DOMParser / XHR one (the bindings' flag, dom-nodes.js `DOC_NO_BROWSING_CONTEXT`).
@@ -272,8 +264,8 @@ fn set_current_script(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     crate::dom::dom(scope).arena.document_states.0.entry(doc).or_default().current_script = script;
 }
 
-// __dom.docText(docNid, field) -> the document's text (0 its URL, 1 its encoding, 2 its content type, 3 its
-// `document.domain` set, 4 the base URL of an about: one), or null where none is set.
+// __dom.docText(docNid, field) -> the document's text (0 its URL, 1 its encoding, 2 its content type, 3 the base URL of
+// an about: one, 4 its referrer), or null where none is set.
 fn doc_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let doc = nid_arg(scope, &args, 0);
     let field = args.get(1).uint32_value(scope).map_or(TEXTS, |f| f as usize);

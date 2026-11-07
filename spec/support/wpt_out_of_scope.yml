@@ -35,11 +35,6 @@
 # runs; to reclassify, move a line between this file and wpt_expected_failures.yml.
 #
 ---
-FileAPI/url/multi-global-origin-serialization.sub.html:
-- name: Blob URL serialization (specifically the origin) in multi-global situations
-  reason: Needs cross-origin iframes + document.domain + per-settings-object (incumbent
-    global) Blob URL origin attribution — a cross-origin multi-global navigation/origin
-    model we don't implement (single-origin in-process driver).
 FileAPI/url/sandboxed-iframe.html:
 - name: Revoke blob URL after creating Request, then clone Request, will fetch
   reason: Calls garbageCollect() from WPT /common/gc.js, which the test self-built

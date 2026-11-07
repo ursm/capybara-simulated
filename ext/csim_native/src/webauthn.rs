@@ -842,9 +842,9 @@ fn caller(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments
     let arena = &mut crate::dom::dom(scope).arena;
     let (cross_origin, top_origin) = crate::referrer::ancestors_of_document(arena, realm);
     let has_transient_activation = arena.transiently_activated(realm);
-    let domain = arena.realm_document(realm).and_then(|doc| arena.document_states.domain(doc).map(str::to_owned));
-    let origin = arena.realm_state_mut(realm).map(|state| state.location.origin().to_owned()).unwrap_or_default();
-    let effective_domain = crate::realm_location::effective_domain(&origin, domain.as_deref());
+    let location = arena.realm_state(realm).map(|state| &state.location);
+    let origin = location.map(|l| l.origin().to_owned()).unwrap_or_default();
+    let effective_domain = location.and_then(|l| l.effective_domain());
     Caller { origin, effective_domain, cross_origin, top_origin, has_transient_activation }
 }
 fn member_text(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>, name: &str) -> Option<String> {

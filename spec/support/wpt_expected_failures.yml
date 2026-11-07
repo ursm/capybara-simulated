@@ -2093,10 +2093,6 @@ custom-elements/registries/scoped-registry-define-upgrade-order.html:
 custom-elements/upgrading.html:
 - If definition's disable shadow is true and element's shadow root is non-null, then
   throw a "NotSupportedError" DOMException.
-dom/events/EventListener-incumbent-global-1.sub.html:
-- "[harness] TIMEOUT"
-dom/events/EventListener-incumbent-global-2.sub.html:
-- "[harness] TIMEOUT"
 dom/events/EventListener-invoke-legacy.html:
 - Legacy listener of animationstart
 - Legacy listener of transitionend
@@ -65017,9 +65013,6 @@ html/browsers/browsing-the-web/navigating-across-documents/initial-empty-documen
 html/browsers/browsing-the-web/navigating-across-documents/javascript-url-referrer.window.js:
 - origin referrer policy used to create the starting page
 - unsafe-url referrer policy used to create the starting page
-html/browsers/browsing-the-web/navigating-across-documents/javascript-url-security-check-failure.sub.html:
-- cross-origin-domain but same-origin, setting location.href
-- cross-origin-domain but same-origin, setting src
 html/browsers/browsing-the-web/navigating-across-documents/javascript-url-security-check-multi-globals.sub.html:
 - Using iframeEl.src
 - Using location.href
@@ -65169,17 +65162,6 @@ html/browsers/history/the-location-interface/location-ancestor-origins.sub.html:
 - test of toggle of masked at first origin != parentDocOrigin, A1 -> B1 -> B2 -> A2
 - test sandboxed iframe in A1, A1 iframe attribute sandbox -> C1 -> B1 -> C2
 - test toggle of masked A1 -> B1 iframe for A2 sets no-referrer -> A2
-html/browsers/history/the-location-interface/location-prototype-setting-cross-origin-domain.sub.html:
-- 'Cross-origin via document.domain: setting the prototype to an empty object via
-  __proto__ should throw a "SecurityError" DOMException'
-- 'Cross-origin via document.domain: setting the prototype to its original value via
-  __proto__ should throw a "SecurityError" since it ends up in CrossOriginGetOwnProperty'
-- 'Cross-origin via document.domain: the prototype is null'
-html/browsers/history/the-location-interface/location-prototype-setting-cross-origin.sub.html:
-- 'Cross-origin: setting the prototype to null via Object.setPrototypeOf should not
-  throw'
-- 'Cross-origin: setting the prototype to null via Reflect.setPrototypeOf should return
-  true'
 html/browsers/history/the-location-interface/location-prototype-setting-goes-cross-origin-domain.sub.html:
 - 'Became cross-origin via document.domain: setting the prototype to an empty object
   via __proto__ should throw a "SecurityError" DOMException'
@@ -65198,9 +65180,6 @@ html/browsers/history/the-location-interface/location-prototype-setting-goes-cro
   DOMException'
 - 'Became cross-origin via document.domain: the prototype is now null'
 - 'Became cross-origin via document.domain: the prototype must still be null'
-html/browsers/history/the-location-interface/location-prototype-setting-same-origin-domain.sub.html:
-- 'Same-origin-domain prerequisite check: the original prototype is accessible'
-- "[harness] ERROR"
 html/browsers/history/the-location-interface/location_hash.html:
 - Setting location.hash on srcdoc iframe
 html/browsers/history/the-location-interface/location_port.html:
@@ -65244,10 +65223,6 @@ html/browsers/origin/cross-origin-objects/cross-origin-due-to-document-domain-on
 html/browsers/origin/cross-origin-objects/cross-origin-objects-on-new-window.html:
 - Cross-origin object identity preserved across document.domain
 html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
-- Basic sanity-checking (same-origin + document.domain)
-- Can only enumerate safelisted enumerable properties (same-origin + document.domain)
-- Cross-origin Window accessors get local Function.prototype (same-origin + document.domain)
-- Cross-origin functions get local Function.prototype (same-origin + document.domain)
 - LegacyLenientThis behavior (cross-origin)
 - LegacyLenientThis behavior (cross-site)
 - LegacyLenientThis behavior (same-origin + document.domain)
@@ -65275,21 +65250,18 @@ html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
 - "[[Delete]] Should throw on cross-origin objects (cross-origin)"
 - "[[Delete]] Should throw on cross-origin objects (cross-site)"
 - "[[Delete]] Should throw on cross-origin objects (same-origin + document.domain)"
-- "[[GetOwnProperty]] - Property descriptors for cross-origin properties should be
-  set up correctly (same-origin + document.domain)"
-- "[[GetOwnProperty]] - Should be able to get a property descriptor for an indexed
-  property only if it corresponds to a child window. (same-origin + document.domain)"
 - "[[GetOwnProperty]] - Subframe named 'then' should shadow the default 'then' value
   (cross-origin)"
 - "[[GetOwnProperty]] - Subframe named 'then' should shadow the default 'then' value
   (cross-site)"
+- "[[GetOwnProperty]] - Subframe named 'then' should shadow the default 'then' value
+  (same-origin + document.domain)"
 - "[[GetOwnProperty]] - Subframes should be visible cross-origin only if their names
   don't match the names of cross-origin-exposed IDL properties (cross-origin)"
 - "[[GetOwnProperty]] - Subframes should be visible cross-origin only if their names
   don't match the names of cross-origin-exposed IDL properties (cross-site)"
 - "[[GetOwnProperty]] - Subframes should be visible cross-origin only if their names
   don't match the names of cross-origin-exposed IDL properties (same-origin + document.domain)"
-- "[[GetPrototypeOf]] should return null (same-origin + document.domain)"
 - "[[OwnPropertyKeys]] should not reorder where 'then' appears if it's a named subframe,
   nor add another copy of 'then' (cross-origin)"
 - "[[OwnPropertyKeys]] should not reorder where 'then' appears if it's a named subframe,
@@ -65312,27 +65284,6 @@ html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
   objects (cross-site)"
 - "[[OwnPropertyKeys]] should return the right symbol-named properties for cross-origin
   objects (same-origin + document.domain)"
-- "[[PreventExtensions]] should return false cross-origin objects (cross-origin)"
-- "[[PreventExtensions]] should return false cross-origin objects (cross-site)"
-- "[[SetPrototypeOf]] should return false (cross-origin)"
-- "[[SetPrototypeOf]] should return false (cross-site)"
-- "[[SetPrototypeOf]] should return false (same-origin + document.domain)"
-- proto setter |call| on cross-origin Location with null (function set __proto__()
-  { [native code] }, C)
-- proto setter |call| on cross-origin Location with null (function set __proto__()
-  { [native code] }, G)
-- proto setter |call| on cross-origin Location with null (function(p) { Object.setPrototypeOf(this,
-  p); }, C)
-- proto setter |call| on cross-origin Location with null (function(p) { Object.setPrototypeOf(this,
-  p); }, G)
-- proto setter |call| on cross-origin Window with null (function set __proto__() {
-  [native code] }, C)
-- proto setter |call| on cross-origin Window with null (function set __proto__() {
-  [native code] }, G)
-- proto setter |call| on cross-origin Window with null (function(p) { Object.setPrototypeOf(this,
-  p); }, C)
-- proto setter |call| on cross-origin Window with null (function(p) { Object.setPrototypeOf(this,
-  p); }, G)
 - "{}.toString.call() does the right thing on cross-origin objects (cross-origin)"
 - "{}.toString.call() does the right thing on cross-origin objects (cross-site)"
 - "{}.toString.call() does the right thing on cross-origin objects (same-origin +
@@ -65705,39 +65656,14 @@ html/browsers/the-window-object/window-properties.https.html:
 html/browsers/the-windowproxy-exotic-object/document-tree-child-browsing-context-name-property-set.sub.html:
 - Cross origin child window's name shadows the second candidate of a same origin iframe
 html/browsers/the-windowproxy-exotic-object/windowproxy-prevent-extensions.html: HARNESS_ERROR
-html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-cross-origin-domain.sub.html:
-- 'Cross-origin via document.domain: setting the prototype to an empty object via
-  __proto__ should throw a "SecurityError" DOMException'
-- 'Cross-origin via document.domain: setting the prototype to null via Object.setPrototypeOf
-  should not throw'
-- 'Cross-origin via document.domain: setting the prototype to null via Reflect.setPrototypeOf
-  should return true'
-- 'Cross-origin via document.domain: setting the prototype to null via __proto__ should
-  throw a "SecurityError" since it ends up in CrossOriginGetOwnProperty'
-- 'Cross-origin via document.domain: the prototype is null'
-- 'Cross-origin via document.domain: the prototype must still be null'
-html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-cross-origin.sub.html:
-- 'Cross-origin: setting the prototype to null via Object.setPrototypeOf should not
-  throw'
-- 'Cross-origin: setting the prototype to null via Reflect.setPrototypeOf should return
-  true'
-html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-goes-cross-origin-domain.sub.html:
-- 'Became cross-origin via document.domain: setting the prototype to an empty object
-  via __proto__ should throw a "SecurityError" DOMException'
-- 'Became cross-origin via document.domain: setting the prototype to null via Object.setPrototypeOf
-  should not throw'
-- 'Became cross-origin via document.domain: setting the prototype to null via Reflect.setPrototypeOf
-  should return true'
-- 'Became cross-origin via document.domain: setting the prototype to null via __proto__
-  should throw a "SecurityError" since it ends up in CrossOriginGetOwnProperty'
-- 'Became cross-origin via document.domain: setting the prototype to the original
-  value from before going cross-origin via __proto__ should throw a "SecurityError"
-  DOMException'
-- 'Became cross-origin via document.domain: the prototype is now null'
-- 'Became cross-origin via document.domain: the prototype must still be null'
 html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-same-origin-domain.sub.html:
-- 'Same-origin-domain prerequisite check: the original prototype is accessible'
-- "[harness] ERROR"
+- 'Same-origin-domain: setting the prototype to an empty object via Reflect.setPrototypeOf
+  should return false'
+- 'Same-origin-domain: setting the prototype to an empty object via __proto__ should
+  throw a TypeError'
+- 'Same-origin-domain: setting the prototype to its original value via Object.setPrototypeOf
+  should not throw'
+- 'Same-origin-domain: the prototype must still be its original value'
 html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-same-origin.html:
 - 'Same-origin: setting the prototype to an empty object via Object.setPrototypeOf
   should throw a TypeError'
@@ -65760,8 +65686,6 @@ html/browsers/windows/clear-window-name.https.html:
 - "[harness] TIMEOUT"
 html/browsers/windows/consume-user-activation/window-open-multi-global.html:
 - window.open() and consuming user activation with multiple globals in play
-html/browsers/windows/document-domain-nested-navigate.window.js:
-- Navigated frame to about:blank and document.domain
 html/browsers/windows/embedded-opener-remove-frame.html:
 - opener of discarded auxiliary browsing context
 - opener of discarded nested browsing context
@@ -65773,8 +65697,6 @@ html/browsers/windows/iframe-cross-origin-scaled-print.sub.html:
 - "== html/browsers/windows/iframe-nested-scaled-print-ref.html (both renderings blank)"
 html/browsers/windows/iframe-nested-print.html:
 - "== html/browsers/windows/iframe-nested-print-ref.html"
-html/browsers/windows/nested-browsing-contexts/frameElement-siblings.sub.html:
-- it must return the iframe element if the pages are same-origin domain
 html/browsers/windows/nested-browsing-contexts/frameElement.sub.html:
 - The window's frameElement attribute must return its container element if it is a
   nested browsing context
@@ -68062,22 +67984,8 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-while-na
 - document.open() aborts documents that are navigating through iframe loading (image
   loading)
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/bailout-exception-vs-return-origin.sub.window.js:
-- "[harness] TIMEOUT"
-- document.open should throw a SecurityError with cross-origin document even when
-  the ignore-opens-during-unload counter is greater than 0 (during beforeunload event)
-- document.open should throw a SecurityError with cross-origin document even when
-  the ignore-opens-during-unload counter is greater than 0 (during pagehide event)
-- document.open should throw a SecurityError with cross-origin document even when
-  the ignore-opens-during-unload counter is greater than 0 (during unload event)
-- document.open should throw a SecurityError with cross-origin document even when
-  there is an active parser executing script
 - document.open should throw an InvalidStateError when the throw-on-dynamic-markup-insertion
   counter is incremented even if the document is cross-origin
-- document.open should throw an InvalidStateError with XML document even if it is
-  cross-origin
-html/webappapis/dynamic-markup-insertion/opening-the-input-stream/bailout-side-effects-same-origin-domain.sub.window.js:
-- document.open bailout should not have any side effects (same origin-domain (but
-  not same origin) document)
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/document.open-02.html:
 - document.open should redirect to window.open when called with three arguments
 - document.open should throw when it has no window and is called with three arguments
@@ -68093,10 +68001,6 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/event-listener
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/ignore-opens-during-unload.window.js:
 - document.open should bail out when ignore-opens-during-unload is greater than 0
   during beforeunload event (open(parent) while unloading parent and child)
-html/webappapis/dynamic-markup-insertion/opening-the-input-stream/origin-check-in-document-open-same-origin-domain.sub.html:
-- It should not be possible to implicitly open same origin-domain (but not same origin)
-  documents.
-- It should not be possible to open same origin-domain (but not same origin) documents.
 html/webappapis/dynamic-markup-insertion/the-innerhtml-property/annotation-xml-fragment-parsing.html:
 - HTML parsing does apply in <annotation-xml encoding="application/xhtml+xml">
 html/webappapis/scripting/events/event-handler-idl-attribute-realm.window.js:
@@ -68168,9 +68072,6 @@ resource-timing/cross-origin-redirects.html:
 resource-timing/decoded-body-size-compressed.https.html:
 - "[harness] ERROR"
 - decodedBodySize for brotli-compressed text resource
-resource-timing/document-domain-no-impact-opener.html:
-- test that document.domain being set doesn't have an impact on the resource timing
-  entry.
 resource-timing/encoded-body-size-cached.https.html:
 - "[harness] ERROR"
 - "[harness] no subtests"
@@ -69055,12 +68956,6 @@ web-locks/bfcache/contention.https.window.js:
 - "[harness] no subtests"
 - "[harness] no subtests"
 - "[harness] no subtests"
-webmessaging/multi-globals/broadcastchannel-current.sub.html:
-- The current page being cross-origin must prevent the BroadcastChannel message from
-  being seen
-webmessaging/multi-globals/broadcastchannel-incumbent.sub.html:
-- The incumbent page being cross-origin must not prevent the BroadcastChannel message
-  from being seen
 webmessaging/postMessage_CryptoKey_insecure.sub.html:
 - insecure context should not receive an object for secure contexts only
 websockets/Close-delayed.any.js:

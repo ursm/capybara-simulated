@@ -17,6 +17,12 @@ pub(crate) struct RealmLocation {
     target_hash: Option<String>,
     document_origin: Option<String>,
     origin_key: Option<String>,
+    // Its origin's domain (HTML §7.5.1: a tuple origin's, null until a `document.domain` write sets it) — and which
+    // origin it is, by a number of its own (`ORIGINS`): an origin is a record a document that inherited it shares with
+    // its creator (an about:blank frame's, its parent's), its domain one for them all — a frame made before its parent's
+    // write reads the domain it set (Chrome and Firefox, measured).
+    domain: Option<String>,
+    origin_record: u64,
     // Its document's active sandboxing flag set (sandbox.rs), which every frame it makes inherits — its origin a NEW
     // opaque one where that has the sandboxed origin flag.
     pub(crate) sandbox: u32,
@@ -38,6 +44,12 @@ const SEARCH: usize = 8;
 const HASH: usize = 9;
 const ORIGIN: usize = 10;
 
+// The number the last origin record was given (`origin_record`), one count across the process.
+static ORIGINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn new_origin_record() -> u64 {
+    ORIGINS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+}
+
 // A realm's URL until a document of its own sets one: a page reads `location.href` at module time.
 const INITIAL_URL: &str = "http://www.example.com/";
 
@@ -50,6 +62,8 @@ impl Default for RealmLocation {
             target_hash: None,
             document_origin: None,
             origin_key: None,
+            domain: None,
+            origin_record: new_origin_record(),
             sandbox: 0,
             origin_keyed: false,
             cluster_key: None,
@@ -96,6 +110,16 @@ impl RealmLocation {
             }
             None => self.document_origin = text,
         }
+    }
+    // Its document's origin is a new record: a document of the window's next, which a realm kept for it (dom-nodes.js
+    // `__csimRenewDocument`), with no domain set.
+    fn renew_origin(&mut self) {
+        self.origin_record = new_origin_record();
+        self.domain = None;
+    }
+    // Its origin's effective domain (`effective_domain`).
+    pub(crate) fn effective_domain(&self) -> Option<String> {
+        effective_domain(self.origin(), self.domain.as_deref())
     }
     // Its document's sandboxing is `flags` — its origin a new opaque one where they have the sandboxed origin flag.
     fn set_sandbox(&mut self, flags: u32) {
@@ -196,6 +220,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "realmOrigin", realm_origin, context_id);
     register(scope, ns, "realmOriginKey", realm_origin_key, context_id);
     register(scope, ns, "sameOriginRealm", same_origin_realm, context_id);
+    register(scope, ns, "sameOriginDomainRealm", same_origin_domain_realm, context_id);
+    register(scope, ns, "renewOrigin", renew_origin, context_id);
     register(scope, ns, "setOriginKey", set_origin_key, context_id);
     register(scope, ns, "setOriginKeyedCluster", set_origin_keyed_cluster, context_id);
     register(scope, ns, "setAgentClusterKey", set_agent_cluster_key, context_id);
@@ -203,6 +229,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "setBrowsingContextGroup", set_browsing_context_group, context_id);
     register(scope, ns, "effectiveDomain", effective_domain_op, context_id);
     register(scope, ns, "setDomain", set_domain_op, context_id);
+    let domain_writes = crate::dom::dom(scope).arena.domain_writes.store();
+    crate::dom::view_word(scope, ns, "domainWrites", domain_writes);
 }
 
 // __dom.documentOrigin() -> the serialization of the calling realm's document's origin (`RealmLocation::origin`).
@@ -325,10 +353,12 @@ fn take_opener_origins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let opener = args.get(0).int32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     let created = popup_origins(realm(scope, opener), opener);
-    let location = &mut realm(scope, cid).location;
+    let arena = realm(scope, cid);
+    let location = &mut arena.location;
     location.set_sandbox(created.sandbox);
     location.set_document_origin(created.document);
     location.origin_override = created.location.map(str::to_owned);
+    arena.inherit_origin(cid, opener);
 }
 // __dom.pageSandbox(csp) -> the sandboxing flags the page's document, as it loads, has: its window's popup sandboxing flag
 // set (`popup_sandbox_of`: a pop-up's a Browser hosts, made by a sandboxed document — `SessionHistory#popup_sandbox=`)
@@ -378,11 +408,24 @@ fn sandboxed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_bool(arena.sandboxed(realm, flag));
 }
 
-// __dom.setDocumentOrigin(text) — the calling realm's document's origin (`set_document_origin`; null: its location's).
+// __dom.setDocumentOrigin(text[, creator]) — the calling realm's document's origin (`set_document_origin`; null: its
+// location's) — a tuple one realm `creator`'s document has, inherited from it (a frame's about:blank, its parent's:
+// `frame_origins`), the record that document's origin is (`share_origin`), its domain with it.
 fn set_document_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let text = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
+    let creator = args.get(1).is_int32().then(|| args.get(1).int32_value(scope)).flatten();
     let cid = realm_id(scope, &args);
-    realm(scope, cid).location.set_document_origin(text);
+    let arena = realm(scope, cid);
+    arena.location.set_document_origin(text);
+    if let Some(creator) = creator {
+        arena.inherit_origin(cid, creator);
+    }
+}
+// __dom.renewOrigin() — the calling realm's document's origin a new record (`renew_origin`): a realm kept for a window's
+// next document.
+fn renew_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).location.renew_origin();
 }
 
 // __dom.originKey() -> the key the calling realm's origin is matched by (`RealmLocation::origin_key`).
@@ -490,6 +533,64 @@ pub(crate) fn realms_same_origin(scope: &mut v8::PinScope<'_, '_>, a: i32, b: i3
     };
     let (a, b) = (key(a), key(b));
     a.is_some() && a == b
+}
+// HTML "same origin-domain": the same opaque origin; or tuple origins of one scheme whose domains are set and the same,
+// or set on neither and the origins the same — by their keys as far as they are known (`known_origin_key`: an opaque
+// one with none no other's). What HTML's checks of whether a script may reach a window's members ask
+// (IsPlatformObjectSameOrigin), its `contentDocument` and its `frameElement`, and a javascript: URL's navigation —
+// where a `document.domain` write may make two origins it, or no longer it. (Storage, cookies, a postMessage's target
+// origin, a document's encoding and `document.open()` ask "same origin" — `realms_same_origin` — which no domain moves.)
+fn same_origin_domain(a: &RealmLocation, b: &RealmLocation) -> bool {
+    let (Some(ka), Some(kb)) = (a.known_origin_key(), b.known_origin_key()) else { return false };
+    if is_opaque_origin_key(&ka) || is_opaque_origin_key(&kb) {
+        return ka == kb;
+    }
+    let scheme = |key: &str| key.split_once(':').map(|(s, _)| s.to_owned());
+    match (&a.domain, &b.domain) {
+        (Some(da), Some(db)) => da == db && scheme(&ka) == scheme(&kb),
+        (None, None) => ka == kb,
+        _ => false,
+    }
+}
+impl RealmArena {
+    // Whether realms `a`'s and `b`'s origins are same origin-domain (`same_origin_domain`): false for a realm gone.
+    pub(crate) fn realms_same_origin_domain(&self, a: i32, b: i32) -> bool {
+        let location = |r: i32| (!self.is_dropped(r)).then(|| self.realm_state(r)).flatten().map(|s| &s.location);
+        match (location(a), location(b)) {
+            (Some(x), Some(y)) => a == b || same_origin_domain(x, y),
+            _ => false,
+        }
+    }
+    // Realm `cid`'s document's origin the record realm `creator`'s document's is, its domain with it, where it inherited
+    // that origin (`creation`): a tuple one, the same.
+    fn inherit_origin(&mut self, cid: i32, creator: i32) {
+        let Some(from) = self.realm_state(creator).map(|s| &s.location) else { return };
+        if from.origin() == "null" || self.realm_state(cid).map(|s| s.location.origin()) != Some(from.origin()) {
+            return;
+        }
+        let (record, domain) = (from.origin_record, from.domain.clone());
+        if let Some(state) = self.realm_state_mut(cid) {
+            state.location.origin_record = record;
+            state.location.domain = domain;
+        }
+    }
+    // Realm `cid`'s origin's domain is `host` (HTML `document.domain` setter step 7) — every realm's whose document has
+    // that origin too, a frame's that inherited it (`origin_record`).
+    fn set_origin_domain(&mut self, cid: i32, host: String) {
+        let Some(record) = self.realm_state(cid).map(|s| s.location.origin_record) else { return };
+        for state in self.realm_states_mut().filter(|s| s.location.origin_record == record) {
+            state.location.domain = Some(host.clone());
+        }
+        self.domain_writes.bump();
+    }
+}
+// __dom.sameOriginDomainRealm(realm) -> whether realm `realm`'s origin is same origin-domain with the calling realm's
+// (`same_origin_domain`) — false for a realm gone (fail CLOSED).
+fn same_origin_domain_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let theirs = args.get(0).int32_value(scope);
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    rv.set_bool(theirs.is_some_and(|r| arena.realms_same_origin_domain(cid, r)));
 }
 // __dom.sameOriginRealm(realm) -> whether realm `realm`'s origin is the calling realm's — by their keys: an opaque
 // origin is the same with the realms that share it alone (one that inherited it), never with another opaque one; false
@@ -687,36 +788,28 @@ fn domain_to_set(effective: Option<&str>, value: &str) -> Result<String, (u32, S
         Err((DOMAIN_NOT_SUFFIX, host))
     }
 }
-// …a document's: realm `realm`'s origin (its creator's, for a document with none of its own), with what a write set on
-// `doc` — None for a realm gone.
-fn document_effective_domain(scope: &mut v8::PinScope<'_, '_>, doc: Option<NodeId>, realm: v8::Local<'_, v8::Value>) -> Option<String> {
-    let origin = other_realm(scope, realm, |l, _| l.origin().to_owned())?;
-    let states = &crate::dom::dom(scope).arena.document_states;
-    effective_domain(&origin, doc.and_then(|d| states.domain(d)))
-}
-// __dom.effectiveDomain(doc, realm) -> `doc`'s effective domain (`effective_domain`) — `doc` null for the origin's own —
-// or null for an opaque origin.
+// __dom.effectiveDomain(realm) -> the effective domain (`effective_domain`) of realm `realm`'s document's origin — that
+// of every document of the realm, one with no browsing context having its creator's — or null for an opaque origin or
+// a realm gone.
 fn effective_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let doc = crate::node_handle::nid_of(scope, args.get(0));
-    match document_effective_domain(scope, doc, args.get(1)).and_then(|d| v8::String::new(scope, &d)) {
+    match other_realm(scope, args.get(0), |l, _| l.effective_domain()).flatten().and_then(|d| v8::String::new(scope, &d)) {
         Some(d) => rv.set(d.into()),
         None => rv.set_null(),
     }
 }
-// __dom.setDomain(doc, realm, value) -> null with `doc`'s domain set to `value` host-parsed, else `[why, host,
-// effective]`: why not (`domain_to_set`), the host it parsed to and the effective domain ('' for none).
+// __dom.setDomain(realm, value) -> null with the domain of realm `realm`'s document's origin set to `value` host-parsed
+// (`set_origin_domain`), else `[why, host, effective]`: why not (`domain_to_set`), the host it parsed to and the
+// effective domain ('' for none).
 fn set_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let value = args.get(2).to_rust_string_lossy(scope);
-    let doc = crate::node_handle::nid_of(scope, args.get(0));
+    let value = args.get(1).to_rust_string_lossy(scope);
     // (…a document sandboxed — its sandboxed document.domain browsing context flag, whatever it allows (step 2) — refused
-    // as an opaque origin's is, in the same words (Chrome, measured))
-    let sandboxed = other_realm(scope, args.get(1), |l, _| l.sandbox & crate::sandbox::DOCUMENT_DOMAIN != 0).unwrap_or(false);
-    let effective = doc.filter(|_| !sandboxed).and_then(|doc| document_effective_domain(scope, Some(doc), args.get(1)));
-    // (…no document, no effective domain: an opaque origin's refusal)
+    // as an opaque origin's is, in the same words (Chrome, measured); and a realm gone, as one with no effective domain)
+    let allowed = other_realm(scope, args.get(0), |l, realm| (l.sandbox & crate::sandbox::DOCUMENT_DOMAIN == 0).then(|| (realm, l.effective_domain())));
+    let (target, effective) = allowed.flatten().map_or((None, None), |(realm, effective)| (Some(realm), effective));
     let (why, host) = match domain_to_set(effective.as_deref(), &value) {
         Ok(host) => {
-            if let Some(doc) = doc {
-                crate::dom::dom(scope).arena.document_states.set_domain(doc, host);
+            if let Some(target) = target {
+                crate::dom::dom(scope).arena.set_origin_domain(target, host);
             }
             return rv.set_null();
         }
@@ -821,6 +914,31 @@ mod tests {
         assert_eq!(origins(&mut arena, "", None, None), (Some("null".to_owned()), Some("null")));
         // (…what this document restricts restricted still, whatever the frame's attribute lifts)
         assert!(frame_origins(&mut arena, 0, "", Some("allow-forms"), None).sandbox & crate::sandbox::FORMS != 0);
+    }
+
+    #[test]
+    fn same_origin_domain_is_by_the_domains_where_either_is_set() {
+        let (mut a, mut b) = (at("http://a.example.test/"), at("http://b.example.test:8000/"));
+        assert!(!same_origin_domain(&a, &b));
+        a.domain = Some("example.test".to_owned());
+        assert!(!same_origin_domain(&a, &b));
+        // (…the port no part of it, the scheme one)
+        b.domain = Some("example.test".to_owned());
+        assert!(same_origin_domain(&a, &b));
+        let mut c = at("https://a.example.test/");
+        c.domain = Some("example.test".to_owned());
+        assert!(!same_origin_domain(&a, &c));
+        // (…a domain set on one of two documents of one origin parts them)
+        let (d, e) = (at("http://a.example.test/x"), at("http://a.example.test/y"));
+        assert!(same_origin_domain(&d, &e) && !same_origin_domain(&a, &d));
+        // (…an opaque origin the same one alone)
+        let mut f = at("http://a.example.test/");
+        f.set_document_origin(Some("null|k".to_owned()));
+        let mut g = at("http://a.example.test/");
+        g.set_document_origin(Some("null|k".to_owned()));
+        assert!(same_origin_domain(&f, &g) && !same_origin_domain(&f, &d));
+        g.set_document_origin(Some("null|j".to_owned()));
+        assert!(!same_origin_domain(&f, &g));
     }
 
     #[test]

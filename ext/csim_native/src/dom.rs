@@ -956,6 +956,10 @@ pub(crate) struct RealmArena {
     // Whether some realm's observer observes another realm's node, read with no call by every realm's bindings
     // (`__dom.foreignObserved`): a change in any realm then asks those realms for their observations too.
     pub(crate) foreign_observed: SharedWord,
+    // How many `document.domain` writes some realm's document made, read with no call by every realm's bindings
+    // (`__dom.domainWrites`): what a WindowProxy's memo of whether its window is same origin-domain keys on — none, the
+    // common page's, keeps it a load of a word (realm_location.rs `set_origin_domain`).
+    pub(crate) domain_writes: SharedWord,
     // …and which realms they are (foreign_observations.rs).
     pub(crate) foreign_observations: crate::foreign_observations::ForeignObservations,
     // Each frame container's navigation as it goes (frame_navigation.rs).
@@ -2151,6 +2155,10 @@ impl RealmArena {
     }
     pub(crate) fn realm_state_mut(&mut self, cid: i32) -> Option<&mut RealmState> {
         if cid == self.cur { Some(&mut self.state) } else { self.parked.get_mut(&cid) }
+    }
+    // …and every realm's, the entered one's first.
+    pub(crate) fn realm_states_mut(&mut self) -> impl Iterator<Item = &mut RealmState> {
+        std::iter::once(&mut self.state).chain(self.parked.values_mut())
     }
     // The root of `id`'s tree, shadow-including: a shadow root's host is its parent here (not a template's contents':
     // they are a tree of their own). (`root_of`, element_state.rs, is the plain one.)

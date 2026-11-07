@@ -1480,8 +1480,10 @@ module Capybara
         # document loads, so its load-time scripts read the right self.origin and run (or
         # not) under its sandbox. nil → a real-URL frame whose origin is its own location origin.
         # (…a realm kept for the document — its initial about:blank's, `reuse_frame_realm` — reseeded whatever it had)
+        # (…an origin inherited the parent's, which made it: the one record, its domain with it — realm_location.rs
+        # `inherit_origin`)
         realm.eval_void("__dom.setSandbox(#{sandbox.to_i});") unless sandbox.to_i.zero? && !reused
-        realm.call('__csimSetDocumentOrigin', doc_origin&.to_s) unless doc_origin.nil? && !reused
+        realm.call('__csimSetDocumentOrigin', doc_origin&.to_s, parent_id.to_i) unless doc_origin.nil? && !reused
         # The frame's location.origin (opaque "null" for about:blank / srcdoc /
         # javascript:); decoupled from the location string so navigation is intact.
         realm.call('__csimSetLocationOrigin', location_origin&.to_s) unless location_origin.nil? && !reused

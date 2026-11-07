@@ -1055,14 +1055,14 @@ impl RealmArena {
     // Realm `source`'s document's navigation of realm `target`'s navigable to `url` (absolute): "refused" where it may not
     // navigate it (`navigation_allowed`, asked where `check_allowed`: another window's `location` set — a SecurityError
     // its caller throws), "ignored" for a `javascript:` URL across origins (HTML "navigate to a javascript: URL": the
-    // initiator origin same origin-domain with the target's document — same origin here, `document.domain` not
-    // modeled), else "navigate".
+    // initiator origin same origin-domain with the target's document — a `document.domain` write may make two origins
+    // so, or no longer so: realm_location.rs `same_origin_domain`), else "navigate".
     fn navigation_verdict(&self, source: i32, target: i32, url: &str, check_allowed: bool) -> &'static str {
         if check_allowed && !self.navigation_allowed(source, target) {
             return "refused";
         }
         let javascript = url.get(..11).is_some_and(|scheme| scheme.eq_ignore_ascii_case("javascript:"));
-        if javascript && !self.same_origin(source, target) { "ignored" } else { "navigate" }
+        if javascript && !self.realms_same_origin_domain(source, target) { "ignored" } else { "navigate" }
     }
     // HTML "familiar with": whether realm `a`'s browsing context is familiar with realm `b`'s — their documents of one
     // origin; `a`'s top-level traversable `b`; `b` an auxiliary one (a window `window.open` made) whose opener `a` is
