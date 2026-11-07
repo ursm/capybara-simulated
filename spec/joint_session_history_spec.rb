@@ -84,9 +84,9 @@ RSpec.describe 'the joint session history' do
   end
 
   # A navigation of a frame a traversal planned makes the document of again is ignored, its ongoing navigation
-  # "traversal" (HTML "navigate"): its `src` set, or its `location`, in a task after the traversal's, before the host
-  # takes it. Chrome and Firefox,
-  # measured 2026-11-08 (csim-bench rvtr-probe): the frame at /f2, /z never requested.
+  # "traversal" (HTML "navigate"): its `src` set, or its `location`, in a task due as the traversal's ran — which the
+  # traversal waits for, handed over at the event loop's navigation turn as a frame's navigations are. Chrome and Firefox,
+  # measured 2026-11-08 (csim-bench rvtr-probe): the frame at /f2, /z never requested (at 30 ms both load /z).
   {'src' => "document.querySelector('iframe').src = '/z'", 'location' => "frames[0].location = '/z'"}.each do |what, navigate|
     it "ignores a frame's #{what} set while a traversal of it is planned" do
       paths = []
@@ -96,11 +96,26 @@ RSpec.describe 'the joint session history' do
       expect(logged.evaluate_script('frames[0].location.pathname')).to eq('/f2')
       logged.execute_script('frames[0].location = "/b"')
       expect(logged.evaluate_script('frames[0].location.pathname')).to eq('/b')
-      logged.execute_script("setTimeout(() => { history.back(); setTimeout(() => { #{navigate}; }, 0); }, 0)")
+      logged.execute_script("history.back(); setTimeout(() => { #{navigate}; }, 0)")
       logged.evaluate_script('new Promise((resolve) => setTimeout(resolve, 200))')
       expect(logged.evaluate_script('frames[0].location.pathname')).to eq('/f2')
       expect(paths).not_to include('/z')
     end
+  end
+
+  # …and a hyperlink of the page's followed while a traversal of it is planned — the tasks of a page being left (a 204,
+  # which leaves it where it was) running both — ignored as well: the page goes back.
+  it 'ignores a link followed while a traversal of the page is planned' do
+    links = simulated_session(lambda {|env|
+      next [204, {}, []] if env['PATH_INFO'] == '/204'
+
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><title>#{env['PATH_INFO']}</title><body><a id=a href=/c>c</a>"]]
+    })
+    links.visit '/top'
+    links.visit '/b'
+    links.execute_script("setTimeout(() => { history.back(); setTimeout(() => document.getElementById('a').click(), 0); }, 0); location.href = '/204'")
+    links.evaluate_script('new Promise((resolve) => setTimeout(resolve, 200))')
+    expect(links.evaluate_script('location.pathname')).to eq('/top')
   end
 
   it "counts a frame's navigation a step of the page's" do

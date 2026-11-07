@@ -344,6 +344,10 @@ fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let name = if target_keyword(&target) == TARGET_BLANK { String::new() } else { target };
     let page = arena.is_page(cid);
     let activated = arena.transiently_activated(cid);
+    // (…none of a navigable traversing: HTML "navigate" ignores it)
+    if page && !opens_window && arena.navigation_plan.traversal_planned() {
+        return;
+    }
     if page && !opens_window {
         arena.navigation_plan.supersede();
         begin_navigation_of(arena, cid, None);
@@ -375,6 +379,10 @@ fn plan_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 fn supersede_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
+    // (…not a traversal's, which a navigation of the navigable it traverses is ignored by: HTML "navigate")
+    if arena.navigation_plan.traversal_planned() {
+        return;
+    }
     arena.navigation_plan.supersede();
     begin_navigation_of(arena, cid, None);
 }
@@ -720,20 +728,27 @@ fn frame_traversal_items<'s>(scope: &mut v8::PinScope<'s, '_>, t: FrameTraversal
     }
     item
 }
-// __dom.takeTraversal() -> the traversal of its session history the calling realm's document — the page's — planned,
+// __dom.takeTraversal(frames) -> the traversal of its session history the calling realm's document — the page's — planned,
 // which it plans no more: `["traverse", delta]` of one making its document again (`Traversal`: the host's to judge anew
 // from its delta, browser.rb `perform_history_traverse`), one moving a frame of it as `takeWindowNavigations` gives it —
-// or null.
+// none of that kind but `frames`: the event loop's navigation turn's to hand over, as the host's navigations of frames
+// are, behind the tasks due before it (frame_navigation.rs `Plans::through`) — or null. Its traversable told whether one
+// is still planned (session_history.rs `planned_for_host`).
 fn take_traversal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let frames = args.get(0).is_true();
     let own = &mut plan(scope, &args).own;
-    let item = if let Some(t) = own.frame_traversal.take() {
-        frame_traversal_items(scope, t)
-    } else if let Some(t) = own.traversal.take() {
-        vec![v8::String::new(scope, "traverse").unwrap().into(), v8::Number::new(scope, t.delta as f64).into()]
+    let item = if let Some(t) = own.frame_traversal.take_if(|_| frames) {
+        Some(frame_traversal_items(scope, t))
     } else {
-        return rv.set_null();
+        own.traversal.take().map(|t| vec![v8::String::new(scope, "traverse").unwrap().into(), v8::Number::new(scope, t.delta as f64).into()])
     };
-    rv.set(v8::Array::new_with_elements(scope, &item).into());
+    let waiting = plan(scope, &args).traversal_waiting();
+    let cid = realm_id(scope, &args);
+    crate::session_history::note_planned_of(&crate::dom::dom(scope).arena, cid, waiting);
+    match item {
+        Some(item) => rv.set(v8::Array::new_with_elements(scope, &item).into()),
+        None => rv.set_null(),
+    }
 }
 // A text for the bindings, null for none.
 fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, text: Option<String>) -> v8::Local<'s, v8::Value> {
@@ -829,6 +844,10 @@ fn plan_form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     // (…the page's own plan, what a click returns to the driver: `takeSubmission`)
     if arena.is_page(cid) {
         let top = realm(scope, cid);
+        // (…none while a traversal of it is planned: HTML "navigate" ignores it)
+        if top.navigation_plan.traversal_planned() {
+            return;
+        }
         top.navigation_plan.supersede();
         begin_navigation_of(top, cid, None);
         top.navigation_plan.submission = Some(Submission(request));
@@ -846,8 +865,12 @@ fn plan_form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     rv.set_uint32(FORM_PLANNED_TURN);
 }
 // …into top-level realm `top`'s navigable, planned in its plan in place of what that planned.
+// (…none while a traversal of it is planned: HTML "navigate" ignores it)
 fn plan_top_level_submission(scope: &mut v8::PinScope<'_, '_>, top: i32, source: i32, request: v8::Global<v8::Value>, referrer: (String, String)) {
     let arena = realm(scope, top);
+    if arena.navigation_plan.traversal_planned() {
+        return;
+    }
     arena.navigation_plan.supersede();
     begin_navigation_of(arena, top, None);
     arena.navigation_plan.own.submission = Some(FrameSubmission { realm: source, request, referrer });

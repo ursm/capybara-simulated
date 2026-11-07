@@ -238,7 +238,8 @@ struct Traversable {
     flush_mark: Option<u64>,
     // …whether its traversals wait, none applied: while the host commits a `javascript:` URL's document its script asked
     // them before (browser.rb `commit_javascript_document`), which goes first — its flush running their tasks too — and
-    // whether one applied was planned for the host since it last took one (`applyTraversal`), its cheap gate.
+    // whether one applied is planned for the host and not taken (`applyTraversal`, navigation_plan.rs `takeTraversal`),
+    // its cheap gate.
     holding: bool,
     planned_for_host: bool,
     // Whether it closed: its window's browsing context discarded, which no opener of another window is then
@@ -1144,9 +1145,9 @@ impl SessionHistory {
     fn hold_traversals(&self, on: bool) {
         self.lock().holding = on;
     }
-    // #take_traversal_planned -> whether one was planned for the host since it last took one, which it says no more.
-    fn take_traversal_planned(&self) -> bool {
-        std::mem::take(&mut self.lock().planned_for_host)
+    // #traversal_planned? -> whether one is planned for the host (`planned_for_host`), its cheap gate.
+    fn is_traversal_planned(&self) -> bool {
+        self.lock().planned_for_host
     }
     // #end_traversal: the traversals the host took applied, or let go — their navigables traversing no more, whatever
     // became of them (`Traversable::end_traversal`).
@@ -1482,7 +1483,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("flush_begin", method!(SessionHistory::flush_begin, 0))?;
     class.define_method("flush_end", method!(SessionHistory::flush_end, 0))?;
     class.define_method("hold_traversals", method!(SessionHistory::hold_traversals, 1))?;
-    class.define_method("take_traversal_planned", method!(SessionHistory::take_traversal_planned, 0))?;
+    class.define_method("traversal_planned?", method!(SessionHistory::is_traversal_planned, 0))?;
     class.define_method("end_traversal", method!(SessionHistory::end_traversal, 0))?;
     class.define_method("queued?", method!(SessionHistory::is_queued, 0))?;
     class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
@@ -2043,6 +2044,13 @@ pub(crate) fn replan_of(arena: &crate::dom::RealmArena, realm: i32, navs: impl I
             t.begin_traversal(nav);
         }
         t.planned_for_host = true;
+    }
+}
+// …and whether one of realm `realm`'s traversable is still planned for the host, which its take tells it (navigation_plan.rs
+// `takeTraversal`).
+pub(crate) fn note_planned_of(arena: &crate::dom::RealmArena, realm: i32, planned: bool) {
+    if let Some((t, _)) = traversable_of(arena, realm) {
+        lock(&t).planned_for_host = planned;
     }
 }
 // …and the traversals of realm `realm`'s traversable let go of (`Traversable::end_traversal`).
