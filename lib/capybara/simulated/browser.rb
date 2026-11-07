@@ -693,6 +693,8 @@ module Capybara
 
           @load_navigations_due = false
           run_navigation_turn
+          # (…a traversal the turn made due ahead of the navigations it made due with it: `take_frame_navigations_due`)
+          consume_planned_traversal
           consume_pending_frame_submit
           consume_pending_frame_nav
           consume_pending_location
@@ -2431,7 +2433,7 @@ module Capybara
         invalidate_find_cache
         @runtime.realm_call(realm, '__csimTraverseHistory', delta.to_i, true)
         @runtime.realm_call(realm, '__csimApplyOwnTraversals', true)
-        consume_planned_traversal(frames: true) if realm.zero?
+        consume_planned_traversal if realm.zero?
         drain_task_intents if pending_nav_intent? || (!realm.zero? && windows_planned?)
       end
 
@@ -2441,12 +2443,12 @@ module Capybara
       # navigation to "traversal"), where one makes a document again — whose task would have gone ahead of the page's own
       # navigations — or the host has a navigation of the page's to take; else they wait for their task, which runs after
       # what is due now. Then the one the engine planned for the host applied (`consume_planned_traversal`).
-      # (…`frames` at the navigation turn, which hands one moving a frame over: `consume_planned_traversal`)
-      private def apply_planned_traversals_before_navigations(frames: false)
+      # (…`at_turn` as the navigation turn hands over what it made due, these with it: none waits for another)
+      private def apply_planned_traversals_before_navigations(at_turn: false)
         if @session_history.queued? && (@session_history.queued_documents? || pending_navigation_besides_traversals?)
-          @runtime.call('__csimApplyOwnTraversals', true, false)
+          @runtime.call('__csimApplyOwnTraversals', true, at_turn)
         end
-        consume_planned_traversal(frames: frames)
+        consume_planned_traversal
       end
 
       # The traversal of the page's session history the engine planned for the host (navigation_plan.rs `takeTraversal`) —
@@ -2454,12 +2456,13 @@ module Capybara
       # (`traverse_navigables_of`) — applied, then those queued after it, which waited for it, from the step it went to:
       # round after round while one is planned. (…each failing alone)
       # One that moves a frame a task of the page's planned waits for the event loop's navigation turn, as the host's
-      # navigations of frames do, the tasks due before it run first — those the host applied (`frames`), the driver's own
-      # among them, it takes at once. (…none asked of the page where none is planned: session_history.rs `planned_for_host`)
-      def consume_planned_traversal(frames: false)
+      # navigations of frames do, the tasks due before it run first — those the host applied, the driver's own among them,
+      # it takes at once (navigation_plan.rs `frame_traversal_due`). (…none asked of the page where none is planned:
+      # session_history.rs `planned_for_host`)
+      def consume_planned_traversal
         return unless @session_history.traversal_planned?
 
-        while (planned = @runtime.call('__csimTakeTraversal', frames))
+        while (planned = @runtime.call('__csimTakeTraversal'))
           kind, *plan = planned
           invalidate_find_cache
           begin
@@ -2477,7 +2480,6 @@ module Capybara
           rescue StandardError => e
             log_console('warn', "history traversal failed: #{e.message}")
           end
-          frames = true
         end
       end
 
@@ -11142,7 +11144,7 @@ module Capybara
         boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy, controlled: false, keep_traversals: true)
         @session_history.hold_traversals(false)
         @runtime.call('__csimApplyOwnTraversals', true)
-        consume_planned_traversal(frames: true)
+        consume_planned_traversal
       end
       # …the response it is made of, HTML's: `text/html;charset=utf-8` and, given here as its headers, the policy container of
       # realm `realm`'s document: the Content-Security-Policy its own response had (`headers`), the referrer policy it has now.
@@ -11520,7 +11522,7 @@ module Capybara
         @taking_frame_navigations = true
         begin
           # (…a traversal queued with them applied first, the one queue's: what a form after it navigates pushes from its step)
-          apply_planned_traversals_before_navigations(frames: true)
+          apply_planned_traversals_before_navigations(at_turn: true)
           consume_pending_frame_submit
           consume_pending_frame_nav
           consume_pending_frame_reload
@@ -12391,6 +12393,9 @@ module Capybara
         # script the driver ran on an idle page has no step following to run it — behind a traversal planned with it, which
         # cancels it)
         run_navigation_turn
+        # (…and one moving a frame the turn made due, ahead of what it made due with it, as `take_frame_navigations_due`
+        # takes them)
+        consume_planned_traversal
         consume_pending_sw_client_nav
         consume_sw_deferred_navigations
         consume_pending_location
@@ -13549,7 +13554,7 @@ module Capybara
         @restoring_flushed_nav_intents = true
         begin
           # (…a traversal moving a frame among them taken first: its turn, which the flush's tasks ran up to, is over)
-          consume_planned_traversal(frames: true)
+          consume_planned_traversal
           drain_pending_navigation
         ensure
           @restoring_flushed_nav_intents = false

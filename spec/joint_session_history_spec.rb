@@ -460,6 +460,20 @@ RSpec.describe 'the joint session history' do
     def popup_frame_path = session.evaluate_script('w.frames[0].location.pathname')
     def popup_length = session.evaluate_script('w.history.length')
 
+    # …its frame navigated in a task due as its traversal's ran ignored, as the page's is: the traversal waits for the
+    # navigation turn.
+    {'src' => "document.querySelector('iframe').src = '/z'", 'location' => "frames[0].location = '/z'"}.each do |what, navigate|
+      it "ignores its frame's #{what} set while a traversal of it is planned" do
+        session.execute_script('w.frames[0].location = "/f2"')
+        expect(popup_frame_path).to eq('/f2')
+        session.execute_script('w.frames[0].location = "/b"')
+        expect(popup_frame_path).to eq('/b')
+        session.execute_script("w.eval(#{"history.back(); setTimeout(() => { #{navigate}; }, 0)".inspect})")
+        session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 200))')
+        expect(popup_frame_path).to eq('/f2')
+      end
+    end
+
     it "counts its frame's navigation a step of its own" do
       session.execute_script('w.frames[0].location = "/f2"')
       expect(popup_frame_path).to eq('/f2')

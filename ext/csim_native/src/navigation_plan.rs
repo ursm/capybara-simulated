@@ -273,8 +273,10 @@ impl NavigationPlan {
         self.own.traversal = Some(traversal);
         self.own.planned = next_planned();
     }
-    pub(crate) fn plan_frame_traversal(&mut self, traversal: FrameTraversal) {
-        self.own.frame_traversal = Some(FrameTraversal { planned: next_planned(), ..traversal });
+    // (…`by_host` one the host applied, which it takes at once: due already)
+    pub(crate) fn plan_frame_traversal(&mut self, traversal: FrameTraversal, by_host: bool) {
+        let planned = if by_host { 0 } else { next_planned() };
+        self.own.frame_traversal = Some(FrameTraversal { planned, ..traversal });
     }
     // …and whether a traversal of either kind waits for the host to apply it: those queued after it wait for it, their
     // steps judged from the one it goes to (session_history.rs `applyTraversal`).
@@ -638,10 +640,13 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     let mut frames = Vec::new();
     for w in windows {
         let closing = crate::dom::dom(scope).arena.window_closing(w);
-        if let Some(t) = realm(scope, w).navigation_plan.own.frame_traversal.take().filter(|_| !closing) {
+        // (…one moving a frame of it once it is due, as the page's: `takeTraversal`)
+        let due = frame_traversal_due(scope, w);
+        if let Some(t) = realm(scope, w).navigation_plan.own.frame_traversal.take_if(|_| due).filter(|_| !closing) {
             frames.push((w, t));
         }
         let mut own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
+        realm(scope, w).navigation_plan.own.frame_traversal = own.frame_traversal.take();
         // (…a location's or a reload's let go where a traversal its window queued makes its document again: its task,
         // which plans that traversal, goes ahead of them — HTML "apply the history step" sets the ongoing navigation to
         // "traversal", as the page's does: browser.rb `apply_planned_traversals_before_navigations` — not one that makes
@@ -733,13 +738,11 @@ fn frame_traversal_items<'s>(scope: &mut v8::PinScope<'s, '_>, t: FrameTraversal
 // __dom.takeTraversal(frames) -> the traversal of its session history the calling realm's document — the page's — planned,
 // which it plans no more: `["traverse", delta]` of one making its document again (`Traversal`: the host's to judge anew
 // from its delta, browser.rb `perform_history_traverse`), one moving a frame of it as `takeWindowNavigations` gives it —
-// none of that kind before the event loop's navigation turn made it due, as the host's navigations of frames are, behind
-// the tasks due before it (frame_navigation.rs `Plans::through`) — but `frames`, the host's own to take at once — or null.
-// Its traversable told whether one is still planned (session_history.rs `planned_for_host`).
+// none of that kind before it is due (`frame_traversal_due`) — or null. Its traversable told whether one is still planned
+// (session_history.rs `planned_for_host`).
 fn take_traversal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let frames = args.get(0).is_true();
-    let at = plan(scope, &args).own.frame_traversal.as_ref().map(|t| t.planned);
-    let due = frames || at.is_some_and(|at| crate::dom::dom(scope).arena.frame_navigations.due(at));
+    let cid = realm_id(scope, &args);
+    let due = frame_traversal_due(scope, cid);
     let own = &mut plan(scope, &args).own;
     let item = if let Some(t) = own.frame_traversal.take_if(|_| due) {
         Some(frame_traversal_items(scope, t))
@@ -747,12 +750,18 @@ fn take_traversal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         own.traversal.take().map(|t| vec![v8::String::new(scope, "traverse").unwrap().into(), v8::Number::new(scope, t.delta as f64).into()])
     };
     let waiting = plan(scope, &args).traversal_waiting();
-    let cid = realm_id(scope, &args);
     crate::session_history::note_planned_of(&crate::dom::dom(scope).arena, cid, waiting);
     match item {
         Some(item) => rv.set(v8::Array::new_with_elements(scope, &item).into()),
         None => rv.set_null(),
     }
+}
+// Whether the traversal moving a frame top-level realm `top`'s document planned is due for the host: once the event loop's
+// navigation turn has run since a task planned it, as the host's navigations of frames are, behind the tasks due before it
+// (frame_navigation.rs `Plans::through`) — at once where the host applied it itself.
+fn frame_traversal_due(scope: &mut v8::PinScope<'_, '_>, top: i32) -> bool {
+    let at = realm(scope, top).navigation_plan.own.frame_traversal.as_ref().map(|t| t.planned);
+    at.is_some_and(|at| crate::dom::dom(scope).arena.frame_navigations.due(at))
 }
 // A text for the bindings, null for none.
 fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, text: Option<String>) -> v8::Local<'s, v8::Value> {

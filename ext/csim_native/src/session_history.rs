@@ -2184,7 +2184,7 @@ fn windows_traversing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.applyTraversal(token, all) -> the traversal of `token`, and those queued before it (`Traversable::take_due`),
+// __dom.applyTraversal(token, all, byHost) -> the traversal of `token`, and those queued before it (`Traversable::take_due`),
 // applied to the session history of the calling realm's traversable (`traversable_of`) — the page's, or a window's
 // `window.open` made in this isolate; a frame's `history` traverses its top-level one's — in order: [top, planned,
 // settled, url, state, hashchange, …] — the realm of the top-level document, which is moved; whether one was planned for
@@ -2204,6 +2204,7 @@ fn windows_traversing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let token = args.get(0).number_value(scope).map_or(0, |n| n as u64);
     let all = args.get(1).is_true();
+    let by_host = args.get(2).is_true();
     let cid = crate::dom::realm_id(scope, &args);
     let Some((traversable, window)) = traversable_of(crate::dom::realm(scope, cid), cid) else { return rv.set_null() };
     let top = window.unwrap_or(0);
@@ -2277,7 +2278,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     if let Some(traversal) = frames_planned {
         let arena = crate::dom::realm(scope, top);
         settled.extend(traversal.changes.iter().filter(|&&(nav, _, same)| nav != TOP && !same).filter_map(|&(nav, ..)| arena.traversal_cancels_frame(nav)));
-        arena.navigation_plan.plan_frame_traversal(traversal);
+        arena.navigation_plan.plan_frame_traversal(traversal, by_host);
     }
     if let Some(traversal) = planned {
         crate::dom::realm(scope, top).navigation_plan.plan_traversal(traversal);
