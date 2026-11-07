@@ -26,10 +26,12 @@ pub(crate) struct RealmLocation {
     // Its document's active sandboxing flag set (sandbox.rs), which every frame it makes inherits — its origin a NEW
     // opaque one where that has the sandboxed origin flag.
     pub(crate) sandbox: u32,
-    // Whether its agent cluster is keyed by its origin, not its site: its browsing context group cross-origin isolated
-    // (`setOriginKeyedCluster`); and a worker's, the key the host gives it (`setAgentClusterKey`): a dedicated one's its
-    // owner's, a shared or service one's its own.
-    origin_keyed: bool,
+    // Whether its browsing context group is cross-origin isolated (`setCrossOriginIsolation`), and whether its agent
+    // cluster is keyed by its origin, not its site, once its document's agent is obtained (`origin_keyed_cluster`) — and
+    // a worker's agent cluster key, the one the host gives it (`setAgentClusterKey`): a dedicated one's its owner's, a
+    // shared or service one's its own.
+    cross_origin_isolated: bool,
+    origin_keyed: Option<bool>,
     cluster_key: Option<String>,
     // The browsing context group its window is of, and its window's own name (`setBrowsingContextGroup`): the page's, or
     // a window's `window.open` made in the isolate — one its page left since keeping its own (v8_runtime.rb
@@ -65,7 +67,8 @@ impl Default for RealmLocation {
             domain: None,
             origin_record: new_origin_record(),
             sandbox: 0,
-            origin_keyed: false,
+            cross_origin_isolated: false,
+            origin_keyed: None,
             cluster_key: None,
             group: Default::default(),
         }
@@ -116,6 +119,7 @@ impl RealmLocation {
     fn renew_origin(&mut self) {
         self.origin_record = new_origin_record();
         self.domain = None;
+        self.origin_keyed = None;
     }
     // Its origin's effective domain (`effective_domain`).
     pub(crate) fn effective_domain(&self) -> Option<String> {
@@ -150,19 +154,15 @@ impl RealmLocation {
         self.origin_key.insert(opaque_origin_key(format!("realm{cid}"))).clone()
     }
     // The key of the agent cluster the realm is of (HTML "obtain a similar-origin window agent"), in browsing context
-    // group `group` of window `window` (the Dom's): its origin's site — its origin where its group is cross-origin
-    // isolated, an opaque origin its own key, its window's (an opaque key is the isolate's alone) — what a
-    // WebAssembly.Module serialized in one is read back by in another of it alone. (`Origin-Agent-Cluster`, which may
-    // key it by origin too, is not modelled: a gap.)
-    pub(crate) fn agent_cluster_key(&mut self, cid: i32, (group, window): (&str, &str)) -> String {
-        if let Some(key) = &self.cluster_key {
-            return key.clone();
-        }
+    // group `group` of window `window` (the Dom's): its origin's site — its origin where the cluster is origin-keyed
+    // (`keyed`: `origin_keyed_cluster`), an opaque origin its own key, its window's (an opaque key is the isolate's
+    // alone) — what a WebAssembly.Module serialized in one is read back by in another of it alone.
+    fn agent_cluster_key(&mut self, cid: i32, (group, window): (&str, &str), keyed: bool) -> String {
         let key = self.origin_key(cid);
         if is_opaque_origin_key(&key) {
             return format!("{window}|{key}");
         }
-        let key = if self.origin_keyed { key } else { site(&key).unwrap_or(key) };
+        let key = if keyed { key } else { site(&key).unwrap_or(key) };
         format!("{group}|{key}")
     }
     // The fragments to look for the target element by: the target fragment as it stands, then percent-decoded and UTF-8
@@ -223,7 +223,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sameOriginDomainRealm", same_origin_domain_realm, context_id);
     register(scope, ns, "renewOrigin", renew_origin, context_id);
     register(scope, ns, "setOriginKey", set_origin_key, context_id);
-    register(scope, ns, "setOriginKeyedCluster", set_origin_keyed_cluster, context_id);
+    register(scope, ns, "setCrossOriginIsolation", set_cross_origin_isolation, context_id);
+    register(scope, ns, "obtainAgentCluster", obtain_agent_cluster, context_id);
+    register(scope, ns, "originAgentCluster", origin_agent_cluster, context_id);
     register(scope, ns, "setAgentClusterKey", set_agent_cluster_key, context_id);
     register(scope, ns, "agentClusterKey", agent_cluster_key_op, context_id);
     register(scope, ns, "setBrowsingContextGroup", set_browsing_context_group, context_id);
@@ -609,12 +611,50 @@ fn set_origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     realm(scope, cid).location.origin_key = key;
 }
 
-// __dom.setOriginKeyedCluster(keyed) — whether the calling realm's agent cluster is keyed by its origin
-// (`agent_cluster_key`): its group cross-origin isolated.
-fn set_origin_keyed_cluster(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let keyed = args.get(0).boolean_value(scope);
+// __dom.setCrossOriginIsolation(isolated) — whether the calling realm's browsing context group is cross-origin isolated,
+// its agent cluster then origin-keyed (`origin_keyed_cluster`).
+fn set_cross_origin_isolation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let isolated = args.get(0).boolean_value(scope);
     let cid = realm_id(scope, &args);
-    realm(scope, cid).location.origin_keyed = keyed;
+    realm(scope, cid).location.cross_origin_isolated = isolated;
+}
+impl RealmArena {
+    // Whether realm `cid`'s agent cluster is origin-keyed (HTML "obtain a similar-origin window agent"), its document's
+    // agent obtained the first time it is asked — as its document is made, `requests` whether its response asked for one
+    // (`Origin-Agent-Cluster: ?1`), heeded in a secure context alone ("create and initialize a Document object"); a
+    // document no response made (an initial about:blank) asks none. An opaque origin's always is (its key the origin, no
+    // site), a cross-origin isolated group's always; else as its group's historical agent cluster key map has its origin,
+    // which the first document of that origin the group made decided — so two documents of one origin in one group are
+    // of one agent cluster, whatever the second asked. (Chrome keys by origin unless asked not to, `?0`; Firefox, as
+    // HTML, by site unless asked to — measured.)
+    pub(crate) fn origin_keyed_cluster(&mut self, cid: i32, requests: bool) -> bool {
+        if let Some(keyed) = self.realm_state(cid).and_then(|s| s.location.origin_keyed) {
+            return keyed;
+        }
+        let secure = requests && self.secure_context(cid);
+        let Some(location) = self.realm_state(cid).map(|s| &s.location) else { return false };
+        let keyed = location.cross_origin_isolated || location.origin() == "null" || {
+            let key = (location.group.0.clone(), location.origin().to_owned());
+            *self.agent_cluster_keys.entry(key).or_insert(secure)
+        };
+        if let Some(state) = self.realm_state_mut(cid) {
+            state.location.origin_keyed = Some(keyed);
+        }
+        keyed
+    }
+}
+// __dom.obtainAgentCluster(requests) — the calling realm's document's agent obtained as it is made, `requests` whether
+// its response asked for an origin-keyed agent cluster (`origin_keyed_cluster`).
+fn obtain_agent_cluster(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let requests = args.get(0).is_true();
+    let cid = realm_id(scope, &args);
+    crate::dom::dom(scope).arena.origin_keyed_cluster(cid, requests);
+}
+// __dom.originAgentCluster() -> whether the calling realm's agent cluster is origin-keyed (`origin_keyed_cluster`): HTML's
+// `originAgentCluster` getter.
+fn origin_agent_cluster(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::dom(scope).arena.origin_keyed_cluster(cid, false));
 }
 
 // __dom.setAgentClusterKey(key) — the calling realm's agent cluster key, a worker's (`agent_cluster_key`).
@@ -629,11 +669,16 @@ fn agent_cluster_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let key = agent_cluster_key(scope, cid);
     rv.set(v8::String::new(scope, &key).unwrap().into());
 }
-// …realm `cid`'s, in its window's browsing context group.
+// …realm `cid`'s, in its window's browsing context group — a worker's the one its host gave it.
 pub(crate) fn agent_cluster_key(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> String {
-    let location = &mut realm(scope, cid).location;
+    let arena = realm(scope, cid);
+    if let Some(key) = &arena.location.cluster_key {
+        return key.clone();
+    }
+    let keyed = arena.origin_keyed_cluster(cid, false);
+    let location = &mut arena.location;
     let (group, window) = location.group.clone();
-    location.agent_cluster_key(cid, (&group, &window))
+    location.agent_cluster_key(cid, (&group, &window), keyed)
 }
 // __dom.setBrowsingContextGroup(group, window) — the browsing context group of the calling realm's window (the page's,
 // its frames' and its pop-ups' that share it: a window the session opens, or one opened with no opener, is a new one),
@@ -798,8 +843,9 @@ fn effective_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     }
 }
 // __dom.setDomain(realm, value) -> null with the domain of realm `realm`'s document's origin set to `value` host-parsed
-// (`set_origin_domain`), else `[why, host, effective]`: why not (`domain_to_set`), the host it parsed to and the
-// effective domain ('' for none).
+// (`set_origin_domain`) — nothing set where the calling realm's agent cluster is origin-keyed (HTML step 6:
+// `origin_keyed_cluster`), the write then a no-op — else `[why, host, effective]`: why not (`domain_to_set`), the host it
+// parsed to and the effective domain ('' for none).
 fn set_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let value = args.get(1).to_rust_string_lossy(scope);
     // (…a document sandboxed — its sandboxed document.domain browsing context flag, whatever it allows (step 2) — refused
@@ -808,8 +854,10 @@ fn set_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let (target, effective) = allowed.flatten().map_or((None, None), |(realm, effective)| (Some(realm), effective));
     let (why, host) = match domain_to_set(effective.as_deref(), &value) {
         Ok(host) => {
-            if let Some(target) = target {
-                crate::dom::dom(scope).arena.set_origin_domain(target, host);
+            let cid = realm_id(scope, &args);
+            let arena = &mut crate::dom::dom(scope).arena;
+            if let Some(target) = target.filter(|_| !arena.origin_keyed_cluster(cid, false)) {
+                arena.set_origin_domain(target, host);
             }
             return rv.set_null();
         }

@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 require_relative 'support/every_host_local'
+require_relative 'support/https_app_host'
 
 # `document.domain` is its origin's effective domain (HTML §7.5.2): none for an opaque origin — a document sandboxed
 # without allow-same-origin, which may not set one — and its creator's for a document with no browsing context, which
@@ -134,6 +135,59 @@ RSpec.describe 'document.domain' do
       expect(session.evaluate_script(<<~JS)).to eq('SecurityError')
         (() => { try { frames[0].document.open(); return 'opened'; } catch (e) { return e.name; } })()
       JS
+    end
+  end
+
+  # A write is a no-op in an origin-keyed agent cluster (HTML setter step 6): a document whose response asked for one —
+  # `Origin-Agent-Cluster: ?1`, heeded in a secure context alone — or one of an origin whose first document in its
+  # browsing context group did (the historical agent cluster key map), its `originAgentCluster` true. HTML and Firefox
+  # key by site unless asked (Chrome by origin unless asked not to, `?0`; measured).
+  describe 'in an origin-keyed agent cluster', :https, :every_host_local do
+    let(:pages) do
+      {
+        '/' => ['?1', '<!DOCTYPE html><meta charset="utf-8"><iframe src="/plain"></iframe><iframe src="https://a.example.com/keyed"></iframe>'],
+        '/plain' => [nil, '<!DOCTYPE html><meta charset="utf-8"><title>plain</title><iframe src="https://b.example.com/keyed"></iframe>'],
+        '/keyed' => ['?1', '<!DOCTYPE html><meta charset="utf-8"><title>keyed</title>'],
+        '/zero' => ['?0', '<!DOCTYPE html><meta charset="utf-8">']
+      }
+    end
+    let(:session) do
+      simulated_session(lambda {|env|
+        oac, body = pages.fetch(env['PATH_INFO'], [nil, ''])
+        [200, {'content-type' => 'text/html'}.merge(oac ? {'origin-agent-cluster' => oac} : {}), [body]]
+      })
+    end
+    let(:write) do
+      "(() => { const before = [originAgentCluster, document.domain]; document.domain = 'example.com'; return [...before, document.domain]; })()"
+    end
+
+    # (…and the next document of the origin in the window's group keyed so too, whatever its response says)
+    it 'leaves the domain as it is where the response asked for one' do
+      session.visit '/'
+      expect(session.evaluate_script(write)).to eq([true, 'www.example.com', 'www.example.com'])
+      session.visit '/zero'
+      expect(session.evaluate_script(write)).to eq([true, 'www.example.com', 'www.example.com'])
+    end
+
+    it 'sets it where none asked' do
+      session.visit '/zero'
+      expect(session.evaluate_script(write)).to eq([false, 'www.example.com', 'example.com'])
+    end
+
+    it 'keys a document by what the first of its origin in its group asked' do
+      session.visit '/'
+      poll_until { session.within_frame(1) { session.evaluate_script('document.title') } == 'keyed' }
+      expect(session.within_frame(0) { session.evaluate_script('originAgentCluster') }).to be(true)
+      expect(session.within_frame(1) { session.evaluate_script('originAgentCluster') }).to be(true)
+      session.within_frame(0) do
+        poll_until { session.within_frame(0) { session.evaluate_script('document.title') } == 'keyed' }
+        expect(session.within_frame(0) { session.evaluate_script(write) }).to eq([true, 'b.example.com', 'b.example.com'])
+      end
+    end
+
+    it 'heeds no request of a document that is no secure context' do
+      session.visit 'http://www.example.com/'
+      expect(session.evaluate_script(write)).to eq([false, 'www.example.com', 'example.com'])
     end
   end
 

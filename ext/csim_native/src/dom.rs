@@ -960,6 +960,10 @@ pub(crate) struct RealmArena {
     // (`__dom.domainWrites`): what a WindowProxy's memo of whether its window is same origin-domain keys on — none, the
     // common page's, keeps it a load of a word (realm_location.rs `set_origin_domain`).
     pub(crate) domain_writes: SharedWord,
+    // Each browsing context group's historical agent cluster key map (HTML): by group and origin, whether the agent
+    // cluster of the documents of that origin in it is origin-keyed — the first one's to decide (realm_location.rs
+    // `origin_keyed_cluster`).
+    pub(crate) agent_cluster_keys: std::collections::HashMap<(String, String), bool>,
     // …and which realms they are (foreign_observations.rs).
     pub(crate) foreign_observations: crate::foreign_observations::ForeignObservations,
     // Each frame container's navigation as it goes (frame_navigation.rs).

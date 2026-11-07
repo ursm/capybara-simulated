@@ -26,6 +26,17 @@ pub(crate) struct ResponseFields {
     // The first Set-Cookie header's set-cookie-strings as they came: Rack 3's Array of them, Rack 2's one String of them
     // joined by newlines — none for an empty one.
     pub(crate) set_cookie: Vec<Vec<u8>>,
+    // Whether the first Origin-Agent-Cluster header asks for an origin-keyed agent cluster (`requests_origin_keying`).
+    pub(crate) origin_agent_cluster: bool,
+}
+
+// Whether an Origin-Agent-Cluster header's value asks for an origin-keyed agent cluster (HTML "create and initialize a
+// Document object"): it parses as a structured header (RFC 8941) Item whose value is the Boolean true, `?1` — its
+// parameters, if any, whatever they say. Any other value — `?0`, a token, a list — asks nothing.
+pub(crate) fn requests_origin_keying(value: &str) -> bool {
+    let item = value.trim_matches(' ');
+    let (bare, params) = item.split_once(';').map_or((item, None), |(b, p)| (b, Some(p)));
+    bare == "?1" && params.is_none_or(|p| !p.contains(','))
 }
 
 
@@ -123,6 +134,7 @@ impl ResponseFields {
         let Some(headers) = headers else { return Ok(out) };
         let headers = header_map(&Ruby::get_with(headers), headers)?;
         let (mut location, mut policy, mut disposition, mut coop, mut coep, mut content_type, mut refresh, mut cookie) = (false, false, false, false, false, false, false, false);
+        let mut origin_agent_cluster = false;
         let mut csp: Vec<String> = Vec::new();
         headers.foreach(|k: Value, v: Value| {
             let name = ruby_bytes(k.funcall("to_s", ())?);
@@ -159,6 +171,9 @@ impl ResponseFields {
                     // (…as the app gave it, a UTF-8 one's text: a URL in it is parsed as the document's)
                     out.refresh = Some(String::from_utf8(bytes).unwrap_or_else(|e| isomorphic_decode(e.as_bytes())));
                 }
+            } else if is("origin-agent-cluster") && !origin_agent_cluster {
+                origin_agent_cluster = true;
+                out.origin_agent_cluster = text(v)?.is_some_and(|value| requests_origin_keying(&value));
             } else if is("set-cookie") && !cookie {
                 cookie = true;
                 out.set_cookie = set_cookie_lines(v)?;
@@ -213,19 +228,20 @@ impl ResponseFields {
     }
 }
 
-// Native.document_params(headers, url, stand_in) -> [content type, Content-Security-Policy, referrer policy, Refresh, opener policy]:
-// what the document a response of header map `headers` (nil none) makes at `url` is made with (HTML "create and initialize a
-// Document object": its MIME type and charset, its policy container's CSP list and referrer policy, its declarative
-// refresh; and "obtain an opener policy") — nil each it has none of (a content type none where it is empty), the opener
-// policy by its name (coop.rs).
+// Native.document_params(headers, url, stand_in) -> [content type, Content-Security-Policy, referrer policy, Refresh, opener policy,
+// origin-keying]: what the document a response of header map `headers` (nil none) makes at `url` is made with (HTML
+// "create and initialize a Document object": its MIME type and charset, its policy container's CSP list and referrer
+// policy, its declarative refresh, whether it asks for an origin-keyed agent cluster; and "obtain an opener policy") —
+// nil each it has none of (a content type none where it is empty), the opener policy by its name (coop.rs).
 pub(crate) fn document_params(ruby: &Ruby, headers: Option<Value>, url: String, stand_in: bool) -> Result<RArray, Error> {
     let fields = ResponseFields::read(headers)?;
-    let out = ruby.ary_new_capa(5);
+    let out = ruby.ary_new_capa(6);
     out.push(fields.content_type.clone().filter(|t| !t.is_empty()))?;
     out.push(fields.csp.clone())?;
     out.push(fields.referrer_policy)?;
     out.push(fields.refresh.clone())?;
     out.push(fields.opener_policy(&url, stand_in).name())?;
+    out.push(fields.origin_agent_cluster)?;
     Ok(out)
 }
 
@@ -254,4 +270,19 @@ pub(crate) fn redirect_locations_for_ruby(ruby: &Ruby, status: u32, headers: Opt
 // redirect is followed (Chrome: `/x\xFF` → `/x%FF`); a host that hands such a field to script decodes it first)
 fn field_text(ruby: &Ruby, field: &[u8]) -> RString {
     std::str::from_utf8(field).map_or_else(|_| ruby.str_from_slice(field), |s| ruby.str_new(s))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_agent_cluster_asks_for_origin_keying_by_the_boolean_true_alone() {
+        for value in ["?1", " ?1 ", "?1;x=1"] {
+            assert!(requests_origin_keying(value), "{value}");
+        }
+        for value in ["?0", "1", "true", "?1, ?1", "?1;x=1, ?0", "", "?10"] {
+            assert!(!requests_origin_keying(value), "{value}");
+        }
+    }
 }

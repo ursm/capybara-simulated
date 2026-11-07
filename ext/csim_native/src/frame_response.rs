@@ -28,10 +28,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // window is read before the navigation under way has its response, which this leaves to that navigation's build —
 // `[FRAME_DEFERRED]`, `[FRAME_KEPT]`, or `[FRAME_BUILD, url, locationHref,
 // body, contentType, javascriptSource, aboutBase, clientId, referrer, policy, refresh, documentOrigin, locationOrigin,
-// sandbox]`: the document's URL, the one its location reports (about:srcdoc, about:blank), its body (its bytes, a
-// srcdoc's text), its type, the script a javascript: URL runs in it, the base URL an about: document inherits from its
-// creator, the client id its navigation reserved, the Referer its request sent and the Referrer-Policy and Refresh its
-// response set (null for none), its origins (`frame_origins`) and its sandboxing flags.
+// sandbox, originAgentCluster]`: the document's URL, the one its location reports (about:srcdoc, about:blank), its body
+// (its bytes, a srcdoc's text), its type, the script a javascript: URL runs in it, the base URL an about: document
+// inherits from its creator, the client id its navigation reserved, the Referer its request sent and the Referrer-Policy
+// and Refresh its response set (null for none), its origins (`frame_origins`), its sandboxing flags and whether its
+// response asked for an origin-keyed agent cluster (response_headers.rs `requests_origin_keying`).
 fn frame_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     // (…a container of no node, or no host: no document made, as for a build parked)
     let deferred = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>| {
@@ -67,6 +68,7 @@ struct Response<'s> {
     policy: Option<String>,
     refresh: Option<String>,
     csp: Option<String>,
+    origin_agent_cluster: bool,
     // (…a network error's: no response, its document an error document of a new opaque origin — HTML "create a document
     // for inline content", as a top-level one's is — and a PDF's, its viewer's document made by those steps too)
     error: bool,
@@ -79,7 +81,7 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
     };
     let (source, reload) = if initial { (FrameSource::None, false) } else { realm(scope, cid).frame_source(container, doc) };
     let empty = v8::String::empty(scope).into();
-    let mut r = Response { url: String::new(), body: empty, content_type: "text/html".to_owned(), javascript: None, client_id: None, referrer: None, policy: None, refresh: None, csp: None, error: false };
+    let mut r = Response { url: String::new(), body: empty, content_type: "text/html".to_owned(), javascript: None, client_id: None, referrer: None, policy: None, refresh: None, csp: None, origin_agent_cluster: false, error: false };
     let (carried, srcdoc) = (matches!(source, FrameSource::Navigation(_)), matches!(source, FrameSource::Srcdoc(_)));
     match source {
         // (…a scripted navigation's: its response's as it carried it)
@@ -203,6 +205,7 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
         text_or_null(scope, created.document.as_deref()),
         text_or_null(scope, created.location),
         v8::Integer::new_from_unsigned(scope, created.sandbox).into(),
+        v8::Boolean::new(scope, r.origin_agent_cluster).into(),
     ];
     Ok(v8::Array::new_with_elements(scope, &items).into())
 }
@@ -322,6 +325,7 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
         r.csp = header(scope, "content-security-policy").filter(|s| !s.is_empty());
         r.policy = header(scope, "referrer-policy");
         r.refresh = header(scope, "refresh");
+        r.origin_agent_cluster = header(scope, "origin-agent-cluster").is_some_and(|v| crate::response_headers::requests_origin_keying(&v));
         if let Some(content_type) = header(scope, "content-type").filter(|s| !s.is_empty()) {
             r.content_type = content_type;
         }
@@ -336,7 +340,7 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
     if flag(scope, "inline") {
         r.body = crate::dom::u8_array(scope, Vec::new());
         r.content_type = "text/html".to_owned();
-        (r.csp, r.policy, r.refresh) = (None, None, None);
+        (r.csp, r.policy, r.refresh, r.origin_agent_cluster) = (None, None, None, false);
         r.error = true;
     }
     if no_document {

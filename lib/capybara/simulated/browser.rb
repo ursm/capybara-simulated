@@ -11414,16 +11414,17 @@ module Capybara
           # (…its entry's resource the POST that made it — none where a redirect made it a GET: a 301, 302 or 303's; a 307
           # or 308 keeps it, Fetch "HTTP-redirect fetch")
           post = nil if resp['method'] == 'GET'
-          ctype, csp, referrer_policy, refresh, opener_policy = Native.document_params(headers, resp['url'] || url.to_s, @loopback_stand_in)
+          ctype, csp, referrer_policy, refresh, opener_policy, origin_agent_cluster = Native.document_params(headers, resp['url'] || url.to_s, @loopback_stand_in)
           ctype     = resp['document_type'] || ctype
           body, url = document_payload(resp['body_bytes'] || resp['body']), resp['url'] || url
           ctype   ||= 'text/html'
           made = {
-            csp:             csp,
-            referrer:        resp['referrer'],
-            referrer_policy: referrer_policy,
-            client_id:       resp['resulting_client_id'],
-            refresh:         refresh
+            csp:                  csp,
+            referrer:             resp['referrer'],
+            referrer_policy:      referrer_policy,
+            client_id:            resp['resulting_client_id'],
+            refresh:              refresh,
+            origin_agent_cluster: origin_agent_cluster
           }
           made[:doc_origin] = 'null' if resp['error']
           # (…a PDF its viewer's document for inline content: `boot_inline_document`)
@@ -12322,9 +12323,16 @@ module Capybara
         tag_frame_entry_post(realm_id, req_body, content_type, origin_null ? 'null' : url_origin(origin_url)) if fetch.request_method == 'POST'
         # (…and what the caller's document state gives it — a traversal's form state and history state — none where a
         # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
-        ctype, csp, document_policy, refresh = Native.document_params(hop.headers, '', false)
+        ctype, csp, document_policy, refresh, _, origin_agent_cluster = Native.document_params(hop.headers, '', false)
         ctype = hop.document_type || ctype
-        response = {client_id: hop.client_id, csp: csp, referrer: fetch.referrer, referrer_policy: document_policy, refresh: refresh}
+        response = {
+          client_id:            hop.client_id,
+          csp:                  csp,
+          referrer:             fetch.referrer,
+          referrer_policy:      document_policy,
+          refresh:              refresh,
+          origin_agent_cluster: origin_agent_cluster
+        }
         response.update(commit) unless fetch.redirected?
         commit_frame_document(realm_id, entry, target, hop.document || read_rack_body(hop.rack_body), ctype || 'text/html', **response)
       end
@@ -12351,7 +12359,8 @@ module Capybara
         referrer: nil,
         referrer_policy: nil,
         refresh: nil,
-        doc_origin: nil
+        doc_origin: nil,
+        origin_agent_cluster: false
       )
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
@@ -12369,10 +12378,11 @@ module Capybara
           content_type,
           client_id,
           seed,
-          history_state:   history_state,
-          referrer:        referrer,
-          referrer_policy: referrer_policy,
-          refresh:         refresh
+          history_state:        history_state,
+          referrer:             referrer,
+          referrer_policy:      referrer_policy,
+          refresh:              refresh,
+          origin_agent_cluster: origin_agent_cluster
         ).to_i
         return if new_id.zero?
         frame_navigation_made_document(new_id)
@@ -12734,7 +12744,19 @@ module Capybara
       # bounded per-test leak, only reachable by re-entering a sibling subframe
       # before an ancestor `_parent` nav; not worth a JS descendant walk on this
       # path's perf budget.
-      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, client_id: nil, csp: nil, referrer: nil, referrer_policy: nil, refresh: nil, doc_origin: nil)
+      def reload_current_frame_realm(
+        url,
+        bytes,
+        content_type,
+        entry: @frame_stack.last,
+        client_id: nil,
+        csp: nil,
+        referrer: nil,
+        referrer_policy: nil,
+        refresh: nil,
+        doc_origin: nil,
+        origin_agent_cluster: false
+      )
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
@@ -12746,7 +12768,19 @@ module Capybara
         frame_realm_host_call(parent, '__csimForgetFrameLoaded', old_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
 
         frame_realm_host_call(parent, '__csimHostCommitBegins', entry[:iframe_handle])
-        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh).to_i
+        new_id = @runtime.reload_frame_realm(
+          old_id,
+          parent.to_i,
+          url,
+          document_payload(bytes),
+          content_type,
+          client_id,
+          seed,
+          referrer:             referrer,
+          referrer_policy:      referrer_policy,
+          refresh:              refresh,
+          origin_agent_cluster: origin_agent_cluster
+        ).to_i
         return if new_id.zero?
         frame_navigation_made_document(new_id)
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
@@ -13295,7 +13329,7 @@ module Capybara
         drop_document_websockets
         # (…what its response makes it: its content type, its policy container's CSP and referrer policy, its declarative
         # refresh, its opener policy — response_headers.rs `document_params`)
-        ctype, csp, referrer_policy, refresh, opener_policy = inline ? ['text/html', nil, nil, nil, 'unsafe-none'] : Native.document_params(@last_response_headers, page_url.to_s, @loopback_stand_in)
+        ctype, csp, referrer_policy, refresh, opener_policy, origin_agent_cluster = inline ? ['text/html', nil, nil, nil, 'unsafe-none', false] : Native.document_params(@last_response_headers, page_url.to_s, @loopback_stand_in)
         ctype = content_type || ctype
         # (…its opener policy, what a navigation of the page after is judged by — the page's browsing context group left for
         # a new one where it needs, and what that makes it cross-origin isolated: `commit_coop`)
@@ -13363,6 +13397,7 @@ module Capybara
         opts['referrerPolicy'] = referrer_policy if referrer_policy
         opts['csp'] = csp if csp
         opts['refresh'] = refresh if refresh
+        opts['originAgentCluster'] = true if origin_agent_cluster
         # (…the worker controlling it: its navigation's — not one still activating, which the navigation's wait for it
         # gave up on, the navigation having gone to the network: `await_sw_activation`)
         if controlled && http_url?(page_url)

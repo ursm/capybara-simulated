@@ -671,7 +671,7 @@ module Capybara
       # the iframe element at the new id (`__csimRebindFrameRealm`).
       # `history_state` the `[state]` of the classic history API state its document starts with, a traversal's to its
       # entry (Browser#reload_frame_to_entry).
-      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id, seed, history_state: nil, referrer: nil, referrer_policy: nil, refresh: nil)
+      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id, seed, history_state: nil, referrer: nil, referrer_policy: nil, refresh: nil, origin_agent_cluster: false)
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
         # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
@@ -681,7 +681,7 @@ module Capybara
         # WindowProxies of the frame kept, over the new document's window next.
         dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_frame_realm(ctx, url, body, content_type, parent_id, seed['container'], seed['docOrigin'], seed['locationOrigin'], nil, nil, seed['viewport'], client_id, seed['margins'], seed['sandbox'],
-                           history_state: history_state, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh)
+                           history_state: history_state, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh, origin_agent_cluster: origin_agent_cluster)
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
@@ -1164,11 +1164,13 @@ module Capybara
           frame_sandbox = 0,
           referrer = nil,
           policy_header = nil,
-          refresh = nil
+          refresh = nil,
+          origin_agent_cluster = false
         ) {
           RuntimeShared.safe_call do
             create_frame_realm(c, url, body, content_type, parent_id, container, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport, client_id, frame_margins,
-                               frame_sandbox, referrer: referrer, referrer_policy: @browser.referrer_policy_header({'referrer-policy' => policy_header}), refresh: refresh)
+                               frame_sandbox, referrer: referrer, referrer_policy: @browser.referrer_policy_header({'referrer-policy' => policy_header}), refresh: refresh,
+                               origin_agent_cluster: origin_agent_cluster == true)
           end
         })
         # …and a frame's initial about:blank navigated to a document of its origin: loaded into the same realm, its Window
@@ -1189,22 +1191,24 @@ module Capybara
           frame_sandbox = 0,
           referrer = nil,
           policy_header = nil,
-          refresh = nil
+          refresh = nil,
+          origin_agent_cluster = false
         ) {
           RuntimeShared.safe_call do
             reuse_frame_realm(
               id.to_i, url, body, content_type, parent_id,
-              doc_origin:      frame_doc_origin,
-              location_origin: frame_location_origin,
-              js_url_source:   js_url_source,
-              about_base:      frame_about_base,
-              viewport:        frame_viewport,
-              client_id:       client_id,
-              margins:         frame_margins,
-              sandbox:         frame_sandbox,
-              referrer:        referrer,
-              referrer_policy: @browser.referrer_policy_header({'referrer-policy' => policy_header}),
-              refresh:         refresh
+              doc_origin:           frame_doc_origin,
+              location_origin:      frame_location_origin,
+              js_url_source:        js_url_source,
+              about_base:           frame_about_base,
+              viewport:             frame_viewport,
+              client_id:            client_id,
+              margins:              frame_margins,
+              sandbox:              frame_sandbox,
+              referrer:             referrer,
+              referrer_policy:      @browser.referrer_policy_header({'referrer-policy' => policy_header}),
+              refresh:              refresh,
+              origin_agent_cluster: origin_agent_cluster == true
             )
           end
         })
@@ -1325,7 +1329,8 @@ module Capybara
         history_state: nil,
         referrer: nil,
         referrer_policy: nil,
-        refresh: nil
+        refresh: nil,
+        origin_agent_cluster: false
       )
         realm = parent_ctx.create_context
         # (…its depth and its parent the engine's once its container's navigable is given it, before its document loads:
@@ -1370,19 +1375,20 @@ module Capybara
         JS
         load_frame_document(
           realm, url, body, content_type, parent_id,
-          link:            container,
-          doc_origin:      frame_doc_origin,
-          location_origin: frame_location_origin,
-          js_url_source:   js_url_source,
-          about_base:      frame_about_base,
-          viewport:        frame_viewport,
-          client_id:       client_id,
-          margins:         frame_margins,
-          sandbox:         frame_sandbox,
-          history_state:   history_state,
-          referrer:        referrer,
-          referrer_policy: referrer_policy,
-          refresh:         refresh
+          link:                 container,
+          doc_origin:           frame_doc_origin,
+          location_origin:      frame_location_origin,
+          js_url_source:        js_url_source,
+          about_base:           frame_about_base,
+          viewport:             frame_viewport,
+          client_id:            client_id,
+          margins:              frame_margins,
+          sandbox:              frame_sandbox,
+          history_state:        history_state,
+          referrer:             referrer,
+          referrer_policy:      referrer_policy,
+          refresh:              refresh,
+          origin_agent_cluster: origin_agent_cluster
         )
         realm.id
       rescue StandardError => e
@@ -1446,7 +1452,8 @@ module Capybara
         history_state: nil,
         referrer: nil,
         referrer_policy: nil,
-        refresh: nil
+        refresh: nil,
+        origin_agent_cluster: false
       )
         # Pass the URL + document body as call ARGUMENTS, not interpolated into
         # an eval string: the marshaller carries them losslessly, so arbitrary
@@ -1487,6 +1494,8 @@ module Capybara
         # The frame's location.origin (opaque "null" for about:blank / srcdoc /
         # javascript:); decoupled from the location string so navigation is intact.
         realm.call('__csimSetLocationOrigin', location_origin&.to_s) unless location_origin.nil? && !reused
+        # (…and its agent, its origin known: realm_location.rs `origin_keyed_cluster`)
+        realm.call('__csimObtainAgentCluster', origin_agent_cluster == true)
         # An about:blank / about:srcdoc frame's URL is opaque, but its base URL (for
         # relative-URL resolution) is INHERITED from the creator. Seed that inherited
         # base BEFORE the document loads so its load-time scripts resolve relative URLs
@@ -1587,7 +1596,8 @@ module Capybara
         client_id: nil,
         refresh: nil,
         sandbox: nil,
-        controlled: true
+        controlled: true,
+        origin_agent_cluster: false
       )
         realm.call('__csimUpdateLocation', url.to_s)
         # (…its `Date` what its server rendered it with: the host's clock's offset, where that has moved since its opener's
@@ -1609,6 +1619,8 @@ module Capybara
           # `seedWindowDocument`)
           realm.eval_void("__dom.seedWindowDocument(#{JSON.generate(url.to_s)}, #{JSON.generate(csp)});")
         end
+        # (…and its agent, its origin known: realm_location.rs `origin_keyed_cluster`)
+        realm.call('__csimObtainAgentCluster', origin_agent_cluster == true)
         # (…a CONTROLLED client where a registration's scope covers its URL, matched in its own top-level site — Service
         # Workers "Handle Fetch": the reserved client's active service worker, which the document's client takes — wired
         # before its scripts run, as a frame's is (`create_frame_realm`), which registers it as a client; none for one of
@@ -1680,7 +1692,8 @@ module Capybara
         controlled: true,
         entry: nil,
         viewport: nil,
-        group: page_group
+        group: page_group,
+        origin_agent_cluster: false
       )
         realm = seed_realm_bridge(ctx.create_context, group)
         # (…the host's clock's offset its opener's time origin holds, for its initial about:blank: agent_clock.rs `TimeOrigin`)
@@ -1740,7 +1753,8 @@ module Capybara
           load_window_document(
             realm, url, body, content_type,
             doc_origin: doc_origin, location_origin: location_origin, about_base: about_base, referrer: referrer, referrer_policy: referrer_policy,
-            csp: csp, client_id: client_id, refresh: refresh, sandbox: sandbox, entry: entry, controlled: controlled
+            csp: csp, client_id: client_id, refresh: refresh, sandbox: sandbox, entry: entry, controlled: controlled,
+            origin_agent_cluster: origin_agent_cluster
           )
         end
         realm.id
