@@ -175,7 +175,7 @@ RSpec.describe 'a navigation whose server takes its time', :every_host_local do
 
   let(:session) {
     simulated_session(lambda {|env|
-      sleep(0.3) if env['PATH_INFO'] == '/slow'
+      sleep(0.3) if env['PATH_INFO'].start_with?('/slow')
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><title>#{env['PATH_INFO']}</title>"]]
     })
   }
@@ -200,6 +200,40 @@ RSpec.describe 'a navigation whose server takes its time', :every_host_local do
     expect(session.evaluate_script('[location.pathname, history.length, history.state]')).to eq(['/slow', 2, nil])
     session.go_back
     expect(session.evaluate_script('[location.pathname, document.title]')).to eq(['/a', '/a'])
+  end
+
+  # (…and so whatever same-document update that document made: a push that took no entry away, a replace)
+  it 'lets a push or a replace the left document made as a traversal was awaited go' do
+    session.visit('http://a.test/slowa')
+    session.visit('http://a.test/b')
+    session.execute_script("setTimeout(() => history.pushState('p', '', '/p'), 30)")
+    session.go_back
+    expect(session.evaluate_script('[location.pathname, history.length]')).to eq(['/slowa', 2])
+    session.go_forward
+    expect(session.evaluate_script('[location.pathname, history.state]')).to eq(['/b', nil])
+    session.visit('http://a.test/slowc')
+    session.go_back
+    session.execute_script("setTimeout(() => history.replaceState('r', '', '/r'), 30)")
+    session.go_forward
+    session.go_back
+    expect(session.evaluate_script('[location.pathname, history.state]')).to eq(['/b', nil])
+  end
+
+  # (…and a traversal its document asked for as the response was awaited judged from the step this one goes to: HTML
+  # "traverse the history by a delta" appends its steps to the session history traversal queue, behind this one's, and
+  # "Let currentStepIndex be the index of traversable's current session history step within allSteps. Let
+  # targetStepIndex be currentStepIndex plus delta" as they run. Firefox 159 ends at /slow, its `go(-1)` doing nothing.)
+  it 'runs a traversal asked for as one was awaited after it, from the step it went to' do
+    session.visit('http://a.test/z')
+    session.visit('http://a.test/a')
+    session.visit('http://a.test/slow')
+    session.go_back
+    session.execute_script('setTimeout(() => history.go(-1), 30)')
+    session.go_forward
+    expect(poll_until { session.evaluate_script('location.pathname') == '/a' }).to be(true)
+    expect(session.evaluate_script('history.length')).to eq(3)
+    session.go_forward
+    expect(session.evaluate_script('location.pathname')).to eq('/slow')
   end
 
   # (…and the driver's URL its document's at once: what the document it left moved through as the response was awaited

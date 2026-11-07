@@ -184,8 +184,8 @@ impl Data {
     }
 }
 
-// A session history as it stood (`SessionHistory::keep`).
-pub(crate) struct Kept(State);
+// A session history as it stood (`SessionHistory::keep`), and the same-document updates made by then.
+pub(crate) struct Kept(State, u64);
 
 #[derive(Clone)]
 struct Nested {
@@ -269,6 +269,13 @@ struct Traversable {
     // its cheap gate.
     holding: bool,
     planned_for_host: bool,
+    // …and whether a traversal of the page is under way, its document being made (navigation_commit.rs): those queued
+    // meanwhile wait behind it, as HTML's session history traversal queue runs its steps one after another — each
+    // judged from the step the one before it went to ("traverse the history by a delta": currentStepIndex as it runs).
+    page_traversal: bool,
+    // How many same-document updates — pushState, replaceState, a fragment's — its navigables made (`update`): what a
+    // traversal judges the history it began with by (`Kept`).
+    same_document: u64,
     // Whether it closed: its window's browsing context discarded, which no opener of another window is then
     // (navigables.rs `opener_now`).
     closed: bool,
@@ -415,6 +422,9 @@ struct Queued {
     documents: bool,
     source: u64,
     replaces: bool,
+    // Whether it was queued behind a traversal of the page whose document was being made (`page_traversal`), which it
+    // is judged after, from the step that one goes to: what the document made anew keeps (`#clear_queued`).
+    behind: bool,
 }
 #[cfg(test)]
 impl Queued {
@@ -835,7 +845,7 @@ impl Traversable {
         let documents = changes.iter().any(|&(_, _, same)| !same);
         let replaces = changes.iter().any(|&(nav, _, same)| nav == TOP && !same);
         let source = self.state.current_entry(TOP, self.build).map_or(0, |e| e.doc);
-        self.queued.push(Queued { token, delta, documents, source, replaces });
+        self.queued.push(Queued { token, delta, documents, source, replaces, behind: self.page_traversal });
         (token, if documents { 0 } else { 1 })
     }
     // …those queued up to and with the one of `token`, taken off the queue to be applied in order: none where it is not
@@ -944,6 +954,7 @@ impl Traversable {
     // none for a navigable of no entry yet (a top-level one at its initial about:blank, whose document has none).
     fn update(&mut self, nav: u32, parent: u32, url: &str, state: Option<Arc<[u8]>>, push: bool) {
         let Some(id) = self.state.current_entry(nav, self.build).map(|e| e.id) else { return };
+        self.same_document += 1;
         if push {
             self.commit(nav, parent, url, true, false, Data { state, ..Data::default() });
         } else if let Some(entry) = self.state.entry_mut(id) {
@@ -1218,7 +1229,21 @@ impl SessionHistory {
     }
     // #clear_queued: the page's traversals let go — its document gone, whose traversals go with it.
     fn clear_queued(&self) {
-        self.lock().queued.clear();
+        let mut t = self.lock();
+        t.queued.retain_mut(|q| std::mem::take(&mut q.behind));
+    }
+    // A traversal of the page under way (`page_traversal`) — none where one already is — and over.
+    pub(crate) fn begin_page_traversal(&self) -> bool {
+        let mut t = self.lock();
+        !std::mem::replace(&mut t.page_traversal, true)
+    }
+    pub(crate) fn end_page_traversal(&self) {
+        self.lock().page_traversal = false;
+    }
+    // A replaceState of the page's document (`Traversable::update`), which the tests make.
+    #[cfg(test)]
+    pub(crate) fn replace_state_for_test(&self, url: &str) {
+        self.lock().update(TOP, TOP, url, None, false);
     }
     // …the plan with no step passed over (`Traversable::plan`), which the tests read.
     #[cfg(test)]
@@ -1263,12 +1288,16 @@ impl SessionHistory {
     }
     // The history as it stands, kept (`Kept`) — and put back (navigation_commit.rs: a traversal's, as it began).
     pub(crate) fn keep(&self) -> Kept {
-        Kept(self.lock().state.clone())
+        let t = self.lock();
+        Kept(t.state.clone(), t.same_document)
     }
-    pub(crate) fn put_back(&self, kept: Kept) {
+    // …put back where a same-document update — a pushState, a replaceState, a fragment's — was made since, or `lost`.
+    pub(crate) fn put_back(&self, kept: Kept, lost: bool) {
         let mut t = self.lock();
-        t.state = kept.0;
-        t.version += 1;
+        if lost || t.same_document != kept.1 {
+            t.state = kept.0;
+            t.version += 1;
+        }
     }
     // The entry the page's document leaves as a navigation of it commits another (navigation_commit.rs), none where it
     // leaves none — a reload's, of the same entry (`leaving`).
@@ -1359,7 +1388,7 @@ impl SessionHistory {
         t.opener_policy = crate::coop::Value::UnsafeNone;
         t.queued.clear();
         t.flush_mark = None;
-        (t.holding, t.planned_for_host) = (false, false);
+        (t.holding, t.planned_for_host, t.page_traversal) = (false, false, false);
         asking(&mut t, |t| t.asked = Asked::default());
     }
     // #session_storage = shed: its session storage's (`session_storage`), its Browser's.
@@ -2366,7 +2395,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     // `javascript:` URL's document its script asked them before, which goes first — both browsers make the document,
     // then traverse: browser.rb `commit_javascript_document`)
     let plan = &crate::dom::realm(scope, top).navigation_plan;
-    if plan.traversal_waiting() || plan.javascript_document_planned() || lock(&traversable).holding {
+    if plan.traversal_waiting() || plan.javascript_document_planned() || lock(&traversable).holding || lock(&traversable).page_traversal {
         let items = [v8::Integer::new(scope, top).into(), v8::Boolean::new(scope, false).into(), v8::Array::new(scope, 0).into()];
         return rv.set(v8::Array::new_with_elements(scope, &items).into());
     }

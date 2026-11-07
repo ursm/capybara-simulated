@@ -90,10 +90,13 @@ pub(crate) struct Commit {
     // window's initial about:blank's its creator's, none where no creator made it: a `noopener` window's, whose origin
     // is not known here, its target name left as it is (Chrome and Firefox).
     leaving_origin: Option<String>,
-    // A traversal's history as it began: what it is applied to where what was done to it since — a pushState's, a
-    // replaceState's, a fragment's of the document it leaves — took its entry away. HTML queues those on the traversal
-    // queue behind it, where "finalize a same-document navigation" returns, the navigable's active entry no longer theirs.
+    // A traversal's history as it began: what it is applied to where the document it leaves updated it since — a
+    // pushState, a replaceState, a fragment navigation. HTML queues those updates' "finalize a same-document navigation"
+    // on the traversal queue behind it, where each returns: "If targetNavigable's active session history entry is not
+    // targetEntry, then return".
     began: Option<crate::session_history::Kept>,
+    // Whether it holds the page's traversals behind it (`SessionHistory::begin_page_traversal`), to let go as it ends.
+    holds: bool,
     // Whether it ended: once, whatever asks again.
     ended: bool,
 }
@@ -113,6 +116,7 @@ impl Commit {
             to_get: false,
             leaving_origin,
             began: None,
+            holds: false,
             ended: false,
         }
     }
@@ -123,6 +127,7 @@ impl Commit {
         self.start = start;
         if let Handling::Traverse(..) = self.handling {
             self.began = Some(self.history.keep());
+            self.holds = self.history.begin_page_traversal();
         }
     }
 
@@ -171,9 +176,13 @@ impl Commit {
     pub(crate) fn end(&mut self, step: &Step, sandboxed: bool) {
         if self.ended || !step.makes_document() {
             self.ended |= !matches!(step, Step::Fetch | Step::Blob);
+            if self.ended {
+                self.let_go();
+            }
             return;
         }
         self.ended = true;
+        self.let_go();
         let origin = match step {
             _ if sandboxed => None,
             Step::AboutBlank(origin, _) => origin.clone(),
@@ -198,8 +207,9 @@ impl Commit {
         if self.handling.replays() {
             let Some(id) = self.replayed() else { return };
             if let Handling::Traverse(step, _) = self.handling {
-                if let Some(began) = self.began.take().filter(|_| self.history.url(id).is_none()) {
-                    self.history.put_back(began);
+                // (…or where anything else since — a frame's navigation clearing the forward steps — took its entry away)
+                if let Some(began) = self.began.take() {
+                    self.history.put_back(began, self.history.url(id).is_none());
                 }
                 self.history.set_leaving(active);
                 self.history.go_to(step);
@@ -234,6 +244,21 @@ impl Commit {
         if !kept {
             self.history.clear_name();
         }
+    }
+}
+
+impl Commit {
+    // …the page's traversals it held let go (`holds`): as it ends, or is dropped unended (a failure of the host's).
+    fn let_go(&mut self) {
+        if std::mem::take(&mut self.holds) {
+            self.history.end_page_traversal();
+        }
+    }
+}
+
+impl Drop for Commit {
+    fn drop(&mut self) {
+        self.let_go();
     }
 }
 
@@ -342,6 +367,30 @@ mod tests {
         assert_eq!(history.url(history.active(0).unwrap()).as_deref(), Some("http://a.test/b"));
         commit(&history, Handling::Traverse(0, first), "http://a.test/").end(&Step::Document(None), false);
         assert_eq!(history.url(history.active(0).unwrap()).as_deref(), Some("http://a.test/"));
+    }
+
+    #[test]
+    fn a_traversal_holds_the_pages_traversals_until_it_ends() {
+        let history = page();
+        let b = history.record_page_entry("http://a.test/b".into(), false, Data::default()).unwrap();
+        history.go_to(0);
+        let mut c = commit(&history, Handling::Traverse(1, b), "http://a.test/b");
+        assert!(!history.begin_page_traversal());
+        c.end(&Step::None, false);
+        assert!(history.begin_page_traversal());
+        history.end_page_traversal();
+        drop(commit(&history, Handling::Traverse(1, b), "http://a.test/b"));
+        assert!(history.begin_page_traversal());
+    }
+
+    #[test]
+    fn a_same_document_update_the_left_document_made_is_let_go() {
+        let history = page();
+        let b = history.record_page_entry("http://a.test/b".into(), false, Data::default()).unwrap();
+        let mut c = commit(&history, Handling::Traverse(0, history.entry_at_step(0).unwrap()), "http://a.test/");
+        history.replace_state_for_test("http://a.test/r");
+        c.end(&Step::Document(None), false);
+        assert_eq!(history.url(b).as_deref(), Some("http://a.test/b"));
     }
 
     #[test]
