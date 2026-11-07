@@ -78,7 +78,8 @@ struct Store {
 
 // What a canceled copy or cut does with what its page left in the event's store (Clipboard API, "write content to the
 // clipboard"): the items' strings held instead — every part given the type the page gave it, as Chrome's custom data, a
-// file's bytes being the bindings' — the clipboard cleared, those types taken off it, or nothing.
+// file's bytes being the bindings' — the clipboard cleared, those types taken off it (the text's "at risk" feature: its
+// own note says it "doesn't seem all that important, and it's unclear if it can be implemented easily"), or nothing.
 #[derive(Debug, PartialEq)]
 enum ClipboardWrite {
     Items(Vec<(String, Vec<u8>)>),
@@ -166,9 +167,13 @@ impl Store {
     }
     fn clipboard_write(&self) -> ClipboardWrite {
         let text = |units: &[u16]| String::from_utf16_lossy(units);
-        if !self.items.is_empty() {
+        if self.items.iter().any(|i| !i.file) {
             let strings = self.items.iter().filter(|i| !i.file);
             return ClipboardWrite::Items(strings.map(|i| (text(&i.kind_type), text(&i.data).into_bytes())).collect());
+        }
+        // (…only a file's, whose bytes are the bindings': the clipboard as it was, Firefox; Chrome holds the file)
+        if !self.items.is_empty() {
+            return ClipboardWrite::Nothing;
         }
         match (self.clear_was_called, self.types_to_clear.is_empty()) {
             (false, _) => ClipboardWrite::Nothing,
@@ -435,6 +440,15 @@ fn clear_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let format = args.get(1);
     let format = (!format.is_undefined()).then(|| crate::dom::utf16_arg(scope, format));
     h.store.borrow_mut().clear_data(format.as_deref());
+}
+// `strings` added to a store (its mode read/write), as `DataTransferItemList.add` adds them: a paste's data.
+pub(crate) fn add_strings(scope: &mut v8::PinScope<'_, '_>, store: v8::Local<'_, v8::Value>, strings: Vec<(String, Vec<u16>)>) {
+    let Some(h) = handle(scope, store) else { return };
+    let mut store = h.store.borrow_mut();
+    for (ty, data) in strings {
+        let ty: Vec<u16> = ty.encode_utf16().collect();
+        let _ = store.add(false, &ty, data);
+    }
 }
 // __dom.clipboardEventDone(kind, store, canceled, partition) -> what the action ends with, once its clipboard event is
 // dispatched (Clipboard API §8): true for a copy or a cut a listener canceled, what its page left in the event's store

@@ -97,6 +97,12 @@
   // navigator.userActivation and consumed by activation-gated APIs like
   // HTMLInputElement.showPicker(). An optional 3rd `context` argument blesses
   // ANOTHER window (a cross-window proxy) — that window's own steps.
+  // `test_driver.set_permission`: the clipboard's, the session's to say (the rest of the Permissions API's answer no
+  // test's setting here).
+  window.test_driver.set_permission = function (descriptor, state) {
+    globalThis.__csimSetClipboardPermission(descriptor.name, state);
+    return Promise.resolve();
+  };
   window.test_driver.bless = function (intent, fn, context) {
     const target = context && context !== window && typeof context === 'object' ? context : globalThis;
     try { target.__csimActivationNotify(); } catch (e) {}

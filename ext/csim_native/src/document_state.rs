@@ -27,6 +27,8 @@ struct DocumentState {
     // Whether it will declaratively refresh (HTML: a `<meta http-equiv=refresh>` or a `Refresh` header said so already,
     // which no later one undoes): the engine's alone, which no binding writes (declarative_refresh.rs).
     will_refresh: bool,
+    // An `execCommand` of its is running: another its events' listeners ask is refused (Chrome, Firefox).
+    command_running: bool,
 }
 
 impl Default for DocumentState {
@@ -41,6 +43,7 @@ impl Default for DocumentState {
             destructive_ignored: 0,
             current_script: None,
             will_refresh: false,
+            command_running: false,
         }
     }
 }
@@ -113,6 +116,16 @@ impl DocumentStates {
     // Whether `doc` has a browsing context — the realm's document and a frame's, not a `createHTMLDocument` /
     // DOMParser / XHR one (the bindings' flag, dom-nodes.js `DOC_NO_BROWSING_CONTEXT`).
     // A document's mode: 0 no-quirks, 1 limited-quirks, 2 quirks.
+    // An `execCommand` of `doc`'s begins: whether it may, none running. …and ends.
+    pub(crate) fn command_begin(&mut self, doc: NodeId) -> bool {
+        let state = self.0.entry(doc).or_default();
+        !std::mem::replace(&mut state.command_running, true)
+    }
+    pub(crate) fn command_end(&mut self, doc: NodeId) {
+        if let Some(state) = self.0.get_mut(&doc) {
+            state.command_running = false;
+        }
+    }
     // Its throw-on-dynamic-markup-insertion and ignore-destructive-writes counters.
     pub(crate) fn markup_state(&self, doc: NodeId) -> (u32, u32) {
         self.0.get(&doc).map_or((0, 0), |s| (s.insertions, s.destructive_ignored))

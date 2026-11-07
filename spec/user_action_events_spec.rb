@@ -172,6 +172,7 @@ RSpec.describe 'User action events' do
     JS
     session.find('#ta').send_keys('abc', [:control, 'a'], 'Z')
     expect(session.find('#ta').value).to eq('abcZ')
+    session.driver.grant_permissions('clipboard-write')
     session.evaluate_script("navigator.clipboard.writeText('P')")
     session.find('#host').shadow_root.find('#inner').send_keys([:control, 'v'])
     session.find('#ta').send_keys([:control, 'v'])

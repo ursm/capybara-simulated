@@ -39444,6 +39444,26 @@ editing/other/exec-command-with-text-editor.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="password"> in contenteditable, execCommand("paste", false,
+    null), a[]c): The command should be enabled'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="password"> in contenteditable, execCommand("paste", false,
+    null), a[]c): execCommand() should return true'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="password"> in contenteditable, execCommand("paste", false,
+    null), a[]c): input.inputType should be insertFromPaste'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="password"> in contenteditable, execCommand("paste", false,
+    null), a[]c): input.target should be [object HTMLInputElement]'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'In <input type="password"> in contenteditable, execCommand("redo", false,
     null), [a]bc): The command should be supported'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -39579,6 +39599,26 @@ editing/other/exec-command-with-text-editor.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="password">, execCommand("paste", false, null), a[]c): The
+    command should be enabled'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="password">, execCommand("paste", false, null), a[]c): execCommand()
+    should return true'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="password">, execCommand("paste", false, null), a[]c): input.inputType
+    should be insertFromPaste'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="password">, execCommand("paste", false, null), a[]c): input.target
+    should be [object HTMLInputElement]'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'In <input type="password">, execCommand("redo", false, null), [a]bc): The
     command should be supported'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -39681,6 +39721,31 @@ editing/other/exec-command-with-text-editor.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 - name: 'In <input type="text"> in contenteditable, execCommand("insertparagraph",
     false, null), a[b]c): execCommand() should return false'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text"> in contenteditable, execCommand("paste", false, null),
+    a[]c): <input>.value should be "abc[]c"'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text"> in contenteditable, execCommand("paste", false, null),
+    a[]c): The command should be enabled'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text"> in contenteditable, execCommand("paste", false, null),
+    a[]c): execCommand() should return true'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text"> in contenteditable, execCommand("paste", false, null),
+    a[]c): input.inputType should be insertFromPaste'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text"> in contenteditable, execCommand("paste", false, null),
+    a[]c): input.target should be [object HTMLInputElement]'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -39789,6 +39854,31 @@ editing/other/exec-command-with-text-editor.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text">, execCommand("paste", false, null), a[]c): <input>.value
+    should be "abc[]c"'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text">, execCommand("paste", false, null), a[]c): The command
+    should be enabled'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text">, execCommand("paste", false, null), a[]c): execCommand()
+    should return true'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text">, execCommand("paste", false, null), a[]c): input.inputType
+    should be insertFromPaste'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <input type="text">, execCommand("paste", false, null), a[]c): input.target
+    should be [object HTMLInputElement]'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'In <input type="text">, execCommand("redo", false, null), [a]bc): The command
     should be supported'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -39876,6 +39966,31 @@ editing/other/exec-command-with-text-editor.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 - name: 'In <textarea> in contenteditable, execCommand("insertimage", false, no-image.png),
     a[b]c): The command should be supported'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea> in contenteditable, execCommand("paste", false, null), a[]c):
+    <textarea>.value should be "abc[]c"'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea> in contenteditable, execCommand("paste", false, null), a[]c):
+    The command should be enabled'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea> in contenteditable, execCommand("paste", false, null), a[]c):
+    execCommand() should return true'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea> in contenteditable, execCommand("paste", false, null), a[]c):
+    input.inputType should be insertFromPaste'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea> in contenteditable, execCommand("paste", false, null), a[]c):
+    input.target should be [object HTMLTextAreaElement]'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -39969,6 +40084,31 @@ editing/other/exec-command-with-text-editor.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea>, execCommand("paste", false, null), a[]c): <textarea>.value
+    should be "abc[]c"'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea>, execCommand("paste", false, null), a[]c): The command should
+    be enabled'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea>, execCommand("paste", false, null), a[]c): execCommand() should
+    return true'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea>, execCommand("paste", false, null), a[]c): input.inputType
+    should be insertFromPaste'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'In <textarea>, execCommand("paste", false, null), a[]c): input.target should
+    be [object HTMLTextAreaElement]'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: 'In <textarea>, execCommand("redo", false, null), [a]bc): The command should
     be supported'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -40010,19 +40150,53 @@ editing/other/exec-command-with-text-editor.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 editing/other/exec-command-without-editable-element.tentative.html:
-- name: 'ChildDocument.execCommand(copy, false, null) with a[b]c: calling execCommand'
+- name: 'ChildDocument.execCommand(copy, false, null) with a[b]c: checking event on
+    executed document'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'ChildDocument.execCommand(copy, false, null) with ab[]c: calling execCommand'
+- name: 'ChildDocument.execCommand(copy, false, null) with ab[]c: checking event on
+    executed document'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'ParentDocument.execCommand(copy, false, null) with a[b]c: calling execCommand'
+- name: 'ChildDocument.execCommand(cut, false, null) with a[b]c: checking event on
+    executed document'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'ParentDocument.execCommand(copy, false, null) with ab[]c: calling execCommand'
+- name: 'ChildDocument.execCommand(cut, false, null) with ab[]c: checking event on
+    executed document'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'ChildDocument.execCommand(paste, false, null) with a[b]c: checking event
+    on executed document'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'ParentDocument.execCommand(copy, false, null) with a[b]c: checking event
+    on executed document'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'ParentDocument.execCommand(copy, false, null) with ab[]c: checking event
+    on executed document'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'ParentDocument.execCommand(cut, false, null) with a[b]c: checking event on
+    executed document'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'ParentDocument.execCommand(cut, false, null) with ab[]c: checking event on
+    executed document'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'ParentDocument.execCommand(paste, false, null) with a[b]c: checking event
+    on executed document'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -49897,15 +50071,6 @@ editing/other/paste-in-list-with-inline-style.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-editing/other/recursive-exec-command-calls.tentative.html:
-- name: Recursive `Document.execCommand()` shouldn't be supported
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: "[harness] ERROR"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 editing/other/removing-inline-style-specified-by-parent-block.tentative.html:
 - name: Disabling style to text, it's applied to the body
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -50878,6 +51043,14 @@ editing/other/typing-space-in-editable-summary.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 editing/whitespaces/chrome-compat/delete-img.tentative.html:
+- name: document.execCommand("delete") when "<img src="${src}">[]&nbsp;&nbsp;&nbsp;"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.execCommand("delete") when "<img src="${src}">[]&nbsp;&nbsp;&nbsp;b"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: document.execCommand("delete") when "a&nbsp;&nbsp;&nbsp;<img src="${src}">[]&nbsp;&nbsp;&nbsp;b"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -50891,6 +51064,14 @@ editing/whitespaces/chrome-compat/delete-img.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 editing/whitespaces/chrome-compat/delete-to-join-blocks.tentative.html:
+- name: document.execCommand("delete") when "<div><br></div><div>[]&nbsp;&nbsp;&nbsp;</div>"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.execCommand("delete") when "<div><br></div><div>[]&nbsp;&nbsp;&nbsp;b</div>"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: document.execCommand("delete") when "<div><div>&nbsp;&nbsp;&nbsp;</div>{}<br></div>"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
@@ -51134,6 +51315,14 @@ editing/whitespaces/chrome-compat/forwarddelete-img.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+- name: document.execCommand("forwarddelete") when "{}<img src="${src}">&nbsp;&nbsp;&nbsp;"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.execCommand("forwarddelete") when "{}<img src="${src}">&nbsp;&nbsp;&nbsp;b"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 editing/whitespaces/chrome-compat/forwarddelete-to-join-blocks.tentative.html:
 - name: document.execCommand("forwarddelete") when "<div><div>&nbsp;&nbsp;&nbsp;[]</div><br></div>"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -51164,6 +51353,14 @@ editing/whitespaces/chrome-compat/forwarddelete-to-join-blocks.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: document.execCommand("forwarddelete") when "<div>a[]<div>&nbsp;&nbsp;&nbsp;b</div></div>"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.execCommand("forwarddelete") when "<div>{}<br></div><div>&nbsp;&nbsp;&nbsp;</div>"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.execCommand("forwarddelete") when "<div>{}<br></div><div>&nbsp;&nbsp;&nbsp;b</div>"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -51330,11 +51527,6 @@ editing/whitespaces/chrome-compat/forwarddelete.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: 'execCommand("forwarddelete", false, ""): "<span>abc&nbsp; []<span>&nbsp;
-    def</span></span>"'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: 'execCommand("forwarddelete", false, ""): "<span>abc&nbsp;&nbsp;</span><span>[]
     &nbsp;def</span>"'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -51430,10 +51622,6 @@ editing/whitespaces/chrome-compat/forwarddelete.tentative.html:
     path/suffix. CLAUDE.md rule 1.
 - name: 'execCommand("forwarddelete", false, ""): "<span>abc[]&nbsp;</span><span>
     def</span>"'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: 'execCommand("forwarddelete", false, ""): "<span>abc[]&nbsp;<span> &nbsp;def</span></span>"'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

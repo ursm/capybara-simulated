@@ -122,6 +122,7 @@ RSpec.describe 'execCommand in an editing host' do
     ])
   end
 
+  # (…a clipboard action's enabled by the permission, or an activation: granted here)
   # The commands it carries out are the ones `queryCommandSupported` answers for — `paste` among them, the driver's
   # clipboard read, which Chrome refuses a page — and `queryCommandEnabled` with a selection in an editing host, or in a
   # text control the text ones only, none with none but `selectAll`, which selects the page (Chrome's, but for `paste`).
@@ -129,6 +130,7 @@ RSpec.describe 'execCommand in an editing host' do
     session = simulated_session(lambda {|_env|
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable>hello</div><input id=t value=abc>']]
     }).tap {|s| s.visit '/' }
+    session.driver.grant_permissions('clipboard-read', 'clipboard-write')
     got = session.evaluate_script(<<~JS)
       (() => {
         const names = ['bold', 'BOLD', 'insertText', 'delete', 'copy', 'paste', 'fontSize', 'selectAll', 'undo', 'bogus'];

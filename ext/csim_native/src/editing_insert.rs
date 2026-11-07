@@ -19,6 +19,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 pub(crate) const TEXT: u32 = 0;
 pub(crate) const LINE_BREAK: u32 = 1;
 pub(crate) const PARAGRAPH: u32 = 2;
+// …and pasted text: its white space all rebalanced as the line shows it (`a  b` is `a&nbsp; b`, Chrome and Firefox), where
+// a script's or a keystroke's stands as it is.
+pub(crate) const PASTED_TEXT: u32 = 3;
 
 // __dom.editInsert(anchorNode, anchorOffset, focusNode, focusOffset, kind, text, steps) -> [caretNode, caretOffset,
 // copies, (source, copy, names)…, changes…], or undefined where nothing is inserted: the insertion in the editing host
@@ -42,6 +45,12 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(6)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
     let steps = v8::Local::new(scope, steps);
+    let ((sc, so), (ec, eo)) = if kind == TEXT && (sc, so) == (ec, eo) {
+        let place = typing_place(&crate::dom::dom(scope).arena, (sc, so));
+        (place, place)
+    } else {
+        ((sc, so), (ec, eo))
+    };
     let Some(Inserted { cid, caret, changes, copies, held }) = insertion(scope, caller, steps, (sc, so), (ec, eo), kind, &text) else { return };
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, caret.map(|(node, _)| node))];
     if crate::dom::factory_threw(scope) {
@@ -81,7 +90,7 @@ pub(crate) fn insertion<'s>(
     kind: u32,
     text: &[u16],
 ) -> Option<Inserted> {
-    if kind == TEXT && text.is_empty() {
+    if matches!(kind, TEXT | PASTED_TEXT) && text.is_empty() {
         return None;
     }
     let (host, ((sc, so), (ec, eo))) = selection_host(&crate::dom::dom(scope).arena, anchor, focus)?;
@@ -99,7 +108,8 @@ pub(crate) fn insertion<'s>(
         }
     }
     let caret = match kind {
-        TEXT => edit.lines(scope, caret, text),
+        TEXT => edit.lines(scope, caret, text, false),
+        PASTED_TEXT => edit.lines(scope, caret, text, true),
         LINE_BREAK => edit.line_break(scope, caret),
         _ => edit.paragraph(scope, caret),
     };
@@ -122,13 +132,46 @@ fn insertion_point(arena: &RealmArena, place: (NodeId, u32)) -> (NodeId, u32) {
         k -= 1;
     }
     let text = |c: Option<NodeId>| c.filter(|&c| arena.get(c).is_some_and(|d| d.kind == NodeKind::Text));
-    if let Some(t) = text(k.checked_sub(1).and_then(|i| n.children.get(i).copied())) {
+    let before = k.checked_sub(1).and_then(|i| n.children.get(i).copied());
+    if let Some(t) = text(before) {
         return (t, arena.get(t).map_or(0, |d| d.data.len() as u32));
     }
     if let Some(t) = text(n.children.get(k).copied()) {
         return (t, 0);
     }
     (node, k as u32)
+}
+// Where a user's typing at the caret `place` goes: into the end of what is before it —
+// `<b>x</b>`, typed after, is `<b>xT</b>`, and `<p>x</p>` `<p>xT</p>`, Chrome and Firefox — where a script's `insertText` at
+// that point, whose place the Editing draft says, stays (editing/run/inserttext).
+fn typing_place(arena: &RealmArena, place: (NodeId, u32)) -> (NodeId, u32) {
+    let Some(n) = arena.get(place.0).filter(|n| n.kind == NodeKind::Element) else { return place };
+    match (place.1 as usize).checked_sub(1).and_then(|k| n.children.get(k)) {
+        Some(&last) if typed_into(arena, last) => deep_end(arena, last),
+        _ => place,
+    }
+}
+// Whether what is typed at the end of `id` goes into it: an element of the host's that holds text — no link, whose edge
+// `out_of_link` keeps it out of, no void or atomic one, no island.
+fn typed_into(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|d| d.kind == NodeKind::Element && !crate::caret::CARET_VOID_TAGS.contains(&&*d.local_name) && !d.is_html_named("a") && !d.is_html_named("template"))
+        && arena.editing_host(id).is_some()
+        && !crate::rendered::is_atomic_inline(arena, id)
+}
+// The end of `id`'s last leaf, down what is typed into: the end of a text there, else the place after the last child that
+// is none of those.
+pub(crate) fn deep_end(arena: &RealmArena, id: NodeId) -> (NodeId, u32) {
+    let mut at = id;
+    loop {
+        let Some(n) = arena.get(at) else { return (at, 0) };
+        if n.kind == NodeKind::Text {
+            return (at, n.data.len() as u32);
+        }
+        match n.children.last().copied() {
+            Some(last) if arena.get(last).is_some_and(|d| d.kind == NodeKind::Text) || typed_into(arena, last) => at = last,
+            _ => return (at, n.children.len() as u32),
+        }
+    }
 }
 // The place outside the link `(node, offset)` is at the start or the end of — the inline elements between ending or
 // starting there too — before the link or after it; none where it is at no link's edge.
@@ -217,12 +260,12 @@ impl<'s> Edit<'s, '_> {
         crate::cloning::clone_into(scope, self.cid, self.caller, src, None, false, doc, self.held, self.copies)
     }
 
-    // A fragment's children `kids` at the caret (the Editing draft's insertHTML; a paste's markup): a `<br>` holding the
-    // line open that they take the place of removed first, a text split at the caret, a block among them out of a `<p>`
-    // — the draft's "fix disallowed ancestors" of what a `<p>` holds, the paragraph split around it — and a block left
-    // holding nothing visible held open. The place after the last of them, none where a change failed.
-    pub(crate) fn fragment(&mut self, scope: &mut v8::PinScope<'_, '_>, caret: (NodeId, u32), kids: &[NodeId]) -> Option<(NodeId, u32)> {
-        let last = *kids.last()?;
+    // A fragment's children `kids` at the caret, and `descendants` all they hold (the Editing draft's insertHTML; a paste's
+    // markup): a `<br>` holding the line open that they take the place of removed first, a text split at the caret, a block
+    // left holding nothing visible held open, and each of `descendants` where it may be (`fix_disallowed_ancestors`). The
+    // place after the last of them, none where a change failed.
+    pub(crate) fn fragment(&mut self, scope: &mut v8::PinScope<'_, '_>, caret: (NodeId, u32), kids: &[NodeId], descendants: &[NodeId]) -> Option<(NodeId, u32)> {
+        let mut last = *kids.last()?;
         let arena = realm(scope, self.cid);
         if inline_level(arena, caret.0) == Some(false) {
             let held = arena.get(caret.0).and_then(|n| n.children.get(caret.1 as usize).copied()).filter(|&c| placeholder(arena, c));
@@ -232,40 +275,175 @@ impl<'s> Edit<'s, '_> {
         }
         let (parent, before) = self.split_at(scope, caret)?;
         self.move_before(scope, parent, kids, before)?;
-        if realm(scope, self.cid).get(parent).is_some_and(|n| n.is_html_named("p")) {
-            self.out_of_paragraph(scope, parent, kids)?;
-        }
         let arena = realm(scope, self.cid);
-        if arena.parent_of(parent).is_some() && inline_level(arena, parent) == Some(false) && !has_content(arena, parent) {
+        if inline_level(arena, parent) == Some(false) && !has_content(arena, parent) {
             let br = self.element(scope, parent, "br");
             self.insert(scope, parent, &[br], None)?;
+        }
+        for &node in descendants {
+            let fixed = self.fix_disallowed_ancestors(scope, node)?;
+            if node == last {
+                last = fixed;
+            }
         }
         let arena = realm(scope, self.cid);
         Some((arena.parent_of(last)?, arena.child_index(last) as u32 + 1))
     }
-    // …each block of `kids` moved out of the paragraph `p` holding it, what followed it in a copy of `p` after it — one that
-    // holds nothing removed.
-    fn out_of_paragraph(&mut self, scope: &mut v8::PinScope<'_, '_>, p: NodeId, kids: &[NodeId]) -> Option<()> {
-        let mut current = p;
-        for &kid in kids {
-            let arena = realm(scope, self.cid);
-            if inline_level(arena, kid) != Some(false) {
-                continue;
+
+    // The Editing draft's "fix disallowed ancestors" of `node`: where no ancestor in its editing host may hold it, a `dd` or
+    // `dt` wrapped in a `dl`, and a prohibited paragraph child made a `div`, its own such children split out of it; where one
+    // may, its parent split until its parent is that one. (The draft's "record the values" around a split, which keeps a
+    // node's inline style where its ancestors' go, is the styling algorithm's backlog.) What `node` is now.
+    fn fix_disallowed_ancestors(&mut self, scope: &mut v8::PinScope<'_, '_>, node: NodeId) -> Option<NodeId> {
+        let arena = realm(scope, self.cid);
+        let Some(element) = (if arena.is_element(node) { Some(node) } else { arena.parent_of(node) }) else { return Some(node) };
+        let Some(host) = arena.editing_host(element) else { return Some(node) };
+        let mut any = false;
+        let mut at = arena.parent_of(node);
+        while let Some(a) = at {
+            if allowed_child(arena, Child::Node(node), a) {
+                any = true;
+                break;
             }
-            let (outer, next) = (arena.parent_of(current)?, arena.sibling(current, 1));
-            let at = arena.child_index(kid) + 1;
-            let after = arena.get(current)?.children[at..].to_vec();
-            let copy = self.copy(scope, current)?;
-            self.move_into(scope, copy, &after)?;
-            self.move_before(scope, outer, &[kid], next)?;
-            self.insert(scope, outer, &[copy], next)?;
-            if realm(scope, self.cid).get(current)?.children.is_empty() {
-                self.remove(scope, current)?;
+            if a == host {
+                break;
             }
-            current = copy;
+            at = arena.parent_of(a);
         }
-        if current != p && realm(scope, self.cid).get(current)?.children.is_empty() {
-            self.remove(scope, current)?;
+        if !any {
+            if !arena.is_element(node) {
+                return Some(node);
+            }
+            if tag_in(arena, node, &["dd", "dt"]) {
+                return self.wrap_in_dl(scope, node);
+            }
+            if !allowed_child(arena, Child::Name("p"), host) || !tag_in(arena, node, &PROHIBITED_PARAGRAPH_CHILDREN) {
+                return Some(node);
+            }
+            let div = self.retagged(scope, node, "div")?;
+            let div = self.fix_disallowed_ancestors(scope, div)?;
+            let kids = realm(scope, self.cid).get(div)?.children.clone();
+            for child in kids {
+                if tag_in(realm(scope, self.cid), child, &PROHIBITED_PARAGRAPH_CHILDREN) {
+                    self.split_parent(scope, child)?;
+                }
+            }
+            return Some(div);
+        }
+        loop {
+            let arena = realm(scope, self.cid);
+            let Some(parent) = arena.parent_of(node) else { return Some(node) };
+            if allowed_child(arena, Child::Node(node), parent) || !self.split_parent(scope, node)? {
+                return Some(node);
+            }
+        }
+    }
+    fn wrap_in_dl(&mut self, scope: &mut v8::PinScope<'_, '_>, node: NodeId) -> Option<NodeId> {
+        let arena = realm(scope, self.cid);
+        let parent = arena.parent_of(node)?;
+        let plain_dl = |id: NodeId| tag_in(arena, id, &["dl"]) && arena.get(id).is_some_and(|n| n.attributes.is_empty());
+        if let Some(dl) = arena.sibling(node, -1).filter(|&s| plain_dl(s)) {
+            self.move_into(scope, dl, &[node])?;
+            return Some(node);
+        }
+        let dl = self.element(scope, node, "dl");
+        self.insert(scope, parent, &[dl], Some(node))?;
+        self.move_into(scope, dl, &[node])?;
+        Some(node)
+    }
+    // `node` replaced by an element of the name `name`, its attributes and children hers.
+    fn retagged(&mut self, scope: &mut v8::PinScope<'_, '_>, node: NodeId, name: &str) -> Option<NodeId> {
+        let made = self.element(scope, node, name);
+        let (attributes, kids) = {
+            let n = realm(scope, self.cid).get(node)?;
+            (n.attributes.clone(), n.children.clone())
+        };
+        crate::dom::replace_attributes(scope, self.cid, made, attributes, Vec::new(), None);
+        self.replace(scope, node, made)?;
+        self.move_into(scope, made, &kids)?;
+        Some(made)
+    }
+
+    // The Editing draft's "split the parent" of the one-node list `node`: its parent's content before it and after it each
+    // kept in an element of the parent's, the node between them, in the parent's parent — a parent left with nothing gone, a
+    // line break where that would run the lines together added, one it leaves with no line to break removed. Whether it did.
+    // (…what comes after it moved, not what comes before as the draft's words go: the same tree, a run of N of them split out
+    // of one parent in N moves and not N²; the draft's id stays on the first part.)
+    fn split_parent(&mut self, scope: &mut v8::PinScope<'_, '_>, node: NodeId) -> Option<bool> {
+        let arena = realm(scope, self.cid);
+        let Some(original) = arena.parent_of(node) else { return Some(false) };
+        let Some(outer) = arena.parent_of(original) else { return Some(false) };
+        if original == self.host || !arena.is_element(original) || arena.editing_host(original).is_none() {
+            return Some(false);
+        }
+        let n = arena.get(original)?;
+        let (first, last) = (n.children.first() == Some(&node), n.children.last() == Some(&node));
+        let follows = first && line_edge(arena, original, false) != Edge::Content;
+        let precedes = last && line_edge(arena, original, true) != Edge::Content;
+        if !first && last {
+            let next = arena.sibling(original, 1);
+            self.move_before(scope, outer, &[node], next)?;
+            self.break_after(scope, node, precedes)?;
+            self.remove_extraneous_at_end(scope, original)?;
+            return Some(true);
+        }
+        let holder = if first {
+            self.move_before(scope, outer, &[node], Some(original))?;
+            original
+        } else {
+            let arena = realm(scope, self.cid);
+            let at = arena.child_index(node) + 1;
+            let (after, next) = (arena.get(original)?.children[at..].to_vec(), arena.sibling(original, 1));
+            let copy = self.copy(scope, original)?;
+            let attributes: Vec<_> = realm(scope, self.cid).get(copy)?.attributes.iter().filter(|(k, _)| k != "id").cloned().collect();
+            crate::dom::replace_attributes(scope, self.cid, copy, attributes, Vec::new(), None);
+            self.move_into(scope, copy, &after)?;
+            self.move_before(scope, outer, &[node], next)?;
+            self.insert(scope, outer, &[copy], next)?;
+            copy
+        };
+        let arena = realm(scope, self.cid);
+        if follows && line_edge(arena, node, false) == Edge::Content {
+            let br = self.element(scope, node, "br");
+            self.insert(scope, outer, &[br], Some(node))?;
+        }
+        let arena = realm(scope, self.cid);
+        let is_br = |id: Option<NodeId>| id.and_then(|i| arena.get(i)).is_some_and(|d| d.is_html_named("br"));
+        let first_child = arena.get(holder)?.children.first().copied();
+        if inline_level(arena, node) == Some(true) && !is_br(Some(node)) && is_br(first_child) && inline_level(arena, holder) == Some(false) {
+            self.remove(scope, first_child?)?;
+        }
+        if realm(scope, self.cid).get(holder)?.children.is_empty() {
+            self.remove(scope, holder)?;
+            self.break_after(scope, node, precedes)?;
+        } else if let Some(before) = realm(scope, self.cid).sibling(node, -1) {
+            self.remove_extraneous_at_end(scope, before)?;
+        }
+        if realm(scope, self.cid).sibling(node, 1).is_none() {
+            self.remove_extraneous_at_end(scope, outer)?;
+        }
+        Some(true)
+    }
+    fn break_after(&mut self, scope: &mut v8::PinScope<'_, '_>, node: NodeId, precedes: bool) -> Option<()> {
+        let arena = realm(scope, self.cid);
+        if precedes && line_edge(arena, node, true) == Edge::Content {
+            let (parent, next) = (arena.parent_of(node)?, arena.sibling(node, 1));
+            let br = self.element(scope, node, "br");
+            self.insert(scope, parent, &[br], next)?;
+        }
+        Some(())
+    }
+    // The draft's "remove extraneous line breaks at the end of" `node`: a `<br>` last in it, ending a line that has content,
+    // that no line follows — none that is all a list item holds.
+    fn remove_extraneous_at_end(&mut self, scope: &mut v8::PinScope<'_, '_>, node: NodeId) -> Option<()> {
+        let arena = realm(scope, self.cid);
+        let mut at = node;
+        while let Some(&last) = arena.get(at)?.children.last() {
+            at = last;
+        }
+        let lone = arena.parent_of(at).and_then(|p| arena.get(p)).is_some_and(|p| p.is_html_named("li") && p.children.len() == 1);
+        if arena.get(at)?.is_html_named("br") && !lone && arena.editing_host(at).is_some() && line_edge(arena, at, true) != Edge::Content && line_edge(arena, at, false) == Edge::Content {
+            self.remove(scope, at)?;
         }
         Some(())
     }
@@ -273,13 +451,13 @@ impl<'s> Edit<'s, '_> {
     // Text of lines: each line at the caret, a paragraph's break between them (CR LF, CR or LF — Enter's); where one
     // inserts nothing the next goes where the caret was. Where the caret goes, none where nothing went in or a copy's
     // shadow root threw.
-    fn lines(&mut self, scope: &mut v8::PinScope<'_, '_>, mut caret: (NodeId, u32), text: &[u16]) -> Option<(NodeId, u32)> {
+    fn lines(&mut self, scope: &mut v8::PinScope<'_, '_>, mut caret: (NodeId, u32), text: &[u16], pasted: bool) -> Option<(NodeId, u32)> {
         let mut inserted = false;
         let mut rest = text;
         loop {
             let end = rest.iter().position(|&u| u == 0x0d || u == 0x0a).unwrap_or(rest.len());
             if end > 0 {
-                if let Some(at) = self.text(scope, caret, &rest[..end]) {
+                if let Some(at) = self.text(scope, caret, &rest[..end], pasted) {
                     (caret, inserted) = (at, true);
                 }
             }
@@ -288,7 +466,7 @@ impl<'s> Edit<'s, '_> {
             }
             let crlf = rest[end] == 0x0d && rest.get(end + 1) == Some(&0x0a);
             rest = &rest[end + if crlf { 2 } else { 1 }..];
-            if let Some(at) = self.paragraph(scope, caret) {
+            if let Some(at) = self.host_break(scope, caret) {
                 (caret, inserted) = (at, true);
             }
             if crate::dom::dom(scope).clone_exception.is_some() || crate::dom::factory_threw(scope) {
@@ -298,9 +476,25 @@ impl<'s> Edit<'s, '_> {
         inserted.then_some(caret)
     }
 
+    // A line's end in the host: a paragraph's break — but in a `plaintext-only` host, which holds no block of its own, a
+    // line break: a line feed where the white space keeps them, else a `<br>` (editing/plaintext-only's tests).
+    fn host_break(&mut self, scope: &mut v8::PinScope<'_, '_>, caret: (NodeId, u32)) -> Option<(NodeId, u32)> {
+        let arena = realm(scope, self.cid);
+        let plaintext = arena.get(self.host).and_then(|n| n.plain_attr("contenteditable")).is_some_and(|v| v.eq_ignore_ascii_case("plaintext-only"));
+        if !plaintext {
+            return self.paragraph(scope, caret);
+        }
+        let element = if arena.is_element(caret.0) { Some(caret.0) } else { arena.parent_of(caret.0) };
+        if crate::rendered::collapses_white_space(arena, element) {
+            self.line_break(scope, caret)
+        } else {
+            self.text(scope, caret, &[0x0A], false)
+        }
+    }
+
     // `text` at the caret: into the text there, or a text of its own — taking the place of a placeholder `<br>` — and the
     // white space at either edge of it rebalanced (what it holds as it is: Chrome). Where the caret goes: after it.
-    fn text(&mut self, scope: &mut v8::PinScope<'_, '_>, caret: (NodeId, u32), text: &[u16]) -> Option<(NodeId, u32)> {
+    fn text(&mut self, scope: &mut v8::PinScope<'_, '_>, caret: (NodeId, u32), text: &[u16], whole: bool) -> Option<(NodeId, u32)> {
         let (node, offset) = insertion_point(realm(scope, self.cid), caret);
         let arena = realm(scope, self.cid);
         let (target, at) = if arena.get(node)?.kind == NodeKind::Text {
@@ -323,8 +517,12 @@ impl<'s> Edit<'s, '_> {
             (made, 0)
         };
         let end = at + text.len() as u32;
-        rebalance_space(scope, self.caller, target, at, at)?;
-        rebalance_space(scope, self.caller, target, end, end)?;
+        if whole {
+            rebalance_space(scope, self.caller, target, at, end)?;
+        } else {
+            rebalance_space(scope, self.caller, target, at, at)?;
+            rebalance_space(scope, self.caller, target, end, end)?;
+        }
         Some((target, end))
     }
 
@@ -577,5 +775,130 @@ impl<'s> Edit<'s, '_> {
             rebalance_space(scope, self.caller, t, at, at)?;
         }
         Some(())
+    }
+}
+
+// The Editing draft's "allowed child": what a parent may hold.
+pub(crate) enum Child<'a> {
+    Node(NodeId),
+    Name(&'a str),
+}
+const PROHIBITED_PARAGRAPH_CHILDREN: [&str; 50] = [
+    "address", "article", "aside", "blockquote", "caption", "center", "col", "colgroup", "dd", "details", "dir", "div", "dl", "dt", "fieldset",
+    "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "li", "listing", "menu", "nav", "ol", "p",
+    "plaintext", "pre", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul", "xmp", "main", "search", "dialog",
+];
+const INLINE_CONTENTS: [&str; 44] = [
+    "a", "abbr", "b", "bdi", "bdo", "cite", "code", "dfn", "em", "h1", "h2", "h3", "h4", "h5", "h6", "i", "kbd", "mark", "p", "pre", "q", "rp", "rt", "ruby",
+    "s", "samp", "small", "span", "strong", "sub", "sup", "u", "var", "acronym", "listing", "strike", "xmp", "big", "blink", "font", "marquee", "nobr", "tt", "label",
+];
+const HEADINGS: [&str; 6] = ["h1", "h2", "h3", "h4", "h5", "h6"];
+fn tag_in(arena: &RealmArena, id: NodeId, names: &[&str]) -> bool {
+    arena.get(id).is_some_and(|n| n.kind == NodeKind::Element && n.ns == web_atoms::ns!(html) && names.contains(&&*n.local_name))
+}
+pub(crate) fn allowed_child(arena: &RealmArena, child: Child<'_>, parent: NodeId) -> bool {
+    let Some(p) = arena.get(parent) else { return false };
+    const TABLE_PARTS: [&str; 6] = ["colgroup", "table", "tbody", "tfoot", "thead", "tr"];
+    let parent_html = p.kind == NodeKind::Element && p.ns == web_atoms::ns!(html);
+    let parent_name: &str = if parent_html { &p.local_name } else { "" };
+    let child_node = match child {
+        Child::Node(id) => arena.get(id),
+        Child::Name(_) => None,
+    };
+    let is_text = child_node.is_some_and(|c| c.kind == NodeKind::Text);
+    if TABLE_PARTS.contains(&parent_name) && is_text && child_node.is_some_and(|c| !c.data.iter().all(|&u| matches!(u, 0x20 | 0x09 | 0x0A | 0x0C | 0x0D))) {
+        return false;
+    }
+    if ["script", "style", "plaintext", "xmp"].contains(&parent_name) && !is_text {
+        return false;
+    }
+    let child: &str = match child {
+        Child::Name(name) => name,
+        Child::Node(_) => match child_node {
+            Some(c) if c.kind == NodeKind::Document || c.kind == NodeKind::Fragment => return false,
+            Some(c) if c.kind == NodeKind::Element && c.ns == web_atoms::ns!(html) => &c.local_name,
+            _ => return true,
+        },
+    };
+    if !parent_html {
+        return true;
+    }
+    let (heading, prohibited) = (HEADINGS.contains(&child), PROHIBITED_PARAGRAPH_CHILDREN.contains(&child));
+    let mut at = Some(parent);
+    while let Some(a) = at {
+        if child == "a" && tag_in(arena, a, &["a"]) {
+            return false;
+        }
+        if prohibited && tag_in(arena, a, &INLINE_CONTENTS) {
+            return false;
+        }
+        if heading && tag_in(arena, a, &HEADINGS) {
+            return false;
+        }
+        at = arena.parent_of(a);
+    }
+    match parent_name {
+        "colgroup" => return child == "col",
+        "table" => return ["caption", "col", "colgroup", "tbody", "td", "tfoot", "th", "thead", "tr"].contains(&child),
+        "tbody" | "thead" | "tfoot" => return ["td", "th", "tr"].contains(&child),
+        "tr" => return ["td", "th"].contains(&child),
+        "dl" => return ["dt", "dd"].contains(&child),
+        "dir" | "ol" | "ul" => return ["dir", "li", "ol", "ul"].contains(&child),
+        "hgroup" => return heading,
+        _ => {}
+    }
+    if ["body", "caption", "col", "colgroup", "frame", "frameset", "head", "html", "tbody", "td", "tfoot", "th", "thead", "tr"].contains(&child) {
+        return false;
+    }
+    if (child == "dd" || child == "dt") && parent_name != "dl" {
+        return false;
+    }
+    if child == "li" && parent_name != "ol" && parent_name != "ul" {
+        return false;
+    }
+    let same = |a: &[&str]| a.contains(&parent_name) && a.contains(&child);
+    if same(&["a"]) || same(&["dd", "dt"]) || same(&HEADINGS) || same(&["li"]) || same(&["nobr"]) {
+        return false;
+    }
+    if INLINE_CONTENTS.contains(&parent_name) && prohibited {
+        return false;
+    }
+    if (parent_name == "td" || parent_name == "th") && ["caption", "col", "colgroup", "tbody", "td", "tfoot", "th", "thead", "tr"].contains(&child) {
+        return false;
+    }
+    true
+}
+
+#[cfg(test)]
+mod allowed_child_tests {
+    use super::*;
+    use web_atoms::ns;
+
+    fn el(arena: &mut RealmArena, parent: Option<NodeId>, name: &str) -> NodeId {
+        let mut n = NodeData::of_kind(NodeKind::Element, Vec::new());
+        n.local_name = name.into();
+        n.ns = ns!(html);
+        arena.create(n, parent)
+    }
+
+    #[test]
+    fn what_a_parent_may_hold() {
+        let mut arena = RealmArena::default();
+        let arena = &mut arena;
+        let div = el(arena, None, "div");
+        let p = el(arena, Some(div), "p");
+        let b = el(arena, Some(p), "b");
+        let ul = el(arena, Some(div), "ul");
+        let li = el(arena, Some(ul), "li");
+        assert!(allowed_child(arena, Child::Name("p"), div));
+        assert!(!allowed_child(arena, Child::Name("p"), p));
+        assert!(!allowed_child(arena, Child::Name("div"), b), "not through an ancestor with inline contents");
+        assert!(allowed_child(arena, Child::Name("b"), p));
+        assert!(allowed_child(arena, Child::Name("li"), ul));
+        assert!(!allowed_child(arena, Child::Name("li"), li));
+        assert!(!allowed_child(arena, Child::Name("li"), div));
+        assert!(!allowed_child(arena, Child::Name("p"), ul));
+        assert!(allowed_child(arena, Child::Name("ul"), li));
+        assert!(!allowed_child(arena, Child::Name("td"), div));
     }
 }

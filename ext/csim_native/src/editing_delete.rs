@@ -6,7 +6,7 @@
 // children the engine's change; the bindings finish them as the op returns and put the caret where it says.
 
 use crate::dom::{realm, NodeId, NodeKind, RealmArena};
-use crate::editing::{inline_level, selection_host, blank, block_of, cell_of, inline_content, island_of, make_br, rebalance_space, table_part, within};
+use crate::editing::{inline_level, selection_host, blank, block_of, cell_of, inline_content, island_of, make_br, table_part, within};
 use crate::mutation::Change;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -392,6 +392,21 @@ fn clear_emptied<'s>(
     Some(place)
 }
 
+// The white space a deletion brought together, kept as the line shows it, Chrome and Firefox: what ran together at the
+// caret collapsed as it shows (`abc <b>def</b>  ghi`, its first part deleted, is `&nbsp;ghi`, the run a line's start); a space
+// after the caret in the next leaf where it starts the line, or follows the one before the caret (`abc ` and ` ghi` is `abc
+// &nbsp;ghi`).
+fn settle_space<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, caller: i32, caret: (NodeId, u32)) -> Option<()> {
+    crate::editing::rebalance_collapsed(scope, caller, caret.0, caret.1)?;
+    let arena = realm(scope, cid);
+    let Some(after) = crate::editing::next_leaf_text(arena, caret) else { return Some(()) };
+    let before = arena.get(caret.0).filter(|n| n.kind == NodeKind::Text && caret.1 as usize == n.data.len()).and_then(|n| n.data.last().copied());
+    if before.is_some_and(|u| u == 0x20 || u == 0xA0) {
+        return crate::editing::space_to_nbsp(scope, caller, after);
+    }
+    crate::editing::rebalance_collapsed(scope, caller, after, 0)
+}
+
 // What a deletion leaves tidied: the inline elements and the text it emptied at either end removed — the end's first —
 // the caret before what went at the start; the start's block, left empty, held open by a `<br>` the caret is before; the
 // caret, between children, at the end of the text before it, where there is one; and the white space brought together
@@ -430,12 +445,6 @@ fn tidy<'s>(
             caret = (t, arena.get(t).map_or(0, |n| n.data.len() as u32));
         }
     }
-    rebalance_space(scope, caller, caret.0, caret.1, caret.1)?;
-    // (…and, still between children, what the text after it starts with: ` c` a selection left at its line's start is
-    // `&nbsp;c`, Chrome and Firefox)
-    let arena = realm(scope, cid);
-    if let Some(after) = arena.get(caret.0).filter(|n| n.kind == NodeKind::Element).and_then(|n| n.children.get(caret.1 as usize).copied()) {
-        rebalance_space(scope, caller, after, 0, 0)?;
-    }
+    settle_space(scope, cid, caller, caret)?;
     Some(caret)
 }

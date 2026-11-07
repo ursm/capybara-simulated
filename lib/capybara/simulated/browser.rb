@@ -2971,6 +2971,11 @@ module Capybara
       #   set_geolocation(latitude: 1, longitude: 2, accuracy: 5, altitude: 10)
       #   set_geolocation(denied: true)  # report PERMISSION_DENIED
       #   set_geolocation                # clear -> report POSITION_UNAVAILABLE
+      def set_clipboard_permission(name, state)
+        @runtime.call('__csimSetClipboardPermission', name, state)
+        nil
+      end
+
       def set_geolocation(latitude: nil, longitude: nil, accuracy: 10, denied: false, **rest)
         source =
           if denied

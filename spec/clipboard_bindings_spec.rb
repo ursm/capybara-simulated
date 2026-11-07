@@ -20,6 +20,7 @@ RSpec.describe 'Clipboard bindings' do
   let(:session) {
     s = simulated_session(app)
     s.visit('/')
+    s.driver.grant_permissions('clipboard-read', 'clipboard-write')
     s
   }
 
@@ -152,6 +153,7 @@ RSpec.describe 'Clipboard bindings' do
   it 'keeps one clipboard per session, emptied as the session resets' do
     other = simulated_session(app)
     other.visit('/')
+    other.driver.grant_permissions('clipboard-read')
     session.execute_script(<<~JS)
       const png = new Blob([new Uint8Array([0x89, 0x50, 0x00, 0xff])], { type: 'image/png' });
       window.done = navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => navigator.clipboard.read())
@@ -163,6 +165,7 @@ RSpec.describe 'Clipboard bindings' do
     expect(poll_until { other.evaluate_script('window.items') }).to eq(0)
     session.reset!
     session.visit('/')
+    session.driver.grant_permissions('clipboard-read')
     session.execute_script(read)
     expect(poll_until { session.evaluate_script('window.items') }).to eq(0)
   end

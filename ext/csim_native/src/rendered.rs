@@ -247,6 +247,11 @@ fn inherited_ws(arena: &RealmArena, id: Option<NodeId>) -> Ws {
 pub(crate) fn collapses_white_space(arena: &RealmArena, parent: Option<NodeId>) -> bool {
     !inherited_ws(arena, parent).preserving()
 }
+// …and whether it collapses its spaces: `pre-line`, which keeps its line feeds, too.
+pub(crate) fn collapses_spaces(arena: &RealmArena, parent: Option<NodeId>) -> bool {
+    let ws = inherited_ws(arena, parent);
+    !ws.preserving() || ws == Ws::PreLine
+}
 // Does `id`'s `visibility` hide it — its own computed one where the engine styles it, else what it `inherited`?
 pub(crate) fn hides_by_visibility(arena: &RealmArena, id: NodeId, inherited: bool) -> bool {
     use style::computed_values::visibility::T as Visibility;
@@ -337,6 +342,8 @@ struct Walk<'a> {
     arena: &'a RealmArena,
     now: f64,
     root: NodeId,
+    // (…the range it reads, where it reads one: what is outside it none of its text, nor its breaks)
+    clip: Option<((NodeId, u32), (NodeId, u32))>,
     // Nothing rendered yet: a leading collapsible space is dropped.
     at_start: bool,
     // The last thing rendered was a collapsible space.
@@ -376,7 +383,13 @@ impl Walk<'_> {
         let arena = self.arena;
         let Some(node) = arena.get(id) else { return Vec::new() };
         if node.kind == NodeKind::Text {
-            return if hidden { Vec::new() } else { self.text(&node.data, transform, ws) };
+            if hidden {
+                return Vec::new();
+            }
+            let Some(((start, from), (end, to))) = self.clip else { return self.text(&node.data, transform, ws) };
+            let (from, to) = (if start == id { from as usize } else { 0 }, if end == id { to as usize } else { node.data.len() });
+            let from = from.min(node.data.len());
+            return self.text(&node.data[from..to.clamp(from, node.data.len())], transform, ws);
         }
         if !matches!(node.kind, NodeKind::Element | NodeKind::Document | NodeKind::Fragment) {
             return Vec::new();
@@ -440,6 +453,9 @@ impl Walk<'_> {
         let mut collapsible_only = true;
         for &c in &node.children {
             let Some(cn) = arena.get(c) else { continue };
+            if self.clip.is_some_and(|clip| !intersects(arena, c, clip)) {
+                continue;
+            }
             let mut inherited = hidden;
             // (…a HOST renders its light children only through the slots they are assigned to)
             if let Some(root) = host_root {
@@ -715,6 +731,23 @@ fn has_next_cell(arena: &RealmArena, parent: &NodeData, cell: NodeId) -> bool {
 // value, else the rendered text collection from `id` under what its parent hands down — its `text-transform`, its
 // `white-space` mode and its `visibility`.
 pub(crate) fn visible_text(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> Vec<u16> {
+    visible_text_in(engine, arena, id, None, now)
+}
+// (…whether `id` has any of the range in it)
+fn intersects(arena: &RealmArena, id: NodeId, (start, end): ((NodeId, u32), (NodeId, u32))) -> bool {
+    let Some(parent) = arena.parent_of(id) else { return true };
+    let at = arena.child_index(id) as u32;
+    crate::ranges::compare_points(arena, start, (parent, at + 1)) == Some(std::cmp::Ordering::Less)
+        && crate::ranges::compare_points(arena, end, (parent, at)) == Some(std::cmp::Ordering::Greater)
+}
+// The rendered text of what a Range holds — `innerText`'s of the element holding it, read within it: what a copy holds as
+// text/plain (`<p>one</p><p>two</p>` is `one\n\ntwo`, `display: none` nothing; Chrome, Firefox).
+pub(crate) fn range_text(engine: &mut StyleEngine, arena: &RealmArena, start: (NodeId, u32), end: (NodeId, u32), now: f64) -> Vec<u16> {
+    let common = crate::ranges::common_ancestor(arena, start.0, end.0);
+    let root = if arena.is_element(common) || arena.get(common).is_some_and(|n| n.kind == NodeKind::Document) { common } else { arena.parent_of(common).unwrap_or(common) };
+    visible_text_in(engine, arena, root, Some((start, end)), now)
+}
+fn visible_text_in(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, clip: Option<((NodeId, u32), (NodeId, u32))>, now: f64) -> Vec<u16> {
     let Some(node) = arena.get(id) else { return Vec::new() };
     let el = if node.kind == NodeKind::Element { Some(id) } else { node.parent };
     if el.and_then(|e| arena.get(e)).is_some_and(|e| e.kind == NodeKind::Element) && !rendered(engine, arena, el.unwrap_or(id), true, true, None, now) {
@@ -731,6 +764,7 @@ pub(crate) fn visible_text(engine: &mut StyleEngine, arena: &RealmArena, id: Nod
         arena,
         now,
         root: id,
+        clip,
         at_start: true,
         ends_collapsible: false,
         break_pending: false,
@@ -753,6 +787,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "rendered", rendered_op, context_id);
     crate::dom::register(scope, ns, "visibleText", visible_text_op, context_id);
     crate::dom::register(scope, ns, "innerText", inner_text_op, context_id);
+    crate::dom::register(scope, ns, "renderedRangeText", rendered_range_text_op, context_id);
     crate::dom::register(scope, ns, "boxKind", box_kind_op, context_id);
     crate::dom::register(scope, ns, "cssImagesWaiting", css_images_waiting_op, context_id);
     crate::dom::register(scope, ns, "transparent", transparent_op, context_id);
@@ -1027,6 +1062,15 @@ fn inner_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     if let Some(text) = kept_text(scope, &args, id, true) {
         let s = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal).unwrap();
         rv.set(s.into());
+    }
+}
+
+// __dom.renderedRangeText(startNid, startOffset, endNid, endOffset) -> `range_text`.
+fn rendered_range_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(start), Some(end)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2)) else { return };
+    let (from, to) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
+    if let Some(text) = with_engine(scope, &args, |engine, arena, now| range_text(engine, arena, (start, from), (end, to), now)) {
+        rv.set(crate::dom::utf16_value(scope, &text));
     }
 }
 

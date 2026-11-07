@@ -380,8 +380,9 @@ RSpec.describe 'execCommand in the selection’s editing host' do
   # `insertHTML` in an editing host, the Editing draft's: the selection deleted, the fragment made by
   # `createContextualFragment` at the place that left and inserted there — its `input` of no inputType nor data where
   # anything changed (Chrome, Firefox) — the caret after its last child; a block in a `<p>` the paragraph split around it,
-  # "fix disallowed ancestors" (Firefox; Chrome merges the paragraphs); nothing with no fragment. A script in it runs, as
-  # `createContextualFragment` unmarks it: the draft's text, where Chrome and Firefox run none of it but its images.
+  # "fix disallowed ancestors" (Firefox; Chrome merges the paragraphs); nothing with no fragment. A script in it stays
+  # "already started" and does not run (Chrome, Firefox): the draft never says one does, and its own note on that step has
+  # it that the consequences "might be undesirable"; an image's handler does (Chrome, Firefox).
   it 'inserts markup at the selection' do
     session = simulated_session(lambda {|_env|
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable></div><div id=p contenteditable=plaintext-only>plain</div>']]
@@ -430,7 +431,7 @@ RSpec.describe 'execCommand in the selection’s editing host' do
       [true, '<p><br></p>', 'P', 0, ['|null']],
       [true, '<p>abc</p>', '#text', 1, []],
       [true, '<script>window.ran = (window.ran || 0) + 1</script><span onclick="1">s</span>', 'DIV', 2, ['|null']],
-      1,
+      nil,
       true,
       'plainx'
     ])

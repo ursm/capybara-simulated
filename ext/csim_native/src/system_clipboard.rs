@@ -18,6 +18,9 @@ struct Clipboard {
 }
 
 static REGISTRY: LazyLock<Mutex<HashMap<u64, Clipboard>>> = LazyLock::new(Default::default);
+// What a session's driver or `test_driver.set_permission` says of `clipboard-read` and `clipboard-write`: `true` granted,
+// `false` denied; none, the UA's default.
+static PERMISSIONS: LazyLock<Mutex<HashMap<(u64, bool), bool>>> = LazyLock::new(Default::default);
 static LAST_COUNT: AtomicU32 = AtomicU32::new(0);
 
 fn lock() -> MutexGuard<'static, HashMap<u64, Clipboard>> {
@@ -27,6 +30,23 @@ fn lock() -> MutexGuard<'static, HashMap<u64, Clipboard>> {
 // A session's clipboard emptied (its storage cleared).
 pub(crate) fn clear(partition: u64) {
     lock().remove(&partition);
+    permissions().retain(|&(p, _), _| p != partition);
+}
+fn permissions() -> MutexGuard<'static, HashMap<(u64, bool), bool>> {
+    PERMISSIONS.lock().unwrap_or_else(|e| e.into_inner())
+}
+// The permission a session says of writing (else reading) the clipboard.
+pub(crate) fn permission(partition: u64, write: bool) -> Option<bool> {
+    permissions().get(&(partition, write)).copied()
+}
+// Whether a script may modify (`write`, §5.3.1: the action "invoked from a scripting thread which is allowed to show a
+// popup", a transient activation — or the permission granted, without one) or read the clipboard (§5.3.2: only with the
+// permission granted: Chrome and Firefox refuse a page's read otherwise). Denied, neither.
+pub(crate) fn script_may_access(partition: u64, write: bool, activated: bool) -> bool {
+    match permission(partition, write) {
+        Some(granted) => granted,
+        None => write && activated,
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -36,6 +56,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "clipboardKey", key_op, context_id);
     register(scope, ns, "clipboardFiles", files_op, context_id);
     register(scope, ns, "clipboardWriteSelected", write_selected_op, context_id);
+    register(scope, ns, "clipboardAllowed", allowed_op, context_id);
+    register(scope, ns, "clipboardSetPermission", set_permission_op, context_id);
+    register(scope, ns, "clipboardFillStore", fill_store_op, context_id);
 }
 
 // The data types a page may write and read (§6.4, §6.5): the mandatory ones, and the optional ones this clipboard
@@ -124,6 +147,47 @@ fn write_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     write(partition, entries);
 }
 
+// __dom.clipboardAllowed(partition, write) -> `script_may_access` of the calling realm's window.
+fn allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let partition = partition(scope, &args);
+    let write = args.get(1).is_true();
+    let cid = crate::dom::realm_id(scope, &args);
+    let activated = crate::dom::realm(scope, cid).transiently_activated(cid);
+    rv.set_bool(script_may_access(partition, write, activated));
+}
+// __dom.clipboardSetPermission(partition, name, state): what the session says of `clipboard-read` or `clipboard-write`
+// (`granted`, `denied`; any other, the default) — any other permission's name nothing.
+fn set_permission_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let partition = partition(scope, &args);
+    let (name, state) = (args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
+    let write = match name.as_str() {
+        "clipboard-write" => true,
+        "clipboard-read" => false,
+        _ => return,
+    };
+    match state.as_str() {
+        "granted" => permissions().insert((partition, write), true),
+        "denied" => permissions().insert((partition, write), false),
+        _ => permissions().remove(&(partition, write)),
+    };
+}
+// The representations a paste's data holds as strings: for a paste event, all but a file's and a web custom format's
+// (which no paste event sees); for an `insertFromPaste` InputEvent (`rich` no), its text and markup alone, what the clipboard
+// has of them.
+fn paste_strings(partition: u64, rich_only: bool) -> Vec<(String, Vec<u16>)> {
+    let reg = lock();
+    let Some(c) = reg.get(&partition) else { return Vec::new() };
+    let entries = c.entries.iter().filter(|(key, bytes)| {
+        if rich_only { matches!(key.as_str(), "text/plain" | "text/html") && !bytes.is_empty() } else { !key.starts_with(WEB) && file_name(key).is_none() }
+    });
+    entries.map(|(key, bytes)| (key.clone(), String::from_utf8_lossy(bytes).encode_utf16().collect())).collect()
+}
+// __dom.clipboardFillStore(store, partition, richOnly): `paste_strings` added to a DataTransfer's store (drag_data_store.rs).
+fn fill_store_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let partition = args.get(1).integer_value(scope).unwrap_or(0) as u64;
+    let rich_only = args.get(2).is_true();
+    crate::drag_data_store::add_strings(scope, args.get(0), paste_strings(partition, rich_only));
+}
 // __dom.clipboardWriteSelected(partition, text, html): the selected contents of a page copied (Clipboard API §8.1:
 // "alternate text/html and text/plain clipboard formats") — a flavor that is empty not held, and nothing selected at
 // all leaving the clipboard as it was, as Chrome and Firefox leave it.
@@ -183,6 +247,30 @@ mod tests {
         remove_types(partition, &["text/plain".to_owned()]);
         assert_eq!(text_of(partition, "text/plain"), Vec::<u16>::new());
         assert_eq!(lock().get(&partition).map(|c| c.entries.len()), Some(1));
+        clear(partition);
+    }
+
+    #[test]
+    fn a_script_needs_an_activation_or_the_permission() {
+        let partition = 0x5e1ec8;
+        assert!(script_may_access(partition, true, true));
+        assert!(!script_may_access(partition, true, false));
+        assert!(!script_may_access(partition, false, true));
+        permissions().insert((partition, false), true);
+        permissions().insert((partition, true), false);
+        assert!(script_may_access(partition, false, false));
+        assert!(!script_may_access(partition, true, true));
+        clear(partition);
+        assert_eq!(permission(partition, true), None);
+    }
+
+    #[test]
+    fn a_paste_is_given_the_strings_it_sees() {
+        let partition = 0x5e1ec9;
+        write(partition, vec![("text/plain".into(), b"p".to_vec()), ("web x/y".into(), b"w".to_vec()), ("image/png".into(), b"i".to_vec()), ("x-mine".into(), b"m".to_vec())]);
+        let types = |rich| paste_strings(partition, rich).into_iter().map(|(ty, _)| ty).collect::<Vec<_>>();
+        assert_eq!(types(false), vec!["text/plain", "x-mine"]);
+        assert_eq!(types(true), vec!["text/plain"]);
         clear(partition);
     }
 

@@ -254,8 +254,28 @@ module Capybara
         yield FakePlaywrightPage.new(current_browser) if block_given?
       end
 
+      # What a browser's automation grants a page, here the session's: `clipboard-read` and `clipboard-write`, without which
+      # a script reads no clipboard and writes it only with a user activation, as in a browser.
+      #
+      #   page.driver.grant_permissions('clipboard-read', 'clipboard-write')
+      def grant_permissions(*names)
+        names.flatten.each {|name| current_browser.set_clipboard_permission(name.to_s, 'granted') }
+      end
+
       class FakePlaywrightPage
         def initialize(browser) = (@browser = browser)
+
+        # (…`pw_page.context.grant_permissions(names, origin:)`, a Playwright test's way to the clipboard: the session's)
+        FakeContext = Struct.new(:browser) do
+          def grant_permissions(names, **)
+            Array(names).each {|name| browser.set_clipboard_permission(name.to_s, 'granted') }
+          end
+
+          def method_missing(*) = self
+          def respond_to_missing?(*) = true
+        end
+
+        def context = FakeContext.new(@browser)
         # Playwright's `page.evaluate` takes either a string expression
         # or a function literal — when given a function it calls it
         # and returns the result. The simulated driver's underlying

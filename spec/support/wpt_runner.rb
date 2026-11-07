@@ -1316,6 +1316,12 @@ module WptRunner
   # A REFTEST has no harness to report subtests, so it is judged by rendering (see
   # `run_reftest`) and reports its reference comparisons in the same shape — which
   # is what lets the gate, the allowlists and wpt_diag treat it like any other file.
+  # The tests that ask a script's clipboard access with no user activation and no `test_driver.set_permission`, of an
+  # implementation "configured to allow this" (Clipboard API §5.3.3) as WPT's own runners are.
+  CLIPBOARD_GRANTED = {
+    'input-events/input-events-exec-command.html' => %w[clipboard-read clipboard-write]
+  }.freeze
+
   def run(rel)
     result = run_variants(rel)
     failures = arena_verify_failures
@@ -1450,6 +1456,7 @@ module WptRunner
     visit = "#{page}#{query}"
     # (…its `load`, which testharness completes its sync tests off, the task its parse queued: the page's event loop
     # runs it as the visit ends, or later where its images or frames delay it — the steps below)
+    s.driver.grant_permissions(*CLIPBOARD_GRANTED[rel]) if CLIPBOARD_GRANTED.key?(rel)
     s.visit(origin ? "#{origin}/#{visit}" : "/#{visit}")
 
     res = nil

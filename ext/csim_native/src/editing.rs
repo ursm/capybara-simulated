@@ -359,9 +359,52 @@ pub(crate) fn has_content(arena: &RealmArena, id: NodeId) -> bool {
 // content a space, any other alternating no-break space and space, a no-break space first, and — where it ends the line —
 // last; one that starts the line a no-break space first too (`a&nbsp; b`, `a&nbsp; &nbsp;b`, `ab&nbsp;&nbsp;`).
 pub(crate) fn rebalance_space(scope: &mut v8::PinScope<'_, '_>, caller: i32, node: NodeId, from: u32, to: u32) -> Option<()> {
+    rebalance(scope, caller, node, from, to, false)
+}
+// …and at `at` of a text an edit left as it was, a run of plain spaces there one as it shows.
+pub(crate) fn rebalance_collapsed(scope: &mut v8::PinScope<'_, '_>, caller: i32, node: NodeId, at: u32) -> Option<()> {
+    rebalance(scope, caller, node, at, at, true)
+}
+// The first text a place's line goes on with — down what follows the place, inline — where it starts with a space.
+pub(crate) fn next_leaf_text(arena: &RealmArena, (node, offset): (NodeId, u32)) -> Option<NodeId> {
+    let n = arena.get(node)?;
+    let mut at = if n.kind == NodeKind::Text {
+        if (offset as usize) < n.data.len() {
+            return None;
+        }
+        arena.sibling(node, 1)
+    } else {
+        n.children.get(offset as usize).copied()
+    };
+    while let Some(id) = at {
+        let d = arena.get(id)?;
+        match d.kind {
+            NodeKind::Text if d.data.first() == Some(&0x20) => return Some(id),
+            NodeKind::Element if inline_level(arena, id) == Some(true) => at = d.children.first().copied(),
+            _ => return None,
+        }
+    }
+    None
+}
+// …its first unit a no-break space, where the white space collapses there.
+pub(crate) fn space_to_nbsp(scope: &mut v8::PinScope<'_, '_>, caller: i32, node: NodeId) -> Option<()> {
+    let arena = &crate::dom::dom(scope).arena;
+    let n = arena.get(node).filter(|n| n.kind == NodeKind::Text)?;
+    if !crate::rendered::collapses_spaces(arena, n.parent) {
+        return Some(());
+    }
+    let object = crate::dom::node_value(scope, Some(node));
+    if crate::dom::factory_threw(scope) {
+        return None;
+    }
+    let string = v8::String::new_from_two_byte(scope, &[0xA0], v8::NewStringType::Normal)?;
+    crate::character_data::replace_data(scope, caller, node, object, 0, 1, string).ok()?;
+    Some(())
+}
+fn rebalance(scope: &mut v8::PinScope<'_, '_>, caller: i32, node: NodeId, from: u32, to: u32, collapse: bool) -> Option<()> {
     let arena = &crate::dom::dom(scope).arena;
     let Some(n) = arena.get(node).filter(|n| n.kind == NodeKind::Text) else { return Some(()) };
-    if !crate::rendered::collapses_white_space(arena, n.parent) {
+    if !crate::rendered::collapses_spaces(arena, n.parent) {
         return Some(());
     }
     let data = &n.data;
@@ -383,14 +426,17 @@ pub(crate) fn rebalance_space(scope: &mut v8::PinScope<'_, '_>, caller: i32, nod
         while i < end && space(data[i]) {
             i += 1;
         }
-        let count = i - a;
+        // (…plain spaces next to each other showing as one, where the edit brought none of them together: all on a side of
+        // the place — `foo [bar] baz`, whose two meet there, shows both as Chrome keeps them)
+        let apart = collapse && (a >= from as usize || i <= from as usize);
+        let count = if apart { (a..i).filter(|&k| data[k] == 0xA0 || k == a || data[k - 1] != 0x20).count() } else { i - a };
         let starts = a == 0 && line_edge(arena, node, false) != Edge::Content;
         let ends = i == data.len() && line_edge(arena, node, true) != Edge::Content;
         let units: Vec<u16> = (0..count)
             .map(|k| if count == 1 && !starts && !ends { 0x20 } else if (k == count - 1 && ends) || k % 2 == 0 { 0xA0 } else { 0x20 })
             .collect();
         if units[..] != data[a..i] {
-            runs.push((a, units));
+            runs.push((a, i - a, units));
         }
     }
     if runs.is_empty() {
@@ -400,9 +446,9 @@ pub(crate) fn rebalance_space(scope: &mut v8::PinScope<'_, '_>, caller: i32, nod
     if crate::dom::factory_threw(scope) {
         return None;
     }
-    for (at, units) in runs {
+    for (at, length, units) in runs.into_iter().rev() {
         let string = v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal)?;
-        crate::character_data::replace_data(scope, caller, node, object, at, units.len(), string).ok()?;
+        crate::character_data::replace_data(scope, caller, node, object, at, length, string).ok()?;
     }
     Some(())
 }

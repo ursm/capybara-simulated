@@ -14,6 +14,7 @@ RSpec.describe 'Key default actions' do
   it 'cuts and pastes nothing in a read-only control, and nothing from a collapsed selection' do
     s = session_of('<input id=ro readonly value=RO><input id=w value=abc>')
     s.execute_script("window.L = []; for (const t of ['cut', 'paste', 'input']) document.addEventListener(t, (e) => L.push(t + ':' + e.target.id))")
+    s.driver.grant_permissions('clipboard-read', 'clipboard-write')
     s.execute_script('navigator.clipboard.writeText("kept")')
     s.execute_script('ro.focus(); ro.setSelectionRange(0, 2)')
     s.find('#ro').send_keys([:control, 'x'])
@@ -107,6 +108,7 @@ RSpec.describe 'Key default actions' do
   # `execCommand('cut')` alike.
   it "cuts a selection across blocks as Delete deletes it" do
     s = session_of('<div id=ed contenteditable><p>ab</p><p>cd</p></div>')
+    s.driver.grant_permissions('clipboard-write')
     select = 'const t = ed.querySelectorAll("p"); getSelection().setBaseAndExtent(t[0].firstChild, 1, t[1].firstChild, 1)'
     deleted = s.evaluate_script("(() => { ed.focus(); #{select}; document.execCommand('delete'); const h = ed.innerHTML; ed.innerHTML = '<p>ab</p><p>cd</p>'; return h })()")
     cut = s.evaluate_script("(() => { #{select}; document.execCommand('cut'); const h = ed.innerHTML; ed.innerHTML = '<p>ab</p><p>cd</p>'; return h })()")

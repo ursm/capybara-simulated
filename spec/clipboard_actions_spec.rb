@@ -76,7 +76,54 @@ RSpec.describe 'Clipboard actions' do
 
   before { plant_clipboard }
 
+  # A script's access to the clipboard is a user activation's, or the permission's (§5.3.1, §5.3.2): Chrome and Firefox,
+  # fresh page, answer false and fire nothing, and reject the asynchronous API.
+  describe 'with no activation' do
+    # (…a page of its own: the key that planted the clipboard was one)
+    before { session.visit '/' }
+
+    def rejected(call)
+      awaited("#{call}.then(() => 'resolved', (e) => e.name)")
+    end
+
+    it 'refuses a script, firing nothing, and writes nothing' do
+      expect(script("selectText(); return ['copy', 'cut', 'paste'].map((c) => document.execCommand(c))")).to eq([false, false, false])
+      expect(events).to eq([])
+      expect(script("return ['copy', 'cut', 'paste'].map((c) => document.queryCommandEnabled(c))")).to eq([false, false, false])
+      expect(rejected("navigator.clipboard.writeText('x')")).to eq('NotAllowedError')
+      expect(rejected('navigator.clipboard.readText()')).to eq('NotAllowedError')
+      expect(rejected("navigator.clipboard.write([new ClipboardItem({'text/plain': 'x'})])")).to eq('NotAllowedError')
+      expect(rejected('navigator.clipboard.read()')).to eq('NotAllowedError')
+      expect(clipboard_text).to eq('input value')
+    end
+
+    it "lets a user's activation write, not read" do
+      script(<<~JS)
+        E('btn').addEventListener('click', () => {
+          selectText();
+          window.copied = document.execCommand('copy');
+          window.pasted = document.execCommand('paste');
+          window.done = navigator.clipboard.writeText('async').then(() => 'resolved', (e) => e.name);
+        });
+      JS
+      session.find(:id, 'btn').click
+      expect(session.evaluate_script('[window.copied, window.pasted]')).to eq([true, false])
+      expect(awaited('window.done')).to eq('resolved')
+    end
+
+    it 'answers as the permission a driver grants or a test sets says' do
+      session.driver.grant_permissions('clipboard-write')
+      expect(rejected("navigator.clipboard.writeText('x')")).to eq('resolved')
+      expect(rejected('navigator.clipboard.readText()')).to eq('NotAllowedError')
+      session.driver.with_playwright_page {|pw| pw.context.grant_permissions(['clipboard-read'], origin: 'x') }
+      expect(awaited('navigator.clipboard.readText()')).to eq('x')
+      expect(awaited("navigator.permissions.query({name: 'clipboard-read'}).then((p) => p.state)")).to eq('granted')
+    end
+  end
+
   describe 'as a script asks' do
+    before { session.driver.grant_permissions('clipboard-read', 'clipboard-write') }
+
     it "fires the copy event, whatever is selected, and copies what is" do
       expect(script("selectText(); return document.execCommand('copy')")).to be(true)
       expect(clipboard_text).to eq('hello')
@@ -140,6 +187,42 @@ RSpec.describe 'Clipboard actions' do
       expect(events).to eq(['paste@ta'])
     end
 
+    # (…a number or an email field's cut as any other's, where a paste there stays refused: Chrome, Firefox)
+    it "cuts a number field's selection" do
+      expect(script("E('num').focus(); E('num').select(); return document.execCommand('cut')")).to be(true)
+      expect(events).to eq(['cut@num', 'input@num deleteByCut null'])
+      expect(session.evaluate_script("E('num').value")).to eq('')
+      expect(clipboard_text).to eq('123')
+    end
+
+    it 'runs no command in the listeners of one running' do
+      script(<<~JS)
+        window.inner = [];
+        document.addEventListener('copy', () => inner.push(document.execCommand('copy')));
+        document.addEventListener('cut', () => inner.push(document.execCommand('copy')));
+        E('ta').addEventListener('input', () => inner.push(document.execCommand('insertText', false, 'r')));
+      JS
+      expect(script("selectText(); return document.execCommand('copy')")).to be(true)
+      # (…the `input` of this cut's edit a third asking)
+      expect(script("return document.execCommand('cut')")).to be(true)
+      expect(script("E('ta').value = ''; E('ta').focus(); return document.execCommand('insertText', false, 'a')")).to be(true)
+      expect(session.evaluate_script('[inner, E("ta").value]')).to eq([[false, false, false, false], 'a'])
+      # (…and the next may, the document's guard let go)
+      expect(script("return document.execCommand('copy')")).to be(true)
+    end
+
+    it "lets a frame's copy listener remove the frame, true all the same (§8.1)" do
+      script(<<~JS)
+        const f = document.body.appendChild(document.createElement('iframe'));
+        const d = f.contentDocument;
+        d.body.innerHTML = '<p id=p>frame</p>';
+        d.getSelection().selectAllChildren(d.getElementById('p'));
+        d.addEventListener('copy', () => f.remove());
+        window.frameCopy = d.execCommand('copy');
+      JS
+      expect(session.evaluate_script('window.frameCopy')).to be(true)
+    end
+
     it 'fires no beforeinput for any other command' do
       script("E('ta').focus(); E('ta').setSelectionRange(0, 0); document.execCommand('insertText', false, 'Z'); selectHost(); document.execCommand('bold');")
       expect(events).to eq(['input@ta insertText Z', 'input@h formatBold null'])
@@ -147,6 +230,55 @@ RSpec.describe 'Clipboard actions' do
   end
 
   describe 'as the user asks' do
+    # (…the plan read again after it: the draft's "the beforeinput handler might have done something annoying"; Chrome,
+    # Firefox)
+    it 'edits what a beforeinput left, at what it left' do
+      script("selectText(); document.addEventListener('beforeinput', () => { E('ta').readOnly = true; }, {once: true});")
+      press 'x'
+      expect(session.evaluate_script("E('ta').value")).to eq('hello world')
+      script("log.length = 0; E('h').focus(); const t = E('hq').firstChild; sel(t, 1, t, 1); document.addEventListener('beforeinput', () => { E('h').contentEditable = 'false'; }, {once: true});")
+      press 'v'
+      expect(session.evaluate_script("E('h').lastElementChild.innerHTML")).to eq('jkl')
+    end
+
+    it "gives a host's cut and paste their target ranges" do
+      script("window.ranges = []; document.addEventListener('beforeinput', (e) => { const [r] = e.getTargetRanges(); ranges.push([e.inputType, r.startContainer.data, r.startOffset, r.endOffset]); });")
+      script("const t = E('hq').firstChild; E('h').focus(); sel(t, 0, t, 2);")
+      press 'x'
+      press 'v'
+      expect(session.evaluate_script('ranges')).to eq([['deleteByCut', 'jkl', 0, 2], ['insertFromPaste', 'l', 0, 0]])
+    end
+
+    # (…the text as it shows, not the Range's: Chrome, Firefox)
+    it 'copies rendered text' do
+      script(<<~JS)
+        const d = document.body.appendChild(document.createElement('div'));
+        d.id = 'r';
+        d.innerHTML = '<p>one</p><p>two<br>three</p><span style="display:none">no</span><ul><li>a</li><li>b</li></ul>';
+        getSelection().selectAllChildren(d);
+      JS
+      press 'c'
+      expect(clipboard_text).to eq("one\n\ntwo\nthree\n\na\nb")
+    end
+
+    # (…absolute, as a copy's markup goes elsewhere: Chrome, Firefox)
+    it "writes a copied link's URL whole" do
+      session.driver.grant_permissions('clipboard-read')
+      script(<<~JS)
+        const d = document.body.appendChild(document.createElement('div'));
+        d.innerHTML = '<a href="/x">l</a>';
+        getSelection().selectAllChildren(d);
+      JS
+      press 'c'
+      expect(awaited("navigator.clipboard.read().then((items) => items[0].getType('text/html')).then((b) => b.text())")).to match(%r{\A<a href="http://[^"]+/x">l</a>\z})
+    end
+
+    it 'keeps the clipboard where a listener added only a file and canceled' do
+      script("selectText(); document.addEventListener('copy', (e) => { e.clipboardData.items.add(new File(['x'], 'f.txt', {type: 'text/plain'})); e.preventDefault(); }, {once: true});")
+      press 'c'
+      expect(clipboard_text).to eq('input value')
+    end
+
     it 'writes what a copy listener set where it canceled, none where it did not' do
       script("selectText(); document.addEventListener('copy', (e) => { e.clipboardData.setData('text/plain', 'OVER'); e.preventDefault(); }, {once: true});")
       press 'c'
@@ -166,6 +298,7 @@ RSpec.describe 'Clipboard actions' do
     it 'clears the clipboard where a listener cleared the data and canceled' do
       script("selectText(); document.addEventListener('copy', (e) => { e.clipboardData.clearData(); e.preventDefault(); }, {once: true});")
       press 'c'
+      session.driver.grant_permissions('clipboard-read')
       expect(awaited('navigator.clipboard.read().then((items) => items.length)')).to eq(0)
     end
 
@@ -176,6 +309,7 @@ RSpec.describe 'Clipboard actions' do
       script("document.addEventListener('paste', (e) => { window.pasted = [[...e.clipboardData.types], e.clipboardData.getData('application/x-trix'), e.clipboardData.files.length]; }, {once: true});")
       clipboard_text
       expect(session.evaluate_script('window.pasted')).to eq([['application/x-trix'], 'T', 0])
+      session.driver.grant_permissions('clipboard-read')
       expect(awaited('navigator.clipboard.read().then((items) => items.length)')).to eq(0)
     end
 
@@ -262,6 +396,7 @@ RSpec.describe 'Clipboard actions' do
     it 'writes the markup of the inline elements around what is copied' do
       script("E('h').focus(); const t = E('hb').firstChild; sel(t, 0, t, 2);")
       press 'c'
+      session.driver.grant_permissions('clipboard-read')
       expect(awaited("navigator.clipboard.read().then((items) => items[0].getType('text/html')).then((b) => b.text())")).to eq('<b id="hb">de</b>')
     end
 
@@ -285,7 +420,8 @@ RSpec.describe 'Clipboard actions' do
   # A paste into an editing host inserts the clipboard's markup, in the document's own terms: what runs or loads taken out,
   # as both engines take it — a frame out (Firefox; Chrome keeps it), a `<style>` kept (Firefox; Chrome inlines it) — a
   # block in a `<p>` the paragraph split around it (the Editing draft's "fix disallowed ancestors", Firefox: Chrome merges
-  # the `<p>`s). A `plaintext-only` host takes the text.
+  # the `<p>`s), its `id` on the part before, the draft's. A `plaintext-only` host takes the text. The caret at the end of what
+  # went in: Chrome, Firefox.
   describe 'pasting markup' do
     def copy_markup(html)
       script(<<~JS)
@@ -310,7 +446,7 @@ RSpec.describe 'Clipboard actions' do
       copy_markup('<b>x</b>y')
       expect(paste_at_caret).to eq('<p id="hq">j<b>x</b>ykl</p>')
       expect(events).to eq(['paste@hq', 'beforeinput@h insertFromPaste null', 'input@h insertFromPaste null'])
-      expect(session.evaluate_script('getSelection().anchorNode.id + getSelection().anchorOffset')).to eq('hq3')
+      expect(session.evaluate_script('[getSelection().anchorNode.data, getSelection().anchorOffset]')).to eq(['y', 1])
     end
 
     it 'takes out what runs, loads or says something of a document' do
@@ -320,7 +456,7 @@ RSpec.describe 'Clipboard actions' do
         <base href="http://x/"><link rel="stylesheet" href="x"><form action="x"><button formaction="javascript:1">b</button></form><!--c--><style>b{}</style>t</div>
       HTML
       expect(paste_at_caret).to eq(<<~HTML.delete("\n"))
-        <p id="hq">j</p><div id="d" class="c"><a title="t">l</a><img src="x"><form action="x"><button>b</button></form><style>b{}</style>t</div><p id="hq">kl</p>
+        <p id="hq">j</p><div id="d" class="c"><a title="t">l</a><img src="x"><form action="x"><button>b</button></form><style>b{}</style>t</div><p>kl</p>
       HTML
       expect(session.evaluate_script('window.ran')).to be_nil
     end
@@ -332,8 +468,53 @@ RSpec.describe 'Clipboard actions' do
 
     it 'splits a paragraph around a block' do
       copy_markup('<p>one</p><p>two</p>')
-      expect(paste_at_caret).to eq('<p id="hq">j</p><p>one</p><p>two</p><p id="hq">kl</p>')
-      expect(session.evaluate_script('[getSelection().anchorNode.id, getSelection().anchorOffset]')).to eq(['h', 4])
+      expect(paste_at_caret).to eq('<p id="hq">j</p><p>one</p><p>two</p><p>kl</p>')
+      expect(session.evaluate_script('[getSelection().anchorNode.data, getSelection().anchorOffset]')).to eq(['two', 3])
+    end
+
+    # (…the draft's "fix disallowed ancestors", what may hold what: Firefox's figures, Chrome's the same for lists)
+    it 'splits what may not hold it, up to what may' do
+      copy_markup('<p>a</p>')
+      script("E('hq').innerHTML = '<b>xy</b>'; E('h').focus(); const t = E('hq').firstChild.firstChild; sel(t, 1, t, 1);")
+      press 'v'
+      expect(session.evaluate_script("E('h').innerHTML.replace(/^.*?<\\/p>/, '')")).to eq('<p id="hq"><b>x</b></p><p>a</p><p><b>y</b></p>')
+      copy_markup('<li>a</li>')
+      script("E('hq').outerHTML = '<ul id=u><li>xy</li></ul>'; E('h').focus(); const t = document.querySelector('#u li').firstChild; sel(t, 1, t, 1);")
+      press 'v'
+      expect(session.evaluate_script("E('u').innerHTML")).to eq('<li>x</li><li>a</li><li>y</li>')
+    end
+
+    # (…typed after it, in it: Chrome, Firefox)
+    it 'leaves what is typed next in what went in' do
+      copy_markup('<b>x</b>')
+      script("E('hq').innerHTML = ''; E('h').focus(); sel(E('hq'), 0, E('hq'), 0);")
+      press 'v'
+      session.evaluate_script('document.activeElement').send_keys('T')
+      expect(session.evaluate_script("E('hq').innerHTML")).to eq('<b>xT</b>')
+    end
+
+    it 'takes out what runs, inside a template and an animation too' do
+      copy_markup(<<~HTML.delete("\n"))
+        <template><script>1</script><i onclick="1">t</i></template><video poster="javascript:1" onerror="1"></video>
+        <svg><a><animate attributeName="href" values="javascript:window.ran=1"/><text>t</text></a></svg><style>@import url(/x.css);i{}</style>
+      HTML
+      expect(paste_at_caret).to eq('<p id="hq">j<template><i>t</i></template><video></video><svg><a><text>t</text></a></svg>kl</p>')
+    end
+
+    it 'balances the white space pasted, and a paste with none fires nothing' do
+      script("selectText(); document.addEventListener('copy', (e) => { e.clipboardData.setData('text/plain', 'a  b'); e.preventDefault(); }, {once: true});")
+      press 'c'
+      script("E('hq').textContent = ''; E('h').focus(); sel(E('hq'), 0, E('hq'), 0);")
+      press 'v'
+      expect(session.evaluate_script("E('hq').innerHTML")).to eq('a&nbsp; b')
+    end
+
+    it "gives a single-line control's paste a space for a line break" do
+      script("selectText(); document.addEventListener('copy', (e) => { e.clipboardData.setData('text/plain', 'a\\nb'); e.preventDefault(); }, {once: true});")
+      press 'c'
+      script("E('inp').value = ''; E('inp').focus();")
+      press 'v'
+      expect(session.evaluate_script("E('inp').value")).to eq('a b')
     end
 
     it 'replaces what is selected, and an empty line' do
@@ -352,6 +533,14 @@ RSpec.describe 'Clipboard actions' do
       script("log.mute = undefined; log.length = 0; E('h').setAttribute('contenteditable', 'plaintext-only'); E('h').focus(); const t = E('hq').firstChild; sel(t, 1, t, 1);")
       press 'v'
       expect(session.evaluate_script("E('hq').innerHTML")).to eq('jPLAINkl')
+    end
+
+    it "breaks a plaintext-only host's lines by its white space" do
+      script("selectText(); document.addEventListener('copy', (e) => { e.clipboardData.setData('text/plain', 'a\\nb'); e.preventDefault(); }, {once: true});")
+      press 'c'
+      script("E('h').setAttribute('contenteditable', 'plaintext-only'); E('h').focus(); const t = E('hq').firstChild; sel(t, 1, t, 1);")
+      press 'v'
+      expect(session.evaluate_script("E('hq').innerHTML")).to eq('ja<br>bkl')
     end
 
     it 'leaves the page as it was where its beforeinput is canceled' do

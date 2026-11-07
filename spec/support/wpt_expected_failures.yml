@@ -33,23 +33,6 @@ clipboard-apis/async-navigator-clipboard-basics.https.html:
 - navigator.clipboard.write(image/png DOMString) fails
 clipboard-apis/async-write-image-read-image.https.html:
 - Verify write error on malformed data [image/png ClipboardItem]
-clipboard-apis/clipboard-copy-selection-line-break.https.html:
-- 'test paragraph text with line breaks: "\n \r"'
-- 'test paragraph text with line breaks: "\n"'
-- 'test paragraph text with line breaks: "\n\n"'
-- 'test paragraph text with line breaks: "\n\n\n"'
-- 'test paragraph text with line breaks: "\n\n\r"'
-- 'test paragraph text with line breaks: "\n\r"'
-- 'test paragraph text with line breaks: "\n\r\n"'
-- 'test paragraph text with line breaks: "\n\r\r"'
-- 'test paragraph text with line breaks: "\r \n"'
-- 'test paragraph text with line breaks: "\r"'
-- 'test paragraph text with line breaks: "\r\n"'
-- 'test paragraph text with line breaks: "\r\n\n"'
-- 'test paragraph text with line breaks: "\r\n\r"'
-- 'test paragraph text with line breaks: "\r\r"'
-- 'test paragraph text with line breaks: "\r\r\n"'
-- 'test paragraph text with line breaks: "\r\r\r"'
 clipboard-apis/clipboard-item.https.html:
 - ClipboardItem({string, Blob}) succeeds with different types
 - getType(DOMString invalid type) converts DOMString to Blob
@@ -92,12 +75,8 @@ clipboard-apis/permissions-policy/clipboard-read/clipboard-read-enabled-by-permi
     allow="clipboard-write" attribute
 ? clipboard-apis/permissions-policy/clipboard-write/clipboard-write-enabled-by-permissions-policy-cross-origin-tentative.https.sub.html
 : - Permissions-Policy header clipboard-write=* allows cross-origin iframes.
-clipboard-apis/permissions/readText-denied.https.html:
-- navigator.clipboard.readText() fails when permission denied
 clipboard-apis/permissions/readText-granted.https.html:
 - navigator.clipboard.readText() succeeds when permission granted
-clipboard-apis/permissions/writeText-denied.https.html:
-- navigator.clipboard.writeText() fails when permission denied
 cookies/attributes/attributes-ctl.sub.html:
 - Cookie with %x9 after Secure attribute is handled correctly.
 cookies/attributes/domain.sub.html:
@@ -2703,19 +2682,11 @@ editing/other/inserttext-last-mutation.html:
 - Typing X when <div contenteditable style="white-space:pre"><b>{}<br></b></div>
 - Typing X when <div contenteditable style="white-space:pre">{}<br></div>
 - Typing X when <div contenteditable style="white-space:pre-line"><b>{}<br></b></div>
-- Typing X when <div contenteditable style="white-space:pre-line">abc&nbsp;[]<br></div>
 - Typing X when <div contenteditable style="white-space:pre-line">{}<br></div>
 - Typing X when <div contenteditable style="white-space:pre-wrap"><b>{}<br></b></div>
 - Typing X when <div contenteditable style="white-space:pre-wrap">{}<br></div>
 - Typing space when <div contenteditable style="white-space:pre"><b>{}<br></b></div>
 - Typing space when <div contenteditable style="white-space:pre">{}<br></div>
-- Typing space when <div contenteditable style="white-space:pre-line"><b>{}<br></b></div>
-- Typing space when <div contenteditable style="white-space:pre-line">abc&nbsp;[]<br></div>
-- Typing space when <div contenteditable style="white-space:pre-line">abc<b>{}<br></b></div>
-- Typing space when <div contenteditable style="white-space:pre-line">abc[]<b><br></b></div>
-- Typing space when <div contenteditable style="white-space:pre-line">abc[]<br></div>
-- Typing space when <div contenteditable style="white-space:pre-line">abc{}<br></div>
-- Typing space when <div contenteditable style="white-space:pre-line">{}<br></div>
 - Typing space when <div contenteditable style="white-space:pre-wrap"><b>{}<br></b></div>
 - Typing space when <div contenteditable style="white-space:pre-wrap">{}<br></div>
 editing/other/join-different-white-space-style-left-line-and-right-paragraph.html:
@@ -10667,13 +10638,6 @@ editing/other/plain-text-copy-paste-of-paragraph-ending-with-non-layed-out-conte
   inline-flex.
 - Line break should not be present before semicolon after block elements styled as
   inline-grid.
-- The extra line break is missing after the paragraph that ends with a base tag.
-- The extra line break is missing after the paragraph that ends with a comment.
-- The extra line break is missing after the paragraph that ends with a display:none
-  span.
-- The extra line break is missing after the paragraph that ends with a hidden span.
-- The extra line break is missing after the paragraph that ends with a meta tag.
-- The extra line break is missing after the paragraph that ends with a style tag.
 editing/other/removeformat_background_color.html:
 - removeFormat handles complex background-color values
 - removeFormat preserves text when only background-color is present
@@ -10755,81 +10719,6 @@ editing/other/undo-insertparagraph-after-moving-split-nodes.html:
 - Undo insertParagraph after moving left node to different paragraph
 - Undo insertParagraph after moving right node into the left node
 - Undo insertParagraph after moving right node to different paragraph
-editing/plaintext-only/insertHTML.html:
-- |-
-  execCommand("insertHTML", false, "1st line
-  2nd line") when ""
-- |-
-  execCommand("insertHTML", false, "1st line
-  2nd line") when ""
-- |-
-  execCommand("insertHTML", false, "1st line
-  2nd line") when ""
-- |-
-  execCommand("insertHTML", false, "1st line
-  2nd line") when ""
-- execCommand("insertHTML", false, "<div>abc</div><div>def</div>") when ""
-- execCommand("insertHTML", false, "<div>abc</div><div>def</div>") when ""
-- execCommand("insertHTML", false, "<div>abc</div><div>def</div>") when ""
-- execCommand("insertHTML", false, "<div>abc</div><div>def</div>") when ""
-- execCommand("insertHTML", false, "<div>abc<br>def</div>") when ""
-- execCommand("insertHTML", false, "<div>abc<br>def</div>") when ""
-- execCommand("insertHTML", false, "<div>abc<br>def</div>") when ""
-- execCommand("insertHTML", false, "<div>abc<br>def</div>") when ""
-- execCommand("insertHTML", false, "<div>abc<br>def</div><div>ghi<br>jkl</div>") when
-  ""
-- execCommand("insertHTML", false, "<div>abc<br>def</div><div>ghi<br>jkl</div>") when
-  ""
-- execCommand("insertHTML", false, "<div>abc<br>def</div><div>ghi<br>jkl</div>") when
-  ""
-- execCommand("insertHTML", false, "<div>abc<br>def</div><div>ghi<br>jkl</div>") when
-  ""
-- execCommand("insertHTML", false, "<html><head><title>title</title></head><body>body</body></html>")
-  when ""
-- execCommand("insertHTML", false, "<html><head><title>title</title></head><body>body</body></html>")
-  when ""
-- execCommand("insertHTML", false, "<html><head><title>title</title></head><body>body</body></html>")
-  when ""
-- execCommand("insertHTML", false, "<html><head><title>title</title></head><body>body</body></html>")
-  when ""
-- execCommand("insertHTML", false, "<noframes>no frames</noframes>") when ""
-- execCommand("insertHTML", false, "<noframes>no frames</noframes>") when ""
-- execCommand("insertHTML", false, "<noframes>no frames</noframes>") when ""
-- execCommand("insertHTML", false, "<noframes>no frames</noframes>") when ""
-- execCommand("insertHTML", false, "<noscript>no script</noscript>") when ""
-- execCommand("insertHTML", false, "<noscript>no script</noscript>") when ""
-- execCommand("insertHTML", false, "<noscript>no script</noscript>") when ""
-- execCommand("insertHTML", false, "<noscript>no script</noscript>") when ""
-- |-
-  execCommand("insertHTML", false, "<pre>1st line
-  2nd line</pre>") when ""
-- |-
-  execCommand("insertHTML", false, "<pre>1st line
-  2nd line</pre>") when ""
-- |-
-  execCommand("insertHTML", false, "<pre>1st line
-  2nd line</pre>") when ""
-- |-
-  execCommand("insertHTML", false, "<pre>1st line
-  2nd line</pre>") when ""
-- execCommand("insertHTML", false, "<pre>plain  text</pre>") when ""
-- execCommand("insertHTML", false, "<pre>plain  text</pre>") when ""
-- execCommand("insertHTML", false, "<script>script</script>") when ""
-- execCommand("insertHTML", false, "<script>script</script>") when ""
-- execCommand("insertHTML", false, "<script>script</script>") when ""
-- execCommand("insertHTML", false, "<script>script</script>") when ""
-- execCommand("insertHTML", false, "<span>plain  text</span>") when ""
-- execCommand("insertHTML", false, "<span>plain  text</span>") when ""
-- execCommand("insertHTML", false, "<span>plain  text</span>") when ""
-- execCommand("insertHTML", false, "<span>plain  text</span>") when ""
-- execCommand("insertHTML", false, "<style>style</style>") when ""
-- execCommand("insertHTML", false, "<style>style</style>") when ""
-- execCommand("insertHTML", false, "<style>style</style>") when ""
-- execCommand("insertHTML", false, "<style>style</style>") when ""
-- execCommand("insertHTML", false, "plain  text") when ""
-- execCommand("insertHTML", false, "plain  text") when ""
-- execCommand("insertHTML", false, "plain  text") when ""
-- execCommand("insertHTML", false, "plain  text") when ""
 editing/plaintext-only/insertLineBreak.html:
 - 'Pressing Enter when <dl><dd>AB[]</dd></dl> should cause "insertLineBreak" and shouldn''t
   insert new paragraph: beforeinput'
@@ -11315,12 +11204,6 @@ editing/plaintext-only/insertLineBreak.html:
 - execCommand("insertLineBreak") when A[]B
 - execCommand("insertLineBreak") when A[]B
 editing/plaintext-only/insertText.html:
-- Typing "  " when <b>A[]B</b>
-- Typing "  " when <p style="white-space:pre-line">A[]B</p>
-- Typing "  " when <p style="white-space:pre-line">A[]B</p>
-- Typing "  " when <p style="white-space:pre-line">A[]B</p>
-- Typing "  " when <p style="white-space:pre-line">A[]B</p>
-- Typing " " when {}<br>
 - Typing "a" when <p><b>AB[]</b></p> and execCommand("insertLineBreak")
 - Typing "a" when <p><b>AB[]</b></p> and execCommand("insertLineBreak")
 - Typing "a" when <p><b>AB[]</b></p> and execCommand("insertLineBreak")
@@ -11369,12 +11252,6 @@ editing/plaintext-only/insertText.html:
 - Typing "a" when []\n
 - Typing "a" when []\n
 - Typing "a" when []\n
-- execCommand("insertText", false, "  ") when <b>A[]B</b>
-- execCommand("insertText", false, "  ") when <p style="white-space:pre-line">A[]B</p>
-- execCommand("insertText", false, "  ") when <p style="white-space:pre-line">A[]B</p>
-- execCommand("insertText", false, "  ") when <p style="white-space:pre-line">A[]B</p>
-- execCommand("insertText", false, "  ") when <p style="white-space:pre-line">A[]B</p>
-- execCommand("insertText", false, " ") when {}<br>
 - execCommand("insertText", false, "a") when <p><b>AB[]</b></p> and execCommand("insertLineBreak")
 - execCommand("insertText", false, "a") when <p><b>AB[]</b></p> and execCommand("insertLineBreak")
 - execCommand("insertText", false, "a") when <p><b>AB[]</b></p> and execCommand("insertLineBreak")
@@ -11467,19 +11344,6 @@ editing/plaintext-only/nested-with-contenteditable-true.html:
 - styling start boundary of contenteditable="plaintext-only" in contenteditable="true"
   should apply the style to entire the range (explicitly setting focus to the nested
   one)
-editing/plaintext-only/paste.https.html:
-- 'Pasting 2 paragraphs into <b>: pasted result'
-- 'Pasting 2 paragraphs into <b>: pasted result'
-- 'Pasting 2 paragraphs into <b>: pasted result'
-- 'Pasting 2 paragraphs into <b>: pasted result'
-- 'Pasting 2 paragraphs whose text is bold: pasted result'
-- 'Pasting 2 paragraphs whose text is bold: pasted result'
-- 'Pasting 2 paragraphs whose text is bold: pasted result'
-- 'Pasting 2 paragraphs whose text is bold: pasted result'
-- 'Pasting 2 paragraphs: pasted result'
-- 'Pasting 2 paragraphs: pasted result'
-- 'Pasting 2 paragraphs: pasted result'
-- 'Pasting 2 paragraphs: pasted result'
 editing/run/backcolor.html:
 - '[["backcolor","#00FFFF"]] "<b>foo[]bar</b>" queryCommandValue("backcolor") after'
 - '[["backcolor","#00FFFF"]] "<b>foo[]bar</b>" queryCommandValue("backcolor") before'
@@ -14859,12 +14723,8 @@ editing/run/delete.html:
 - '[["delete",""]] "<div style=white-space:nowrap>foo \n[]bar</div>" compare innerHTML'
 - '[["delete",""]] "<div style=white-space:nowrap>foo\n []bar</div>" compare innerHTML'
 - '[["delete",""]] "<div style=white-space:nowrap>foo\n\n[]bar</div>" compare innerHTML'
-- '[["delete",""]] "<div style=white-space:pre-line>&nbsp;[] foo</div>" compare innerHTML'
 - '[["delete",""]] "<div style=white-space:pre-line>foo  []bar</div>" compare innerHTML'
-- '[["delete",""]] "<div style=white-space:pre-line>foo &nbsp;[]</div>" compare innerHTML'
 - '[["delete",""]] "<div style=white-space:pre-line>foo \n[]bar</div>" compare innerHTML'
-- '[["delete",""]] "<div style=white-space:pre-line>foo&nbsp; []bar</div>" compare
-  innerHTML'
 - '[["delete",""]] "<div style=white-space:pre-line>foo\n []bar</div>" compare innerHTML'
 - '[["delete",""]] "<div style=white-space:pre-line>foo\nb[]</div>" compare innerHTML'
 - '[["delete",""]] "<div style=white-space:pre-wrap>foo\nb[]</div>" compare innerHTML'
@@ -14947,7 +14807,6 @@ editing/run/delete.html:
 - '[["delete",""]] "<ul><li>[abc</li><li>def] </li></ul>" compare innerHTML'
 - '[["delete",""]] "<ul><li>foo</ul>{}<br><ol><li>bar</ol>" compare innerHTML'
 - '[["delete",""]] "<ul><li>foo</ul>{}<br><ul><li>bar</ul>" compare innerHTML'
-- '[["delete",""]] "[foo<b>&nbsp;] bar</b>" compare innerHTML'
 - '[["delete",""]] "abc<audio controls>def</audio>[]ghi" compare innerHTML'
 - '[["delete",""]] "abc<iframe>def</iframe>[]ghi" compare innerHTML'
 - '[["delete",""]] "abc<meter>def</meter>[]ghi" compare innerHTML'
@@ -14956,7 +14815,6 @@ editing/run/delete.html:
 - '[["delete",""]] "abc<progress>def</progress>[]ghi" compare innerHTML'
 - '[["delete",""]] "abc<video>def</video>[]ghi" compare innerHTML'
 - '[["delete",""]] "foo  []bar" compare innerHTML'
-- '[["delete",""]] "foo <span>&nbsp;</span>[] bar" compare innerHTML'
 - '[["delete",""]] "foo<blockquote><blockquote><p>[]bar<p>baz</blockquote></blockquote>"
   compare innerHTML'
 - '[["delete",""]] "foo<blockquote><blockquote>[]bar</blockquote></blockquote>" compare
@@ -25877,14 +25735,8 @@ editing/run/forwarddelete.html:
   innerHTML'
 - '[["forwarddelete",""]] "<div style=white-space:nowrap>foo[]\n\nbar</div>" compare
   innerHTML'
-- '[["forwarddelete",""]] "<div style=white-space:pre-line>[]&nbsp; foo</div>" compare
-  innerHTML'
-- '[["forwarddelete",""]] "<div style=white-space:pre-line>foo []&nbsp;</div>" compare
-  innerHTML'
 - '[["forwarddelete",""]] "<div style=white-space:pre-line>foo[]  bar</div>" compare
   innerHTML'
-- '[["forwarddelete",""]] "<div style=white-space:pre-line>foo[] &nbsp;bar</div>"
-  compare innerHTML'
 - '[["forwarddelete",""]] "<div style=white-space:pre-line>foo[] \nbar</div>" compare
   innerHTML'
 - '[["forwarddelete",""]] "<div style=white-space:pre-line>foo[]\n bar</div>" compare
@@ -25958,7 +25810,6 @@ editing/run/forwarddelete.html:
 - '[["forwarddelete",""]] "abc[]<video controls>def</video>ghi" compare innerHTML'
 - '[["forwarddelete",""]] "fo[]o&#x308;&#x327;bar" compare innerHTML'
 - '[["forwarddelete",""]] "fo[]o&#x308;bar" compare innerHTML'
-- '[["forwarddelete",""]] "foo []<span>&nbsp;</span> bar" compare innerHTML'
 - '[["forwarddelete",""]] "foo<table><tr><td>bar[]<br></table>baz" compare innerHTML'
 - '[["forwarddelete",""]] "foo[<div>]bar<p>baz</p></div>" compare innerHTML'
 - '[["forwarddelete",""]] "foo[<p>]bar<br>baz</p>" compare innerHTML'
@@ -28603,15 +28454,11 @@ editing/run/inserthtml.html:
 - '[["defaultparagraphseparator","div"],["inserthtml","<hr>"]] "<p>f[o]o": execCommand("defaultparagraphseparator",
   false, "div") return value'
 - '[["defaultparagraphseparator","div"],["inserthtml","<li>abc"]] "<p>foo[bar]baz"
-  compare innerHTML'
-- '[["defaultparagraphseparator","div"],["inserthtml","<li>abc"]] "<p>foo[bar]baz"
   queryCommandValue("defaultparagraphseparator") after'
 - '[["defaultparagraphseparator","div"],["inserthtml","<li>abc"]] "<p>foo[bar]baz"
   queryCommandValue("defaultparagraphseparator") before'
 - '[["defaultparagraphseparator","div"],["inserthtml","<li>abc"]] "<p>foo[bar]baz":
   execCommand("defaultparagraphseparator", false, "div") return value'
-- '[["defaultparagraphseparator","div"],["inserthtml","<li>abc</li>"]] "f[o]o" compare
-  innerHTML'
 - '[["defaultparagraphseparator","div"],["inserthtml","<li>abc</li>"]] "f[o]o" queryCommandValue("defaultparagraphseparator")
   after'
 - '[["defaultparagraphseparator","div"],["inserthtml","<li>abc</li>"]] "f[o]o" queryCommandValue("defaultparagraphseparator")
@@ -28625,15 +28472,11 @@ editing/run/inserthtml.html:
 - '[["defaultparagraphseparator","div"],["inserthtml","<p>abc"]] "<ol><li>[foo]</li><li>bar</ol>":
   execCommand("defaultparagraphseparator", false, "div") return value'
 - '[["defaultparagraphseparator","div"],["inserthtml","<p>abc"]] "<ol><li>foo</li>{<li>bar</li>}<li>baz</ol>"
-  compare innerHTML'
-- '[["defaultparagraphseparator","div"],["inserthtml","<p>abc"]] "<ol><li>foo</li>{<li>bar</li>}<li>baz</ol>"
   queryCommandValue("defaultparagraphseparator") after'
 - '[["defaultparagraphseparator","div"],["inserthtml","<p>abc"]] "<ol><li>foo</li>{<li>bar</li>}<li>baz</ol>"
   queryCommandValue("defaultparagraphseparator") before'
 - '[["defaultparagraphseparator","div"],["inserthtml","<p>abc"]] "<ol><li>foo</li>{<li>bar</li>}<li>baz</ol>":
   execCommand("defaultparagraphseparator", false, "div") return value'
-- '[["defaultparagraphseparator","div"],["inserthtml","<p>abc"]] "<ol>{<li>foo</li>}<li>bar</ol>"
-  compare innerHTML'
 - '[["defaultparagraphseparator","div"],["inserthtml","<p>abc"]] "<ol>{<li>foo</li>}<li>bar</ol>"
   queryCommandValue("defaultparagraphseparator") after'
 - '[["defaultparagraphseparator","div"],["inserthtml","<p>abc"]] "<ol>{<li>foo</li>}<li>bar</ol>"
@@ -28675,15 +28518,11 @@ editing/run/inserthtml.html:
 - '[["defaultparagraphseparator","p"],["inserthtml","<p>abc"]] "<ol><li>[foo]</li><li>bar</ol>":
   execCommand("defaultparagraphseparator", false, "p") return value'
 - '[["defaultparagraphseparator","p"],["inserthtml","<p>abc"]] "<ol><li>foo</li>{<li>bar</li>}<li>baz</ol>"
-  compare innerHTML'
-- '[["defaultparagraphseparator","p"],["inserthtml","<p>abc"]] "<ol><li>foo</li>{<li>bar</li>}<li>baz</ol>"
   queryCommandValue("defaultparagraphseparator") after'
 - '[["defaultparagraphseparator","p"],["inserthtml","<p>abc"]] "<ol><li>foo</li>{<li>bar</li>}<li>baz</ol>"
   queryCommandValue("defaultparagraphseparator") before'
 - '[["defaultparagraphseparator","p"],["inserthtml","<p>abc"]] "<ol><li>foo</li>{<li>bar</li>}<li>baz</ol>":
   execCommand("defaultparagraphseparator", false, "p") return value'
-- '[["defaultparagraphseparator","p"],["inserthtml","<p>abc"]] "<ol>{<li>foo</li>}<li>bar</ol>"
-  compare innerHTML'
 - '[["defaultparagraphseparator","p"],["inserthtml","<p>abc"]] "<ol>{<li>foo</li>}<li>bar</ol>"
   queryCommandValue("defaultparagraphseparator") after'
 - '[["defaultparagraphseparator","p"],["inserthtml","<p>abc"]] "<ol>{<li>foo</li>}<li>bar</ol>"
@@ -28706,25 +28545,10 @@ editing/run/inserthtml.html:
   compare innerHTML'
 - '[["inserthtml","<!--abc-->"]] "<p>{}<span><!--foo--><br><!--bar--></span></p>"
   compare innerHTML'
-- '[["inserthtml","<a href=/>abc</a>"]] "<a href=.>f[o]o</a>" compare innerHTML'
-- '[["inserthtml","<a>abc</a>"]] "<a>f[o]o</a>" compare innerHTML'
-- '[["inserthtml","<dd>abc</dd>"]] "<dl><dt>f[o]o<dd>bar</dl>" compare innerHTML'
-- '[["inserthtml","<dd>abc</dd>"]] "<dl><dt>foo<dd>b[a]r</dl>" compare innerHTML'
-- '[["inserthtml","<dd>abc</dd>"]] "<ol><li>f[o]o</ol>" compare innerHTML'
-- '[["inserthtml","<dd>abc</dd>"]] "f[o]o" compare innerHTML'
-- '[["inserthtml","<dt>abc</dt>"]] "<dl><dt>f[o]o<dd>bar</dl>" compare innerHTML'
-- '[["inserthtml","<dt>abc</dt>"]] "<dl><dt>foo<dd>b[a]r</dl>" compare innerHTML'
-- '[["inserthtml","<dt>abc</dt>"]] "<ol><li>f[o]o</ol>" compare innerHTML'
-- '[["inserthtml","<dt>abc</dt>"]] "f[o]o" compare innerHTML'
-- '[["inserthtml","<h2>abc</h2>"]] "<h1>f[o]o</h1>" compare innerHTML'
 - '[["inserthtml","<i>Z</i>"]] "<p><b><span contenteditable=false>abc</span>[Y]</b><i>def</i></p>"
   compare innerHTML'
 - '[["inserthtml","<i>Z</i>"]] "<p><b>[X]<span contenteditable=false>abc</span></b><i>def</i></p>"
   compare innerHTML'
-- '[["inserthtml","<li>abc</li>"]] "<dir><li>f[o]o</dir>" compare innerHTML'
-- '[["inserthtml","<li>abc</li>"]] "<ol><li>f[o]o</ol>" compare innerHTML'
-- '[["inserthtml","<li>abc</li>"]] "<ul><li>f[o]o</ul>" compare innerHTML'
-- '[["inserthtml","<nobr>abc</nobr>"]] "<nobr>f[o]o</nobr>" compare innerHTML'
 - '[["inserthtml","<ol id=\"new\"><li id=\"li1\">abc</li><li id=\"li2\">def</li></ol>"]]
   "<ol id=\"old\"><li id=\"li0\">{}<br></ol>" compare innerHTML'
 - '[["inserthtml","<ol id=\"new\"><li id=\"li1\">abc</li><li id=\"li2\">def</li></ol>"]]
@@ -28733,7 +28557,6 @@ editing/run/inserthtml.html:
   compare innerHTML'
 - '[["inserthtml","<pre>abc</pre>"]] "<pre>12[]34</pre>" compare innerHTML'
 - '[["inserthtml","<pre>abc</pre>"]] "<pre>1[23]4</pre>" compare innerHTML'
-- '[["inserthtml","<pre>abc</pre>"]] "<pre>[1234]</pre>" compare innerHTML'
 - '[["inserthtml","<ul id=\"new\"><li id=\"li1\">abc</li><li id=\"li2\">def</li></ul>"]]
   "<ol id=\"old\"><li id=\"li0\">{}<br></ol>" compare innerHTML'
 - '[["inserthtml","<ul id=\"new\"><li id=\"li1\">abc</li><li id=\"li2\">def</li></ul>"]]
@@ -28785,8 +28608,6 @@ editing/run/inserthtml.html:
   "<span style=color:blue>foo[]bar</span>": execCommand("stylewithcss", false, "false")
   return value'
 - '[["stylewithcss","false"],["defaultparagraphseparator","div"],["inserthtml","<p>abc"]]
-  "<span style=font-variant:small-caps>foo[]bar</span>" compare innerHTML'
-- '[["stylewithcss","false"],["defaultparagraphseparator","div"],["inserthtml","<p>abc"]]
   "<span style=font-variant:small-caps>foo[]bar</span>" queryCommandState("stylewithcss")
   before'
 - '[["stylewithcss","false"],["defaultparagraphseparator","div"],["inserthtml","<p>abc"]]
@@ -28834,8 +28655,6 @@ editing/run/inserthtml.html:
   "<span style=color:blue>foo[]bar</span>": execCommand("stylewithcss", false, "false")
   return value'
 - '[["stylewithcss","false"],["defaultparagraphseparator","p"],["inserthtml","<p>abc"]]
-  "<span style=font-variant:small-caps>foo[]bar</span>" compare innerHTML'
-- '[["stylewithcss","false"],["defaultparagraphseparator","p"],["inserthtml","<p>abc"]]
   "<span style=font-variant:small-caps>foo[]bar</span>" queryCommandState("stylewithcss")
   before'
 - '[["stylewithcss","false"],["defaultparagraphseparator","p"],["inserthtml","<p>abc"]]
@@ -28866,7 +28685,6 @@ editing/run/inserthtml.html:
   before'
 - '[["stylewithcss","false"],["inserthtml","<b>abc</b>"]] "<xmp>f[o]o</xmp>": execCommand("stylewithcss",
   false, "false") return value'
-- '[["stylewithcss","false"],["inserthtml","<hr>"]] "<b>f[o]o</b>" compare innerHTML'
 - '[["stylewithcss","false"],["inserthtml","<hr>"]] "<b>f[o]o</b>" queryCommandState("stylewithcss")
   before'
 - '[["stylewithcss","false"],["inserthtml","<hr>"]] "<b>f[o]o</b>": execCommand("stylewithcss",
@@ -28951,8 +28769,6 @@ editing/run/inserthtml.html:
   "<span style=color:blue>foo[]bar</span>": execCommand("stylewithcss", false, "true")
   return value'
 - '[["stylewithcss","true"],["defaultparagraphseparator","div"],["inserthtml","<p>abc"]]
-  "<span style=font-variant:small-caps>foo[]bar</span>" compare innerHTML'
-- '[["stylewithcss","true"],["defaultparagraphseparator","div"],["inserthtml","<p>abc"]]
   "<span style=font-variant:small-caps>foo[]bar</span>" queryCommandState("stylewithcss")
   after'
 - '[["stylewithcss","true"],["defaultparagraphseparator","div"],["inserthtml","<p>abc"]]
@@ -29000,8 +28816,6 @@ editing/run/inserthtml.html:
   "<span style=color:blue>foo[]bar</span>": execCommand("stylewithcss", false, "true")
   return value'
 - '[["stylewithcss","true"],["defaultparagraphseparator","p"],["inserthtml","<p>abc"]]
-  "<span style=font-variant:small-caps>foo[]bar</span>" compare innerHTML'
-- '[["stylewithcss","true"],["defaultparagraphseparator","p"],["inserthtml","<p>abc"]]
   "<span style=font-variant:small-caps>foo[]bar</span>" queryCommandState("stylewithcss")
   after'
 - '[["stylewithcss","true"],["defaultparagraphseparator","p"],["inserthtml","<p>abc"]]
@@ -29032,7 +28846,6 @@ editing/run/inserthtml.html:
   after'
 - '[["stylewithcss","true"],["inserthtml","<b>abc</b>"]] "<xmp>f[o]o</xmp>": execCommand("stylewithcss",
   false, "true") return value'
-- '[["stylewithcss","true"],["inserthtml","<hr>"]] "<b>f[o]o</b>" compare innerHTML'
 - '[["stylewithcss","true"],["inserthtml","<hr>"]] "<b>f[o]o</b>" queryCommandState("stylewithcss")
   after'
 - '[["stylewithcss","true"],["inserthtml","<hr>"]] "<b>f[o]o</b>": execCommand("stylewithcss",
@@ -63409,10 +63222,6 @@ editing/run/superscript.html:
 - '[["superscript",""]] "foo[<sup>b]ar</sup>baz" queryCommandState("superscript")
   before'
 - '[["superscript",""]] "foo[]bar" queryCommandState("superscript") after'
-editing/run/typing-text-in-direct-child-of-editing-host.html:
-- Backspace when "a b[]"
-- Typing "a b"
-- Typing multiple white-spaces and type "Y"
 editing/run/underline.html:
 - '[["stylewithcss","false"],["underline",""]] "<del>foo[b<i>ar]ba</i>z</del>" queryCommandState("stylewithcss")
   before'

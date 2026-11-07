@@ -22,6 +22,8 @@ struct Writer<'a> {
     // The shadow roots to serialize (`getHTML()`'s options): each host, and the opening `<template shadowrootmode=…>`
     // tag its root is written as — the root's own attributes are the page side's to say.
     shadows: &'a [(NodeId, Vec<u16>)],
+    // (…the URL `href` and `src` are written absolute against, where it is a copy's markup: Chrome, Firefox)
+    base: Option<ada_url::Url>,
     out: Vec<u16>,
 }
 
@@ -128,9 +130,11 @@ impl Writer<'_> {
             self.push(" ");
             self.push(&attribute_name(n, key));
             self.push("=\"");
-            match n.attr_u16.iter().find(|(k, _)| k == key) {
-                Some((_, units)) => self.escaped(units, true),
-                None => self.escaped(&value.encode_utf16().collect::<Vec<_>>(), true),
+            let absolute = self.base.as_ref().filter(|_| key == "href" || key == "src").and_then(|base| ada_url::Url::parse(value.as_str(), Some(base.href())).ok());
+            match (absolute, n.attr_u16.iter().find(|(k, _)| k == key)) {
+                (Some(url), _) => self.escaped(&url.href().encode_utf16().collect::<Vec<_>>(), true),
+                (None, Some((_, units))) => self.escaped(units, true),
+                (None, None) => self.escaped(&value.encode_utf16().collect::<Vec<_>>(), true),
             }
             self.push("\"");
         }
@@ -161,7 +165,7 @@ fn attribute_name(n: &NodeData, key: &str) -> String {
 
 // `id`'s children serialized — or, `outer`, `id` itself — with the shadow roots `shadows` names.
 pub(crate) fn html(arena: &RealmArena, id: NodeId, outer: bool, shadows: &[(NodeId, Vec<u16>)]) -> Vec<u16> {
-    let mut w = Writer { arena, shadows, out: Vec::new() };
+    let mut w = Writer { arena, shadows, base: None, out: Vec::new() };
     let mut stack = Vec::new();
     match arena.get(id) {
         Some(n) if outer && n.kind == NodeKind::Element => stack.push(Task::Node(id, false)),
@@ -174,8 +178,8 @@ pub(crate) fn html(arena: &RealmArena, id: NodeId, outer: bool, shadows: &[(Node
 
 // …a node's children written inside the elements `holders`, innermost first — their start tags, attributes and all, around
 // what they are not asked to hold of their own.
-pub(crate) fn html_in(arena: &RealmArena, id: NodeId, holders: &[NodeId]) -> Vec<u16> {
-    let mut w = Writer { arena, shadows: &[], out: Vec::new() };
+pub(crate) fn html_in(arena: &RealmArena, id: NodeId, holders: &[NodeId], base: Option<ada_url::Url>) -> Vec<u16> {
+    let mut w = Writer { arena, shadows: &[], base, out: Vec::new() };
     let mut ends = Vec::new();
     for n in holders.iter().rev().filter_map(|&h| arena.get(h)) {
         ends.extend(w.start_tag(n));
@@ -626,7 +630,7 @@ fn serializable_shadows(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, 
         }
         if let Some(value) = adopted {
             push(" shadowrootadoptedstylesheets=\"");
-            let mut w = Writer { arena: crate::dom::realm(scope, cid), shadows: &[], out: Vec::new() };
+            let mut w = Writer { arena: crate::dom::realm(scope, cid), shadows: &[], base: None, out: Vec::new() };
             w.escaped(&value, true);
             tag.extend(w.out);
             tag.extend("\"".encode_utf16());

@@ -80,6 +80,25 @@ RSpec.describe 'deleting in an editing host' do
     ]).to eq([["foo&nbsp; baz", "foo  baz@4"], ["foo&nbsp; baz", "foo  baz@4"]])
   end
 
+  # What it runs together shows as it shows: the spaces after a line's first part one no-break space, a space kept beside
+  # the one before the deleted element a no-break one, down an inline element too (Chrome, Firefox).
+  it 'collapses the white space a selection leaves' do
+    html = lambda {|markup, from, to|
+      session.execute_script(<<~JS)
+        const e = document.getElementById('e');
+        e.innerHTML = #{markup.to_json};
+        e.focus();
+        const at = (w) => w === 'b' ? e.querySelector('b').lastChild : e.firstChild.firstChild;
+        getSelection().setBaseAndExtent(at(#{from[0].to_json}), #{from[1]}, at(#{to[0].to_json}), #{to[1]});
+      JS
+      session.find(:css, '#e').send_keys(:delete)
+      session.evaluate_script("document.getElementById('e').innerHTML")
+    }
+    expect(html.call('<p>abc <b>def</b>  ghi</p>', ['t', 0], ['b', 3])).to eq('<p>&nbsp;ghi</p>')
+    expect(html.call('<p>abc <b>def</b><i> ghi</i></p>', ['t', 0], ['b', 3])).to eq('<p><i>&nbsp;ghi</i></p>')
+    expect(html.call('<p>abc <b>def</b> ghi</p>', ['b', 0], ['b', 3])).to eq('<p>abc &nbsp;ghi</p>')
+  end
+
   # …the innerHTML a deletion leaves, the caret at the node `at` (a script expression over `e`, the host) and `offset`.
   def deleted(html, at, offset, key, to = nil)
     session.execute_script(<<~JS)

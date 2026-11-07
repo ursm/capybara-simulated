@@ -274,6 +274,8 @@ fn permission_state_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let member = text_arg(scope, &args, 2);
     match permission_state(&name, member.as_deref(), &session_source(partition)) {
         Ok(state) => {
+            let said = matches!(name.as_str(), "clipboard-read" | "clipboard-write").then(|| crate::system_clipboard::permission(partition, name == "clipboard-write")).flatten();
+            let state = said.map_or(state, |granted| if granted { "granted" } else { "denied" });
             if let Some(s) = v8::String::new(scope, state) {
                 rv.set(s.into());
             }

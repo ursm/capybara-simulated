@@ -601,7 +601,7 @@ fn range_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // is never anything else (HTML: its API value is its raw value so normalized; Chrome and Firefox: `setRangeText('1\r\n2')`
 // leaves `1\n2`) — any other's as it is.
 // …and of text inserted into a single-line control: each line break — CR LF, CR, LF — one space.
-fn single_line_text(text: &[u16]) -> std::borrow::Cow<'_, [u16]> {
+pub(crate) fn single_line_text(text: &[u16]) -> std::borrow::Cow<'_, [u16]> {
     if !text.iter().any(|&u| u == 0x0A || u == 0x0D) {
         return std::borrow::Cow::Borrowed(text);
     }
