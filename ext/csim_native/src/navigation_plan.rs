@@ -93,9 +93,11 @@ pub(crate) struct Traversal {
 // (browser.rb `traverse_navigables`), the traversals queued after it applied then, from the step it went to. No ongoing
 // navigation of the window's own: HTML "apply the history step" sets that of the navigables whose documents it changes
 // alone (the host cancels the frames').
+// (…and the order it was planned in, which the navigation turn makes due: `takeTraversal`)
 pub(crate) struct FrameTraversal {
     pub(crate) step: i64,
     pub(crate) changes: Vec<crate::session_history::Change>,
+    pub(crate) planned: u64,
 }
 
 // A reload: whether the document had transient activation as it began, and — one of a document at a `blob:` URL — the
@@ -272,7 +274,7 @@ impl NavigationPlan {
         self.own.planned = next_planned();
     }
     pub(crate) fn plan_frame_traversal(&mut self, traversal: FrameTraversal) {
-        self.own.frame_traversal = Some(traversal);
+        self.own.frame_traversal = Some(FrameTraversal { planned: next_planned(), ..traversal });
     }
     // …and whether a traversal of either kind waits for the host to apply it: those queued after it wait for it, their
     // steps judged from the one it goes to (session_history.rs `applyTraversal`).
@@ -731,13 +733,15 @@ fn frame_traversal_items<'s>(scope: &mut v8::PinScope<'s, '_>, t: FrameTraversal
 // __dom.takeTraversal(frames) -> the traversal of its session history the calling realm's document — the page's — planned,
 // which it plans no more: `["traverse", delta]` of one making its document again (`Traversal`: the host's to judge anew
 // from its delta, browser.rb `perform_history_traverse`), one moving a frame of it as `takeWindowNavigations` gives it —
-// none of that kind but `frames`: the event loop's navigation turn's to hand over, as the host's navigations of frames
-// are, behind the tasks due before it (frame_navigation.rs `Plans::through`) — or null. Its traversable told whether one
-// is still planned (session_history.rs `planned_for_host`).
+// none of that kind before the event loop's navigation turn made it due, as the host's navigations of frames are, behind
+// the tasks due before it (frame_navigation.rs `Plans::through`) — but `frames`, the host's own to take at once — or null.
+// Its traversable told whether one is still planned (session_history.rs `planned_for_host`).
 fn take_traversal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let frames = args.get(0).is_true();
+    let at = plan(scope, &args).own.frame_traversal.as_ref().map(|t| t.planned);
+    let due = frames || at.is_some_and(|at| crate::dom::dom(scope).arena.frame_navigations.due(at));
     let own = &mut plan(scope, &args).own;
-    let item = if let Some(t) = own.frame_traversal.take_if(|_| frames) {
+    let item = if let Some(t) = own.frame_traversal.take_if(|_| due) {
         Some(frame_traversal_items(scope, t))
     } else {
         own.traversal.take().map(|t| vec![v8::String::new(scope, "traverse").unwrap().into(), v8::Number::new(scope, t.delta as f64).into()])

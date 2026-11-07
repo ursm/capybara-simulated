@@ -2453,8 +2453,8 @@ module Capybara
       # one that makes the page's document again (`perform_history_traverse`), or one that moves a frame of it
       # (`traverse_navigables_of`) — applied, then those queued after it, which waited for it, from the step it went to:
       # round after round while one is planned. (…each failing alone)
-      # One that moves a frame a task of the page's planned waits for the event loop's navigation turn (`frames`), as the
-      # host's navigations of frames do, the tasks due before it run first — those the host applied, the driver's own
+      # One that moves a frame a task of the page's planned waits for the event loop's navigation turn, as the host's
+      # navigations of frames do, the tasks due before it run first — those the host applied (`frames`), the driver's own
       # among them, it takes at once. (…none asked of the page where none is planned: session_history.rs `planned_for_host`)
       def consume_planned_traversal(frames: false)
         return unless @session_history.traversal_planned?

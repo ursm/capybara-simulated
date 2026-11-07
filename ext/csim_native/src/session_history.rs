@@ -2254,7 +2254,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
                         t.begin_traversal(nav);
                     }
                 }
-                frames_planned = Some(crate::navigation_plan::FrameTraversal { step, changes });
+                frames_planned = Some(crate::navigation_plan::FrameTraversal { step, changes, planned: 0 });
                 t.planned_for_host = true;
                 break;
             }
