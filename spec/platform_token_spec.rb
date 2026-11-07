@@ -271,7 +271,7 @@ RSpec.describe 'the platform\'s token for its own constructions' do
   it 'has no constructor of an interface with none make an object for a subclass', :every_host_local do
     session.visit('https://a.test/')
     got = session.evaluate_script(<<~JS)
-      ['Node', 'CharacterData', 'AbstractRange', 'StyleSheet', 'CSSStyleDeclaration', 'HTMLCollection', 'NodeList', 'Lock', 'History'].filter((name) => {
+      ['Element', 'Node', 'CharacterData', 'AbstractRange', 'StyleSheet', 'CSSStyleDeclaration', 'HTMLCollection', 'NodeList', 'Lock', 'History'].filter((name) => {
         function Other() {}
         try {
           Reflect.construct(window[name], [], Other);
@@ -304,6 +304,58 @@ RSpec.describe 'the platform\'s token for its own constructions' do
           return !(e instanceof TypeError) || read;
         }
       })
+    JS
+    expect(got).to eq([])
+  end
+
+  # A constructor's own work walks no list by %Array.prototype%'s iterator, which is a page's to replace: a sequence argument of its
+  # alone is Web IDL's to iterate, and none of these takes one here.
+  it 'constructs whatever a page has made of the array iterator', :every_host_local do
+    session.visit('https://a.test/')
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const f = () => {};
+        const makers = {
+          URL: () => new URL('http://a.test/'),
+          URLSearchParams: () => new URLSearchParams('a=b'),
+          Blob: () => new Blob(),
+          TextEncoder: () => new TextEncoder(),
+          TextDecoder: () => new TextDecoder(),
+          TextDecoderStream: () => new TextDecoderStream(),
+          FormData: () => new FormData(),
+          MutationObserver: () => new MutationObserver(f),
+          ResizeObserver: () => new ResizeObserver(f),
+          PerformanceObserver: () => new PerformanceObserver(f),
+          IntersectionObserver: () => new IntersectionObserver(f),
+          BroadcastChannel: () => new BroadcastChannel('x'),
+          MessageChannel: () => new MessageChannel(),
+          Headers: () => new Headers(),
+          Request: () => new Request('/x'),
+          Response: () => new Response(),
+          FontFace: () => new FontFace('f', 'url(x)'),
+          DOMException: () => new DOMException('m', 'NotFoundError'),
+          QuotaExceededError: () => new QuotaExceededError('m'),
+          StaticRange: () => new StaticRange({ startContainer: document, startOffset: 0, endContainer: document, endOffset: 0 }),
+          CSSStyleSheet: () => new CSSStyleSheet(),
+          KeyframeEffect: () => new KeyframeEffect(null, null),
+          KeyframeEffectCopy: () => new KeyframeEffect(new KeyframeEffect(null, null)),
+          URLPattern: () => new URLPattern({}),
+          EventSource: () => { const e = new EventSource('/data'); e.close(); return e; },
+          WebSocket: () => new WebSocket('ws://a.test/'),
+          Document: () => new Document(),
+          Text: () => new Text(1),
+          Comment: () => new Comment(1),
+          ProcessingInstruction: () => new ProcessingInstruction('p', 1)
+        };
+        const names = Object.keys(makers), threw = [];
+        const original = Array.prototype[Symbol.iterator];
+        Array.prototype[Symbol.iterator] = function () { throw new Error('the page'); };
+        for (let i = 0; i < names.length; i++) {
+          try { makers[names[i]](); } catch (e) { threw.push(names[i] + ': ' + e); }
+        }
+        Array.prototype[Symbol.iterator] = original;
+        return threw;
+      })()
     JS
     expect(got).to eq([])
   end

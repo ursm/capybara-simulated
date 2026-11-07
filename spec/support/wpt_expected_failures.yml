@@ -2198,7 +2198,6 @@ dom/idlharness.window.js:
   with too few arguments must throw TypeError'
 - 'Element interface: element must inherit property "requestFullscreen(optional FullscreenOptions)"
   with the proper type'
-- 'Element interface: existence and properties of interface object'
 - 'Element interface: operation requestFullscreen(optional FullscreenOptions)'
 - Stringification of new XSLTProcessor()
 - XSLTProcessor interface object length
