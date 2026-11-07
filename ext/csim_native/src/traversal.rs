@@ -551,13 +551,29 @@ fn is_equal_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set_bool(crate::dom::realm(scope, cid).is_equal_node(a, b));
 }
 
-// __dom.textContent(nid) -> the node's descendant text content (`text_content`).
+// __dom.textContent(node) -> `node.textContent` (DOM §4.4), what the engine holds of it: an element's or a fragment's
+// descendant text, character data's own data (the string its handle holds, `nodeData`), null for a document or a
+// doctype — `false` for a node whose text the bindings hold (an Attr, its value), undefined for what is no node's object,
+// which the attribute's getter takes for its `this` check (`selfChecked`, gen_bindings.mjs).
 fn text_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let text = crate::dom::realm(scope, cid).text_content(id);
-    if let Some(string) = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal) {
-        rv.set(string.into());
+    let Some(ptr) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    // SAFETY: the handle lives while its object, an argument, does.
+    let kind = unsafe { ptr.as_ref() }.nid().and_then(|id| crate::dom::dom(scope).arena.get(id).map(|n| (id, n.node_type())));
+    match kind {
+        Some((id, 1 | 11)) => {
+            let cid = realm_id(scope, &args);
+            let text = crate::dom::realm(scope, cid).text_content(id);
+            if let Some(string) = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal) {
+                rv.set(string.into());
+            }
+        }
+        Some((_, 3 | 4 | 7 | 8)) => {
+            if let Some(data) = crate::node_handle::data_string(scope, args.get(0)) {
+                rv.set(data.into());
+            }
+        }
+        Some((_, 9 | 10)) => rv.set_null(),
+        _ => rv.set_bool(false),
     }
 }
 

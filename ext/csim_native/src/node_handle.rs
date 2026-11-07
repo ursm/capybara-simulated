@@ -32,7 +32,8 @@ use crate::dom::{NodeId, NodeKind};
 // The wrapper tag `Object::wrap` / `unwrap` file the handle under.
 const TAG: u16 = 1;
 
-// What marks an object as a node's (its internal field 0): no other object carries this address.
+// What marks an object as a node's: its internal field 0 the one External of this address the isolate makes
+// (`Dom::node_brand`), told by identity — no other object carries it.
 static BRAND: u8 = 0;
 
 // src/v8_shim.cc: a DROPPABLE TracedReference, and the roots handler that resets one when a scavenge drops the young,
@@ -43,6 +44,7 @@ unsafe extern "C" {
     fn csim_traced_reset_droppable(this: *mut v8::TracedReference<v8::Object>, isolate: v8::UnsafeRawIsolatePtr, other: *const v8::Object);
     fn csim_install_roots_handler(isolate: v8::UnsafeRawIsolatePtr, tag: u16);
     fn csim_traced_clear(this: *mut v8::TracedReference<v8::Object>);
+    fn csim_node_branded(obj: *const v8::Object, brand: *const v8::External) -> bool;
 }
 // V8 dropped the wrapper of the handle `wrappable` (filed under TAG): its reference goes, and it holds its object no more.
 #[unsafe(no_mangle)]
@@ -300,7 +302,8 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         return;
     }
     let obj = args.this();
-    let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
+    let Some(brand) = crate::dom::dom(scope).node_brand.clone() else { return };
+    let brand = v8::Local::new(scope, brand);
     obj.set_internal_field(0, brand.into());
     let pending = crate::dom::dom(scope).wrap_pending.take();
     // SAFETY: the handle is on the cppgc heap — a fresh one moved there, or a pending one its Persistent holds — and its
@@ -369,10 +372,12 @@ pub(crate) fn handle_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v
         Ok(proxy) => proxy.get_target(scope),
         Err(_) => value,
     };
-    let obj = v8::Local::<v8::Object>::try_from(value).ok().filter(|o| o.internal_field_count() == 1)?;
-    let field = obj.get_internal_field(scope, 0)?;
-    let brand = v8::Local::<v8::Value>::try_from(field).ok().and_then(|v| v8::Local::<v8::External>::try_from(v).ok())?;
-    if brand.value() as *const u8 != std::ptr::addr_of!(BRAND) {
+    let obj = v8::Local::<v8::Object>::try_from(value).ok()?;
+    let brand = crate::dom::dom(scope).node_brand.as_ref()? as *const v8::Global<v8::External>;
+    // SAFETY: `obj` is a live local of the current scope, and the brand a global the isolate's `Dom` keeps for its life,
+    // whose handle the shim compares (V8 is built without direct handles: a Global opens to its slot, as a Local).
+    let brand = unsafe { &*brand }.open(scope) as *const v8::External;
+    if !unsafe { csim_node_branded(&*obj as *const v8::Object, brand) } {
         return None;
     }
     // SAFETY: a branded object was made by `construct`, which wrapped a NodeHandle under TAG; the handle lives while its
@@ -481,6 +486,8 @@ pub(crate) fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::
             unsafe { csim_install_roots_handler(scope.as_raw_isolate_ptr(), TAG) };
             // (…no property of its own: what the bindings keep of a node are private fields, node-identity.js)
             t.instance_template(scope).set_internal_field_count(1);
+            let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
+            crate::dom::dom(scope).node_brand = Some(v8::Global::new(scope, brand));
             let global = v8::Global::new(scope, t);
             crate::dom::dom(scope).node_template = Some(global);
             t

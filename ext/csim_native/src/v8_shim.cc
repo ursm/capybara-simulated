@@ -19,6 +19,15 @@ extern "C" void csim_traced_reset_droppable(v8::TracedReference<v8::Object>* sel
   self->Reset(isolate, local, v8::TracedReference<v8::Object>::IsDroppable{});
 }
 
+// Whether `obj` is a node's object: its one internal field the brand its constructor put there (node_handle.rs
+// `construct`), the External `brand` — the same object, compared by identity — in one call and V8's inline paths, where
+// the bindings' are a call each (a node's tree accessors ask it of their `this` on every read).
+extern "C" bool csim_node_branded(const v8::Object* obj, const v8::Data* brand) {
+  auto object = *reinterpret_cast<const v8::Local<v8::Object>*>(&obj);
+  auto expected = *reinterpret_cast<const v8::Local<v8::Data>*>(&brand);
+  return object->InternalFieldCount() == 1 && object->GetInternalField(0) == expected;
+}
+
 // Clear `self` — which needs no isolate, as a roots handler has none to give.
 extern "C" void csim_traced_clear(v8::TracedReference<v8::Object>* self) {
   self->Reset();

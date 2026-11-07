@@ -53,7 +53,9 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // `slots`, in `event`: attributes that read another's slot, by the slot. `init`: attributes `impl.init(state, init)` fills instead, as
 // the object is made — and it may fill
 // any other state of the event's: [] for that alone. `initialized`: its legacy `init…` operation goes on with
-// `impl.initialized(state)`, for what it resets that no argument names.
+// `impl.initialized(state)`, for what it resets that no argument names. `selfChecked`, with `install`: the attributes whose
+// getter's implementation is handed `this` unchecked and checks it itself — a hot one whose own answer tells an object of
+// the interface from anything else in the one step (Node's tree accessors: the engine's, from the node's handle).
 // GlobalEventHandlers' touch handlers, which a desktop with no touch screen — headless Chrome's and Firefox's, measured —
 // exposes on no object: feature detection reads them (flatpickr binds `touchstart` instead of `mousedown` where
 // `window.ontouchstart` is defined).
@@ -71,7 +73,7 @@ const INTERFACES = [
   ['dom', 'NodeFilter'],
   ['dom', 'NodeIterator'],
   ['dom', 'TreeWalker'],
-  ['dom', 'Node', { install: true }],
+  ['dom', 'Node', { install: true, selfChecked: ['nodeType', 'parentNode', 'parentElement', 'firstChild', 'lastChild', 'previousSibling', 'nextSibling', 'textContent'] }],
   ['dom', 'CharacterData', { install: true }],
   ['dom', 'Text', { install: true, omit: { GeometryUtils: 'getBoxQuads / convert*FromNode (cssom-view) are not implemented' } }],
   ['dom', 'Comment', { install: true }],
@@ -1605,6 +1607,7 @@ function generateInterface(def, options = {}) {
       const slotRead = slot && `${options.install ? `thisOf(this ?? globalThis, '${name}')` : self}.${slot}`;
       const getter = slot ? `return ${slotRead};`
         : reflection?.get ? `const self = ${self}; return ${reflection.get};`
+        : options.selfChecked?.includes(m.name) ? `return ${getImpl}(this ?? globalThis);`
         : `return ${getImpl}(${self});`;
       out.push(`    get ${key}() { ${promiseOf(m) ? rejecting(getter) : getter} }`);
       const forwards = (m.extAttrs || []).find((e) => e.name === 'PutForwards');

@@ -2639,8 +2639,10 @@ pub(crate) struct Dom {
     // `hasOwnProperty`, `Object.keys`, `delete` all work against the arena in C++ — faster than a
     // JS Proxy and a faithful stand-in for the native-backed endgame.
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
-    // The template every node's object is made from (`node_handle`, `__dom.NodeBase`).
+    // The template every node's object is made from (`node_handle`, `__dom.NodeBase`), and the one External each of them
+    // holds in its internal field — its brand, which a node's object is told by (`node_handle::handle_of`).
     pub(crate) node_template: Option<v8::Global<v8::FunctionTemplate>>,
+    pub(crate) node_brand: Option<v8::Global<v8::External>>,
     // The private key each realm's global carries its realm id under (`realm_of_global`) — a property no script sees,
     // not a context's embedder data: a context slot gives V8 a finalizer to run at teardown (rusty_racer's
     // `id_of_context` says why it keeps none either).
@@ -3413,9 +3415,12 @@ const IS_CONNECTED_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction:
     ),
 )];
 // __dom.relativeNode(node, kind) -> the node DOM's accessor of `kind` names of `node` (`relative`), as `node_value`
-// answers it.
+// answers it — null for a node with no slot (an Attr); undefined for what is no node's object, which Node's tree
+// accessors take for their `this` check (`selfChecked`, gen_bindings.mjs).
 fn relative_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let Some(ptr) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    // SAFETY: the handle lives while its object, an argument, does.
+    let Some(id) = unsafe { ptr.as_ref() }.nid() else { return rv.set_null() };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
     let found = dom(scope).arena.relative(id, kind);
     rv.set(node_value(scope, found));
