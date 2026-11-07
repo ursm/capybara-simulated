@@ -762,20 +762,20 @@ module Capybara
       # A navigable gone on from realm `from`'s document to realm `to`'s: the WindowProxy of it every realm holds over the
       # new one's window — one object however its active document changes (HTML) — before the new document's scripts run.
       def retarget_window_proxies(from, to)
-        ctx.call('__csimRetargetWindowProxies', proxy_holders, from, to)
+        V8Runtime.engine_call(ctx, 'retargetWindowProxies', proxy_holders, from, to)
       rescue StandardError
         nil
       end
       # …and, its window gone, dropped: they would pin the dead global and be handed back stale.
       # (…`successor` where the realm is another document's from now on: the page's, its group left — `rebuild_ctx`)
       def evict_window_proxies(id, successor: false)
-        ctx.call('__csimEvictWindowProxies', proxy_holders, id, successor)
+        V8Runtime.engine_call(ctx, 'evictWindowProxies', proxy_holders, id, successor)
       rescue StandardError
         nil
       end
       # …and those of the navigables destroyed between two documents, no document after the last one made.
       def evict_lost_window_proxies
-        ctx.call('__csimEvictLostWindowProxies', proxy_holders)
+        V8Runtime.engine_call(ctx, 'evictLostWindowProxies', proxy_holders)
       rescue StandardError
         nil
       end

@@ -143,6 +143,16 @@ RSpec.describe 'a WindowProxy of a pop-up' do
       expect(read('w.__csimRawWindow')).to eq('SecurityError')
     end
 
+    # (…nor any of the driver's own members of it: a function of its realm's would run code there by its constructor —
+    # `w.__csimRegisterNavigableName.constructor('return document.title')()` — which the bindings, reaching another
+    # realm by its raw global, never need through the proxy)
+    it "is a SecurityError for the driver's own members of it" do
+      names = %w[__csimRegisterNavigableName __csimActivationNotify __csimRegisterNode __csimSendKeys __csimClickResolve
+                 __csimSnapshotFrameNavBlob __csimParent __csimTop __csimSourceMaps]
+      expect(read("#{names.to_json}.map((k) => { try { return typeof w[k]; } catch (e) { return e.name; } })")).to eq(['SecurityError'] * names.size)
+      expect(read("#{names.to_json}.map((k) => { try { return k in w; } catch (e) { return e.name; } })")).to eq(['SecurityError'] * names.size)
+    end
+
     # (…[[HasProperty]] by [[GetOwnProperty]], HTML's: Chrome and Firefox measured)
     it 'is a SecurityError to ask for a member it does not expose, and true for one it does' do
       expect(read("'document' in w")).to eq('SecurityError')

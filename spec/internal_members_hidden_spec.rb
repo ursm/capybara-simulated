@@ -78,16 +78,19 @@ RSpec.describe 'internal members' do
     JS
   end
 
-  # …nor a Proxy of a page's, whatever its traps answer — none of which runs (Chrome, Firefox: `[TypeError, TypeError,
-  # 0]`, an object with no EventTarget's brand) — and an object inheriting from a window is no window
-  it 'takes no Proxy of a page\'s for an EventTarget, and runs none of its traps' do
-    expect(outcome(<<~JS)).to eq(['TypeError', 'TypeError', 'TypeError', 0])
+  # …nor a Proxy of a page's, whatever its traps answer — none of which runs — nor any object inheriting from one but no
+  # EventTarget's own: Web IDL's brand is the object's (Chrome, Firefox 2026-11-08: `Object.create(EventTarget.prototype)`
+  # a TypeError), which a page's subclass gets by `super()`
+  it 'takes no object without its own brand for an EventTarget, and runs no Proxy trap' do
+    expect(outcome(<<~JS)).to eq(['TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError', 'ok', 'ok', 0])
       (() => {
         const add = EventTarget.prototype.addEventListener;
         const of = (self) => { try { add.call(self, 'x', () => {}); return 'ok'; } catch (e) { return e.constructor.name; } };
         let trapped = 0;
         const traps = { getPrototypeOf: () => { trapped++; return EventTarget.prototype; }, get: () => { trapped++; } };
-        return [of(new Proxy({}, traps)), of(Object.create(new Proxy({}, traps))), of(Object.create(window)), trapped];
+        return [of(new Proxy({}, traps)), of(Object.create(new Proxy({}, traps))), of(Object.create(window)),
+          of(Object.create(EventTarget.prototype)), of(Object.create(new XMLHttpRequest())), of(new (class extends EventTarget {})()),
+          of(new EventTarget()), trapped];
       })()
     JS
   end

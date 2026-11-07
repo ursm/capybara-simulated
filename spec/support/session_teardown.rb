@@ -1,3 +1,5 @@
+require 'json'
+
 # A `Capybara::Session.new(:simulated, app)` built inside an example owns a V8 isolate, and nothing
 # tears it down: Capybara only resets the sessions IT pools, so a manually constructed one lives
 # until the process exits. Measured: 30 such sessions cost 737 MB (~25 MB each); disposing them
@@ -33,26 +35,20 @@ module SimulatedSessionTeardown
     end
   end
 
-  # What the Rust walk declined on the session's page and in every frame under it, by reason — or nil. A page it declines
-  # is laid out as its root alone, which a spec reading a box at the root would never notice, so every session a spec
-  # built is asked at its end (an example that declines on purpose says so: `rust_declines: true`).
-  RUST_DECLINES_JS = <<~JS
-    (() => {
-      const all = {};
-      const visit = (win) => {
-        const stats = win.__csimNativeLayoutStats ? win.__csimNativeLayoutStats().rustFellBack : {};
-        for (const [reason, n] of Object.entries(stats)) all[reason] = (all[reason] || 0) + n;
-      };
-      visit(globalThis);
-      globalThis.__csimEachChildRealm(visit);
-      return JSON.stringify(all);
-    })()
-  JS
+  # What the Rust walk declined on the session's page and in every realm of its isolate — its frames', nested ones too,
+  # and its same-isolate pop-ups' — by reason, or nil: each realm asked by the host. A page it declines is laid out as
+  # its root alone, which a spec reading a box at the root would never notice, so every session a spec built is asked at
+  # its end (an example that declines on purpose says so: `rust_declines: true`).
   def rust_declines(session)
     return unless session.instance_variable_defined?(:@driver)
 
-    declined = session.driver.browser.evaluate_script(RUST_DECLINES_JS)
-    declined == '{}' ? nil : declined
+    runtime = session.driver.browser.instance_variable_get(:@runtime)
+    all = Hash.new(0)
+    [0, *runtime.frame_realm_ids].each do |id|
+      stats = runtime.realm_call(id, '__csimNativeLayoutStats') rescue nil
+      (stats && stats['rustFellBack'] || {}).each {|reason, n| all[reason] += n.to_i }
+    end
+    all.empty? ? nil : all.to_h.to_json
   rescue StandardError => e
     # (…a session the example already closed cannot answer; one that cannot for another reason says so)
     warn "[spec] asking a session for the Rust walk's declines failed: #{e.class}: #{e.message}" unless e.message.include?('disposed')
