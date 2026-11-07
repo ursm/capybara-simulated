@@ -7,6 +7,19 @@ require_relative 'support/session_teardown'
 # Firefox's (depth 9 there; Chrome 157 had none at 40, measured 2026-11-07) — nothing fetched for it, however often it is
 # read — and its document's own load is none the later.
 RSpec.describe 'a frame past the nesting limit' do
+  # …a form into one holding nothing up either (Firefox at its limit, measured 2026-11-07).
+  it "takes a form into it without holding its document's load" do
+    limit = Capybara::Simulated::Native::MAX_FRAME_DEPTH
+    app = ->(env) {
+      depth = Rack::Utils.parse_query(env['QUERY_STRING'])['d'].to_i
+      submit = depth == limit ? '<form id=x action=/x target=n></form><script>x.submit()</script>' : ''
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><iframe name=n src='/?d=#{depth + 1}'></iframe>#{submit}"]]
+    }
+    s = simulated_session(app)
+    s.visit '/?d=0'
+    expect(s.evaluate_script('document.readyState')).to eq('complete')
+  end
+
   it 'has no window, no document and no load, and costs no request' do
     hits = Hash.new(0)
     app = ->(env) {

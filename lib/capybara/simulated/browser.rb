@@ -12102,6 +12102,8 @@ module Capybara
       # (`navigate_realm_self_get`) — none asked for a `javascript:` URL, which unloads nothing (HTML "navigate"
       # evaluates it in the document it is at), whose entry none is either (`record_frame_nav`).
       private def navigate_frame_by_realm(realm_id, url, record, begun, recorded: true)
+        return if Native.navigation_hands_off(url.to_s)
+
         parent = @runtime.frame_realm_parent(realm_id)
         prompted = !url.to_s.match?(/\Ajavascript:/i)
         return if prompted && !prompt_to_unload_frame(realm_id, parent)
@@ -12128,6 +12130,8 @@ module Capybara
         origin_url: nil,
         user_activated: false
       )
+        return if Native.navigation_hands_off(url.to_s) || !@runtime.frame_realm_alive?(realm_id)
+
         # (…one of a URL no network answers: `data:` and about:blank answer a POST as they answer a GET, Chrome and Firefox
         # alike, and any other navigation fails on it: navigation_fetch.rs `start`)
         start = Native.navigation_start(url.to_s, 'POST', false)
@@ -12189,6 +12193,7 @@ module Capybara
         # (…its navigation begun, the frame's ongoing one: session_history.rs `begin_navigation`)
         nav, _, _, history = frame_navigable(realm_id)
         ongoing = history && [history, nav, history.begin_navigation(nav)]
+        dest = @runtime.realm_direct_call(0, '__csimFrameDestination', realm_id.to_i)
         if sw_registered?
           deferred = await_sw_activation(url, blob_partition_site(realm_id), ongoing:) do
             navigate_realm_self(
@@ -12246,7 +12251,7 @@ module Capybara
           # into, so it rides the SW fetch event too: a rewritten request keeps it)
           ancestors:                     @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm_id.to_i),
           client_origin:                 (document_origin(realm_id) if traversal),
-          dest:                          'iframe',
+          dest:                          dest,
           user_activated:                user_activated,
           jar:                           @cookie_jar,
           # (…a service worker may answer its hops where one is registered — an https one's only where the frame may be
@@ -12257,7 +12262,7 @@ module Capybara
           fetch,
           body:               body,
           content_type:       content_type,
-          dest:               'iframe',
+          dest:               dest,
           frame_type:         'nested',
           origin_url:         origin_url,
           client_id:          client_id,

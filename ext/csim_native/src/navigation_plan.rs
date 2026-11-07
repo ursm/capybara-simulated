@@ -599,6 +599,8 @@ fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     plan.let_go();
     plan.own.reload = Some(Reload { activated, blob, mark: None });
     plan.own.planned = next_planned();
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).frame_navigations.drop_submissions_of(cid);
 }
 // __dom.takeLocation() -> [url, replace, initiatorRealm, referrerSource, referrerPolicy, activated, blob, ongoing, document]
 // of the location navigation planned (initiatorRealm and the Referer null for the document's own, blob undefined for none,
@@ -872,6 +874,10 @@ fn take_routed_submission(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionC
         let framed = arena.frame_navigations.first_submission();
         if let Some(at) = framed.filter(|&at| arena.frame_navigations.due(at) && routed.is_none_or(|r| at < r)) {
             let Some((container, request, source, referrer)) = arena.frame_navigations.take_submission(at) else { continue };
+            // (…none of a document no longer fully active, its form's task gone with it: HTML "plan to navigate")
+            if !arena.navigables.fully_active(source) {
+                continue;
+            }
             crate::frame_navigation::FrameNavigations::begin_submission(arena, container);
             return rv.set(routed_item(scope, source, &request, Route::Frame(container), referrer));
         }

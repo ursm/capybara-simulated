@@ -206,6 +206,11 @@ pub(crate) fn start(url: &str, method: &str, refuses_data: bool) -> &'static str
         "fetch"
     }
 }
+// Native.navigation_hands_off(url) -> whether a navigation to `url` is handed to external software, its navigable staying at
+// the document it is at (HTML "navigate": a URL of no fetch scheme, `javascript:` apart, a `mailto:`'s). Chrome and Firefox.
+pub(crate) fn hands_off(url: String) -> bool {
+    ada_url::Url::parse(&url, None).is_ok_and(|u| !matches!(u.protocol(), "about:" | "blob:" | "data:" | "file:" | "http:" | "https:" | "javascript:"))
+}
 pub(crate) fn start_for_ruby(url: String, method: String, refuses_data: bool) -> &'static str {
     start(&url, &method.to_ascii_uppercase(), refuses_data)
 }

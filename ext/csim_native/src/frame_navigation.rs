@@ -183,6 +183,13 @@ impl FrameNavigations {
     pub(crate) fn hosted(&self) -> bool {
         self.0.values().any(|n| n.host.as_ref().is_some_and(|&(at, _)| at <= self.1.through))
     }
+    // The forms' submissions a reload of realm `source`'s document takes with it, that document's into its frames: Chrome and
+    // Firefox send none (measured 2026-11-07).
+    pub(crate) fn drop_submissions_of(&mut self, source: i32) {
+        for nav in self.0.values_mut() {
+            nav.host.take_if(|(_, h)| matches!(h, HostNavigation::Submit { source: s, .. } if *s == source));
+        }
+    }
     // Whether a navigation planned in order `at` is due: the navigation turn has run since.
     pub(crate) fn due(&self, at: u64) -> bool {
         at <= self.1.through
@@ -302,6 +309,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameTraversalSrcdoc", frame_traversal_srcdoc, context_id);
     crate::dom::register(scope, ns, "planFrameSubmission", plan_frame_submission, context_id);
     crate::dom::register(scope, ns, "frameSubmissionPlanned", frame_submission_planned, context_id);
+    crate::dom::register(scope, ns, "frameDestination", frame_destination, context_id);
     crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
     crate::dom::register(scope, ns, "stopFrameLoading", stop_frame_loading, context_id);
     crate::dom::register(scope, ns, "stopChildFramesLoading", stop_child_frames_loading, context_id);
@@ -585,6 +593,14 @@ fn plan_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     crate::session_history::begin_navigation_of(arena, frame, None);
     crate::navigation_plan::supersede_routed(scope, frame);
 }
+// __dom.frameDestination(realm) -> the destination of a navigation of frame realm `realm`'s navigable: its container's (HTML
+// "create navigation params by fetching": "frame" for a `<frame>`, else "iframe").
+fn frame_destination(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let arena = &crate::dom::dom(scope).arena;
+    let frame = arena.live_container(realm).and_then(|c| arena.get(c)).is_some_and(|n| n.is_html_named("frame"));
+    rv.set(crate::subresource_obtain::text(scope, if frame { "frame" } else { "iframe" }));
+}
 // __dom.frameSubmissionPlanned(containerNid) -> whether a form's submission plans to navigate the container's navigable.
 fn frame_submission_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
@@ -687,6 +703,7 @@ fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let nav = arena.frame_navigation(container);
     nav.aborted_document = aborted;
     nav.host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload { url }));
+    arena.frame_navigations.drop_submissions_of(cid);
     crate::navigation_plan::supersede_routed(scope, cid);
 }
 // __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of, and the

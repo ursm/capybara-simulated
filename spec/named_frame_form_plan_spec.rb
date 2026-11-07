@@ -126,6 +126,72 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     expect(session.evaluate_script('frames[0].frames[0].location.pathname + frames[0].frames[0].location.search')).to eq('/in?a=1')
   end
 
+  # A form's document no longer fully active takes its plan with it: its frame removed (HTML "plan to navigate" queues on the
+  # form's document), reloaded (Chrome and Firefox send none, measured 2026-11-07).
+  {
+    "its document's frame removed"  => 'frames[0].g.submit(); fr.remove()',
+    "its document's frame reloaded" => 'frames[0].g.submit(); frames[0].location.reload()'
+  }.each do |name, js|
+    it "sends nothing of a frame's form into its own frame, #{name}" do
+      hits = []
+      session = session_with(hits)
+      session.visit '/top'
+      session.execute_script('frames[0].document.body.innerHTML = "<iframe name=in></iframe><form id=g method=post action=/in target=in></form>"')
+      session.execute_script(js)
+      session.evaluate_script('1')
+      expect(hits).not_to include('POST /in')
+    end
+  end
+
+  # …the page's own reload likewise (Chrome and Firefox: the frame at its `src`).
+  it "sends nothing of a page's form into its frame where the page reloads" do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    session.execute_script('f.submit(); location.reload()')
+    session.evaluate_script('1')
+    expect(hits).not_to include('POST /x')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/blank')
+  end
+
+  # A navigation of a frame to a URL of no fetch scheme is handed to external software, the frame at its document: no entry,
+  # no `load` (HTML "navigate"; Chrome and Firefox, measured 2026-11-07).
+  ['frames[0].location = "mailto:a@b.test"', 'f.action = "mailto:a@b.test"; f.submit()'].each do |js|
+    it "leaves a frame where it is on #{js}" do
+      session = session_with([])
+      session.visit '/top'
+      session.execute_script("window.loads = 0; fr.onload = () => loads++; #{js}")
+      session.evaluate_script('1')
+      expect(session.evaluate_script('[frames[0].location.pathname, loads, history.length]')).to eq(['/blank', 0, 1])
+    end
+  end
+
+  # A `<frame>`'s navigation is of the destination "frame" (Chrome and Firefox).
+  it "tells a form's navigation of a <frame> so" do
+    dest = nil
+    session = simulated_session(lambda {|env|
+      dest = env['HTTP_SEC_FETCH_DEST'] if env['PATH_INFO'] == '/x'
+      body = env['PATH_INFO'] == '/top' ? '<body><script>const e = document.createElement("frame"); e.name = "n"; e.src = "/blank"; document.body.append(e)</script>' : 'x'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8>#{body}"]]
+    })
+    session.visit 'http://localhost/top'
+    session.execute_script('const f = document.createElement("form"); f.action = "/x"; f.method = "post"; f.target = "n"; document.body.append(f); f.submit()')
+    session.evaluate_script('1')
+    expect(dest).to eq('frame')
+  end
+
+  # A `javascript:` action into a frame just inserted is a navigation that ends the one to its `src`, as HTML "navigate" has
+  # it — the ruling here; Chrome and Firefox run the script and go on to the `src`.
+  it 'ends the navigation to a src with a javascript: action' do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    session.execute_script('window.ran = false; const e = document.createElement("iframe"); e.name = "m"; e.src = "/src"; document.body.append(e); f.method = "get"; f.target = "m"; f.action = "javascript:parent.ran = true"; f.submit()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('ran')).to be(true)
+    expect(hits).not_to include('GET /src')
+  end
+
   # A link to a fragment of the frame's document moves it within it, fetching nothing (HTML "navigate to a fragment").
   it "fetches nothing for a link to the frame's own fragment" do
     hits = []

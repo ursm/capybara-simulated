@@ -474,6 +474,34 @@ RSpec.describe 'Handle Fetch outcomes' do
 
   # A browser's fetch resolves at the head, what a request's tainting filters as any other; csim's buffered the bytes it keeps
   # for rendering first, so a stream that never closes never resolved it (Chrome and Firefox resolve it, measured 2026-11-07).
+  # …an element's the bytes it renders as it is answered (Chrome and Firefox: the image loads).
+  it "loads an image of another origin a worker answers with a stream" do
+    png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        const bytes = Uint8Array.from(atob('#{png}'), c => c.charCodeAt(0));
+        self.addEventListener('fetch', e => {
+          if (new URL(e.request.url).pathname === '/i.png') e.respondWith(new Response(new ReadableStream({start(c) { c.enqueue(bytes); c.close(); }}), {headers: {'content-type': 'image/png'}}));
+        });
+      JS
+
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
+    })
+    session.visit '/'
+    session.execute_script("navigator.serviceWorker.addEventListener('controllerchange', () => { globalThis.__controlled = true; }); navigator.serviceWorker.register('/sw.js');")
+    expect(poll_until { session.evaluate_script('globalThis.__controlled === true') }).to be(true)
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const i = new Image();
+      i.onload = () => done(i.naturalWidth);
+      i.onerror = () => done('error');
+      i.src = 'http://other.test/i.png';
+    JS
+    expect(got).to eq(1)
+  end
+
   it 'resolves a no-cors fetch at the head of a stream that never closes' do
     session = simulated_session(lambda {|env|
       next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
