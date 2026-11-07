@@ -1850,23 +1850,28 @@ fn entered_global(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 }
 // __dom.locationAccess() -> whether the entry settings object's script may use the members of the calling realm's
 // Location (HTML: "If this's relevant Document is non-null and its origin is not same origin-domain with the entry
-// settings object's origin, then throw"): 1 it may — its browsing context gone, its relevant Document null; the entry
-// realm this one, as the entered context is where none is entered by name, asked of nothing more; or one same
-// origin-domain with it — 0 it may not, and -1 where the entered context is another realm's, whose number the bindings
-// find (`enteredGlobal`) to ask `sameOriginDomainRealm` of.
+// settings object's origin, then throw"): it may where its browsing context is gone, its relevant Document null; where
+// the entry realm — the one the host entered by name, else the entered context's — is this one, the entered context the
+// current one asked of nothing more; and where it is same origin-domain with this one (realm_location.rs
+// `same_origin_domain`). An entered context of no realm's (`realm_of_global`) may not: fail CLOSED.
 fn location_access(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let entered_here = scope.get_entered_or_microtask_context() == scope.get_current_context();
-    let arena = &crate::dom::dom(scope).arena;
-    if arena.navigables.lost_navigable(cid) {
-        return rv.set_int32(1);
-    }
-    let access = match arena.navigables.entry {
-        Some(entry) => i32::from(entry == cid || arena.realms_same_origin_domain(cid, entry)),
-        None if entered_here => 1,
-        None => -1,
+    let named = crate::dom::dom(scope).arena.navigables.entry;
+    let entry = match named {
+        Some(entry) => Some(entry),
+        None => {
+            let entered = scope.get_entered_or_microtask_context();
+            if entered == scope.get_current_context() {
+                Some(cid)
+            } else {
+                let global = entered.global(scope);
+                crate::dom::realm_of_global(scope, global)
+            }
+        }
     };
-    rv.set_int32(access);
+    let arena = &crate::dom::dom(scope).arena;
+    let allowed = arena.navigables.lost_navigable(cid) || entry.is_some_and(|e| e == cid || arena.realms_same_origin_domain(cid, e));
+    rv.set_bool(allowed);
 }
 // __dom.incumbentOperation(steps, name, length) -> an operation `name` of `length` arguments, a native function of this
 // realm, whose call is `steps.call(this, incumbent, ...args)` — `incumbent` the global of the incumbent realm, HTML's

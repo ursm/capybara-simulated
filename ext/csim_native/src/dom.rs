@@ -2624,6 +2624,10 @@ pub(crate) struct Dom {
     attrs_view_template: Option<v8::Global<v8::ObjectTemplate>>,
     // The template every node's object is made from (`node_handle`, `__dom.NodeBase`).
     pub(crate) node_template: Option<v8::Global<v8::FunctionTemplate>>,
+    // The private key each realm's global carries its realm id under (`realm_of_global`) — a property no script sees,
+    // not a context's embedder data: a context slot gives V8 a finalizer to run at teardown (rusty_racer's
+    // `id_of_context` says why it keeps none either).
+    realm_key: Option<v8::Global<v8::Private>>,
     // The template a legacy platform object with an indexed getter is made from (legacy.rs).
     pub(crate) indexed_template: Option<v8::Global<v8::ObjectTemplate>>,
     // …and the one an HTMLAllCollection is (legacy.rs `allCollectionObject`).
@@ -2916,6 +2920,24 @@ fn read_attrs_flat(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Valu
     (attributes, attr_u16)
 }
 
+// The private key a realm's global carries its realm id under, made once per isolate.
+fn realm_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Private> {
+    if let Some(key) = &dom(scope).realm_key {
+        let key = key.clone();
+        return v8::Local::new(scope, key);
+    }
+    let name = v8::String::new(scope, "csim#realm").expect("a short string");
+    let key = v8::Private::for_api(scope, Some(name));
+    dom(scope).realm_key = Some(v8::Global::new(scope, key));
+    key
+}
+// The realm whose global `global` is — a context's (`v8::Context::global`) — as `install` stamped it: none for a context
+// no realm's `__dom` was installed into.
+pub(crate) fn realm_of_global(scope: &mut v8::PinScope<'_, '_>, global: v8::Local<'_, v8::Object>) -> Option<i32> {
+    let key = realm_key(scope);
+    global.get_private(scope, key).filter(|v| v.is_int32()).and_then(|v| v.int32_value(scope))
+}
+
 // Install `globalThis.__dom` (the arena build / query / match surface + attrsView) into |ctx|, building
 // the isolate-shared templates on first call. Mirrors install_host_namespace's shape (its own
 // HandleScope + ContextScope, safe to re-run per realm — each realm gets its own function set carrying
@@ -2926,6 +2948,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     let scope = &mut v8::ContextScope::new(scope, context);
 
     ensure_templates(scope);
+    // (…its global stamped with its realm id: `realm_of_global`)
+    let global = context.global(scope);
+    let key = realm_key(scope);
+    let id = v8::Integer::new(scope, context_id);
+    global.set_private(scope, key, id.into());
     // A new context for a realm id the arena has seen (main's, at every warm reset): nothing of the old context is
     // reachable from it any more, so its nodes go now, as they would one by one as V8 collected them.
     let d = dom(scope);
