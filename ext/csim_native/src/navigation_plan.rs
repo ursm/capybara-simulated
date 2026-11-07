@@ -1069,11 +1069,21 @@ fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         let Some(flushed) = plan.flushed.take() else { continue };
         if drop {
             if flushed.traversal.is_some() || flushed.frame_traversal.is_some() {
+                crate::session_history::end_traversal_of(&crate::dom::dom(scope).arena, r);
                 orphaned.push(r);
             }
             continue;
         }
+        let navs: Vec<u32> = match (&flushed.traversal, &flushed.frame_traversal) {
+            (Some(_), _) => vec![0],
+            (_, Some(f)) => f.changes.iter().filter(|c| !c.2).map(|c| c.0).collect(),
+            _ => Vec::new(),
+        };
         restored |= plan.own.restore(flushed);
+        // (…a traversal put back the host's to take again, its navigables traversing again)
+        if !navs.is_empty() && plan.traversal_waiting() {
+            crate::session_history::replan_of(&crate::dom::dom(scope).arena, r, navs.into_iter());
+        }
     }
     let arena = &mut crate::dom::dom(scope).arena;
     restored |= arena.frame_navigations.flush_restore(drop);

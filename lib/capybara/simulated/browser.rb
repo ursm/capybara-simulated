@@ -2423,14 +2423,15 @@ module Capybara
       end
       # The session history of realm `realm`'s document — the page's (0), or a window's `window.open` made in this isolate —
       # traversed by `delta` (HTML "traverse the history by a delta", the user's as a script's): queued on its traversal
-      # queue as its `history.go(delta)` queues it (history.js `__csimTraverseHistory`), then applied with those queued
-      # before it, no script of the page's on the stack — as its task would, run first: a move within the documents at once,
-      # one that makes a document again planned, which the driver takes with the rest (`drain_task_intents`).
+      # queue as its `history.go(delta)` queues it (history.js `__csimTraverseHistory`) but with no task, applied at once
+      # with those queued before it — no script of the page's on the stack, as its task would, run first: a move within
+      # the documents made, one that makes a document again planned, which the driver takes with what else is planned
+      # (`drain_task_intents`) — none asked where nothing is.
       def traverse_history(realm, delta)
         invalidate_find_cache
-        @runtime.realm_call(realm, '__csimTraverseHistory', delta.to_i)
+        @runtime.realm_call(realm, '__csimTraverseHistory', delta.to_i, true)
         @runtime.realm_call(realm, '__csimApplyOwnTraversals', true)
-        drain_task_intents
+        drain_task_intents if pending_nav_intent? || (!realm.zero? && windows_planned?)
       end
 
       # The traversals the page's `history` queued (session_history.rs `historyTraverse`), each applied by the engine as its
@@ -2454,6 +2455,14 @@ module Capybara
       def consume_planned_traversal
         return unless @session_history.take_traversal_planned
 
+        begin
+          consume_planned_traversals
+        ensure
+          # (…its navigables traversing no more, whichever became of it: `end_traversal`)
+          @session_history.end_traversal
+        end
+      end
+      private def consume_planned_traversals
         while (planned = @runtime.call('__csimTakeTraversal'))
           kind, *plan = planned
           invalidate_find_cache
@@ -2558,7 +2567,11 @@ module Capybara
       private def traverse_navigables_of(realm, step, *changes)
         return unless (history = realm.zero? ? @session_history : window_history(realm))
 
-        traverse_navigables(history, step, changes.each_slice(3).to_a, top: realm)
+        begin
+          traverse_navigables(history, step, changes.each_slice(3).to_a, top: realm)
+        ensure
+          history.end_traversal
+        end
         @runtime.realm_call(realm, '__csimApplyOwnTraversals', true) if realm.zero? || @runtime.frame_realm_alive?(realm)
       end
 
@@ -12368,8 +12381,10 @@ module Capybara
         end
       end
       def drain_pending_navigation
-        take_window_tasks
+        # (…a traversal ahead of a navigation another window asked of the page: the page traversing ignores it, HTML
+        # "navigate" — `plan_on`)
         apply_planned_traversals_before_navigations
+        take_window_tasks
         # (…a navigation of a frame the task planned, its turn on the event loop queued, due with what is due before it: a
         # script the driver ran on an idle page has no step following to run it — behind a traversal planned with it, which
         # cancels it)

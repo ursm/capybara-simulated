@@ -67,6 +67,42 @@ RSpec.describe 'the joint session history' do
     expect(session.evaluate_script('location.pathname')).to eq('/top')
   end
 
+  # A frame's `history.back()` is a traversal of the traversable's, its task the top-level document's (HTML "append the
+  # following session history traversal steps to traversable"): the frame removed before it runs, it is applied all the
+  # same, the page's popstate to /a2. Chrome and Firefox, measured 2026-11-08 (csim-bench
+  # rvtr-probe).
+  [['at once', '', ''], ['a task later', 'setTimeout(() => ', ', 0)']].each do |(when_, open, close)|
+    it "applies a frame's traversal the frame was removed #{when_} after asking" do
+      session.visit '/top'
+      session.execute_script("history.pushState(null, '', '/a1'); history.pushState(null, '', '/a2'); history.pushState(null, '', '/a3')")
+      session.execute_script("frames[0].history.back(); #{open}document.querySelector('iframe').remove()#{close}")
+      session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 200))')
+      expect(session.evaluate_script('location.pathname')).to eq('/a2')
+      session.go_back
+      expect(session.evaluate_script('location.pathname')).to eq('/a1')
+    end
+  end
+
+  # A navigation of a frame a traversal planned makes the document of again is ignored, its ongoing navigation
+  # "traversal" (HTML "navigate"): its `src` set, or its `location`, in a task after the traversal's, before the host
+  # takes it. Chrome and Firefox,
+  # measured 2026-11-08 (csim-bench rvtr-probe): the frame at /f2, /z never requested.
+  {'src' => "document.querySelector('iframe').src = '/z'", 'location' => "frames[0].location = '/z'"}.each do |what, navigate|
+    it "ignores a frame's #{what} set while a traversal of it is planned" do
+      paths = []
+      logged = simulated_session(->(env) { paths << env['PATH_INFO']; app.call(env) })
+      logged.visit '/top'
+      logged.execute_script('frames[0].location = "/f2"')
+      expect(logged.evaluate_script('frames[0].location.pathname')).to eq('/f2')
+      logged.execute_script('frames[0].location = "/b"')
+      expect(logged.evaluate_script('frames[0].location.pathname')).to eq('/b')
+      logged.execute_script("setTimeout(() => { history.back(); setTimeout(() => { #{navigate}; }, 0); }, 0)")
+      logged.evaluate_script('new Promise((resolve) => setTimeout(resolve, 200))')
+      expect(logged.evaluate_script('frames[0].location.pathname')).to eq('/f2')
+      expect(paths).not_to include('/z')
+    end
+  end
+
   it "counts a frame's navigation a step of the page's" do
     session.visit '/top'
     expect(length).to eq(1)

@@ -679,7 +679,10 @@ fn plan_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let policy = args.get(4).to_rust_string_lossy(scope);
     let activated = args.get(5).is_true();
     let arena = &mut crate::dom::dom(scope).arena;
-    let Some(container) = arena.live_container(target) else { return rv.set_uint32(PLANNED_NONE) };
+    // (…none of a navigable traversing: HTML "navigate" ignores it)
+    let Some(container) = arena.live_container(target).filter(|_| !crate::session_history::traversing_of(arena, target)) else {
+        return rv.set_uint32(PLANNED_NONE);
+    };
     let here = arena.enter_known(target).map(|a| a.location.href().to_owned());
     if here.is_some_and(|here| crate::url_ops::is_fragment_navigation(&here, &url)) {
         return rv.set_uint32(PLANNED_FRAGMENT);
