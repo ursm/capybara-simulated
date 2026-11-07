@@ -284,6 +284,62 @@ RSpec.describe 'the platform\'s token for its own constructions' do
     expect(got).to eq([])
   end
 
+  # …and that ahead of anything else: no `prototype` of NewTarget read, the class having made no object before its body.
+  it 'throws for an interface with no constructor before it reads NewTarget\'s `prototype`', :every_host_local do
+    session.visit('https://a.test/')
+    got = session.evaluate_script(<<~JS)
+      [
+        'History', 'Storage', 'Location', 'Navigator', 'NodeList', 'HTMLCollection', 'NamedNodeMap', 'DOMStringMap', 'HTMLAllCollection', 'Selection',
+        'Crypto', 'CryptoKey', 'SubtleCrypto', 'Cache', 'CacheStorage', 'IdleDeadline', 'Lock', 'LockManager', 'XPathResult', 'XPathExpression',
+        'ResizeObserverEntry', 'ResizeObserverSize', 'PerformanceObserverEntryList', 'CredentialsContainer', 'CaretPosition', 'CustomStateSet',
+        'ElementInternals', 'DOMImplementation', 'CSSFontFeatureValuesMap', 'CSSStyleDeclaration', 'StyleSheet', 'AbstractRange', 'AnimationEffect',
+        'MutationRecord', 'CanvasRenderingContext2D', 'OffscreenCanvasRenderingContext2D', 'Node', 'CharacterData'
+      ].filter((name) => {
+        let read = false;
+        const target = new Proxy(function () {}, { get(t, p, r) { if (p === 'prototype') read = true; return Reflect.get(t, p, r); } });
+        try {
+          Reflect.construct(window[name], [], target);
+          return true;
+        } catch (e) {
+          return !(e instanceof TypeError) || read;
+        }
+      })
+    JS
+    expect(got).to eq([])
+  end
+
+  # (…its platform's own constructions of them working as they did)
+  it 'makes what the platform makes of those', :every_host_local do
+    session.visit('https://a.test/')
+    expect(session.evaluate_async_script(<<~JS)).to eq([true, 'x', 0, false, true, true, true, 'exclusive', true, 'AES-GCM', 'string', true])
+      const done = arguments[0];
+      (async () => {
+        const r = document.evaluate('count(//p)', document, null, XPathResult.NUMBER_TYPE, null);
+        const expr = document.createExpression('//p', null);
+        const canvas = document.createElement('canvas');
+        const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 128 }, true, ['encrypt']);
+        class Internals extends HTMLElement {}
+        customElements.define('x-with-internals', Internals);
+        let lock;
+        await navigator.locks.request('l', async (l) => { lock = l; });
+        return [
+          r.numberValue === 1 && expr.evaluate(document).iterateNext().id === 'p',
+          document.getElementById('p').textContent,
+          history.length - history.length,
+          document.createElement('div').dataset.nope !== undefined,
+          document.implementation.createHTMLDocument('t') instanceof Document,
+          getSelection() === getSelection(),
+          new (customElements.get('x-with-internals'))().attachInternals().states.add('a').has('a'),
+          lock.mode,
+          canvas.getContext('2d') instanceof CanvasRenderingContext2D,
+          key.algorithm.name,
+          typeof navigator.userAgent,
+          document.styleSheets[0].cssRules.length > 0
+        ];
+      })().then(done, (e) => done(String(e)));
+    JS
+  end
+
   it 'answers a class without `new` and with another NewTarget as a class does', :every_host_local do
     session.visit('https://a.test/')
     expect(session.evaluate_script(<<~JS)).to eq([true, true, true, true, 0, 'Event', 'XMLHttpRequest', 1, 'DOMPoint'])

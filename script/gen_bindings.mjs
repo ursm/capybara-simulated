@@ -367,7 +367,7 @@ const INTERFACES = [
   // (…`document.all`, an object the engine makes (legacy.rs `allCollectionObject`), whose interceptors answer its indices and
   // names)
   ['html', 'HTMLAllCollection', {
-    install: true,
+    install: true, shell: true,
     namedProperties: "the undetectable object's interceptors (legacy.rs)",
     indexedProperties: 'the same interceptors'
   }],
@@ -380,9 +380,9 @@ const INTERFACES = [
   ['html', 'External'],
   ['html', 'CustomElementRegistry', { install: true }],
   ['html', 'ValidityState'],
-  ['html', 'CustomStateSet', { install: true }],
-  ['html', 'ElementInternals', { install: true, slots: ['states'] }],
-  ['html', 'DOMStringMap', { install: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
+  ['html', 'CustomStateSet', { install: true, shell: true }],
+  ['html', 'ElementInternals', { install: true, shell: true, slots: ['states'] }],
+  ['html', 'DOMStringMap', { install: true, shell: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
   ['dom', 'HTMLCollection', {
     install: true,
     namedProperties: 'the Proxy each collection is (dom-collections.js `legacyCollection`)',
@@ -393,7 +393,7 @@ const INTERFACES = [
   ['dom', 'NodeList', { install: true, indexedProperties: 'the Proxy `withIndexedGetter` makes of each (dom-collections.js `makeNodeList`)' }],
   ['html', 'RadioNodeList', { install: true }],
   ['dom', 'NamedNodeMap', {
-    install: true,
+    install: true, shell: true,
     namedProperties: 'the Proxy each element\'s attributes are (dom-collections.js)',
     indexedProperties: 'the same Proxy'
   }],
@@ -401,8 +401,8 @@ const INTERFACES = [
   ['html', 'TextMetrics'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],
-  ['html', 'CanvasRenderingContext2D', { install: true }],
-  ['html', 'OffscreenCanvasRenderingContext2D', { install: true }],
+  ['html', 'CanvasRenderingContext2D', { install: true, shell: true }],
+  ['html', 'OffscreenCanvasRenderingContext2D', { install: true, shell: true }],
   ['html', 'OffscreenCanvas', { install: true }],
   ['SVG', 'SVGAnimatedString'],
   ['clipboard-apis', 'ClipboardItem', { install: true, slots: ['presentationStyle', 'types'] }],
@@ -450,7 +450,7 @@ const INTERFACES = [
   ['IndexedDB', 'IDBCursorWithValue', { install: true, shell: true }],
   ['html', 'DOMStringList'],
   ['html', 'Location', { install: true, crossOrigin: { href: 'set', replace: 'method' } }],
-  ['html', 'History', { install: true }],
+  ['html', 'History', { install: true, shell: true }],
   ['css-font-loading', 'FontFaceSetLoadEvent', { event: {} }],
   ['gamepad', 'GamepadEvent', { event: {} }],
   ['orientation-event', 'DeviceMotionEventAcceleration', { slots: ['x', 'y', 'z'] }],
@@ -459,7 +459,7 @@ const INTERFACES = [
   ['orientation-event', 'DeviceOrientationEvent', { event: {} }],
   ['webidl', 'DOMException', { install: true, slots: ['name', 'message', 'code'] }],
   ['webidl', 'QuotaExceededError', { install: true, slots: ['quota', 'requested'] }],
-  ['dom', 'DOMImplementation', { install: true }],
+  ['dom', 'DOMImplementation', { install: true, shell: true }],
   ['geometry', 'DOMPointReadOnly', { install: true }],
   ['geometry', 'DOMPoint', { install: true }],
   ['geometry', 'DOMRectReadOnly', { install: true }],
@@ -473,16 +473,16 @@ const INTERFACES = [
   ['urlpattern', 'URLPattern', { install: true }],
   ['fetch', 'Headers', { install: true }],
   ['xhr', 'FormData', { install: true }],
-  ['html', 'Storage', { install: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
+  ['html', 'Storage', { install: true, shell: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
   ['dom', 'XMLDocument', { install: true }],
-  ['webcrypto', 'CryptoKey', { install: true }],
-  ['webcrypto', 'SubtleCrypto', { install: true }],
-  ['webcrypto', 'Crypto', { install: true, slots: ['subtle'] }],
-  ['service-workers', 'Cache', { install: true }],
-  ['service-workers', 'CacheStorage', { install: true }],
-  ['requestidlecallback', 'IdleDeadline', { install: true, slots: ['didTimeout'] }],
-  ['web-locks', 'LockManager', { install: true }],
-  ['web-locks', 'Lock', { install: true, slots: ['name', 'mode'] }],
+  ['webcrypto', 'CryptoKey', { install: true, shell: true }],
+  ['webcrypto', 'SubtleCrypto', { install: true, shell: true }],
+  ['webcrypto', 'Crypto', { install: true, shell: true, slots: ['subtle'] }],
+  ['service-workers', 'Cache', { install: true, shell: true }],
+  ['service-workers', 'CacheStorage', { install: true, shell: true }],
+  ['requestidlecallback', 'IdleDeadline', { install: true, shell: true, slots: ['didTimeout'] }],
+  ['web-locks', 'LockManager', { install: true, shell: true }],
+  ['web-locks', 'Lock', { install: true, shell: true, slots: ['name', 'mode'] }],
   ['service-workers', 'ServiceWorker', { install: true, slots: ['scriptURL', 'state'] }],
   ['service-workers', 'ServiceWorkerRegistration', {
     slots: ['scope'],
@@ -503,7 +503,7 @@ const INTERFACES = [
   ['html', 'Worker', { install: true }],
   ['html', 'SharedWorker', { install: true, slots: ['port'] }],
   ['credential-management', 'Credential', { install: true, shell: true, slots: ['id', 'type'] }],
-  ['credential-management', 'CredentialsContainer', { install: true }],
+  ['credential-management', 'CredentialsContainer', { install: true, shell: true }],
   ['webauthn', 'PublicKeyCredential', { install: true, shell: true, slots: ['rawId', 'response', 'authenticatorAttachment'] }],
   ['webauthn', 'AuthenticatorResponse', { install: true, shell: true, slots: ['clientDataJSON'] }],
   ['webauthn', 'AuthenticatorAttestationResponse', { install: true, shell: true, slots: ['attestationObject'] }],
@@ -533,7 +533,7 @@ const INTERFACES = [
   }],
   ['web-animations', 'DocumentTimeline', { install: true, shell: true }],
   ['web-animations', 'AnimationEffect', {
-    install: true,
+    install: true, shell: true,
     omit: {
       'web-animations-2': 'the timing hierarchy (parent, siblings, before / after / replace / remove): group effects, which ' +
         'no engine ships'
@@ -565,10 +565,10 @@ const INTERFACES = [
   ['server-timing', 'PerformanceServerTiming', { install: true, shell: true, slots: ['name', 'duration', 'description'] }],
   ['resource-timing', 'PerformanceResourceTiming', { install: true, shell: true }],
   ['performance-timeline', 'PerformanceObserver', { install: true }],
-  ['performance-timeline', 'PerformanceObserverEntryList', { install: true }],
+  ['performance-timeline', 'PerformanceObserverEntryList', { install: true, shell: true }],
   ['resize-observer', 'ResizeObserver', { install: true }],
-  ['resize-observer', 'ResizeObserverEntry', { install: true, slots: ['target', 'contentRect', 'borderBoxSize', 'contentBoxSize', 'devicePixelContentBoxSize'] }],
-  ['resize-observer', 'ResizeObserverSize', { install: true, slots: ['inlineSize', 'blockSize'] }],
+  ['resize-observer', 'ResizeObserverEntry', { install: true, shell: true, slots: ['target', 'contentRect', 'borderBoxSize', 'contentBoxSize', 'devicePixelContentBoxSize'] }],
+  ['resize-observer', 'ResizeObserverSize', { install: true, shell: true, slots: ['inlineSize', 'blockSize'] }],
   ['xhr', 'XMLHttpRequestEventTarget', { install: true, shell: true }],
   ['xhr', 'XMLHttpRequestUpload', { install: true, shell: true }],
   ['xhr', 'XMLHttpRequest', { install: true, shell: true, slots: ['upload'], omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
@@ -588,13 +588,13 @@ const INTERFACES = [
   ['FileAPI', 'FileList', { nativeIndexed: true }],
   ['FileAPI', 'FileReader', { install: true, slots: ['readyState', 'result', 'error'] }],
   ['FileAPI', 'FileReaderSync', { install: true }],
-  ['dom', 'XPathResult', { install: true, slots: [{ resultType: 'type' }] }],
-  ['dom', 'XPathExpression', { install: true }],
+  ['dom', 'XPathResult', { install: true, shell: true, slots: [{ resultType: 'type' }] }],
+  ['dom', 'XPathExpression', { install: true, shell: true }],
   ['dom', 'XPathEvaluator', { install: true }],
   ['dom', 'AbstractRange', { install: true }],
   ['dom', 'StaticRange', { install: true }],
   ['dom', 'Range', { install: true }],
-  ['selection-api', 'Selection', { install: true }],
+  ['selection-api', 'Selection', { install: true, shell: true }],
   ['cssom', 'CSSStyleDeclaration', { install: true, indexedProperties: 'the Proxy each declaration is (style-proxy.js `makeDeclProxy`)' }],
   ['cssom', 'CSSStyleProperties', { install: true }],
   ['cssom', 'CSSPageDescriptors', { install: true }],
@@ -603,7 +603,7 @@ const INTERFACES = [
   ['cssom', 'MediaList'],
   ['cssom', 'StyleSheetList'],
   ['cssom', 'CSSRuleList'],
-  ['cssom', 'StyleSheet', { install: true, slots: ['href', 'parentStyleSheet', 'title', 'media'] }],
+  ['cssom', 'StyleSheet', { install: true, shell: true, slots: ['href', 'parentStyleSheet', 'title', 'media'] }],
   ['cssom', 'CSSStyleSheet', { install: true, slots: ['ownerRule'] }],
   ['cssom', 'CSSRule', { install: true, shell: true }],
   ['cssom', 'CSSGroupingRule', { install: true, shell: true }],
@@ -622,7 +622,7 @@ const INTERFACES = [
   ['css-transitions-2', 'CSSStartingStyleRule', { install: true, shell: true }],
   ['css-fonts-5', 'CSSFontFaceRule', { install: true, shell: true }],
   ['css-fonts', 'CSSFontFeatureValuesRule', { install: true, shell: true }],
-  ['css-fonts', 'CSSFontFeatureValuesMap', { install: true }],
+  ['css-fonts', 'CSSFontFeatureValuesMap', { install: true, shell: true }],
   ['css-fonts', 'CSSFontPaletteValuesRule', { install: true, shell: true }],
   ['css-animations', 'CSSKeyframeRule', { install: true, shell: true }],
   ['css-animations', 'CSSKeyframesRule', { install: true, shell: true, indexedProperties: 'the Proxy each @keyframes rule is (cssom.js `withIndexedGetter`)' }],
@@ -643,8 +643,8 @@ const INTERFACES = [
     }
   }],
   ['permissions', 'PermissionStatus', { install: true, slots: ['state', 'name'] }],
-  ['cssom-view', 'CaretPosition', { install: true, slots: ['offsetNode', 'offset'] }],
-  ['dom', 'MutationRecord', { install: true, slots: ['type', 'target', 'previousSibling', 'nextSibling', 'attributeName', 'attributeNamespace', 'oldValue'] }],
+  ['cssom-view', 'CaretPosition', { install: true, shell: true, slots: ['offsetNode', 'offset'] }],
+  ['dom', 'MutationRecord', { install: true, shell: true, slots: ['type', 'target', 'previousSibling', 'nextSibling', 'attributeName', 'attributeNamespace', 'oldValue'] }],
   ['dom', 'AbortController', { install: true, slots: ['signal'] }],
   ['dom', 'AbortSignal', { install: true }],
   ['dom', 'ShadowRoot', { install: true, omitMembers: { setHTML: 'the Sanitizer API is not implemented' } }],
@@ -659,7 +659,7 @@ const INTERFACES = [
   ['html', 'DedicatedWorkerGlobalScope', { install: true, omit: { 'webrtc-encoded-transform': 'onrtctransform: WebRTC encoded transforms are not implemented' } }],
   ['html', 'SharedWorkerGlobalScope', { install: true }],
   ['html', 'Navigator', {
-    install: true,
+    install: true, shell: true,
     omit: {
       attribution: 'attribution: the Attribution Reporting API is not implemented',
       'audio-session': 'audioSession: the Audio Session API is not implemented',
@@ -719,7 +719,7 @@ const INTERFACES = [
     }
   }],
   ['html', 'WorkerNavigator', {
-    install: true,
+    install: true, shell: true,
     omit: {
       NavigatorBadge: 'setAppBadge / clearAppBadge: the Badging API is not implemented',
       NavigatorCrossOriginStorage: 'crossOriginStorage: Cross-Origin Storage is not implemented (a WICG proposal)',
@@ -733,7 +733,7 @@ const INTERFACES = [
       usb: 'usb: WebUSB is not implemented'
     }
   }],
-  ['html', 'WorkerLocation', { install: true }]
+  ['html', 'WorkerLocation', { install: true, shell: true }]
 ];
 
 // …and from reflect.js, the [Reflect…] attributes' steps.
