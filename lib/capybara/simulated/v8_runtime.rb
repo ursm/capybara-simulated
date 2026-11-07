@@ -612,7 +612,7 @@ module Capybara
         # (its engine's `dropRealm` frees ANY realm's arena); main (id 0) is untouched.
         going = (@frame_realms&.keys || []) - kept
         # (…where windows are kept, which may hold WindowProxies of the frames going: each proxy of one answering as its
-        # browsing context's gone — `closed`, no `parent` — platform-globals.js `__csimEvictWindowProxy` — and its window
+        # browsing context's gone — `closed`, no `parent` — platform-globals.js `realmHooks.evictWindowProxy` — and its window
         # neutered, which a held proxy still reads its document through)
         unless kept.empty?
           going.each do |id|
@@ -663,7 +663,7 @@ module Capybara
       def discarded_realm_ids = (@discarded_realm_ids ||= [])
       # …and those of the page's frames its navigation disposed under kept windows: their arenas kept while any window
       # is — a script of one may hold a WindowProxy of such a frame (its proxies answer as their browsing contexts' gone,
-      # `__csimEvictWindowProxy`) and read the document it showed, as Chrome's does (measured: `closed` true, `parent` null,
+      # `realmHooks.evictWindowProxy`) and read the document it showed, as Chrome's does (measured: `closed` true, `parent` null,
       # its title and text its document's). Whether one still does is its heap's to know — the realm that evicted the
       # proxy, whose finalizers could tell, is the page's that goes — so they go with the last window kept.
       def frame_realms_held = (@frame_realms_held ||= [])
@@ -1682,11 +1682,11 @@ module Capybara
       # points at the opener realm's WindowProxy. Tracked in `frame_realms` so
       # realm_call / the event loop's step / dispose_frame_realms cover it for free.
       # Returns the new realm's context id; the opener-side `window.open` wraps it in
-      # a native `__csimFrameWindowProxyFor`, so `popup.document` is a real
+      # a `frameWindowProxyFor` (platform-globals.js), so `popup.document` is a real
       # same-isolate Document (cross-window adoptNode works). The single isolate also
       # makes a same-origin window far cheaper than today's isolate-per-window.
       # (…`retarget_from` the realm whose document this one replaces — its window the same WindowProxy wherever a realm
-      # holds one, retargeted before the document's scripts run: `__csimRetargetWindowProxy` — `csp` its response's
+      # holds one, retargeted before the document's scripts run: `realmHooks.retargetWindowProxy` — `csp` its response's
       # Content-Security-Policy, `client_id` the client its navigation reserved, `entry` — `[how, step]` — its entry of the
       # window's session history, that of a navigation's document (history.js `__csimCommitWindowEntry`): none for a new
       # window's initial about:blank, which has none)
