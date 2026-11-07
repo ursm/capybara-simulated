@@ -2423,14 +2423,13 @@ module Capybara
       end
       # The session history of realm `realm`'s document — the page's (0), or a window's `window.open` made in this isolate —
       # traversed by `delta` (HTML "traverse the history by a delta", the user's as a script's): queued on its traversal
-      # queue as its `history.go(delta)` queues it (history.js `__csimTraverseHistory`), one that makes a document again
-      # applied as the driver takes what is planned (`drain_task_intents`), one within the documents as its task runs
-      # (`settle`) — then what the documents it made planned.
+      # queue as its `history.go(delta)` queues it (history.js `__csimTraverseHistory`), then applied with those queued
+      # before it, no script of the page's on the stack — as its task would, run first: a move within the documents at once,
+      # one that makes a document again planned, which the driver takes with the rest (`drain_task_intents`).
       def traverse_history(realm, delta)
         invalidate_find_cache
         @runtime.realm_call(realm, '__csimTraverseHistory', delta.to_i)
-        drain_task_intents
-        settle
+        @runtime.realm_call(realm, '__csimApplyOwnTraversals', true)
         drain_task_intents
       end
 
