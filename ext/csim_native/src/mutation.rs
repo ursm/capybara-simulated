@@ -165,18 +165,19 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moveChild", move_child_op, context_id);
 }
 
-// __dom.insertionRefusal(nodeNid, nodeType, parentNid, parentType, childNid, replace) -> 0 where the insertion of the
-// node into the parent before `childNid` (-1 for none; null for a child with no slot) — or its replacing of `childNid`,
-// `replace` — is valid, else why not (`Refusal`).
+// __dom.insertionRefusal(node, parent, child, replace) -> 0 where the insertion of the node into the parent before
+// `child` (null for none) — or its replacing of `child`, `replace` — is valid, else why not (`Refusal`): each a node's
+// object, its slot and kind the arena's — a node with no slot an Attr, the one kind that has none.
 fn insertion_refusal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let node = nid_arg(scope, &args, 0);
-    let Some(parent) = nid_arg(scope, &args, 2) else { return rv.set_uint32(Refusal::ParentKind as u32) };
-    let node_type = args.get(1).uint32_value(scope).unwrap_or(0);
-    let parent_type = args.get(3).uint32_value(scope).unwrap_or(0);
-    let child = (args.get(4).number_value(scope) != Some(-1.0)).then(|| nid_arg(scope, &args, 4));
-    let replace = args.get(5).is_true();
+    const ATTRIBUTE_NODE: u32 = 2;
+    let node = crate::node_handle::nid_of(scope, args.get(0));
+    let Some(parent) = crate::node_handle::nid_of(scope, args.get(1)) else { return rv.set_uint32(Refusal::ParentKind as u32) };
+    let child = (!args.get(2).is_null_or_undefined()).then(|| crate::node_handle::nid_of(scope, args.get(2)));
+    let replace = args.get(3).is_true();
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
+    let node_type = node.and_then(|n| arena.get(n)).map_or(ATTRIBUTE_NODE, |n| n.node_type());
+    let parent_type = arena.get(parent).map_or(0, |n| n.node_type());
     rv.set_uint32(refusal(arena, node, node_type, parent, parent_type, child, replace).map_or(0, |r| r as u32));
 }
 

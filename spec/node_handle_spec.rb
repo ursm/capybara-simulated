@@ -211,9 +211,9 @@ RSpec.describe 'node handles' do
       (() => {
         const tree = document.createElement('div');
         tree.innerHTML = '<form><select><option>a</option></select></form><p>x</p>';
-        const found = __dom.query(__dom.nidOf(tree), '*', false);
+        const found = __dom.query(tree, '*', false);
         const parsed = new DOMParser().parseFromString('<p>y</p>', 'text/html');
-        const inParsed = __dom.query(__dom.nidOf(parsed), 'p', false);
+        const inParsed = __dom.query(parsed, 'p', false);
         return [
           Array.isArray(found), found[0] === tree.querySelector('form'), found[1] === tree.querySelector('select'),
           Array.isArray(inParsed), inParsed[0] === parsed.querySelector('p')

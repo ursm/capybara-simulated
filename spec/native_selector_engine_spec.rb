@@ -38,7 +38,7 @@ RSpec.describe 'native selector engine' do
   def count(sel)
     session.evaluate_script(<<~JS)
       (() => {
-        const answer = __dom.query(__dom.nidOf(document), #{sel.to_json}, false);
+        const answer = __dom.query(document, #{sel.to_json}, false);
         return answer === null ? 'INVALID' : answer.length;
       })()
     JS

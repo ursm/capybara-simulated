@@ -66,10 +66,12 @@ RSpec.describe 'internal members' do
   end
 
   # Every `_` name a page can see — on an interface object, its prototype, or an instance made here (own, for…in or
-  # JSON: support/internal_names_probe.js) — is one of these: the campaign's worklist, which only shrinks. A name that is
-  # no longer visible comes off it, as an allowlisted WPT subtest that starts passing does.
+  # JSON: support/internal_names_probe.js) — and every brand keyed by a symbol of the agent's registry, which a page can
+  # make and forge (`@csim:Name` for `Symbol.for('csim.Name')`), is one of these: the campaign's worklist, which only
+  # shrinks. A name that is no longer visible comes off it, as an allowlisted WPT subtest that starts passing does.
   let(:still_visible) {
     %w[
+      @csim:EventTarget
       __aboutBaseURL _activeElement _adoptNode _alreadyStarted _appendChild _appendData _appendValid __applyAsyncImage
       __arriveAsyncImage _attachShadow _attributeMap _attrNodeFor _attrValue _baseURI _bindAttrNode _blur
       _ceInitialized _ceRegistry _checkedness _children _click _cloneNode _cloneShell _close _compareDocumentPosition

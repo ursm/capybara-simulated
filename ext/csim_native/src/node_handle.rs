@@ -524,8 +524,7 @@ pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<
     crate::dom::register(scope, ns, "liveValue", live_value, context_id);
     crate::dom::register(scope, ns, "setLiveValue", set_live_value, context_id);
     crate::dom::register(scope, ns, "nodeDocument", node_document, context_id);
-    crate::dom::register(scope, ns, "nodeDocumentIsHtml", node_document_is_html, context_id);
-    crate::dom::register(scope, ns, "nodeDocumentNid", node_document_nid, context_id);
+    crate::dom::register(scope, ns, "elementTagName", element_tag_name, context_id);
     crate::dom::register(scope, ns, "setNodeDocument", set_node_document, context_id);
     crate::dom::register(scope, ns, "setSubtreeDocument", set_subtree_document, context_id);
     let store = {
@@ -751,27 +750,45 @@ fn node_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         None => rv.set_null(),
     }
 }
-// `__dom.nodeDocumentIsHtml(node)`: whether the node document of the node `node` is the object of is an HTML document
-// (or it has none) — what an element's `tagName` asks, in one call: not through the document's object, a Proxy.
-fn node_document_is_html(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(ptr) = handle_of(scope, args.get(0)) else { return rv.set_bool(true) };
-    // SAFETY: the main thread reads the reference; the handle lives while the object, an argument, does.
-    let doc = unsafe { (*ptr.as_ref().document.get()).get(scope) }.and_then(|d| nid_of(scope, d.into()));
-    rv.set_bool(crate::document_state::is_html(&crate::dom::dom(scope).arena, doc));
-}
-// `__dom.nodeDocumentNid(node)`: the slot of the node document of the node `node` is the object of — a document's its
-// own — or -1 for none: what a selector match reads the document's mode by, in one call.
-fn node_document_nid(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(ptr) = handle_of(scope, args.get(0)) else { return rv.set_int32(-1) };
+// The node `value` is the object of, by its slot, and the slot of its node document — a document's its own — or none:
+// what an op the bindings hand a node rather than its slot reads both by, from the node's handle.
+pub(crate) fn node_and_document(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<(NodeId, Option<NodeId>)> {
+    let ptr = handle_of(scope, value)?;
     // SAFETY: the handle lives while its object, an argument, does; the main thread reads the reference.
     let h = unsafe { ptr.as_ref() };
+    let id = h.nid()?;
     let doc = match unsafe { (*h.document.get()).get(scope) } {
         Some(d) => nid_of(scope, d.into()),
-        None => h.nid().filter(|&id| crate::dom::dom(scope).arena.get(id).is_some_and(|n| n.kind == NodeKind::Document)),
+        None => crate::dom::dom(scope).arena.get(id).is_some_and(|n| n.kind == NodeKind::Document).then_some(id),
     };
-    match doc {
-        Some(id) => rv.set(v8::Number::new(scope, id.to_f64()).into()),
-        None => rv.set_int32(-1),
+    Some((id, doc))
+}
+// `__dom.elementTagName(el)`: an element's `tagName` (DOM): its qualified name, ASCII-uppercased where it is an HTML
+// element whose node document is an HTML document — exact, a lone surrogate kept; undefined for no element.
+fn element_tag_name(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some((id, doc)) = node_and_document(scope, args.get(0)) else { return };
+    let arena = &crate::dom::dom(scope).arena;
+    let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return };
+    let upper = n.ns.as_ref() == "http://www.w3.org/1999/xhtml" && crate::document_state::is_html(arena, doc);
+    let mut units: Vec<u16> = match &n.name_u16 {
+        Some(exact) => match &exact.prefix {
+            Some(p) => p.iter().copied().chain([u16::from(b':')]).chain(exact.local.iter().copied()).collect(),
+            None => exact.local.clone(),
+        },
+        None => match &n.prefix {
+            Some(p) => p.encode_utf16().chain([u16::from(b':')]).chain(n.local_name.encode_utf16()).collect(),
+            None => n.local_name.encode_utf16().collect(),
+        },
+    };
+    if upper {
+        for u in &mut units {
+            if (u16::from(b'a')..=u16::from(b'z')).contains(u) {
+                *u -= 32;
+            }
+        }
+    }
+    if let Some(name) = v8::String::new_from_two_byte(scope, &units, v8::NewStringType::Normal) {
+        rv.set(name.into());
     }
 }
 // `__dom.setNodeDocument(node, doc)` -> whether the node has a handle to keep it: its node document becomes `doc` (none

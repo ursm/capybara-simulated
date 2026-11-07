@@ -3098,7 +3098,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "latchFocusRing", latch_focus_ring, context_id);
     register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
-    register(scope, ns, "matchesId", matches_id, context_id);
+    register(scope, ns, "matches", matches, context_id);
     register(scope, ns, "closest", closest, context_id);
     register(scope, ns, "selectorValid", selector_valid, context_id);
     register(scope, ns, "pseudoElementSelector", pseudo_element_selector, context_id);
@@ -3412,9 +3412,10 @@ const IS_CONNECTED_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction:
         v8::fast_api::Int64Representation::Number,
     ),
 )];
-// __dom.relativeNode(nid, kind) -> the node DOM's accessor of `kind` names (`relative`), as `node_value` answers it.
+// __dom.relativeNode(node, kind) -> the node DOM's accessor of `kind` names of `node` (`relative`), as `node_value`
+// answers it.
 fn relative_node(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let kind = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
     let found = dom(scope).arena.relative(id, kind);
     rv.set(node_value(scope, found));
@@ -4579,25 +4580,27 @@ pub(crate) fn store_attribute(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: No
     attribute_steps(scope, cid, id, &[key], was_checked);
 }
 
-// __dom.query(rootNid, selector, docNid, firstOnly, scopeNid) -> the elements matched, in document order, as
-// `nodes_value` answers them, or `null` for an invalid selector (the caller's SyntaxError); `undefined` for a root the
-// arena does not hold.
+// The node a selector op is handed — its slot, the realm whose tree it is in (whose state the match reads), and its
+// document's mode (`document_mode`: quirks, HTML) — or none for an object that is no node of a live realm's.
+fn selector_node(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<(NodeId, i32, bool, bool)> {
+    let (id, doc) = crate::node_handle::node_and_document(scope, value)?;
+    let cid = dom(scope).arena.get(id).map(|n| n.realm).filter(|&r| r >= 0)?;
+    let (quirks, html_doc) = realm(scope, cid).document_mode(doc);
+    Some((id, cid, quirks, html_doc))
+}
+
+// __dom.query(container, selector, firstOnly, scopeEl) -> querySelector(All) on `container`: the matching descendant
+// elements, as `nodes_value` answers them — the first alone with `firstOnly` — `:scope` the element `scopeEl` (none:
+// the container); `null` for an invalid selector (the caller's SyntaxError), `undefined` for no node of a live realm's.
 fn query(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some(root) = nid_arg(scope, &args, 0) else {
-        return;
-    };
+    let Some((root, cid, quirks, html_doc)) = selector_node(scope, args.get(0)) else { return };
     let selector = args.get(1).to_rust_string_lossy(scope);
-    let cid = realm_id(scope, &args);
-    // …in the mode of the root's document (arg 2, `document_mode`); querySelector stops at the first (arg 3); `:scope`
-    // is the element arg 4 names, else the root.
-    let doc = nid_arg(scope, &args, 2);
-    let first_only = args.get(3).is_true();
-    let scope_el = nid_arg(scope, &args, 4).unwrap_or(root);
-    let (quirks, html_doc) = realm(scope, cid).document_mode(doc);
+    let first_only = args.get(2).is_true();
+    let scope_el = crate::node_handle::nid_of(scope, args.get(3)).unwrap_or(root);
     match crate::selector::query_text(realm(scope, cid), root, scope_el, &selector, first_only, quirks, html_doc) {
         Some(ids) => {
             let answer = nodes_value(scope, cid, &ids);
@@ -4607,43 +4610,34 @@ fn query(
     }
 }
 
-// __dom.matchesId(nodeNid, selector, docNid, scoped) -> bool, or `null` for an invalid selector; `undefined`
-// for a node the arena does not hold. Element.matches (`scoped`: `:scope` is the element), and the cascade's
-// does-this-element-match-this-rule.
-fn matches_id(
+// __dom.matches(el, selector) -> Element.matches, `:scope` the element: false for a node that is no element, `null` for
+// an invalid selector, `undefined` as query.
+fn matches(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
+    let Some((id, cid, quirks, html_doc)) = selector_node(scope, args.get(0)) else { return };
+    if dom(scope).arena.get(id).is_none_or(|n| n.kind != NodeKind::Element) {
+        return rv.set_bool(false);
+    }
     let selector = args.get(1).to_rust_string_lossy(scope);
-    let cid = realm_id(scope, &args);
-    let doc = nid_arg(scope, &args, 2);
-    let scoped = args.get(3).is_true();
-    let (quirks, html_doc) = realm(scope, cid).document_mode(doc);
-    match crate::selector::matches_text(realm(scope, cid), id, &selector, None, quirks, html_doc, scoped, false) {
+    match crate::selector::matches_text(realm(scope, cid), id, &selector, None, quirks, html_doc, true, false) {
         Some(hit) => rv.set_bool(hit.is_some()),
         None => rv.set_null(),
     }
 }
 
-// __dom.closest(nid, selector, docNid) -> the nearest inclusive ancestor element matching (Element.closest, `:scope`
-// the element itself), as `node_value` answers it, -1 for none; `false` for an invalid selector (the caller's
-// SyntaxError), `undefined` as matchesId.
+// __dom.closest(el, selector) -> the nearest inclusive ancestor element matching (Element.closest, `:scope` the element
+// itself), as `node_value` answers it, -1 for none; `false` for an invalid selector (the caller's SyntaxError),
+// `undefined` as query.
 fn closest(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
+    let Some((id, cid, quirks, html_doc)) = selector_node(scope, args.get(0)) else { return };
     let selector = args.get(1).to_rust_string_lossy(scope);
-    let cid = realm_id(scope, &args);
-    let doc = nid_arg(scope, &args, 2);
-    let (quirks, html_doc) = realm(scope, cid).document_mode(doc);
     match crate::selector::matches_text(realm(scope, cid), id, &selector, None, quirks, html_doc, true, true) {
         Some(Some(hit)) => rv.set(node_value(scope, Some(hit))),
         Some(None) => rv.set_int32(-1),

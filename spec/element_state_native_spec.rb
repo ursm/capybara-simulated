@@ -41,7 +41,7 @@ RSpec.describe 'element state in the native arena' do
 
   # The ids `sel` matches natively, in document order.
   def native_ids(sel)
-    session.evaluate_script("__dom.query(__dom.nidOf(document), #{sel.to_json}, false).map((n) => n.id)")
+    session.evaluate_script("__dom.query(document, #{sel.to_json}, false).map((n) => n.id)")
   end
 
   before { session.visit '/' }
@@ -280,7 +280,7 @@ RSpec.describe 'element state in the native arena' do
       ms = session.evaluate_script(<<~JS)
         (() => {
           const t = performance.now();
-          const nat = __dom.query(__dom.nidOf(document), ':indeterminate', false).length + __dom.query(__dom.nidOf(document), ':default', false).length;
+          const nat = __dom.query(document, ':indeterminate', false).length + __dom.query(document, ':default', false).length;
           return [nat, performance.now() - t];
         })()
       JS
@@ -428,7 +428,7 @@ RSpec.describe 'element state in the native arena' do
           for (let i = 0; i < 200; i++) {
             const p = document.body.appendChild(document.createElement('p'));
             p.matches(':target');
-            __dom.query(__dom.nidOf(p), ':scope:target', false);
+            __dom.query(p, ':scope:target', false);
           }
           return performance.now() - t;
         })()
