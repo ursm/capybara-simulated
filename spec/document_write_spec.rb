@@ -211,4 +211,23 @@ RSpec.describe 'document.write during parsing' do
                     %(document.write('<!DOCTYPE html><p>new</p>'); document.close(); }"></iframe><p>old-after</p>))
     expect(s.evaluate_script('document.body.textContent.trim()')).to eq('new')
   end
+
+  # …and runs no "the end" of its own for it: the document written stays loading until it is closed, its
+  # DOMContentLoaded and load the written document's, after `close()` (Chrome and Firefox, measured 2026-11-07). The
+  # aborted parse ran "the end" as its run returned, completing the document before anything closed it.
+  it 'leaves the document an open() from a frame’s load wrote loading until it is closed' do
+    s = session_for(<<~HTML)
+      <script>
+        function reopen() {
+          document.open();
+          document.write("<p>new</p><script>window.L = []; document.addEventListener('DOMContentLoaded', () => L.push('dcl')); " +
+                         "addEventListener('load', () => L.push('load'));<\\/script>");
+        }
+      </script>
+      <iframe onload="if (!window.done) { window.done = true; reopen(); }"></iframe><p>old-after</p>
+    HTML
+    expect(s.evaluate_script('[document.readyState, L.slice(), document.querySelector("p").textContent]')).to eq(['loading', [], 'new'])
+    s.execute_script('document.close()')
+    expect(s.evaluate_async_script('setTimeout(() => arguments[0]([document.readyState, L]), 50)')).to eq(['complete', %w[dcl load]])
+  end
 end
