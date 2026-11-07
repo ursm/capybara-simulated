@@ -111,7 +111,7 @@ const PERMISSIONS: &[(&str, &str, Needs)] = &[
     ("background-sync", "granted", Needs::Nothing),
     ("camera", "prompt", Needs::Nothing),
     ("captured-surface-control", "prompt", Needs::Nothing),
-    ("clipboard-read", "prompt", Needs::Nothing),
+    ("clipboard-read", "denied", Needs::Nothing),
     ("clipboard-write", "granted", Needs::Nothing),
     ("display-capture", "prompt", Needs::Nothing),
     ("fullscreen", "denied", Needs::True("allowWithoutGesture")),

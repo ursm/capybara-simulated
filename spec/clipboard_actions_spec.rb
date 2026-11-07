@@ -118,6 +118,20 @@ RSpec.describe 'Clipboard actions' do
       session.driver.with_playwright_page {|pw| pw.context.grant_permissions(['clipboard-read'], origin: 'x') }
       expect(awaited('navigator.clipboard.readText()')).to eq('x')
       expect(awaited("navigator.permissions.query({name: 'clipboard-read'}).then((p) => p.state)")).to eq('granted')
+      session.driver.clear_permissions
+      expect(awaited("navigator.permissions.query({name: 'clipboard-read'}).then((p) => p.state)")).to eq('denied')
+      expect(rejected("navigator.clipboard.writeText('x')")).to eq('NotAllowedError')
+    end
+
+    # (…a name it does not keep raises, and so does a Playwright context's method it does not take)
+    it 'refuses what it cannot grant' do
+      expect { session.driver.grant_permissions('geolocation') }.to raise_error(ArgumentError, /geolocation/)
+      session.driver.with_playwright_page do |pw|
+        expect { pw.context.bogus }.to raise_error(NoMethodError)
+        pw.context.add_cookies([{url: session.current_url, name: 'k', value: 'v'}])
+        expect(pw.context.cookies).to include({'name' => 'k', 'value' => 'v'})
+      end
+      expect(session.evaluate_script('document.cookie')).to include('k=v')
     end
   end
 
@@ -271,6 +285,70 @@ RSpec.describe 'Clipboard actions' do
       JS
       press 'c'
       expect(awaited("navigator.clipboard.read().then((items) => items[0].getType('text/html')).then((b) => b.text())")).to match(%r{\A<a href="http://[^"]+/x">l</a>\z})
+    end
+
+    # (…nothing of a document its copy's listener took out of its frame, a focused control's selection included: Chrome,
+    # Firefox)
+    it "writes nothing of a frame whose copy listener removed it" do
+      session.driver.grant_permissions('clipboard-write')
+      script(<<~JS)
+        const f = document.body.appendChild(document.createElement('iframe'));
+        const d = f.contentDocument;
+        d.body.innerHTML = '<textarea id=t>frame text</textarea>';
+        const t = d.getElementById('t');
+        t.focus();
+        t.select();
+        d.addEventListener('copy', () => f.remove());
+        window.frameCopy = d.execCommand('copy');
+      JS
+      expect(session.evaluate_script('window.frameCopy')).to be(true)
+      expect(clipboard_text).to eq('input value')
+    end
+
+    # (…an empty string a copy listener set is none of the clipboard's: Chrome)
+    it 'leaves out a type set empty' do
+      script("selectText(); document.addEventListener('copy', (e) => { e.clipboardData.setData('text/plain', ''); e.clipboardData.setData('text/x-a', 'A'); e.preventDefault(); }, {once: true});")
+      press 'c'
+      script("document.addEventListener('paste', (e) => { window.pasted = [...e.clipboardData.types]; }, {once: true});")
+      clipboard_text
+      expect(session.evaluate_script('window.pasted')).to eq(['text/x-a'])
+    end
+
+    # (…a copy's text as it shows: its edge spaces where the line shows them, no transform, an image's alt, a no-break space
+    # a plain one, a host's shadow tree; Chrome, Firefox)
+    it 'copies the text a selection shows, edge to edge' do
+      copied = lambda {|html, from, to|
+        script(<<~JS)
+          document.activeElement.blur();
+          E('plain').innerHTML = #{html.to_json};
+          const t = E('plain').firstChild;
+          #{from ? "sel(t, #{from}, t, #{to});" : "getSelection().selectAllChildren(E('plain'));"}
+        JS
+        press 'c'
+        clipboard_text
+      }
+      expect(copied.call('abc def', 0, 4)).to eq('abc ')
+      expect(copied.call('abc def', 3, 7)).to eq(' def')
+      expect(copied.call('abc def', 3, 4)).to eq(' ')
+      expect(copied.call('ab cd ef', 2, 6)).to eq(' cd ')
+      expect(copied.call('<span style="text-transform:uppercase">low</span>', nil, nil)).to eq('low')
+      expect(copied.call('a<img alt="ALT" src="x">b', nil, nil)).to eq('aALTb')
+      expect(copied.call('a&nbsp;b', nil, nil)).to eq('a b')
+      script("E('plain').innerHTML = 'a<span id=sh></span>b'; E('sh').attachShadow({mode: 'open'}).innerHTML = '<i>S</i>'; document.activeElement.blur(); getSelection().selectAllChildren(E('plain'));")
+      press 'c'
+      expect(clipboard_text).to eq('aSb')
+    end
+
+    # (…an image alone on the clipboard pasted as one, its files in the InputEvents: Chrome, Firefox)
+    it 'pastes an image the clipboard holds alone' do
+      session.driver.grant_permissions('clipboard-write')
+      awaited(<<~JS.chomp)
+        fetch('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==')
+          .then((r) => r.blob()).then((png) => navigator.clipboard.write([new ClipboardItem({'image/png': png})]))
+      JS
+      script("window.types = []; document.addEventListener('beforeinput', (e) => types.push([...e.dataTransfer.types]), {once: true}); E('hq').textContent = ''; E('h').focus(); sel(E('hq'), 0, E('hq'), 0);")
+      press 'v'
+      expect(session.evaluate_script('[window.types, E("hq").firstElementChild?.src.slice(0, 22), E("hq").firstElementChild?.alt]')).to eq([[['Files']], 'data:image/png;base64,', ''])
     end
 
     it 'keeps the clipboard where a listener added only a file and canceled' do
@@ -482,6 +560,24 @@ RSpec.describe 'Clipboard actions' do
       script("E('hq').outerHTML = '<ul id=u><li>xy</li></ul>'; E('h').focus(); const t = document.querySelector('#u li').firstChild; sel(t, 1, t, 1);")
       press 'v'
       expect(session.evaluate_script("E('u').innerHTML")).to eq('<li>x</li><li>a</li><li>y</li>')
+    end
+
+    # (…but never into what holds no caret — a void element, a raw-text one, one that shows nothing, a table, an island:
+    # Chrome, Firefox — whose end the caret stays outside of, and past what shows nothing after the last that shows)
+    it 'types after what went in where it holds no caret' do
+      typed = lambda {|html|
+        copy_markup(html)
+        script("E('hq').innerHTML = ''; E('h').focus(); sel(E('hq'), 0, E('hq'), 0);")
+        press 'v'
+        session.evaluate_script('document.activeElement').send_keys('T')
+        session.evaluate_script("E('hq').innerHTML")
+      }
+      expect(typed.call('x<br>')).to eq('xT<br>')
+      expect(typed.call('x<img alt="i">')).to eq('x<img alt="i">T')
+      expect(typed.call('<b>x</b><style>i{}</style>')).to eq('<b>xT</b><style>i{}</style>')
+      expect(typed.call('a<span hidden="">h</span>')).to eq('aT<span hidden="">h</span>')
+      expect(typed.call('a<b></b>')).to eq('aT<b></b>')
+      expect(typed.call('a<b><span contenteditable="false">r</span></b>')).to eq('a<b><span contenteditable="false">r</span></b>T')
     end
 
     # (…typed after it, in it: Chrome, Firefox)

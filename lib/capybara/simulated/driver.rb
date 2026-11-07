@@ -259,20 +259,30 @@ module Capybara
       #
       #   page.driver.grant_permissions('clipboard-read', 'clipboard-write')
       def grant_permissions(*names)
-        names.flatten.each {|name| current_browser.set_clipboard_permission(name.to_s, 'granted') }
+        names.flatten.each {|name| current_browser.set_permission(name.to_s, 'granted') }
+      end
+
+      # …and back to what the browser gives a page itself.
+      def clear_permissions
+        current_browser.clear_permissions
       end
 
       class FakePlaywrightPage
         def initialize(browser) = (@browser = browser)
 
-        # (…`pw_page.context.grant_permissions(names, origin:)`, a Playwright test's way to the clipboard: the session's)
+        # (…`pw_page.context`, a Playwright test's way to the browser: its permissions and cookies the session's, a CDP
+        # session to say what our engine has no use for — and nothing else, which raises)
         FakeContext = Struct.new(:browser) do
-          def grant_permissions(names, **)
-            Array(names).each {|name| browser.set_clipboard_permission(name.to_s, 'granted') }
-          end
-
-          def method_missing(*) = self
-          def respond_to_missing?(*) = true
+          def grant_permissions(names, **) = Array(names).each {|name| browser.set_permission(name.to_s, 'granted') }
+          def clear_permissions = browser.clear_permissions
+          def add_cookies(cookies) = browser.add_cookies(cookies)
+          def cookies(*) = browser.cookies
+          def new_cdp_session(*) = FakeCdpSession.new
+        end
+        # (…a CDP session's messages — a timezone override, a debugger — taken and answered with nothing)
+        class FakeCdpSession
+          def send_message(*, **) = {}
+          def detach = nil
         end
 
         def context = FakeContext.new(@browser)

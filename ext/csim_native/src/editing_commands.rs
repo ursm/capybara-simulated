@@ -270,7 +270,7 @@ fn str_value<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8:
 // __dom.commandPlan(command, activeNid | -1, selection | null, hasView, asked, partition) -> [step, node | null, flags,
 // inputType, name, pasted] (`command_plan`, `STEP_*`; `PLAN_*`; the `inputType` of the InputEvents it fires, '' for none;
 // its name as `COMMANDS` spells it; what a paste goes on to insert, that the session's clipboard holds — its markup in an
-// editing host that takes it, else its text — null for none and for any other command), the document's active element, its
+// editing host that takes it (an image's, `pasted_image`, where it holds that alone), else its text — null for none and for any other command), the document's active element, its
 // selection's state, whether it has a browsing context, who asks (`ASKED_BY_SCRIPT` …) and the session's partition given —
 // undefined for no command.
 fn command_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -285,7 +285,12 @@ fn command_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let arena = realm(scope, cid);
     let plaintext = step == STEP_HOST && node.is_some_and(|host| arena.get(host).is_some_and(plaintext_only));
     let pasting = action == Action::Paste && asked != ASKED_BY_SCRIPT && matches!(step, STEP_CONTROL | STEP_HOST);
-    let markup = if pasting && step == STEP_HOST && !plaintext { crate::system_clipboard::text_of(partition, "text/html") } else { Vec::new() };
+    let markup = if pasting && step == STEP_HOST && !plaintext {
+        let html = crate::system_clipboard::text_of(partition, "text/html");
+        if html.is_empty() { crate::system_clipboard::pasted_image(partition).map_or_else(Vec::new, |m| m.encode_utf16().collect()) } else { html }
+    } else {
+        Vec::new()
+    };
     let pasted = if !markup.is_empty() {
         markup.clone()
     } else if pasting {
@@ -743,8 +748,8 @@ fn edit_insert_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let caret = match edit.fragment(scope, range.0, &kids, &descendants) {
         Some((node, offset)) if pasted => {
             let arena = realm(scope, cid);
-            let last = arena.get(node).and_then(|n| n.children.get((offset as usize).wrapping_sub(1)).copied());
-            let (node, offset) = last.map_or((node, offset), |last| crate::editing_insert::deep_end(arena, last));
+            let before = arena.get(node).map_or(&[][..], |n| &n.children[..(offset as usize).min(n.children.len())]);
+            let (node, offset) = crate::editing_insert::shown_end(arena, before).unwrap_or((node, offset));
             Caret::At(node, offset)
         }
         Some((node, offset)) => Caret::At(node, offset),

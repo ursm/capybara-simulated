@@ -2971,9 +2971,42 @@ module Capybara
       #   set_geolocation(latitude: 1, longitude: 2, accuracy: 5, altitude: 10)
       #   set_geolocation(denied: true)  # report PERMISSION_DENIED
       #   set_geolocation                # clear -> report POSITION_UNAVAILABLE
-      def set_clipboard_permission(name, state)
+      # The permissions a session's driver may say of a page, and what it says them with: `clipboard-read` and
+      # `clipboard-write` (the session's, system_clipboard.rs); `geolocation` is `set_geolocation`'s, with a position.
+      PERMISSIONS = %w[clipboard-read clipboard-write].freeze
+
+      def set_permission(name, state)
+        raise ArgumentError, "no permission #{name.inspect} to set here (#{PERMISSIONS.join(', ')}; geolocation: set_geolocation)" unless PERMISSIONS.include?(name)
+
         @runtime.call('__csimSetClipboardPermission', name, state)
         nil
+      end
+
+      def clear_permissions
+        PERMISSIONS.each {|name| @runtime.call('__csimSetClipboardPermission', name, 'prompt') }
+        nil
+      end
+
+      # Playwright's `context.add_cookies` / `cookies`: each cookie set as a response from its `url` (or its `domain` and
+      # `path`, over the page's scheme) would set it; the cookies the page's URL is sent.
+      def add_cookies(cookies)
+        cookies.each do |c|
+          c = c.transform_keys(&:to_s)
+          url = c['url'] || "#{parse_url(page_url.to_s)&.fetch(:protocol) || 'http:'}//#{c['domain'].to_s.delete_prefix('.')}#{c['path'] || '/'}"
+          line = +"#{c['name']}=#{c['value']}"
+          line << "; Path=#{c['path']}" if c['path']
+          line << "; Domain=#{c['domain']}" if c['domain']
+          line << '; Secure' if c['secure']
+          line << '; HttpOnly' if c['httpOnly']
+          Native.cookie_jar_set(@cookie_jar, url, line, Native.document_cookie_context(url), cookie_now)
+        end
+        nil
+      end
+
+      def cookies
+        url = page_url.to_s
+        line = RuntimeShared.utf8_text(Native.cookie_jar_get(@cookie_jar, url, Native.document_cookie_context(url), cookie_now))
+        line.split('; ').filter_map {|pair| name, value = pair.split('=', 2); {'name' => name, 'value' => value.to_s} unless name.to_s.empty? }
       end
 
       def set_geolocation(latitude: nil, longitude: nil, accuracy: 10, denied: false, **rest)

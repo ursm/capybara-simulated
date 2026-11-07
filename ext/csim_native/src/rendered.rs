@@ -344,6 +344,8 @@ struct Walk<'a> {
     root: NodeId,
     // (…the range it reads, where it reads one: what is outside it none of its text, nor its breaks)
     clip: Option<((NodeId, u32), (NodeId, u32))>,
+    // (…the tree the range is in: a shadow tree a host in the range renders, whole)
+    clip_root: Option<NodeId>,
     // Nothing rendered yet: a leading collapsible space is dropped.
     at_start: bool,
     // The last thing rendered was a collapsible space.
@@ -403,6 +405,15 @@ impl Walk<'_> {
             if tag(node) == "textarea" && id != self.root {
                 return Vec::new();
             }
+            // (…an image a copy takes as its `alt`, Chrome and Firefox)
+            if self.clip.is_some() && tag(node) == "img" && !hidden {
+                if let Some(alt) = node.plain_attr_units("alt").filter(|a| !a.is_empty()) {
+                    self.last_collapsible_only = false;
+                    self.any_rendered = true;
+                    self.ends_collapsible = false;
+                    return alt.to_vec();
+                }
+            }
             if tag(node) == "br" {
                 // (…a `display: contents` one is no break: `aa<br>bb` is one line)
                 if id == self.root || hidden || !generates_box(arena, id) {
@@ -443,7 +454,11 @@ impl Walk<'_> {
         let flex_context = node.kind == NodeKind::Element && primary_style(arena, id).is_some_and(|s| {
             matches!(s.get_box().clone_display().inside(), DisplayInside::Flex | DisplayInside::Grid)
         });
-        let host_root = node.shadow_root.filter(|_| node.kind == NodeKind::Element);
+        // (…a copy's the flat tree: a host's shadow tree with what its slots take — Chrome, Firefox — where `innerText` reads
+        // the node tree, a host's light children through the slots they are assigned to)
+        let flat = self.clip.is_some();
+        let host_root = node.shadow_root.filter(|_| node.kind == NodeKind::Element && !flat);
+        let kids = if flat { crate::geometry::flat_children(arena, node) } else { &node.children[..] };
         let mut out: Vec<u16> = Vec::new();
         // Required line breaks are PENDING until something is written after them: they merge (consecutive
         // requirements collapse to the largest), and collapsible white space next to one renders nothing.
@@ -451,9 +466,9 @@ impl Walk<'_> {
         // (…and those owed before anything is written here, which are the parent's to put in front of it)
         let mut leading = 0u32;
         let mut collapsible_only = true;
-        for &c in &node.children {
+        for &c in kids {
             let Some(cn) = arena.get(c) else { continue };
-            if self.clip.is_some_and(|clip| !intersects(arena, c, clip)) {
+            if self.clip.is_some_and(|clip| !intersects(arena, c, clip, self.clip_root)) {
                 continue;
             }
             let mut inherited = hidden;
@@ -630,7 +645,8 @@ impl Walk<'_> {
                 out
             }
         };
-        let mut text = apply_transform(raw, transform, !self.in_word);
+        // (…a copy's text as the page has it: no `text-transform`, Chrome and Firefox)
+        let mut text = if self.clip.is_some() { raw } else { apply_transform(raw, transform, !self.in_word) };
         if let Some(&last) = text.last() {
             self.in_word = char::from_u32(u32::from(last)).is_some_and(continues_word);
         }
@@ -733,19 +749,53 @@ fn has_next_cell(arena: &RealmArena, parent: &NodeData, cell: NodeId) -> bool {
 pub(crate) fn visible_text(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> Vec<u16> {
     visible_text_in(engine, arena, id, None, now)
 }
-// (…whether `id` has any of the range in it)
-fn intersects(arena: &RealmArena, id: NodeId, (start, end): ((NodeId, u32), (NodeId, u32))) -> bool {
+fn tree_root(arena: &RealmArena, mut id: NodeId) -> NodeId {
+    while let Some(p) = arena.parent_of(id) {
+        id = p;
+    }
+    id
+}
+// (…whether `id` has any of the range in it: all of a tree other than the range's, which a host the range holds renders)
+fn intersects(arena: &RealmArena, id: NodeId, (start, end): ((NodeId, u32), (NodeId, u32)), root: Option<NodeId>) -> bool {
     let Some(parent) = arena.parent_of(id) else { return true };
+    if root.is_some_and(|r| tree_root(arena, parent) != r) {
+        return true;
+    }
     let at = arena.child_index(id) as u32;
     crate::ranges::compare_points(arena, start, (parent, at + 1)) == Some(std::cmp::Ordering::Less)
         && crate::ranges::compare_points(arena, end, (parent, at)) == Some(std::cmp::Ordering::Greater)
 }
 // The rendered text of what a Range holds — `innerText`'s of the element holding it, read within it: what a copy holds as
-// text/plain (`<p>one</p><p>two</p>` is `one\n\ntwo`, `display: none` nothing; Chrome, Firefox).
+// text/plain (`<p>one</p><p>two</p>` is `one\n\ntwo`, `display: none` nothing; Chrome, Firefox) — a no-break space a plain
+// one, and a space the range starts or ends with kept where the line shows it, between what is before and after the range
+// (`abc |def` selected from the space is ` def`), Chrome and Firefox.
 pub(crate) fn range_text(engine: &mut StyleEngine, arena: &RealmArena, start: (NodeId, u32), end: (NodeId, u32), now: f64) -> Vec<u16> {
     let common = crate::ranges::common_ancestor(arena, start.0, end.0);
     let root = if arena.is_element(common) || arena.get(common).is_some_and(|n| n.kind == NodeKind::Document) { common } else { arena.parent_of(common).unwrap_or(common) };
-    visible_text_in(engine, arena, root, Some((start, end)), now)
+    let mut text = visible_text_in(engine, arena, root, Some((start, end)), now);
+    for u in text.iter_mut() {
+        if *u == 0xA0 {
+            *u = SPACE;
+        }
+    }
+    let space = |u: u16| matches!(u, 0x20 | 0x09 | 0x0A | 0x0D | 0xA0);
+    let data = |id: NodeId| arena.get(id).filter(|n| n.kind == NodeKind::Text).map(|n| &n.data[..]);
+    let edge = |(node, offset): (NodeId, u32), forward: bool| -> bool {
+        let Some(d) = data(node) else { return false };
+        let k = (offset as usize).min(d.len());
+        // (…the range's first or last unit a space, and content on its line beyond it, outside the range)
+        let (inside, outside) = if forward { (d[..k].last(), &d[k..]) } else { (d[k..].first(), &d[..k]) };
+        inside.is_some_and(|&u| space(u))
+            && (outside.iter().any(|&u| !space(u)) || crate::editing::line_edge(arena, node, forward) == crate::editing::Edge::Content)
+            && crate::rendered::collapses_white_space(arena, arena.parent_of(node))
+    };
+    if edge(start, false) && text.first() != Some(&SPACE) {
+        text.insert(0, SPACE);
+    }
+    if edge(end, true) && text.last() != Some(&SPACE) {
+        text.push(SPACE);
+    }
+    text
 }
 fn visible_text_in(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, clip: Option<((NodeId, u32), (NodeId, u32))>, now: f64) -> Vec<u16> {
     let Some(node) = arena.get(id) else { return Vec::new() };
@@ -765,6 +815,7 @@ fn visible_text_in(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, cli
         now,
         root: id,
         clip,
+        clip_root: clip.map(|((start, _), _)| tree_root(arena, start)),
         at_start: true,
         ends_collapsible: false,
         break_pending: false,

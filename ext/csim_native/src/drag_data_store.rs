@@ -167,8 +167,9 @@ impl Store {
     }
     fn clipboard_write(&self) -> ClipboardWrite {
         let text = |units: &[u16]| String::from_utf16_lossy(units);
+        // (…a string set empty no part of it: Chrome)
         if self.items.iter().any(|i| !i.file) {
-            let strings = self.items.iter().filter(|i| !i.file);
+            let strings = self.items.iter().filter(|i| !i.file && !i.data.is_empty());
             return ClipboardWrite::Items(strings.map(|i| (text(&i.kind_type), text(&i.data).into_bytes())).collect());
         }
         // (…only a file's, whose bytes are the bindings': the clipboard as it was, Firefox; Chrome holds the file)

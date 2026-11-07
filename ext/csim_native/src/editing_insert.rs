@@ -146,31 +146,70 @@ fn insertion_point(arena: &RealmArena, place: (NodeId, u32)) -> (NodeId, u32) {
 // that point, whose place the Editing draft says, stays (editing/run/inserttext).
 fn typing_place(arena: &RealmArena, place: (NodeId, u32)) -> (NodeId, u32) {
     let Some(n) = arena.get(place.0).filter(|n| n.kind == NodeKind::Element) else { return place };
-    match (place.1 as usize).checked_sub(1).and_then(|k| n.children.get(k)) {
-        Some(&last) if typed_into(arena, last) => deep_end(arena, last),
-        _ => place,
+    let before = &n.children[..(place.1 as usize).min(n.children.len())];
+    shown_end(arena, before).unwrap_or(place)
+}
+// The end of what typing after `nodes` goes into: their last that shows anything, past what shows nothing (a style, a script,
+// a `display: none` or `hidden` element, an empty one, a comment: `<b>x</b><style>…</style>`, typed after, is `<b>xT</b>`,
+// Chrome; a `<br>` is a line's end, no nothing) — none where that one holds no caret at its end.
+pub(crate) fn shown_end(arena: &RealmArena, nodes: &[NodeId]) -> Option<(NodeId, u32)> {
+    let last = nodes.iter().rev().copied().find(|&c| !shows_nothing(arena, c))?;
+    typing_end(arena, last)
+}
+fn shows_nothing(arena: &RealmArena, id: NodeId) -> bool {
+    let Some(d) = arena.get(id) else { return true };
+    match d.kind {
+        NodeKind::Comment | NodeKind::ProcessingInstruction => true,
+        NodeKind::Text => d.data.is_empty(),
+        NodeKind::Element => {
+            ["script", "style", "template", "title", "meta", "link", "base", "noscript"].iter().any(|t| (*d.local_name).eq_ignore_ascii_case(t))
+                || (crate::geometry::box_style(arena, id).is_some() && !crate::rendered::has_own_box(arena, id))
+                || d.plain_attr("hidden").is_some_and(|v| !v.eq_ignore_ascii_case("until-found"))
+                || (!d.is_html_named("br") && !crate::editing::has_content(arena, id))
+        }
+        _ => false,
     }
 }
-// Whether what is typed at the end of `id` goes into it: an element of the host's that holds text — no link, whose edge
-// `out_of_link` keeps it out of, no void or atomic one, no island.
-fn typed_into(arena: &RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|d| d.kind == NodeKind::Element && !crate::caret::CARET_VOID_TAGS.contains(&&*d.local_name) && !d.is_html_named("a") && !d.is_html_named("template"))
+// Whether `id` can hold a caret typed text goes in at its end — an element of the host's that shows inline or block
+// content of its own: editable (no island), rendered (no `display: none`), not raw text (a script, a style, a textarea's or a
+// title's text is no line), not replaced or void (a `<br>`, an image, a control, a frame), not a table or one of its parts,
+// whose content no caret after it reaches, not a link, whose edge `out_of_link` keeps a caret out of, not a template. The
+// Editing draft's own rules have it so in part: "editable", and its "visible" (no `display: none`, none of a collapsed
+// whitespace's or line break's) for what the caret may be beside.
+const NO_CARET_INSIDE: [&str; 26] = [
+    "script", "style", "xmp", "textarea", "title", "noscript", "noframes", "noembed", "iframe", "plaintext", "template", "select",
+    "option", "optgroup", "datalist", "button", "img", "input", "video", "audio", "canvas", "object", "embed", "svg", "math", "a",
+];
+fn holds_caret(arena: &RealmArena, id: NodeId) -> bool {
+    let Some(d) = arena.get(id).filter(|d| d.kind == NodeKind::Element) else { return false };
+    !crate::caret::CARET_VOID_TAGS.contains(&&*d.local_name)
+        && !NO_CARET_INSIDE.iter().any(|t| (*d.local_name).eq_ignore_ascii_case(t))
+        && !crate::editing::table_part(arena, id)
         && arena.editing_host(id).is_some()
         && !crate::rendered::is_atomic_inline(arena, id)
+        && (crate::geometry::box_style(arena, id).is_none() || crate::rendered::has_own_box(arena, id))
 }
-// The end of `id`'s last leaf, down what is typed into: the end of a text there, else the place after the last child that
-// is none of those.
-pub(crate) fn deep_end(arena: &RealmArena, id: NodeId) -> (NodeId, u32) {
+// The end of the last text that shows down the end of `id` — through what holds a caret, each one's last child — where
+// there is one: none where that ends in anything else (`<b>x<br></b>`, an empty `<b>`, a `<b>` ending in a non-editable
+// island), whose end the caret stays outside of (Chrome, Firefox).
+pub(crate) fn typing_end(arena: &RealmArena, id: NodeId) -> Option<(NodeId, u32)> {
     let mut at = id;
     loop {
-        let Some(n) = arena.get(at) else { return (at, 0) };
+        let n = arena.get(at)?;
         if n.kind == NodeKind::Text {
-            return (at, n.data.len() as u32);
+            let shows = arena.parent_of(at).is_some_and(|p| p == id && at == id || holds_caret(arena, p));
+            return (shows && !n.data.is_empty()).then_some((at, n.data.len() as u32));
         }
-        match n.children.last().copied() {
-            Some(last) if arena.get(last).is_some_and(|d| d.kind == NodeKind::Text) || typed_into(arena, last) => at = last,
-            _ => return (at, n.children.len() as u32),
+        // (…a `<br>` ending its block's line: before it, as `insertion_point` takes a place there: `<b>a<br></b>`, typed
+        // after, is `<b>aT<br></b>`, Chrome)
+        if n.is_html_named("br") && at != id && line_edge(arena, at, true) == Edge::Block {
+            return Some((arena.parent_of(at)?, arena.child_index(at) as u32));
         }
+        if !holds_caret(arena, at) {
+            return None;
+        }
+        let kids = &n.children;
+        at = *kids.iter().rev().find(|&&c| !shows_nothing(arena, c))?;
     }
 }
 // The place outside the link `(node, offset)` is at the start or the end of — the inline elements between ending or

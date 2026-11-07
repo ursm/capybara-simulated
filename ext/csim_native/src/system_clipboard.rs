@@ -182,6 +182,17 @@ fn paste_strings(partition: u64, rich_only: bool) -> Vec<(String, Vec<u16>)> {
     });
     entries.map(|(key, bytes)| (key.clone(), String::from_utf8_lossy(bytes).encode_utf16().collect())).collect()
 }
+// The markup a paste of an image-only clipboard inserts into an editing host: the image, its data its URL (Chrome and
+// Firefox insert an `<img>`) — none where the clipboard holds text or markup, or no image.
+pub(crate) fn pasted_image(partition: u64) -> Option<String> {
+    let reg = lock();
+    let c = reg.get(&partition)?;
+    if c.entries.iter().any(|(key, bytes)| matches!(key.as_str(), "text/plain" | "text/html") && !bytes.is_empty()) {
+        return None;
+    }
+    let (_, bytes) = c.entries.iter().find(|(key, _)| key == "image/png")?;
+    Some(format!("<img src=\"data:image/png;base64,{}\" alt=\"\">", crate::data_url::base64_encode(bytes)))
+}
 // __dom.clipboardFillStore(store, partition, richOnly): `paste_strings` added to a DataTransfer's store (drag_data_store.rs).
 fn fill_store_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let partition = args.get(1).integer_value(scope).unwrap_or(0) as u64;

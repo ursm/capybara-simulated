@@ -294,4 +294,32 @@ RSpec.describe 'inserting in an editing host' do
       selected.call('document.body, 0', 'e.firstChild, 1', 'x')
     ]).to eq([island, island, 'ax<span contenteditable="false">XY</span>b', island])
   end
+
+  # A user's typing at a caret after an element goes into its end where that holds a caret, through what shows nothing after
+  # it — not into a void element, a raw-text one, a table's cell, an empty element or an island (Chrome, Firefox).
+  it 'types into the end of what is before the caret only where it holds one' do
+    session = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable></div>']]
+    }).tap {|s| s.visit '/' }
+    typed = lambda {|html|
+      session.execute_script(<<~JS)
+        const e = document.getElementById('e');
+        e.innerHTML = #{html.to_json};
+        e.focus();
+        const p = e.firstElementChild;
+        getSelection().collapse(p, p.childNodes.length);
+      JS
+      session.find(:css, '#e').send_keys('T')
+      session.evaluate_script("document.getElementById('e').innerHTML")
+    }
+    expect(typed.call('<p><b>x</b></p>')).to eq('<p><b>xT</b></p>')
+    expect(typed.call('<p><b>a<br></b></p>')).to eq('<p><b>aT<br></b></p>')
+    expect(typed.call('<p>a<style>x{}</style></p>')).to eq('<p>aT<style>x{}</style></p>')
+    expect(typed.call('<p>a<script>1</script></p>')).to eq('<p>aT<script>1</script></p>')
+    expect(typed.call('<p>a<b></b></p>')).to eq('<p>aT<b></b></p>')
+    expect(typed.call('<p>a<span style="display:none">h</span></p>')).to eq('<p>aT<span style="display:none">h</span></p>')
+    expect(typed.call('<p>a<select><option>o</option></select></p>')).to eq('<p>a<select><option>o</option></select>T</p>')
+    expect(typed.call('<div><table><tbody><tr><td>c</td></tr></tbody></table></div>')).to eq('<div><table><tbody><tr><td>c</td></tr></tbody></table>T</div>')
+    expect(typed.call('<p><b>a<span contenteditable="false">r</span></b></p>')).to eq('<p><b>a<span contenteditable="false">r</span></b>T</p>')
+  end
 end
