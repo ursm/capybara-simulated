@@ -150,6 +150,19 @@ RSpec.describe 'the platform\'s token for its own constructions' do
         WebSocket: (arg) => [`ws://a.test/${String(arg)}`],
         EventSource: (arg) => [arg],
         Worker: (arg) => [arg],
+        Blob: (arg) => [[arg]],
+        Request: (arg) => [arg],
+        Response: (arg) => [arg],
+        URL: (arg) => [arg, 'http://a.test/'],
+        URLSearchParams: (arg) => [[[arg, 'v']]],
+        Headers: () => [[[{ toString() { log.push('arg'); return 'x'; } }, 'v']]],
+        TextDecoder: (arg) => ['utf-8', { get fatal() { log.push('arg'); return false; } }],
+        DOMPointReadOnly: (arg) => [arg],
+        DOMRectReadOnly: (arg) => [arg],
+        DOMQuad: (arg) => [{ get x() { log.push('arg'); return 0; } }],
+        MutationObserver: (arg) => [() => { log.push('no'); }],
+        KeyframeEffect: (arg) => [null, [], { get duration() { log.push('arg'); return 1; } }],
+        Animation: (arg) => [null, document.timeline],
         Option: (arg) => [arg],
         Image: (arg) => [arg],
         Audio: (arg) => [arg]
@@ -172,7 +185,9 @@ RSpec.describe 'the platform\'s token for its own constructions' do
         return [name, log.join('>').replace(/^(arg>)+/, 'arg>')];
       });
     JS
-    expect(got).to all(satisfy {|_name, order| order == 'arg>proto' })
+    # (…MutationObserver's and Animation's arguments no user code: its `prototype` read once)
+    expect(got.to_h.reject {|name, _| %w[MutationObserver Animation].include?(name) }.values.uniq).to eq(['arg>proto'])
+    expect(got.to_h.values_at('MutationObserver', 'Animation')).to eq(%w[proto proto])
   end
 
   it 'answers a class without `new` and with another NewTarget as a class does', :every_host_local do
