@@ -5699,36 +5699,34 @@ module Capybara
         was_in_place = @sw_waiting_in_place
         @sw_waiting_in_place = true if in_place
         while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
-          step_sw_jobs_in_place if in_place
+          if in_place
+            # (…the guard not spent on a job's fetch, on this thread: the worker can't be waited on while that waits on the app)
+            stepping = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            step_sw_jobs_in_place
+            deadline += Process.clock_gettime(Process::CLOCK_MONOTONIC) - stepping
+          end
           job_under_way = in_place && Native.sw_job_under_way(@sw_partition)
           reply = @worker_host.await_reply(fetch_id, [left, job_under_way ? WORKER_RESUME_POLL : WORKER_POLL_INTERVAL].min)
-          # (…a worker waiting on the network — its own fetch, on its own thread — is no hang, however long an app takes)
+          # (…a worker waiting on the network — its own fetch, on its own thread — is no hang, however long that takes)
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + budget if worker&.dig(:on_network)
-          # (…none from a worker whose thread is gone — a request it never took answered as it was reaped, so this one it
-          # took and dropped)
-          break if !reply && worker && worker[:thread] && !worker[:thread].alive?
           took = worker && worker[:took][fetch_id]
           # (…the worker's time it took so far, to its answer where that is out)
           spent = took && ((reply && worker[:answered][fetch_id]) || worker[:now]).to_f - took
-          # (…an answer later than the timeout no answer: the timeout came first)
-          if spent && timeout_ms.positive? && spent >= timeout_ms
+          # (…seen so twice running, a poll apart: its state read between its steps)
+          stalled = spent && stops_window && !waiting && !job_under_way && worker_stalled?(worker) ? stalled + 1 : 0
+          gone = worker && worker[:thread] && !worker[:thread].alive?
+          case Native.sw_answer_wait(!reply.nil?, gone == true, spent, timeout_ms.to_f, limit.to_f, stalled)
+          when 'answer' then return reply
+          when 'timeout'
             limit = timeout_ms
             return TIMEOUT_REPLY
+          when 'give up' then break
           end
-          return reply if reply
-          next unless took
-
-          break if spent >= limit
-
-          # (…seen so twice running, a poll apart: its state read between its steps)
-          stalled = stops_window && !waiting && !job_under_way && worker_stalled?(worker) ? stalled + 1 : 0
-          break if stalled >= 2
         end
-        # A worker that took none of the budget's time to answer, its thread still in there: a hang, a handler spinning. Its
-        # isolate ended, so no later request waits it out too: a dead worker routes nothing (a user agent's own "the service
-        # worker is unresponsive": Chrome after 62 s, Firefox after 60 s, measured). A wait a worker's thread makes leaves it
-        # to the window.
-        worker_terminate(@workers.key(worker)) if in_place && worker && left <= 0 && worker[:service] && @workers.key(worker)
+        # A wait that ran out on a hang, a handler spinning: its isolate ended, so no later request waits it out too — a dead
+        # worker routes nothing (a user agent's own "the service worker is unresponsive": Chrome after 62 s, Firefox after
+        # 60 s, measured). A wait a worker's thread makes leaves it to the window.
+        worker_terminate(@workers.key(worker)) if in_place && worker&.dig(:service) && @workers.key(worker) && Native.sw_hung(left <= 0, worker[:inbox].num_waiting.positive?, worker[:on_network] == true)
         nil
       ensure
         if in_place
@@ -6110,17 +6108,11 @@ module Capybara
       end
 
       # A fetch event the worker `handle` holds as it takes it, until it answers (its response's head, for a stream) or the
-      # request gives up on it: an event pending, which holds a successor at Try Activate and the registration at Try Clear
-      # (Service Worker Has No Pending Events) — a handler's own `unregister()` still answers its request.
-      private def sw_fetch_event_begun(handle, record, realm, fid)
-        (record[:fetch_events] ||= {})[[realm, fid]] = true
-        Native.sw_hold(@sw_partition, handle, 'fetch', true)
-      end
+      # request gives up on it, by the registry (`fetch_event`): an event pending, which holds a successor at Try Activate and
+      # the registration at Try Clear — a handler's own `unregister()` still answers its request — their wakeup where one waits.
+      private def sw_fetch_event_begun(handle, realm, fid) = Native.sw_fetch_event(@sw_partition, handle, realm, fid, true)
       private def sw_fetch_event_over(handle, realm, fid)
-        events = @workers.dig(handle.to_i, :fetch_events)
-        return unless events&.delete([realm, fid])
-
-        sw_job_event({try_activate: true}) if Native.sw_hold(@sw_partition, handle.to_i, 'fetch', false)
+        sw_job_event({try_activate: true}) if Native.sw_fetch_event(@sw_partition, handle.to_i, realm, fid, false)
       end
 
       # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
@@ -7312,7 +7304,7 @@ module Capybara
       # `'coop_switch'`, whether they need a browsing context group switch)
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
                                  referrer_policy: nil, initiator_realm: nil, link_policy: nil, sandbox: nil, download_realm: container_realm, user_activated: false,
-                                 coop_realm: nil)
+                                 coop_realm: nil, replaces_realm: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # A caller in a script (`defer_ok`: the iframe build, a form submission to a named frame
@@ -7392,7 +7384,7 @@ module Capybara
           frame_type:         dest == 'document' ? 'auxiliary' : 'nested',
           origin_url:         origin_url,
           client_id:          initiating[:client_id],
-          replaces_client_id: (sw_client_id(coop_realm) if coop_realm),
+          replaces_client_id: coop_realm ? sw_replaced_document(coop_realm) : (replaces_realm ? sw_replaced_document(replaces_realm) : [mint_resulting_client_id, container_realm && document_origin(container_realm)]),
           is_reload:          is_reload,
           coop_realm:         coop_realm
         )
@@ -7496,7 +7488,7 @@ module Capybara
                site_seed:             seed,
                origin_null:           tainted,
                client_id:             client_id,
-               replaces_client_id:    replaces_client_id,
+               replaces_client_id:    (replaces_client_id[0] if replaces_client_id && replaces_client_id[1] == url_origin(target)),
                resulting_client_id:   rid,
                cookie_cross_site:     cookie_cross,
                navigation_cross_site: fetch.cross_site?,
@@ -9286,6 +9278,8 @@ module Capybara
         @worker_init_lock.synchronize { @workers = {} }
         @worker_outbox.clear
         @worker_outbox_head = nil
+        @sw_job_events.clear
+        @sw_realm_tells.clear
         @held_controller_changes.clear
         # Nothing owed, streamed, raced, awaited or held for any more, and no client id adopted: the adopted ids go with
         # the client registry (the reserved ids a navigation mints are the process's, never reset — `mint_resulting_client_id`).
@@ -10151,7 +10145,7 @@ module Capybara
               fid        = msg[:fetch_id].to_i
               # (…one awaited in place taken now, its time the one its waiter counts from: `await_worker_reply`)
               record[:took][fid] = worker_now if record && (fid.negative? || WorkerHost.direct?(fid))
-              sw_fetch_event_begun(handle, record, msg[:realm_id].to_i, fid) if record
+              sw_fetch_event_begun(handle, msg[:realm_id].to_i, fid)
               begin
                 rt.call('__csim_swDispatchFetch', msg[:req], fid, msg[:realm_id], fid.negative? || WorkerHost.direct?(fid))
                 dispatched = true
@@ -12180,7 +12174,7 @@ module Capybara
           frame_type:         'nested',
           origin_url:         origin_url,
           client_id:          client_id,
-          replaces_client_id: sw_client_id(realm_id),
+          replaces_client_id: sw_replaced_document(realm_id),
           is_reload:          is_reload,
           is_history:         is_history,
           # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
@@ -12521,6 +12515,9 @@ module Capybara
         _url, _policy, opaque, _realm, _source, cross_site_ancestor = request_client(realm)
         {origin_null: opaque == true, initiator_cross_site_ancestor: cross_site_ancestor == true, client_id: sw_client_id(realm)}
       end
+      # The document a navigation replaces, `[its client id, its origin]`: `event.replacesClientId`, HTML's "replaces client id",
+      # for a request of its origin alone (w3c/ServiceWorker#1679 asks for that check, open: Chrome and Firefox expose none).
+      private def sw_replaced_document(realm) = [sw_client_id(realm), document_origin(realm)]
       # …realm `realm` where its document is still there — loaded or loading — else the page's, whose script began the
       # navigation as the source snapshot names it: another window's plan is never left an address bar's, of no
       # initiator (`navigation_initiator`).
@@ -12913,7 +12910,7 @@ module Capybara
             frame_type:         'top-level',
             origin_url:         origin || initiator,
             client_id:          client_id || (sw_client_id(0) if traversed),
-            replaces_client_id: (sw_client_id(0) if window_has_document?),
+            replaces_client_id: (sw_replaced_document(0) if window_has_document?),
             is_reload:          is_reload,
             is_history:         from_history && !is_reload,
             coop_realm:         0,
@@ -13704,7 +13701,7 @@ module Capybara
       # (…`transport` the caller's own, where it sends every hop the app does not serve itself — an event stream's, which
       # Net::HTTP would read whole: `event_stream_transport`; the app's own it answers as it answers any, on the caller's
       # thread, its body read as the app writes it)
-      # (…a worker's thread marked as it waits on the app: no hang of its own, `await_worker_reply`)
+      # (…a worker's thread marked as it waits on the network, the app's or another host's: no hang, `await_worker_reply`)
       private def on_network
         record = Thread.current[:csim_worker_record]
         return yield unless record
@@ -13716,7 +13713,8 @@ module Capybara
           record[:on_network] = false
         end
       end
-      def dispatch_rack_or_http(url, env, method: 'GET', body: nil, transport: nil)
+      def dispatch_rack_or_http(url, env, method: 'GET', body: nil, transport: nil) = on_network { dispatched(url, env, method:, body:, transport:) }
+      private def dispatched(url, env, method:, body:, transport:)
         # (…its Fetch Metadata sent to a potentially trustworthy URL alone — Fetch "append the Fetch metadata headers for a
         # request" — which the request's own verdicts read all the same: its SameSite cookies, already attached)
         env = env.reject {|k, _| k.start_with?('HTTP_SEC_FETCH_') } unless potentially_trustworthy_url?(url)
@@ -13745,7 +13743,7 @@ module Capybara
       # refused comes to it as well, for a 404, and what it raises of that is no error of the test's: it goes up to what asked, a
       # network error)
       def app_call(env, deferring: false, own_host: true)
-        return on_network { in_app_call { @app.call(env) } } unless deferring
+        return in_app_call { @app.call(env) } unless deferring
 
         in_app_call {
           Thread.handle_interrupt(EventSourceCancelled => :never) {

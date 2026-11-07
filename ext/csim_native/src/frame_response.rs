@@ -220,7 +220,8 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
     let referrer = arena.location.href().to_owned();
     let sandbox = arena.frame_sandbox(container);
     let activated = arena.frame_navigation_activated(container);
-    let reloaded = arena.frame_realm(container).filter(|_| reload);
+    let active = arena.frame_realm(container);
+    let reloaded = active.filter(|_| reload);
     let controlled = crate::dom::dom(scope).arena.sw_may_control_navigation(cid, Some(container));
     let request = [
         text(scope, &r.url),
@@ -237,6 +238,8 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
         reloaded.map_or_else(|| v8::null(scope).into(), |id| v8::Integer::new(scope, id).into()),
         text_or_null(scope, sandbox.as_deref()),
         v8::Boolean::new(scope, activated).into(),
+        v8::undefined(scope).into(),
+        active.map_or_else(|| v8::null(scope).into(), |id| v8::Integer::new(scope, id).into()),
     ];
     let request = v8::Array::new_with_elements(scope, &request).into();
     let generation = realm(scope, cid).await_frame_response(container);

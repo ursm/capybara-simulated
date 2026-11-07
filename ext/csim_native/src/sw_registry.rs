@@ -93,7 +93,7 @@ struct Worker {
     skip_waiting: bool,
     extended: bool,
     messages: u32,
-    fetches: u32,
+    fetches: Vec<(i64, i32)>,
     // …and, for the host, whether its next lifecycle step is queued as a task, what a step it took waits for ("install",
     // "activation", "try_activate"), and whether its activating step retired the worker it replaces already.
     step_queued: bool,
@@ -109,7 +109,7 @@ impl Worker {
     // Whether it has events pending that extend its lifetime — a message it has not finished, an unsettled `waitUntil` of
     // one, a fetch event unanswered — none for one whose thread is gone.
     fn extended(&self) -> bool {
-        !self.dead && (self.extended || self.messages > 0 || self.fetches > 0)
+        !self.dead && (self.extended || self.messages > 0 || !self.fetches.is_empty())
     }
     // …or a lifecycle event of its own: its install event's, from its job's end until the step its outcome makes is
     // taken, or its activate event's, from its activating step until its activated one — none for one waiting at Try
@@ -378,7 +378,7 @@ fn worker_new(partition: u64, handle: u32, site: String, script_url: String, scr
         skip_waiting: false,
         extended: false,
         messages: 0,
-        fetches: 0,
+        fetches: Vec::new(),
         step_queued: false,
         waits: None,
         retired_outgoing: false,
@@ -418,8 +418,7 @@ pub(crate) fn worker_live_for_ruby(partition: u64, handle: u32) -> bool {
 }
 // …a hold of it set or let go, from whichever thread (`what` "skip_waiting": it called `skipWaiting()`; "extended": an
 // extendable message event's `waitUntil` unsettled, `on`, or not; "message": a message queued to it, `on`, or one it
-// finished dispatching; "fetch": a fetch event it took, `on`, or one it answered): whether it has none of the last three
-// left — a release that may let a successor activate.
+// finished dispatching): whether it has none of those holds left — a release that may let a successor activate.
 pub(crate) fn hold_for_ruby(partition: u64, handle: u32, what: String, on: bool) -> bool {
     let mut reg = lock();
     let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return true };
@@ -428,11 +427,25 @@ pub(crate) fn hold_for_ruby(partition: u64, handle: u32, what: String, on: bool)
         "extended" => w.extended = on,
         "message" if on => w.messages += 1,
         "message" => w.messages = w.messages.saturating_sub(1),
-        "fetch" if on => w.fetches += 1,
-        "fetch" => w.fetches = w.fetches.saturating_sub(1),
         _ => {}
     }
-    !w.extended && w.messages == 0 && w.fetches == 0
+    !w.extended && w.messages == 0 && w.fetches.is_empty()
+}
+// …a fetch event of a realm's it took (`on`), or answered, or a request gave up on: where that is the last hold let go and a
+// worker waits at Try Activate or a registration to clear, whether to try them again — which most fetch events' ends have no
+// one for, this path every controlled request's.
+pub(crate) fn fetch_event_for_ruby(partition: u64, handle: u32, realm: i64, fetch: i32, on: bool) -> bool {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return false };
+    let Some(w) = p.workers.get_mut(&handle) else { return false };
+    if on {
+        w.fetches.push((realm, fetch));
+        return false;
+    }
+    let Some(at) = w.fetches.iter().position(|e| *e == (realm, fetch)) else { return false };
+    w.fetches.swap_remove(at);
+    let released = !w.extended && w.messages == 0 && w.fetches.is_empty();
+    released && (!p.uninstalling.is_empty() || p.workers.values().any(|w| w.waits == Some("try_activate")))
 }
 // …whether `clients.claim()` is its to call: an active worker, activating or activated (§4.3.4).
 pub(crate) fn may_claim_for_ruby(partition: u64, handle: u32) -> bool {
@@ -983,9 +996,10 @@ pub(crate) fn job_worker_gone_for_ruby(partition: u64, handle: u32) -> Vec<Cmd> 
     }
     out
 }
-// Whether a job has yet to settle its promises: what a worker answering on one may be waiting for.
+// Whether a job that can run now has yet to settle its promises: what a worker answering on one may be waiting for. One
+// behind another at its scope waits for that one to finish, which may be an Install no window's step is taking.
 pub(crate) fn job_under_way_for_ruby(partition: u64) -> bool {
-    lock().existing(partition).is_some_and(|p| p.jobs.iter().any(|j| !j.settled))
+    lock().existing(partition).is_some_and(|p| p.jobs.iter().enumerate().any(|(i, j)| !j.settled && !p.jobs[..i].iter().any(|e| e.site == j.site && e.scope == j.scope)))
 }
 // The jobs whose run is queued, in the order queued — the outgoing page's tasks, the new page's to run.
 pub(crate) fn queued_jobs_for_ruby(partition: u64) -> Vec<u32> {
@@ -1688,6 +1702,35 @@ mod tests {
         assert!(part(p, |q| q.clients.iter().any(|c| c.id == "using" && c.controller == Some(2))));
         note_client_for_ruby(p, "using".into(), 5, String::new(), "https://a.test/y".into(), "window".into(), "top-level".into(), None, None);
         assert!(part(p, |q| q.clients.iter().any(|c| c.id == "using" && c.controller.is_none())));
+        clear_for_ruby(p);
+    }
+
+    #[test]
+    fn a_fetch_event_holds_its_worker_a_wakeup_only_where_one_waits() {
+        let p = partition_new_for_ruby();
+        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
+        assert!(!fetch_event_for_ruby(p, 1, 0, 7, true));
+        assert!(part(p, |q| q.workers[&1].extended()));
+        assert!(!fetch_event_for_ruby(p, 1, 0, 7, false));
+        assert!(!part(p, |q| q.workers[&1].extended()));
+        fetch_event_for_ruby(p, 1, 0, 7, true);
+        fetch_event_for_ruby(p, 1, 5, 7, true);
+        part(p, |q| q.uninstalling.push(9));
+        assert!(!fetch_event_for_ruby(p, 1, 0, 7, false));
+        assert!(!fetch_event_for_ruby(p, 1, 0, 7, false));
+        assert!(fetch_event_for_ruby(p, 1, 5, 7, false));
+        clear_for_ruby(p);
+    }
+
+    #[test]
+    fn a_job_behind_another_at_its_scope_is_none_under_way() {
+        let p = partition_new_for_ruby();
+        let schedule = |scope: &str| schedule_job_for_ruby(p, "register".into(), String::new(), scope.into(), format!("{scope}a.js"), Some("imports".into()), "classic".into(), 0, 0, String::new()).unwrap().0;
+        let first = schedule("s/");
+        let _behind = schedule_job_for_ruby(p, "unregister".into(), String::new(), "s/".into(), String::new(), None, String::new(), 0, 0, String::new());
+        assert!(job_under_way_for_ruby(p));
+        part(p, |q| q.job(first).unwrap().settled = true);
+        assert!(!job_under_way_for_ruby(p));
         clear_for_ruby(p);
     }
 

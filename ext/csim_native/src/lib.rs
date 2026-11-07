@@ -370,6 +370,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_claim", magnus::function!(sw_registry::claim_for_ruby, 3))?;
     native.define_module_function("sw_soft_update", magnus::function!(sw_registry::soft_update_for_ruby, 2))?;
     native.define_module_function("sw_soft_update_if_stale", magnus::function!(sw_registry::soft_update_if_stale_for_ruby, 3))?;
+    native.define_module_function("sw_answer_wait", magnus::function!(service_worker::answer_wait_for_ruby, 6))?;
+    native.define_module_function("sw_hung", magnus::function!(service_worker::hung_for_ruby, 3))?;
+    native.define_module_function("sw_fetch_event", magnus::function!(sw_registry::fetch_event_for_ruby, 5))?;
     native.define_module_function("sw_may_claim", magnus::function!(sw_registry::may_claim_for_ruby, 2))?;
     native.define_module_function("sw_job_under_way", magnus::function!(sw_registry::job_under_way_for_ruby, 1))?;
     native.define_module_function("sw_worker_new", magnus::function!(sw_registry::worker_new_for_ruby, 7))?;

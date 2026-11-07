@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'rack'
 require 'json'
+require 'socket'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
@@ -319,5 +320,190 @@ RSpec.describe 'Handle Fetch outcomes' do
     session.visit '/broken'
     session.visit '/'
     expect(poll_until { ask(session)['seen']['handled'] }).to eq('resolved')
+  end
+
+  # An idle worker is no hang, whatever a job behind its Install or a slow host makes of a wait: only a thread in its script ends.
+  context 'with a guard a request runs out of' do
+    let(:scripts) { {} }
+    let(:session) {
+      served = scripts
+      simulated_session(lambda {|env|
+        script = served[env['PATH_INFO']]
+        next [200, {'content-type' => 'text/javascript'}, [script.call]] if script
+        next (sleep 0.6; [200, {'content-type' => 'text/plain'}, ['slow']]) if env['PATH_INFO'] == '/slow'
+
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
+      })
+    }
+
+    before { stub_const('Capybara::Simulated::Browser::WORKER_ANSWER_GUARD', 0.3) }
+
+    def control
+      session.visit '/'
+      session.execute_script("navigator.serviceWorker.addEventListener('controllerchange', () => { globalThis.__controlled = true; }); navigator.serviceWorker.register('/sw.js');")
+      expect(poll_until { session.evaluate_script('globalThis.__controlled === true') }).to be(true)
+    end
+
+    let(:head) {
+      <<~JS
+        self.addEventListener('install', e => { self.skipWaiting(); });
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        const html = (text) => new Response(`<!doctype html><body>${text}`, {headers: {'content-type': 'text/html'}});
+      JS
+    }
+
+    it 'gives up on a stalled handler at once while a job waits behind an Install no step takes, and keeps the worker' do
+      version = 0
+      scripts['/sw.js'] = lambda {
+        version += 1
+        <<~JS
+          #{head}
+          self.addEventListener('fetch', e => {
+            const path = new URL(e.request.url).pathname;
+            if (path === '/update') e.respondWith(self.registration.update().then(() => html('updated')));
+            if (path === '/never') { self.registration.update(); e.respondWith(new Promise(() => {})); }
+            if (path === '/plain') e.respondWith(html('plain ' + #{version}));
+          });
+        JS
+      }
+      control
+      session.visit '/update'
+      expect(session.text).to eq('updated')
+      began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      session.visit '/never'
+      expect(session.text).to eq('page')
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 0.3
+      session.visit '/plain'
+      expect(session.text).to start_with('plain ')
+    end
+
+    it "doesn't end a worker for a job whose script takes the app past the guard" do
+      slow = false
+      scripts['/sw.js'] = lambda {
+        sleep 0.6 if slow
+        <<~JS
+          #{head}
+          self.addEventListener('fetch', e => {
+            const path = new URL(e.request.url).pathname;
+            if (path === '/update') e.respondWith(self.registration.update().then(() => html('updated')));
+          });
+        JS
+      }
+      control
+      slow = true
+      session.visit '/update'
+      expect(session.text).to eq('updated')
+    end
+
+    it "doesn't end a worker waiting on another host past the guard" do
+      server = TCPServer.new('127.0.0.1', 0)
+      port = server.addr[1]
+      thread = Thread.new {
+        client = server.accept
+        client.readpartial(4096)
+        sleep 0.6
+        client.write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: 3\r\nConnection: close\r\n\r\next")
+        client.close
+      }
+      scripts['/sw.js'] = lambda {
+        <<~JS
+          #{head}
+          self.addEventListener('fetch', e => {
+            if (new URL(e.request.url).pathname === '/out') e.respondWith(fetch('http://127.0.0.1:#{port}/x').then(r => r.text()).then(html, x => html(x.name)));
+          });
+        JS
+      }
+      control
+      session.visit '/out'
+      expect(session.text).to eq('ext')
+    ensure
+      thread&.kill
+      server&.close
+    end
+  end
+
+  context "with a response a handler makes, by its request's tainting" do
+    let(:worker) {
+      <<~JS
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        const PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+        self.addEventListener('fetch', e => {
+          const u = new URL(e.request.url);
+          if (u.pathname === '/made.png') e.respondWith(new Response(PNG, {headers: {'content-type': 'image/png'}}));
+          if (u.pathname === '/made') e.respondWith(new Response('made', {headers: {'x-mine': '1', 'x-shown': '2', 'access-control-expose-headers': 'x-shown', 'content-type': 'text/plain'}}));
+        });
+      JS
+    }
+
+    it 'filters it as main fetch does: "basic", "cors" with what it exposes, "opaque" hiding all, and a canvas tainted' do
+      session = controlled_session
+      seen = session.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        const other = 'http://other.test/made';
+        const look = (r) => r.text().then(t => [r.type, r.status, r.headers.get('x-mine'), r.headers.get('x-shown'), t]);
+        const draws = (src) => new Promise(ok => {
+          const i = new Image();
+          i.onload = () => {
+            const c = document.createElement('canvas');
+            c.getContext('2d').drawImage(i, 0, 0);
+            try { c.toDataURL(); ok('clean'); } catch (x) { ok(x.name); }
+          };
+          i.onerror = () => ok('error');
+          i.src = src;
+        });
+        (async () => done([
+          await look(await fetch('/made')),
+          await look(await fetch(other)),
+          await look(await fetch(other, {mode: 'no-cors'})),
+          await draws('/made.png'),
+          await draws('http://other.test/made.png')
+        ]))();
+      JS
+      expect(seen).to eq(
+        [
+          ['basic', 200, '1', '2', 'made'],
+          ['cors', 200, nil, '2', 'made'],
+          ['opaque', 0, nil, nil, ''],
+          'clean',
+          'SecurityError'
+        ]
+      )
+    end
+  end
+
+  it "gives a frame's navigation the document it replaces, a cross-origin one's none" do
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/javascript'}, [<<~JS]] if env['PATH_INFO'] == '/sw.js'
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+        const seen = {};
+        self.addEventListener('fetch', e => { seen[new URL(e.request.url).pathname] = [e.replacesClientId, e.resultingClientId]; });
+        self.addEventListener('message', e => e.ports[0].postMessage(seen));
+      JS
+
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
+    })
+    session.visit '/'
+    session.execute_script("navigator.serviceWorker.addEventListener('controllerchange', () => { globalThis.__controlled = true; }); navigator.serviceWorker.register('/sw.js');")
+    expect(poll_until { session.evaluate_script('globalThis.__controlled === true') }).to be(true)
+    frame = lambda {|code|
+      session.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        const f = document.querySelector('iframe') || document.body.appendChild(document.createElement('iframe'));
+        f.addEventListener('load', () => done(true), {once: true});
+        #{code}
+      JS
+    }
+    frame.call("f.src = '/first';")
+    frame.call("f.src = '/second';")
+    seen = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const channel = new MessageChannel();
+      channel.port1.onmessage = e => done(e.data);
+      navigator.serviceWorker.controller.postMessage(null, [channel.port2]);
+    JS
+    expect(seen.fetch('/first')[0]).not_to be_empty
+    expect(seen.fetch('/second')[0]).to eq(seen.fetch('/first')[1])
   end
 end

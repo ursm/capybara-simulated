@@ -311,4 +311,24 @@ RSpec.describe "a service worker's own view" do
     end
     expect(rss.call - before).to be < 300
   end
+
+  # (…what a wait in place held for its window's realms and its jobs is the session's, none of the next one's page)
+  it "keeps nothing a wait held for a reset's next page" do
+    scripts['/s/a.js'] = <<~JS
+      self.addEventListener('install', () => self.skipWaiting());
+      self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+      self.addEventListener('fetch', e => {
+        if (e.request.url.endsWith('/updated')) e.respondWith(self.registration.update().then(() => new Response('updated')));
+      });
+    JS
+    session = simulated_session(app)
+    session.visit '/s/page'
+    session.execute_script("navigator.serviceWorker.addEventListener('controllerchange', () => { globalThis.__controlled = true; }); navigator.serviceWorker.register('/s/a.js');")
+    expect(poll_until { session.evaluate_script('globalThis.__controlled === true') }).to be(true)
+    session.execute_script("const x = new XMLHttpRequest(); x.open('GET', '/s/updated', false); x.send();")
+    browser = session.driver.browser
+    session.reset_session!
+    expect(browser.instance_variable_get(:@sw_realm_tells)).to be_empty
+    expect(browser.instance_variable_get(:@sw_job_events)).to be_empty
+  end
 end

@@ -947,12 +947,13 @@ fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     rv.set_double(if min == f64::INFINITY { -1.0 } else { min.max(0.0) });
 }
 
-// __dom.timerOnceAwaited(own) -> whether the calling realm has a timer set that runs once, past `own` of them that are the
+// __dom.timerOnceAwaited() -> whether the calling realm has a timer set that runs once, past a Soft Update's, which is the
 // platform's: what may be the coming of something it waits on, where one that repeats is a poll.
 fn timer_once_awaited(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let own = args.get(0).uint32_value(scope).unwrap_or(0) as usize;
-    let timers = dom(scope).arena.realm_state(cid).map(|s| &s.timers);
+    let state = dom(scope).arena.realm_state(cid);
+    let own = usize::from(state.and_then(|s| s.service_worker.as_ref()).is_some_and(|g| g.soft_update_coming()));
+    let timers = state.map(|s| &s.timers);
     let once = timers.map_or(0, |t| t.by_key.values().filter(|timer| timer.period.is_none()).count());
     rv.set_bool(once > own);
 }

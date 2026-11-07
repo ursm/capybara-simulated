@@ -361,6 +361,32 @@ mod tests {
     }
 
     #[test]
+    fn a_wait_in_place_gives_up_on_a_worker_gone_spent_or_stalled_and_ends_only_a_hang() {
+        let verdict = |answered, gone, spent, timeout, stalled| answer_wait_for_ruby(answered, gone, spent, timeout, 300.0, stalled);
+        assert_eq!(verdict(true, true, None, 0.0, 0), "answer");
+        assert_eq!(verdict(false, true, None, 0.0, 0), "give up");
+        assert_eq!(verdict(true, false, Some(100.0), 50.0, 0), "timeout");
+        assert_eq!(verdict(false, false, None, 0.0, 9), "wait");
+        assert_eq!(verdict(false, false, Some(299.0), 0.0, 1), "wait");
+        assert_eq!(verdict(false, false, Some(300.0), 0.0, 0), "give up");
+        assert_eq!(verdict(false, false, Some(1.0), 0.0, 2), "give up");
+        assert!(hung_for_ruby(true, false, false));
+        assert!(!hung_for_ruby(false, false, false) && !hung_for_ruby(true, true, false) && !hung_for_ruby(true, false, true));
+    }
+
+    #[test]
+    fn a_response_not_filtered_is_filtered_by_its_request_s_tainting() {
+        let o = "https://a.test";
+        assert_eq!(response_filter("default", 200, "cors", "https://a.test/x", o), "basic");
+        assert_eq!(response_filter("default", 200, "no-cors", "https://a.test/x", o), "basic");
+        assert_eq!(response_filter("default", 200, "navigate", "https://b.test/x", o), "basic");
+        assert_eq!(response_filter("default", 200, "cors", "https://b.test/x", o), "cors");
+        assert_eq!(response_filter("default", 200, "no-cors", "https://b.test/x", o), "opaque");
+        assert_eq!(response_filter("default", 302, "no-cors", "https://b.test/x", o), "");
+        assert_eq!(response_filter("basic", 200, "no-cors", "https://b.test/x", o), "");
+    }
+
+    #[test]
     fn a_fetch_event_s_outcome() {
         assert_eq!(dispatched_outcome(false, false), OUTCOME_NETWORK);
         assert_eq!(dispatched_outcome(false, true), OUTCOME_NETWORK_ERROR);
@@ -469,6 +495,31 @@ mod tests {
     }
 }
 
+// What a wait in place for a worker's answer comes to at a poll: "answer", the answer it has; "timeout", where the wait's own
+// timeout (`timeout_ms`, 0 for none) has passed in the worker's time (`spent`, from when it took the request, none before
+// that) — an answer later than it no answer; "wait"; or "give up": its thread gone, `limit` of its time gone, or
+// (`stalled_polls` twice running) a worker that can do nothing more of its own accord.
+pub(crate) fn answer_wait_for_ruby(answered: bool, thread_gone: bool, spent: Option<f64>, timeout_ms: f64, limit: f64, stalled_polls: u32) -> &'static str {
+    if !answered && thread_gone {
+        return "give up";
+    }
+    if timeout_ms > 0.0 && spent.is_some_and(|s| s >= timeout_ms) {
+        return "timeout";
+    }
+    if answered {
+        return "answer";
+    }
+    if spent.is_some_and(|s| s >= limit) || (spent.is_some() && stalled_polls >= 2) {
+        return "give up";
+    }
+    "wait"
+}
+// …and whether a wait that ran out of its guard ran out on a hang, the worker to be ended: its thread in its script, neither at
+// its inbox nor waiting on the network, however slow.
+pub(crate) fn hung_for_ruby(guard_out: bool, at_inbox: bool, on_network: bool) -> bool {
+    guard_out && !at_inbox && !on_network
+}
+
 // What a fetch event comes to (Service Workers "Create Fetch Event and Dispatch"), its realm's to carry out (constants.js):
 // the network's to answer, a network error, the promise `respondWith` was given waited for, and — that fulfilled — its
 // Response delivered: buffered whole, or streamed frame by frame. A response whose body is a stream goes incrementally to
@@ -517,6 +568,7 @@ pub(crate) struct ServiceWorkerGlobal {
     update_via_cache: String,
     probed_imports: std::collections::HashMap<String, String>,
     installed: bool,
+    soft_update_coming: bool,
 }
 
 impl ServiceWorkerGlobal {
@@ -525,6 +577,10 @@ impl ServiceWorkerGlobal {
     // "importScripts(urls)": its state past `parsed` and `installing`).
     pub(crate) fn installed(&self) -> bool {
         self.installed
+    }
+    // Whether a Soft Update of its registration is coming, its timer the platform's: `swSoftUpdateLater`.
+    pub(crate) fn soft_update_coming(&self) -> bool {
+        self.soft_update_coming
     }
     // The cache mode its `importScripts` fetches in: `no-cache` under an updateViaCache of `none` (every import
     // revalidated), else none (the HTTP cache read).
@@ -542,6 +598,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "swGlobal", global_op, context_id);
     crate::dom::register(scope, ns, "swInstalled", installed_op, context_id);
     crate::dom::register(scope, ns, "swClaims", claims_op, context_id);
+    crate::dom::register(scope, ns, "swSoftUpdateLater", soft_update_later_op, context_id);
+    crate::dom::register(scope, ns, "swSoftUpdateDue", soft_update_due_op, context_id);
+    crate::dom::register(scope, ns, "swResponseFilter", response_filter_op, context_id);
+    crate::dom::register(scope, ns, "swExposedHeaders", exposed_headers_op, context_id);
     crate::dom::register(scope, ns, "swDispatchedOutcome", dispatched_outcome_op, context_id);
     crate::dom::register(scope, ns, "swFulfilledOutcome", fulfilled_outcome_op, context_id);
 }
@@ -593,6 +653,61 @@ fn installed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         g.installed = true;
     }
 }
+// A Soft Update's delay, in the calling service worker's time (Handle Fetch: "If shouldSoftUpdate is true, then in parallel run
+// the Soft Update algorithm"): each navigation's script request came about 1 s after its load in Firefox, 1.6 s in Chrome,
+// measured — the page that navigation made under way.
+const SOFT_UPDATE_DELAY_MS: u32 = 1000;
+// __dom.swSoftUpdateLater() -> the ms until a Soft Update asked now, -1 where one is coming already: one at a time.
+fn soft_update_later_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(g) = crate::dom::realm(scope, cid).realm_state_mut(cid).and_then(|s| s.service_worker.as_mut()) else { return rv.set_int32(-1) };
+    if std::mem::replace(&mut g.soft_update_coming, true) {
+        return rv.set_int32(-1);
+    }
+    rv.set_uint32(SOFT_UPDATE_DELAY_MS);
+}
+// __dom.swSoftUpdateDue(): it has come.
+fn soft_update_due_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    if let Some(g) = crate::dom::realm(scope, cid).realm_state_mut(cid).and_then(|s| s.service_worker.as_mut()) {
+        g.soft_update_coming = false;
+    }
+}
+
+// Fetch's main fetch on a response that is not filtered, a `new Response()` of a handler's or a cache's ("If response is not a
+// network error and response is not a filtered response"): the filtered response of a request's tainting — "basic" for a
+// request of a mode `navigate`, or of the client's origin; "opaque" for a `no-cors` one; else "cors". (A redirect isn't filtered:
+// HTTP fetch follows it first. Chrome and Firefox leave such a response "basic" whatever the request, its headers and body
+// intact: the text rules, the app reading its own no-cors synthetic body the cost.) Empty for one already filtered.
+fn response_filter(kind: &str, status: i32, mode: &str, url: &str, origin: &str) -> &'static str {
+    if kind != "default" || matches!(status, 301 | 302 | 303 | 307 | 308) {
+        return "";
+    }
+    if mode == "navigate" || Url::parse(url, None).is_ok_and(|u| u.origin() == origin) {
+        return "basic";
+    }
+    if mode == "no-cors" { "opaque" } else { "cors" }
+}
+// __dom.swResponseFilter(type, status, mode, url) -> `response_filter`, the client's origin the calling worker's.
+fn response_filter_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let kind = args.get(0).to_rust_string_lossy(scope);
+    let status = args.get(1).int32_value(scope).unwrap_or(0);
+    let [mode, url, origin] = [2, 3, 4].map(|i| args.get(i).to_rust_string_lossy(scope));
+    if let Some(s) = v8::String::new(scope, response_filter(&kind, status, &mode, &url, &origin)) {
+        rv.set(s.into());
+    }
+}
+// __dom.swExposedHeaders(names, expose, credentialed) -> those of a CORS-filtered response's headers it exposes (`cors::exposed`).
+fn exposed_headers_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
+    let names: Vec<v8::Local<'_, v8::Value>> = (0..list.length()).filter_map(|i| list.get_index(scope, i)).collect();
+    let bytes: Vec<Vec<u8>> = names.iter().map(|n| n.to_rust_string_lossy(scope).into_bytes()).collect();
+    let expose = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
+    let shown = crate::cors::exposed(bytes.iter().map(Vec::as_slice), expose.as_deref(), args.get(2).boolean_value(scope));
+    let items: Vec<v8::Local<'_, v8::Value>> = shown.into_iter().map(|i| names[i]).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
 // __dom.swClaims(href, scope, scopes, site) -> whether the calling realm's document, at `href`, is claimed by the claim of the
 // registration at `scope`, of a storage key whose top-level site is `site`: `claims`, none of another key's clients.
 fn claims_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

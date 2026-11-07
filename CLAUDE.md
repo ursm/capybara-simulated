@@ -270,11 +270,15 @@ redirect's later hop into such a scope, which waits what it can in place
 and, as no deferral can make a chain's hop again, goes on to the network
 where it can't; and a request awaited in place — a navigation's, a sync XHR's —
 holds its window's event loop for as long as the service worker takes to answer, so a handler that
-needs the page's reply goes to the network as soon as it is known to be stalled (`worker_stalled?`,
-Chrome and Firefox would answer it in about 30 ms), a frame's wait holds its parent too (a 60 s handler
-in an iframe, the parent's timers at 60 s of its clock all at once), and a 400 s timer's answer is still
-taken, where Chrome gives up at about 300 s and Firefox at 60 s (`WORKER_ANSWER_VIRTUAL_MS`,
-`WORKER_ANSWER_GUARD`): the alternative is asynchronous navigation fetches. List and justify these
+needs the page's reply gives up as soon as it is known to be stalled (`worker_stalled?`: a navigation to
+the network, a sync XHR a network error, where Chrome and Firefox answer in about 30 ms), a frame's wait
+holds its parent too (a 60 s handler in an iframe, the parent's timers at 60 s of its clock all at once),
+a 400 s timer's answer is still taken, where Chrome gives up at about 300 s and Firefox at 60 s
+(`WORKER_ANSWER_VIRTUAL_MS`), and a handler in its script past `WORKER_ANSWER_GUARD` (an 8 s compute
+answers, a 12 s one doesn't, Chrome and Firefox allow about 60 s) is ended for good: nothing restarts
+it on demand, so its registration's `active.state` stays `activated`, the next page has no controller and
+no Soft Update, its timer died with it, until a client's `update()` brings the registration back: the
+alternative is asynchronous navigation fetches and "Run Service Worker". List and justify these
 explicitly; don't let them multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
