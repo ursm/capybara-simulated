@@ -61,7 +61,7 @@ RSpec.describe "a service worker's own view" do
 
   it 'tells an outgoing worker of the next version: its updatefound, and each state of it' do
     scripts['/s/a.js'] = lambda {|req|
-      next "self.addEventListener('install', () => self.skipWaiting());" if req.params['v'] == '2'
+      next '// the next version' if req.params['v'] == '2'
 
       <<~JS
         #{say}
@@ -76,6 +76,13 @@ RSpec.describe "a service worker's own view" do
     session = session_listening
     register(session, '/s/a.js?v=1')
     wait_activated(session)
+    # (…a client it controls, which keeps it the active worker, its thread there to say so, past the next version's install)
+    session.execute_script(<<~JS)
+      const f = document.createElement('iframe');
+      f.src = '/s/held';
+      document.body.append(f);
+    JS
+    expect(poll_until { session.evaluate_script("document.querySelector('iframe').contentWindow.navigator.serviceWorker.controller !== null") }).to be(true)
     # (…a second registration of another script at the scope: an update, its worker told apart by its query)
     register(session, '/s/a.js?v=2')
     log = hear(session, 3)

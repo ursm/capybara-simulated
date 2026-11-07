@@ -5189,15 +5189,13 @@ module Capybara
         # `service:` marks a SERVICE worker.
         # `realm:` is the browsing context that created this worker — a dedicated worker belongs to
         # it and is terminated when it is discarded (terminate_realm_workers).
-        # `sw_scope`: a SERVICE worker's registration scope — process_worker_unregister
-        # (the worker's own registration.unregister()) resolves the scope from it.
         # `rt` / `rt_lock`: the worker's own runtime, published by its thread once built, so the
         # session boundary can stop the JS half without waiting for it (see `stop_worker_js`). The
         # lock is per worker rather than the shared counter mutex: the only two things that ever
         # contend for it are that stop and the worker's own dispose, and holding it across a native
         # call must not block anything else in the browser.
         # `url`: the worker's own URL — its script's, after redirects — which a nested worker's script fetch is judged against.
-        record = {thread: nil, inbox: inbox, took: {}, answered: {}, answering: {}, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, cluster_key: cluster_key, isolated: !service && isolated == true, secure: service || secure == true, rt: nil, rt_lock: Mutex.new, ticked: Thread::Queue.new}
+        record = {thread: nil, inbox: inbox, took: {}, answered: {}, answering: {}, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, url: target, creator_key: creator_key, cluster_key: cluster_key, isolated: !service && isolated == true, secure: service || secure == true, rt: nil, rt_lock: Mutex.new, ticked: Thread::Queue.new}
         # (…the window's virtual time it was made at — `new Worker()`'s, else the window's last step's — which its clock
         # starts from, and at which it is due: a booting worker runs its script before the window steps past it)
         record[:origin]        = at ? at.to_f : @runtime.clock
