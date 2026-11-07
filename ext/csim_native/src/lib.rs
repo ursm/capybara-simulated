@@ -261,6 +261,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // Whether the realms made from now on name their engine ops `__dom` on their globals: a spec's switch, to read the
     // engine's own state off a page (dom.rs `ENGINE_GLOBAL`).
     native.define_module_function("engine_global=", magnus::function!(dom::set_engine_global, 1))?;
+    // …and the token the host's calls of a realm's engine carry (engine.js `HOST_OPS`), which no page's script has.
+    native.define_module_function("host_token", magnus::function!(dom::host_token, 0))?;
     // A form the host submits, as its request: method, URL and body (text_codec.rs, multipart.rs).
     native.define_module_function("form_request", magnus::function!(text_codec::form_request_for_ruby, 5))?;
     // An image resource's bytes decoded to RGBA, on whichever thread fetched them.

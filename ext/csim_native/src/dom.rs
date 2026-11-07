@@ -2975,11 +2975,40 @@ fn engine_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         rv.set(ops);
     }
 }
+// __dom.realmOfGlobal(global) -> the realm whose global `global` is, as `install` stamped it (`realm_of_global`), or
+// undefined — a JS Proxy of one, a WindowProxy, none.
+fn realm_of_global_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(global) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    if global.is_proxy() {
+        return;
+    }
+    if let Some(id) = realm_of_global(scope, global) {
+        rv.set(v8::Integer::new(scope, id).into());
+    }
+}
+// __dom.isProxy(o) -> whether `o` is a JS Proxy: what no script can ask without running the Proxy's traps.
+fn is_proxy(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(args.get(0).is_proxy());
+}
 // Whether a realm's global names its engine ops `__dom` besides (`Native.engine_global=`): for a spec that reads the
 // engine's own state off a page — never a page's of an app, whose scripts it would hand every op of the engine.
 pub(crate) static ENGINE_GLOBAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub(crate) fn set_engine_global(on: bool) {
     ENGINE_GLOBAL.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+// The token the host's calls of a realm's engine carry (`Native.host_token`, engine.js `HOST_OPS`): made once a process
+// from the operating system's random bytes, handed to every realm's bindings as it is made, and to Ruby — and to no
+// script of a page's, which so cannot make the host's calls.
+pub(crate) fn host_token() -> String {
+    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TOKEN
+        .get_or_init(|| {
+            use rand_core::RngCore as _;
+            let mut bytes = [0u8; 16];
+            rand_core::OsRng.fill_bytes(&mut bytes);
+            bytes.iter().map(|b| format!("{b:02x}")).collect()
+        })
+        .clone()
 }
 
 // The realm whose global `global` is — a context's (`v8::Context::global`) — as `install` stamped it: none for a context
@@ -3353,23 +3382,24 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // The layout walk's reuse counts (the pass itself, `layoutBuild`, is walk_ops.rs's).
     register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
     register(scope, ns, "engineOf", engine_of, context_id);
+    register(scope, ns, "realmOfGlobal", realm_of_global_op, context_id);
+    register(scope, ns, "isProxy", is_proxy, context_id);
     // The ops are no property of the global: the realm's bindings take them as the realm is made, before any script of a
     // page's runs (engine.js `__csimTakeEngine`, which the snapshot's global holds until then and loses as it is called),
-    // and its global keeps them under a private key, for another realm's code holding the window (`engine_of`).
+    // with the host's token and whether a spec asked for them on the global (`ENGINE_GLOBAL`); and its global keeps them
+    // under a private key, for another realm's code holding the window (`engine_of`).
     let global = context.global(scope);
     let key = engine_key(scope);
     global.set_private(scope, key, ns.into());
     let take = v8::String::new(scope, "__csimTakeEngine").expect("a short string");
     if let Some(take) = global.get(scope, take.into()).and_then(|f| v8::Local::<v8::Function>::try_from(f).ok()) {
+        let token = v8::String::new(scope, &host_token()).expect("a short string");
+        let exposed = v8::Boolean::new(scope, ENGINE_GLOBAL.load(std::sync::atomic::Ordering::Relaxed));
         v8::tc_scope!(let tc, scope);
-        let _ = take.call(tc, global.into(), &[ns.into()]);
+        let _ = take.call(tc, global.into(), &[ns.into(), token.into(), exposed.into()]);
         if let Some(e) = tc.exception() {
             eprintln!("[csim] realm {context_id}'s bindings refused its engine: {}", e.to_rust_string_lossy(tc));
         }
-    }
-    if ENGINE_GLOBAL.load(std::sync::atomic::Ordering::Relaxed) {
-        let name = v8::String::new(scope, "__dom").expect("a short string");
-        let _ = global.define_own_property(scope, name.into(), ns.into(), v8::PropertyAttribute::DONT_ENUM);
     }
 }
 

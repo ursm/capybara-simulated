@@ -78,6 +78,35 @@ RSpec.describe 'internal members' do
     JS
   end
 
+  # …nor a Proxy of a page's, whatever its traps answer — none of which runs (Chrome, Firefox: `[TypeError, TypeError,
+  # 0]`, an object with no EventTarget's brand) — and an object inheriting from a window is no window
+  it 'takes no Proxy of a page\'s for an EventTarget, and runs none of its traps' do
+    expect(outcome(<<~JS)).to eq(['TypeError', 'TypeError', 'TypeError', 0])
+      (() => {
+        const add = EventTarget.prototype.addEventListener;
+        const of = (self) => { try { add.call(self, 'x', () => {}); return 'ok'; } catch (e) { return e.constructor.name; } };
+        let trapped = 0;
+        const traps = { getPrototypeOf: () => { trapped++; return EventTarget.prototype; }, get: () => { trapped++; } };
+        return [of(new Proxy({}, traps)), of(Object.create(new Proxy({}, traps))), of(Object.create(window)), trapped];
+      })()
+    JS
+  end
+
+  # The target a member acts on is read through no name a page can define: an XMLHttpRequest whose prototype answers
+  # `__csimRawWindow` — the name a WindowProxy was once unwrapped by — still fires its own `load`.
+  it 'fires an event at its target whatever its prototype names' do
+    session.execute_script(<<~JS)
+      Object.defineProperty(XMLHttpRequest.prototype, '__csimRawWindow', { get() { return document.body; }, configurable: true });
+      window.fired = [];
+      document.body.addEventListener('load', () => fired.push('body'));
+      const x = new XMLHttpRequest();
+      x.onload = () => fired.push('xhr');
+      x.open('GET', '/');
+      x.send();
+    JS
+    expect(poll_until { session.evaluate_script('window.fired.length > 0 && window.fired') }).to eq(['xhr'])
+  end
+
   # The bindings reach none of their own steps through a prototype a page can change: a page's member of a form's
   # interface is overridden by the control it names ([LegacyOverrideBuiltIns]), whatever its name — the driver's own
   # `_`-prefixed members took precedence over such a control until they were functions — and a legacy factory's element
@@ -141,6 +170,24 @@ RSpec.describe 'internal members' do
       new Worker(URL.createObjectURL(new Blob([#{"postMessage(#{probe})".to_json}]))).onmessage = (e) => { window.workerSaw = e.data; };
     JS
     expect(poll_until { session.evaluate_script('window.workerSaw') }).to eq(expected)
+  end
+
+  # …and the host's namespace a page reads makes none of the host's calls: each takes the host's token, which no script
+  # of a page's has — a sandboxed frame's `setSandbox(0)` would lift its sandbox, `dropRealm(0)` empty the page — nor
+  # holds rusty_racer's own functions (`contextGlobal`, any realm's raw global, whatever its origin), nor can a page put
+  # another in its place, which the host's calls would reach.
+  it "gives a page none of the host's calls" do
+    expect(outcome(<<~JS)).to eq(['TypeError', 'TypeError', 'undefined', 'undefined', false, true, 1])
+      (() => {
+        const call = (f) => { try { f(); return 'ok'; } catch (e) { return e.constructor.name; } };
+        const before = RustyRacer;
+        RustyRacer = {};
+        return [call(() => RustyRacer.engine.setSandbox(0)), call(() => RustyRacer.engine.dropRealm(0)),
+          typeof RustyRacer.contextGlobal, typeof RustyRacer.contextOf,
+          Object.getOwnPropertyDescriptor(globalThis, 'RustyRacer').writable, RustyRacer === before,
+          document.querySelectorAll('iframe').length];
+      })()
+    JS
   end
 
   # Every `_` name a page can see — on an interface object, its prototype, or an instance made here (own, for…in or

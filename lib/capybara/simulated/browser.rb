@@ -3796,7 +3796,7 @@ module Capybara
         # document of this one's, nor a domain any of them wrote counted — realm_location.rs `forgetOrigins`)
         new_browsing_context_group
         @runtime.reset_page
-        @runtime.call("#{V8Runtime::ENGINE}.forgetOrigins")
+        V8Runtime.engine_call(@runtime, 'forgetOrigins')
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
         # next visit.
@@ -9726,14 +9726,14 @@ module Capybara
         rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f, record[:travel].to_f) if record&.dig(:epoch)
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
-        rt.call("#{V8Runtime::ENGINE}.realmIdentify", 'workerHandle', handle.to_i)
+        V8Runtime.engine_call(rt, 'realmIdentify', 'workerHandle', handle.to_i)
         # …and the token its realm's agent of the engine's registries is made with (agents.rs), whose locks and
         # connections go as it is reaped — not only once its isolate is gone, which a terminated one may outlive.
         if record
           record[:agent_owner] = Native.agent_owner_new
-          rt.call("#{V8Runtime::ENGINE}.realmIdentify", 'agentOwner', record[:agent_owner])
+          V8Runtime.engine_call(rt, 'realmIdentify', 'agentOwner', record[:agent_owner])
           # (…and its storage partition, its owner document's: what the blob URLs it makes and resolves are of)
-          rt.call("#{V8Runtime::ENGINE}.realmIdentify", 'partition', record[:partition].to_s) if record[:partition]
+          V8Runtime.engine_call(rt, 'realmIdentify', 'partition', record[:partition].to_s) if record[:partition]
         end
         # A dedicated / shared worker is a service-worker CLIENT of its origin, and the host
         # registry already records it as 'client-worker-<handle>' (sw_note_worker_client). Seed
@@ -9746,11 +9746,11 @@ module Capybara
         # A SERVICE worker is no client of another, but its global is an environment of its own all the
         # same, its id its own (what its lock requests are held by: web_locks.rs) — never the realm-numbered
         # key of the window space, which would name the page's realm 0 (`sw_client_realm`).
-        rt.call("#{V8Runtime::ENGINE}.realmIdentify", 'clientId', sw_worker_client_id(handle))
+        V8Runtime.engine_call(rt, 'realmIdentify', 'clientId', sw_worker_client_id(handle))
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
         # (importScripts throws a TypeError); its script evaluates as a real module graph
         # below (eval_module_graph).
-        rt.call("#{V8Runtime::ENGINE}.realmIdentify", 'moduleWorker', true) if module_worker
+        V8Runtime.engine_call(rt, 'realmIdentify', 'moduleWorker', true) if module_worker
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
         # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a
@@ -9775,11 +9775,11 @@ module Capybara
           elsif url.to_s.start_with?('data:')
             Native.opaque_origin_key("worker#{handle}")
           end
-        rt.call("#{V8Runtime::ENGINE}.setOriginKey", worker_origin_key) if worker_origin_key
+        V8Runtime.engine_call(rt, 'setOriginKey', worker_origin_key) if worker_origin_key
         # …and its agent cluster (HTML "obtain a dedicated/shared worker agent"): a dedicated worker's its owner's, a shared
         # or service worker's one of its own — what a WebAssembly.Module it is sent is read back in (clone.rs).
         cluster = shared || service ? "#{@browsing_context_group}|worker:#{handle}" : record&.dig(:cluster_key)
-        rt.call("#{V8Runtime::ENGINE}.setAgentClusterKey", cluster) if cluster
+        V8Runtime.engine_call(rt, 'setAgentClusterKey', cluster) if cluster
         # A service worker runs in a ServiceWorkerGlobalScope: adjust the worker scope
         # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs. The
         # registration SCOPE rides in first — `self.registration.scope` must be the
@@ -9792,7 +9792,7 @@ module Capybara
           # HTTP cache) and the Update probe's import responses (this version's script resource map, which importScripts take
           # each once instead of fetching again) — the engine's (service_worker.rs `swGlobalInit`).
           args = [sw_registration, sw_scope.to_s, sw_uvc, sw_imports_map && JSON.generate(sw_imports_map)]
-          rt.call("#{V8Runtime::ENGINE}.swGlobalInit", *args)
+          V8Runtime.engine_call(rt, 'swGlobalInit', *args)
           rt.eval_void('__csim_installServiceWorkerScope();')
         end
         # A DEFERRED main script (worker_spawn found a controlling, fetch-handling SW for the

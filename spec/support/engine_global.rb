@@ -2,14 +2,20 @@
 
 # A realm's engine ops are no property of its global (engine.js): a page — an app's — reaches none of them. A spec that
 # reads the engine's own state off a page (`__dom.nidOf(node)`, `__dom.layoutMeasureCounts()`) has the realms made under
-# `EngineGlobal.within { … }` name them `__dom` (dom.rs `ENGINE_GLOBAL`, read as each realm is made); an example or a
+# `EngineGlobal.within { … }` name them `__dom`, and their `RustyRacer` rusty_racer's whole host namespace besides
+# (`contextGlobal`: dom.rs `ENGINE_GLOBAL`, read as each realm is made, engine.js `__csimTakeEngine`); an example or a
 # group tagged `engine_global: true` runs whole under it.
 module EngineGlobal
+  @depth = 0
+
+  # (…nested — a tagged example running the WPT runner — off again only as the outermost ends)
   def self.within
+    @depth += 1
     Capybara::Simulated::Native.engine_global = true
     yield
   ensure
-    Capybara::Simulated::Native.engine_global = false
+    @depth -= 1
+    Capybara::Simulated::Native.engine_global = false if @depth.zero?
   end
 end
 

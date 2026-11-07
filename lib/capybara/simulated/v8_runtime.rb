@@ -115,9 +115,12 @@ module Capybara
       # unhandled-rejection.js / bridge.entry.js) — a rename must touch both
       # sides.
       HOST_NAMESPACE_NAME = 'RustyRacer'
-      # …and under it, the engine ops the host calls a realm with — those alone (engine.js `HOST_OPS`): a realm's engine
-      # is no property of its global.
+      # …and under it, the steps the host calls a realm by — those alone (engine.js `HOST_OPS`, `hostStep`): a realm's
+      # engine is no property of its global. Each takes the host's token first (`Native.host_token`), which no script of
+      # a page's has, so a page that reads the namespace makes none of the host's calls.
       ENGINE = "#{HOST_NAMESPACE_NAME}.engine"
+      def self.host_token = (@host_token ||= Native.host_token.freeze)
+      def self.engine_call(realm, step, *args) = realm.call("#{ENGINE}.#{step}", host_token, *args)
 
       # One isolate + its default context, presented as a single handle — the
       # shape the rest of the runtime (and `ScriptCache`) passes around.
@@ -632,7 +635,11 @@ module Capybara
         # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
         going.each {|id| @browser.revoke_realm_blobs(id) rescue nil }
         if @ctx && !ids.empty?
-          @ctx.eval_void(ids.map {|id| "globalThis.#{ENGINE}.dropRealm(#{id.to_i});" }.join) rescue nil
+          ids.each do |id|
+            V8Runtime.engine_call(@ctx, 'dropRealm', id.to_i)
+          rescue StandardError
+            nil
+          end
         end
         discarded_realm_ids.clear
         window_realms_changed
@@ -749,7 +756,7 @@ module Capybara
       def adopt_client_id(realm, client_id, realm_id: realm.id)
         return if client_id.to_s.empty?
 
-        realm.call("#{ENGINE}.realmIdentify", 'clientId', client_id.to_s)
+        V8Runtime.engine_call(realm, 'realmIdentify', 'clientId', client_id.to_s)
         @browser.sw_adopt_client_id(realm_id, client_id.to_s)
       end
       # A navigable gone on from realm `from`'s document to realm `to`'s: the WindowProxy of it every realm holds over the
@@ -804,13 +811,13 @@ module Capybara
         # unregister path (its iframe element going away), but a WINDOW realm has no
         # element — this is its only eviction, and it covers the reload (dispose +
         # recreate) path too, where the old id would otherwise leak in the set.
-        ctx.call("#{ENGINE}.setSteppedWindow", id.to_i, false) rescue nil
+        V8Runtime.engine_call(ctx, 'setSteppedWindow', id.to_i, false) rescue nil
         # The custom element reactions the backup element queue owes its elements run first, as its microtask would have
         # before the old document went. Then what nothing can run any more goes, which the engine keeps: its mutation
         # observers (nothing can notify them), its timers, whose handlers held its global, and the reactions still owed
         # (`RealmArena::discard_realm`).
         ctx.eval_void("globalThis.__csimRunBackupReactionsOf && globalThis.__csimRunBackupReactionsOf(#{id.to_i});") rescue nil
-        ctx.call("#{ENGINE}.discardRealm", id.to_i) rescue nil
+        V8Runtime.engine_call(ctx, 'discardRealm', id.to_i) rescue nil
         # (…its document discarded, the navigables in it between two documents lost with it)
         evict_lost_window_proxies
         fr = frame_realms.delete(id)
@@ -890,7 +897,7 @@ module Capybara
         @browser.forget_blob_copies rescue nil
         # …and the main realm's ports and channels let go of in the isolate's registries, which outlive the context: the
         # next page reuses realm 0 (a channel of this page would otherwise hear its posts).
-        @ctx&.call("#{ENGINE}.forgetRealmObjects", 0) rescue nil
+        (V8Runtime.engine_call(@ctx, 'forgetRealmObjects', 0) rescue nil) if @ctx
         # Warm path: per rusty's reset contract the snapshot is REPLAYED —
         # including its precompiled code cache — so re-visited app modules
         # compile at in-memory-hit cost (~3.3× cheaper than a cold
@@ -1285,14 +1292,13 @@ module Capybara
       def loading_frame_realms = (@loading_frame_realms ||= {})
       def loading_frame_realm_url(realm_id)
         realm = loading_frame_realms[realm_id] or return nil
-        realm.call(*REALM_URL).to_s
+        V8Runtime.engine_call(realm, 'locationPart', 0).to_s
       rescue StandardError
         nil
       end
       # The URL of realm `realm_id`'s document (0 the page's), as its engine has it — its location's href (url_ops.rs
       # `parts`' first), read with none of its Location's security check, which is a script's.
-      REALM_URL = ["#{ENGINE}.locationPart", 0].freeze
-      def realm_url(realm_id) = realm_call(realm_id, *REALM_URL).to_s
+      def realm_url(realm_id) = realm_call(realm_id, "#{ENGINE}.locationPart", V8Runtime.host_token, 0).to_s
       # …and a call of `name` in realm `realm_id` (0 the page's), loading or loaded, made on its context directly — from
       # inside a V8 callback (the module resolver), where `call`'s script-cache warm must not run — nil where the realm is
       # gone.
@@ -1382,35 +1388,9 @@ module Capybara
         # id passed from `__csimFrameWindow`), BEFORE the frame's scripts run —
         # `top` propagates up the chain (the main realm's `top` is itself). A
         # nested frame thus reaches its TRUE parent, not unconditionally the
-        # main frame. `parent_id` is an integer the marshaller carries verbatim.
-        #
-        # eval_void, and not by preference: a statement list's completion value is
-        # its last statement's, so this block evaluates to the WindowProxy it just
-        # assigned — and marshalling a value RUNS JS, so the proxy's `ownKeys` trap
-        # throws SecurityError at a cross-origin parent. That lands after every
-        # write here has already succeeded, aborting the rest of the frame's boot
-        # (leaving it on the snapshot's default origin) over a value we never asked
-        # for. Every eval below whose value we discard is spelled the same way.
-        # (…in a function of its own: a `var` of this script would be a global of the frame's, which no page enumerating
-        # its window may see, and which nothing could make non-enumerable)
-        realm.eval_void(<<~JS)
-          (function () {
-          var __NS        = globalThis.#{HOST_NAMESPACE_NAME};
-          var __parentWin = __NS.contextGlobal(#{parent_id.to_i});
-          if (__parentWin) {
-            // Expose `parent`/`top` as THIS realm's WindowProxy for them (not the
-            // raw parent global) so `e.source === parent` holds and a frame's
-            // `parent.postMessage(...)` attributes the sender. `top` resolves
-            // through the parent's own top (already a proxy if the parent is a
-            // frame), unwrapped to its raw global then re-proxied for this realm.
-            var __pf     = globalThis.__csimFrameWindowProxyFor;
-            var __topRaw = __parentWin.__csimTop || __parentWin;
-            if (__topRaw.__csimRawWindow) __topRaw = __topRaw.__csimRawWindow;
-            globalThis.__csimParent = __pf(__NS.contextOf(__parentWin)) || __parentWin;
-            globalThis.__csimTop    = __pf(__NS.contextOf(__topRaw)) || __topRaw;
-          }
-          })();
-        JS
+        # main frame — platform-globals.js `setParentRealm`, which answers nothing (a WindowProxy marshalled back would run
+        # its traps, a cross-origin parent's `ownKeys` a SecurityError).
+        V8Runtime.engine_call(realm, 'setParentRealm', parent_id.to_i)
         load_frame_document(
           realm, url, body, content_type, parent_id,
           link:                 container,
@@ -1527,7 +1507,7 @@ module Capybara
         # (…a realm kept for the document — its initial about:blank's, `reuse_frame_realm` — reseeded whatever it had)
         # (…an origin inherited the parent's, which made it: the one record, its domain with it — realm_location.rs
         # `inherit_origin`)
-        realm.call("#{ENGINE}.setSandbox", sandbox.to_i) unless sandbox.to_i.zero? && !reused
+        V8Runtime.engine_call(realm, 'setSandbox', sandbox.to_i) unless sandbox.to_i.zero? && !reused
         realm.call('__csimSetDocumentOrigin', doc_origin&.to_s, parent_id.to_i) unless doc_origin.nil? && !reused
         # The frame's location.origin (opaque "null" for about:blank / srcdoc /
         # javascript:); decoupled from the location string so navigation is intact.
@@ -1649,13 +1629,13 @@ module Capybara
         adopt_client_id(realm, client_id)
         if doc_origin
           # (…an about:blank one a navigation made its initiator's origins, its navigable's sandboxing: `navigationOrigins`)
-          realm.call("#{ENGINE}.setSandbox", sandbox.to_i) if sandbox.to_i.positive?
+          V8Runtime.engine_call(realm, 'setSandbox', sandbox.to_i) if sandbox.to_i.positive?
           realm.call('__csimSetDocumentOrigin', doc_origin.to_s)
           realm.call('__csimSetLocationOrigin', location_origin&.to_s)
         else
           # (…another sandboxed as its window is, and by its response's CSP `sandbox`: realm_location.rs
           # `seedWindowDocument`)
-          realm.call("#{ENGINE}.seedWindowDocument", url.to_s, csp)
+          V8Runtime.engine_call(realm, 'seedWindowDocument', url.to_s, csp)
         end
         # (…and its agent, its origin known: realm_location.rs `origin_keyed_cluster`)
         realm.call('__csimObtainAgentCluster', origin_agent_cluster == true)
@@ -1738,13 +1718,13 @@ module Capybara
         realm.call('__csimTimeTravelFrom', opener_id.to_i) if opener_id
         # (…its viewport the window's — the one it was made with, a navigation's the document's before it had — which its
         # document loads at: viewport.rs)
-        realm.call("#{ENGINE}.viewportSet", viewport[0].to_i, viewport[1].to_i, true) if viewport
+        V8Runtime.engine_call(realm, 'viewportSet', viewport[0].to_i, viewport[1].to_i, true) if viewport
         # Mark it a top-level window realm: its location's navigations planned in its own realm's plan, which the host
         # takes for it (`consume_pending_window_nav`), as the page's are its own. That a script may close it, and the
         # realm that opened it (its `window.opener`), are the engine's (`setSteppedWindow` below), by the window's key:
         # the realm of its first document, which a document it navigates to keeps (window.js `windowKey`).
         window_key ||= realm.id
-        realm.call("#{ENGINE}.realmIdentify", 'windowKey', window_key.to_i)
+        V8Runtime.engine_call(realm, 'realmIdentify', 'windowKey', window_key.to_i)
         # `window.open()` with no URL opens about:blank — that IS the new document's URL, and a
         # realm built from the snapshot would otherwise keep reporting the OPENER's (making the
         # popup a phantom duplicate of its opener everywhere a document URL is read, the service-
@@ -1760,7 +1740,7 @@ module Capybara
           # (…and its referrer its creator's URL, its referrer policy its creator's: HTML "create a new browsing context and
           # document")
           realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
-          realm.call("#{ENGINE}.takeOpenerOrigins", opener_id.to_i) unless opener_id.nil?
+          V8Runtime.engine_call(realm, 'takeOpenerOrigins', opener_id.to_i) unless opener_id.nil?
           # (…and its agent, obtained as its browsing context is made — HTML "create a new browsing context", no response
           # its document's to ask for an origin-keyed one: realm_location.rs `origin_keyed_cluster`)
           realm.call('__csimObtainAgentCluster', false)
@@ -1776,7 +1756,7 @@ module Capybara
         # Register with the page's (main) realm's stepped windows so the event loop
         # runs THIS realm's tasks too — otherwise its queued tasks (e.g. a
         # BroadcastChannel delivery from a blob document) never fire.
-        ctx.eval_void("globalThis.#{ENGINE}.setSteppedWindow(#{realm.id}, true, #{opener_id.nil? ? 'undefined' : opener_id.to_i}, #{window_key.to_i});")
+        V8Runtime.engine_call(ctx, 'setSteppedWindow', realm.id, true, opener_id&.to_i, window_key.to_i)
         # Remember the window's opener / name so a self-navigation (reload_window_realm
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
@@ -2246,21 +2226,11 @@ module Capybara
       # other run as a classic Script of the realm in the engine (script.rs `runClassicScript`: HTML "run a classic
       # script" — its top-level declarations the global ones, its `let` / `const` / `class` in the global lexical
       # environment the realm's scripts share, a redeclaration a SyntaxError before any of it runs; named its label, which
-      # its errors' stacks and its `import()`s' referrer report). It snapshots the CURRENT `__csim_runScriptCached` host fn
-      # and the realm's engine op, so it must run after the attach it captures (`attach_run_script_with_cache` installs it
-      # last for exactly that reason).
+      # its errors' stacks and its `import()`s' referrer report): engine.js `installRunScript`. It snapshots the CURRENT
+      # `__csim_runScriptCached` host fn, so it must run after the attach it captures (`attach_run_script_with_cache`
+      # installs it last for exactly that reason).
       def install_run_script_dispatcher(c)
-        c.eval_void(<<~JS)
-          (function () {
-            const cached     = globalThis.__csim_runScriptCached;
-            const runClassic = globalThis.#{ENGINE}.runClassicScript;
-            const threshold  = #{SCRIPT_CACHE_MIN_BYTES};
-            globalThis.__csim_runScript = function (label, body) {
-              if (body.length >= threshold) return cached(label, body);
-              runClassic(label || 'csim-eval', body);
-            };
-          })();
-        JS
+        V8Runtime.engine_call(c, 'installRunScript', SCRIPT_CACHE_MIN_BYTES)
       end
 
       # A fresh per-frame realm boots from the snapshot, so every
@@ -2288,12 +2258,12 @@ module Capybara
         # Register the bridge's recorder for V8's promise-reject notifications
         # — the one channel that surfaces rejections no handler sees by HTML's
         # notify task (fire-and-forget async functions, bare `Promise.reject`,
-        # a throwing `then` callback with nothing downstream). Post-snapshot: the host
-        # namespace doesn't exist while the snapshot is built, which is why
-        # unhandled-rejection.js leaves registration to us. Main realm only —
+        # a throwing `then` callback with nothing downstream): unhandled-rejection.js
+        # `watchPromiseRejections`. Post-snapshot: the host namespace doesn't exist
+        # while the snapshot is built, which is why it is ours to ask. Main realm only —
         # the recorder routes per-realm via `contextGlobal` itself, and a
         # frame-realm registration would dangle once that realm is disposed.
-        c.eval_void("globalThis.#{HOST_NAMESPACE_NAME}.setPromiseRejectHandler(globalThis.__csimPromiseRejected);")
+        engine_call(c, 'watchPromiseRejections')
       end
 
       # Worker-isolate factory: fresh isolate from the shared

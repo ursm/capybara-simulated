@@ -42,12 +42,9 @@ module SimulatedSessionTeardown
       const visit = (win) => {
         const stats = win.__csimNativeLayoutStats ? win.__csimNativeLayoutStats().rustFellBack : {};
         for (const [reason, n] of Object.entries(stats)) all[reason] = (all[reason] || 0) + n;
-        for (const id of win.__csimChildRealmIds || []) {
-          const child = globalThis.RustyRacer.contextGlobal(id);
-          if (child) visit(child);
-        }
       };
       visit(globalThis);
+      globalThis.__csimEachChildRealm(visit);
       return JSON.stringify(all);
     })()
   JS

@@ -134,6 +134,15 @@ RSpec.describe 'a WindowProxy of a pop-up' do
       expect(read("EventTarget.prototype.dispatchEvent.call(w, new Event('x'))")).to eq('SecurityError')
     end
 
+    # (…the check none a page can replace — a page's own `__csimIsSameOriginDomainWindow` is just its global — and the
+    # window behind it none a page can read: the name the driver once unwrapped it by is a SecurityError like any other)
+    it 'is a SecurityError whatever global the page defines, and hands over no window behind it' do
+      session.execute_script('window.__csimIsSameOriginDomainWindow = () => true;')
+      expect(read("EventTarget.prototype.addEventListener.call(w, 'x', () => {})")).to eq('SecurityError')
+      expect(read("Object.getOwnPropertyDescriptor(window, 'document').get.call(w)")).to eq('SecurityError')
+      expect(read('w.__csimRawWindow')).to eq('SecurityError')
+    end
+
     # (…[[HasProperty]] by [[GetOwnProperty]], HTML's: Chrome and Firefox measured)
     it 'is a SecurityError to ask for a member it does not expose, and true for one it does' do
       expect(read("'document' in w")).to eq('SecurityError')
