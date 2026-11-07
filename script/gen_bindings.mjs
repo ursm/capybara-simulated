@@ -14,7 +14,7 @@
 import { parseAll } from '@webref/idl';
 import { listAll as listAllElements } from '@webref/elements';
 import { parse as parseIdl } from 'webidl2';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -38,12 +38,14 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // name, an operation `'method'`, an attribute what of it is exposed (`'get'`, `'set'`, `'get set'`, the table's
 // [[NeedsGet]] / [[NeedsSet]]) — emitted as `CROSS_ORIGIN_<NAME>_PROPERTIES`, a Set of the names, and
 // `CROSS_ORIGIN_<NAME>_KINDS`, each one's kind (platform-globals.js, the WindowProxy and the Location of another origin).
-// `shell`: with `install`, an interface whose class the binding makes too — flat, as an event interface's: chained to the
-// class of the interface it inherits by its [[Prototype]]s alone (`define<Name>(Parent, impl)`), no `extends`, no `super`, so
-// nothing of a page's put in that chain is ever called, with PLATFORM or at all. Its object's slots one record, with the
-// brand of each interface of the chain that is a shell's; `impl.init(slots, …)` fills it for the platform's own construction
-// (`new X(PLATFORM, …)`, by position), and `impl.construct(slots, …)` for a script's, with its IDL constructor's arguments
-// converted: `shellClass`. `slots`: the attributes whose getter reads a slot of the object's and no more, needing no
+// `shell`: `install`, and an interface whose class the binding makes too — flat, as an event interface's: `class extends Object`,
+// which makes no object before its body, chained to the class of the interface it inherits by its [[Prototype]]s alone
+// (`define<Name>(Parent, impl)`), no `super`, so nothing of a page's put in that chain is ever called, with PLATFORM or at all.
+// Its object's slots one record, with the brand of each interface of the chain that is a shell's; `impl.construct(slots, …)` fills
+// it for a script's construction, with its IDL constructor's arguments converted: `shellClass`. `platform: N`: the platform's own
+// construction takes N arguments (`new X(PLATFORM, …)`, by position), which `impl.init(slots, …)` is handed; without it the platform
+// makes none but its slots, with no `init`. `impl` is checked against it as the bridge loads (webidl.js `checkPlatformSteps`), and
+// each `new X(PLATFORM, …)` of the sources as this generates (`checkPlatformConstructions`). `slots`: the attributes whose getter reads a slot of the object's and no more, needing no
 // implementation — a slot of the attribute's name, or, in an object among them, of the name it gives it: a setter, where it
 // has one, stays the implementation's. `event`: an event interface, whose class the binding makes too (`eventInterface`:
 // `define<Name>(Parent, impl)`), its attributes slots of its state that its init fills — but what `event` says otherwise.
@@ -334,7 +336,6 @@ const INTERFACES = [
   ['uievents', 'CompositionEvent', { event: { initialized: true } }],
   ['pointerevents', 'PointerEvent', { event: { init: ['tiltX', 'tiltY', 'altitudeAngle', 'azimuthAngle'] } }],
   ['touch-events', 'Touch', {
-    install: true,
     shell: true,
     slots: ['identifier', 'target', 'screenX', 'screenY', 'clientX', 'clientY', 'pageX', 'pageY', 'radiusX', 'radiusY', 'rotationAngle', 'force', 'altitudeAngle', 'azimuthAngle', 'touchType']
   }],
@@ -343,7 +344,7 @@ const INTERFACES = [
     event: { init: ['touches', 'targetTouches', 'changedTouches'] },
     namedProperties: 'none: getModifierState is the plain operation Chrome and Firefox have, no named property of the event'
   }],
-  ['html', 'DataTransfer', { install: true, shell: true, slots: [{ items: 'list', files: 'filesView' }] }],
+  ['html', 'DataTransfer', { shell: true, slots: [{ items: 'list', files: 'filesView' }] }],
   ['html', 'DataTransferItemList'],
   ['html', 'DataTransferItem', {
     omit: {
@@ -359,7 +360,7 @@ const INTERFACES = [
       palettes: 'a face\'s color palettes are not read from its file'
     }
   }],
-  ['css-font-loading', 'FontFaceSet', { install: true }],
+  ['css-font-loading', 'FontFaceSet', { shell: true, platform: 1 }],
   ['html', 'MediaError', { slots: ['code', 'message'] }],
   ['html', 'ImageData', { install: true, slots: ['width', 'height', 'data', 'pixelFormat', 'colorSpace'] }],
   ['html', 'ImageBitmap'],
@@ -367,7 +368,7 @@ const INTERFACES = [
   // (…`document.all`, an object the engine makes (legacy.rs `allCollectionObject`), whose interceptors answer its indices and
   // names)
   ['html', 'HTMLAllCollection', {
-    install: true, shell: true,
+    shell: true,
     namedProperties: "the undetectable object's interceptors (legacy.rs)",
     indexedProperties: 'the same interceptors'
   }],
@@ -380,9 +381,9 @@ const INTERFACES = [
   ['html', 'External'],
   ['html', 'CustomElementRegistry', { install: true }],
   ['html', 'ValidityState'],
-  ['html', 'CustomStateSet', { install: true, shell: true }],
-  ['html', 'ElementInternals', { install: true, shell: true, slots: ['states'] }],
-  ['html', 'DOMStringMap', { install: true, shell: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
+  ['html', 'CustomStateSet', { shell: true, platform: 1 }],
+  ['html', 'ElementInternals', { shell: true, platform: 1, slots: ['states'] }],
+  ['html', 'DOMStringMap', { shell: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
   ['dom', 'HTMLCollection', {
     install: true,
     namedProperties: 'the Proxy each collection is (dom-collections.js `legacyCollection`)',
@@ -393,27 +394,27 @@ const INTERFACES = [
   ['dom', 'NodeList', { install: true, indexedProperties: 'the Proxy `withIndexedGetter` makes of each (dom-collections.js `makeNodeList`)' }],
   ['html', 'RadioNodeList', { install: true }],
   ['dom', 'NamedNodeMap', {
-    install: true, shell: true,
+    shell: true,
     namedProperties: 'the Proxy each element\'s attributes are (dom-collections.js)',
     indexedProperties: 'the same Proxy'
   }],
   ['html', 'CanvasGradient'],
   ['html', 'TextMetrics'],
   ['html', 'CanvasPattern'],
-  ['html', 'Path2D', { install: true, shell: true }],
-  ['html', 'CanvasRenderingContext2D', { install: true, shell: true }],
-  ['html', 'OffscreenCanvasRenderingContext2D', { install: true, shell: true }],
-  ['html', 'OffscreenCanvas', { install: true, shell: true }],
+  ['html', 'Path2D', { shell: true }],
+  ['html', 'CanvasRenderingContext2D', { shell: true, platform: 1 }],
+  ['html', 'OffscreenCanvasRenderingContext2D', { shell: true, platform: 1 }],
+  ['html', 'OffscreenCanvas', { shell: true }],
   ['SVG', 'SVGAnimatedString'],
   ['clipboard-apis', 'ClipboardItem', { install: true, slots: ['presentationStyle', 'types'] }],
-  ['clipboard-apis', 'Clipboard', { install: true, shell: true }],
-  ['screen-orientation', 'ScreenOrientation', { install: true }],
-  ['html', 'MessageChannel', { install: true, shell: true, slots: ['port1', 'port2'] }],
+  ['clipboard-apis', 'Clipboard', { shell: true }],
+  ['screen-orientation', 'ScreenOrientation', { shell: true }],
+  ['html', 'MessageChannel', { shell: true, slots: ['port1', 'port2'] }],
   ['html', 'MessagePort', {
     install: true,
     omitMembers: { onclose: 'withdrawn from the HTML Standard — no close event is fired at a port; Chrome and Firefox have none' }
   }],
-  ['html', 'BroadcastChannel', { install: true, shell: true, slots: ['name'] }],
+  ['html', 'BroadcastChannel', { shell: true, slots: ['name'] }],
   ['html', 'EventSource', { install: true }],
   ['websockets', 'WebSocket', { install: true }],
   ['html', 'DragEvent', { event: {} }],
@@ -437,20 +438,20 @@ const INTERFACES = [
   ['clipboard-apis', 'ClipboardEvent', { event: {} }],
   ['cssom-view', 'MediaQueryListEvent', { event: {} }],
   ['IndexedDB', 'IDBVersionChangeEvent', { event: {} }],
-  ['IndexedDB', 'IDBRequest', { install: true, shell: true, slots: ['source', 'transaction'] }],
-  ['IndexedDB', 'IDBOpenDBRequest', { install: true, shell: true }],
-  ['IndexedDB', 'IDBFactory', { install: true, shell: true }],
-  ['IndexedDB', 'IDBDatabase', { install: true, shell: true }],
-  ['IndexedDB', 'IDBTransaction', { install: true, shell: true, slots: ['mode', 'durability', 'error', { db: 'connection' }] }],
-  ['IndexedDB', 'IDBObjectStore', { install: true, shell: true, slots: ['name', 'keyPath', 'transaction'] }],
-  ['IndexedDB', 'IDBIndex', { install: true, shell: true, slots: ['name', 'keyPath', { objectStore: 'storeHandle' }] }],
-  ['IndexedDB', 'IDBKeyRange', { install: true, shell: true, slots: ['lowerOpen', 'upperOpen'] }],
-  ['IndexedDB', 'IDBRecord', { install: true, shell: true, slots: ['key', 'primaryKey', 'value'] }],
-  ['IndexedDB', 'IDBCursor', { install: true, shell: true, slots: ['source', 'direction', 'request', { key: 'keyValue', primaryKey: 'primaryKeyValue' }] }],
-  ['IndexedDB', 'IDBCursorWithValue', { install: true, shell: true }],
+  ['IndexedDB', 'IDBRequest', { shell: true, platform: 2, slots: ['source', 'transaction'] }],
+  ['IndexedDB', 'IDBOpenDBRequest', { shell: true, platform: 0 }],
+  ['IndexedDB', 'IDBFactory', { shell: true, platform: 0 }],
+  ['IndexedDB', 'IDBDatabase', { shell: true, platform: 1 }],
+  ['IndexedDB', 'IDBTransaction', { shell: true, platform: 5, slots: ['mode', 'durability', 'error', { db: 'connection' }] }],
+  ['IndexedDB', 'IDBObjectStore', { shell: true, platform: 2, slots: ['name', 'keyPath', 'transaction'] }],
+  ['IndexedDB', 'IDBIndex', { shell: true, platform: 2, slots: ['name', 'keyPath', { objectStore: 'storeHandle' }] }],
+  ['IndexedDB', 'IDBKeyRange', { shell: true, platform: 4, slots: ['lowerOpen', 'upperOpen'] }],
+  ['IndexedDB', 'IDBRecord', { shell: true, platform: 3, slots: ['key', 'primaryKey', 'value'] }],
+  ['IndexedDB', 'IDBCursor', { shell: true, platform: 1, slots: ['source', 'direction', 'request', { key: 'keyValue', primaryKey: 'primaryKeyValue' }] }],
+  ['IndexedDB', 'IDBCursorWithValue', { shell: true, platform: 1 }],
   ['html', 'DOMStringList'],
   ['html', 'Location', { install: true, crossOrigin: { href: 'set', replace: 'method' } }],
-  ['html', 'History', { install: true, shell: true }],
+  ['html', 'History', { shell: true, platform: 0 }],
   ['css-font-loading', 'FontFaceSetLoadEvent', { event: {} }],
   ['gamepad', 'GamepadEvent', { event: {} }],
   ['orientation-event', 'DeviceMotionEventAcceleration', { slots: ['x', 'y', 'z'] }],
@@ -459,30 +460,30 @@ const INTERFACES = [
   ['orientation-event', 'DeviceOrientationEvent', { event: {} }],
   ['webidl', 'DOMException', { install: true, slots: ['name', 'message', 'code'] }],
   ['webidl', 'QuotaExceededError', { install: true, slots: ['quota', 'requested'] }],
-  ['dom', 'DOMImplementation', { install: true, shell: true }],
-  ['geometry', 'DOMPointReadOnly', { install: true }],
-  ['geometry', 'DOMPoint', { install: true }],
-  ['geometry', 'DOMRectReadOnly', { install: true }],
-  ['geometry', 'DOMRect', { install: true }],
+  ['dom', 'DOMImplementation', { shell: true, platform: 1 }],
+  ['geometry', 'DOMPointReadOnly', { shell: true }],
+  ['geometry', 'DOMPoint', { shell: true }],
+  ['geometry', 'DOMRectReadOnly', { shell: true }],
+  ['geometry', 'DOMRect', { shell: true }],
   ['geometry', 'DOMRectList'],
-  ['geometry', 'DOMQuad', { install: true }],
-  ['geometry', 'DOMMatrixReadOnly', { install: true, slots: ['is2D'] }],
-  ['geometry', 'DOMMatrix', { install: true }],
-  ['url', 'URL', { install: true, shell: true }],
-  ['url', 'URLSearchParams', { install: true, shell: true }],
+  ['geometry', 'DOMQuad', { shell: true }],
+  ['geometry', 'DOMMatrixReadOnly', { shell: true, slots: ['is2D'] }],
+  ['geometry', 'DOMMatrix', { shell: true }],
+  ['url', 'URL', { shell: true }],
+  ['url', 'URLSearchParams', { shell: true }],
   ['urlpattern', 'URLPattern', { install: true }],
   ['fetch', 'Headers', { install: true }],
-  ['xhr', 'FormData', { install: true, shell: true }],
-  ['html', 'Storage', { install: true, shell: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
+  ['xhr', 'FormData', { shell: true }],
+  ['html', 'Storage', { shell: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
   ['dom', 'XMLDocument', { install: true }],
-  ['webcrypto', 'CryptoKey', { install: true, shell: true }],
-  ['webcrypto', 'SubtleCrypto', { install: true, shell: true }],
-  ['webcrypto', 'Crypto', { install: true, shell: true, slots: ['subtle'] }],
-  ['service-workers', 'Cache', { install: true, shell: true }],
-  ['service-workers', 'CacheStorage', { install: true, shell: true }],
-  ['requestidlecallback', 'IdleDeadline', { install: true, shell: true, slots: ['didTimeout'] }],
-  ['web-locks', 'LockManager', { install: true, shell: true }],
-  ['web-locks', 'Lock', { install: true, shell: true, slots: ['name', 'mode'] }],
+  ['webcrypto', 'CryptoKey', { shell: true, platform: 1 }],
+  ['webcrypto', 'SubtleCrypto', { shell: true }],
+  ['webcrypto', 'Crypto', { shell: true, platform: 0, slots: ['subtle'] }],
+  ['service-workers', 'Cache', { shell: true, platform: 1 }],
+  ['service-workers', 'CacheStorage', { shell: true }],
+  ['requestidlecallback', 'IdleDeadline', { shell: true, platform: 1, slots: ['didTimeout'] }],
+  ['web-locks', 'LockManager', { shell: true }],
+  ['web-locks', 'Lock', { shell: true, platform: 2, slots: ['name', 'mode'] }],
   ['service-workers', 'ServiceWorker', { install: true, slots: ['scriptURL', 'state'] }],
   ['service-workers', 'ServiceWorkerRegistration', {
     slots: ['scope'],
@@ -502,22 +503,20 @@ const INTERFACES = [
   ['service-workers', 'NavigationPreloadManager', { install: true }],
   ['html', 'Worker', { install: true }],
   ['html', 'SharedWorker', { install: true, slots: ['port'] }],
-  ['credential-management', 'Credential', { install: true, shell: true, slots: ['id', 'type'] }],
-  ['credential-management', 'CredentialsContainer', { install: true, shell: true }],
-  ['webauthn', 'PublicKeyCredential', { install: true, shell: true, slots: ['rawId', 'response', 'authenticatorAttachment'] }],
-  ['webauthn', 'AuthenticatorResponse', { install: true, shell: true, slots: ['clientDataJSON'] }],
-  ['webauthn', 'AuthenticatorAttestationResponse', { install: true, shell: true, slots: ['attestationObject'] }],
-  ['webauthn', 'AuthenticatorAssertionResponse', { install: true, shell: true, slots: ['authenticatorData', 'signature', 'userHandle'] }],
+  ['credential-management', 'Credential', { shell: true, slots: ['id', 'type'] }],
+  ['credential-management', 'CredentialsContainer', { shell: true }],
+  ['webauthn', 'PublicKeyCredential', { shell: true, platform: 2, slots: ['rawId', 'response', 'authenticatorAttachment'] }],
+  ['webauthn', 'AuthenticatorResponse', { shell: true, slots: ['clientDataJSON'] }],
+  ['webauthn', 'AuthenticatorAttestationResponse', { shell: true, platform: 1, slots: ['attestationObject'] }],
+  ['webauthn', 'AuthenticatorAssertionResponse', { shell: true, platform: 1, slots: ['authenticatorData', 'signature', 'userHandle'] }],
   ['service-workers', 'Client', {
     slots: ['url', 'frameType', 'id', 'type'],
-    install: true,
-    shell: true,
+    shell: true, platform: 6,
     omit: { 'page-lifecycle': 'lifecycleState: the Page Lifecycle API is not implemented (a WICG proposal)' }
   }],
   ['service-workers', 'WindowClient', {
     slots: ['focused'],
-    install: true,
-    shell: true,
+    shell: true, platform: 6,
     omitMembers: {
       ancestorOrigins: "the ancestor origins of a client: Location's ancestorOrigins, which it mirrors, is not implemented (Firefox has neither)"
     }
@@ -528,12 +527,12 @@ const INTERFACES = [
   ['service-workers', 'FetchEvent', { event: { steps: ['handled'], init: ['preloadResponse'] } }],
   ['service-workers', 'InstallEvent', { event: {} }],
   ['web-animations', 'AnimationTimeline', {
-    install: true, shell: true,
+    shell: true,
     omitMembers: { play: 'AnimationTimeline.play(): a level-2 shorthand no engine ships (Chrome and Firefox have none)' }
   }],
-  ['web-animations', 'DocumentTimeline', { install: true, shell: true }],
+  ['web-animations', 'DocumentTimeline', { shell: true }],
   ['web-animations', 'AnimationEffect', {
-    install: true, shell: true,
+    shell: true,
     omit: {
       'web-animations-2': 'the timing hierarchy (parent, siblings, before / after / replace / remove): group effects, which ' +
         'no engine ships'
@@ -547,54 +546,54 @@ const INTERFACES = [
   }],
   ['css-animations-2', 'CSSAnimation', { install: true }],
   ['css-transitions-2', 'CSSTransition', { install: true }],
-  ['html', 'DOMParser', { install: true, shell: true }],
-  ['html', 'XMLSerializer', { install: true, shell: true }],
+  ['html', 'DOMParser', { shell: true }],
+  ['html', 'XMLSerializer', { shell: true }],
   ['intersection-observer', 'IntersectionObserver', { install: true, slots: ['root', 'rootMargin', 'scrollMargin', 'thresholds', 'delay', 'trackVisibility'] }],
-  ['intersection-observer', 'IntersectionObserverEntry', { install: true, shell: true, slots: ['time', 'rootBounds', 'boundingClientRect', 'intersectionRect', 'isIntersecting', 'isVisible', 'intersectionRatio', 'target'] }],
+  ['intersection-observer', 'IntersectionObserverEntry', { shell: true, slots: ['time', 'rootBounds', 'boundingClientRect', 'intersectionRect', 'isIntersecting', 'isVisible', 'intersectionRatio', 'target'] }],
   ['hr-time', 'Performance', {
-    install: true,
+    shell: true, platform: 0,
     omit: {
       'navigation-timing': 'timing, navigation: Navigation Timing is not modelled (performance.js says why a partial one is worse)',
       'event-timing': 'eventCounts, interactionCount: Event Timing is not implemented',
       'performance-measure-memory': 'measureUserAgentSpecificMemory: memory measurement is not implemented'
     }
   }],
-  ['performance-timeline', 'PerformanceEntry', { install: true, shell: true, slots: ['id', 'name', 'entryType', 'startTime', 'duration', 'navigationId'] }],
-  ['user-timing', 'PerformanceMark', { install: true, shell: true, slots: ['detail'] }],
-  ['user-timing', 'PerformanceMeasure', { install: true, shell: true, slots: ['detail'] }],
-  ['server-timing', 'PerformanceServerTiming', { install: true, shell: true, slots: ['name', 'duration', 'description'] }],
-  ['resource-timing', 'PerformanceResourceTiming', { install: true, shell: true }],
-  ['performance-timeline', 'PerformanceObserver', { install: true, shell: true }],
-  ['performance-timeline', 'PerformanceObserverEntryList', { install: true, shell: true }],
-  ['resize-observer', 'ResizeObserver', { install: true, shell: true }],
-  ['resize-observer', 'ResizeObserverEntry', { install: true, shell: true, slots: ['target', 'contentRect', 'borderBoxSize', 'contentBoxSize', 'devicePixelContentBoxSize'] }],
-  ['resize-observer', 'ResizeObserverSize', { install: true, shell: true, slots: ['inlineSize', 'blockSize'] }],
-  ['xhr', 'XMLHttpRequestEventTarget', { install: true, shell: true }],
-  ['xhr', 'XMLHttpRequestUpload', { install: true, shell: true }],
-  ['xhr', 'XMLHttpRequest', { install: true, shell: true, slots: ['upload'], omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
+  ['performance-timeline', 'PerformanceEntry', { shell: true, platform: 4, slots: ['id', 'name', 'entryType', 'startTime', 'duration', 'navigationId'] }],
+  ['user-timing', 'PerformanceMark', { shell: true, platform: 1, slots: ['detail'] }],
+  ['user-timing', 'PerformanceMeasure', { shell: true, platform: 4, slots: ['detail'] }],
+  ['server-timing', 'PerformanceServerTiming', { shell: true, platform: 3, slots: ['name', 'duration', 'description'] }],
+  ['resource-timing', 'PerformanceResourceTiming', { shell: true, platform: 1 }],
+  ['performance-timeline', 'PerformanceObserver', { shell: true }],
+  ['performance-timeline', 'PerformanceObserverEntryList', { shell: true, platform: 1 }],
+  ['resize-observer', 'ResizeObserver', { shell: true }],
+  ['resize-observer', 'ResizeObserverEntry', { shell: true, platform: 5, slots: ['target', 'contentRect', 'borderBoxSize', 'contentBoxSize', 'devicePixelContentBoxSize'] }],
+  ['resize-observer', 'ResizeObserverSize', { shell: true, platform: 2, slots: ['inlineSize', 'blockSize'] }],
+  ['xhr', 'XMLHttpRequestEventTarget', { shell: true }],
+  ['xhr', 'XMLHttpRequestUpload', { shell: true }],
+  ['xhr', 'XMLHttpRequest', { shell: true, slots: ['upload'], omit: { 'trust-token-api': 'setPrivateToken: Private State Tokens are not implemented (a WICG proposal)' } }],
   ['fetch', 'Request', {
     slots: ['method', 'url', 'headers', 'destination', 'referrer', 'referrerPolicy', 'mode', 'credentials', 'cache', 'redirect', 'integrity', 'keepalive', 'isReloadNavigation', 'isHistoryNavigation', 'signal'],
     install: true,
     omit: { 'local-network-access': 'targetAddressSpace: Local Network Access is not implemented (a WICG proposal)' }
   }],
   ['fetch', 'Response', { install: true, slots: ['type', 'url', 'redirected', 'status', 'ok', 'statusText', 'headers'] }],
-  ['encoding', 'TextEncoder', { install: true, shell: true }],
-  ['encoding', 'TextDecoder', { install: true, shell: true, slots: ['fatal', 'ignoreBOM'] }],
-  ['encoding', 'TextDecoderStream', { install: true, shell: true, slots: ['fatal', 'ignoreBOM'] }],
-  ['encoding', 'TextEncoderStream', { install: true, shell: true }],
-  ['FileAPI', 'Blob', { install: true, shell: true, slots: ['size', 'type'] }],
-  ['FileAPI', 'File', { install: true, shell: true, slots: ['name', 'lastModified'] }],
+  ['encoding', 'TextEncoder', { shell: true }],
+  ['encoding', 'TextDecoder', { shell: true, slots: ['fatal', 'ignoreBOM'] }],
+  ['encoding', 'TextDecoderStream', { shell: true, slots: ['fatal', 'ignoreBOM'] }],
+  ['encoding', 'TextEncoderStream', { shell: true }],
+  ['FileAPI', 'Blob', { shell: true, slots: ['size', 'type'] }],
+  ['FileAPI', 'File', { shell: true, slots: ['name', 'lastModified'] }],
   // (…made natively: a FileList is [Serializable], and V8's serializer takes no Proxy)
   ['FileAPI', 'FileList', { nativeIndexed: true }],
-  ['FileAPI', 'FileReader', { install: true, shell: true, slots: ['readyState', 'result', 'error'] }],
-  ['FileAPI', 'FileReaderSync', { install: true, shell: true }],
-  ['dom', 'XPathResult', { install: true, shell: true, slots: [{ resultType: 'type' }] }],
-  ['dom', 'XPathExpression', { install: true, shell: true }],
-  ['dom', 'XPathEvaluator', { install: true, shell: true }],
+  ['FileAPI', 'FileReader', { shell: true, slots: ['readyState', 'result', 'error'] }],
+  ['FileAPI', 'FileReaderSync', { shell: true }],
+  ['dom', 'XPathResult', { shell: true, platform: 2, slots: [{ resultType: 'type' }] }],
+  ['dom', 'XPathExpression', { shell: true, platform: 1 }],
+  ['dom', 'XPathEvaluator', { shell: true }],
   ['dom', 'AbstractRange', { install: true }],
-  ['dom', 'StaticRange', { install: true, shell: true }],
+  ['dom', 'StaticRange', { shell: true }],
   ['dom', 'Range', { install: true }],
-  ['selection-api', 'Selection', { install: true, shell: true }],
+  ['selection-api', 'Selection', { shell: true, platform: 1 }],
   ['cssom', 'CSSStyleDeclaration', { install: true, indexedProperties: 'the Proxy each declaration is (style-proxy.js `makeDeclProxy`)' }],
   ['cssom', 'CSSStyleProperties', { install: true }],
   ['cssom', 'CSSPageDescriptors', { install: true }],
@@ -603,35 +602,35 @@ const INTERFACES = [
   ['cssom', 'MediaList'],
   ['cssom', 'StyleSheetList'],
   ['cssom', 'CSSRuleList'],
-  ['cssom', 'StyleSheet', { install: true, shell: true, slots: ['href', 'parentStyleSheet', 'title', 'media'] }],
+  ['cssom', 'StyleSheet', { shell: true, slots: ['href', 'parentStyleSheet', 'title', 'media'] }],
   ['cssom', 'CSSStyleSheet', { install: true, slots: ['ownerRule'] }],
-  ['cssom', 'CSSRule', { install: true, shell: true }],
-  ['cssom', 'CSSGroupingRule', { install: true, shell: true }],
-  ['cssom', 'CSSStyleRule', { install: true, shell: true }],
-  ['cssom', 'CSSImportRule', { install: true, shell: true }],
-  ['cssom', 'CSSPageRule', { install: true, shell: true }],
-  ['cssom', 'CSSMarginRule', { install: true, shell: true }],
-  ['cssom', 'CSSNamespaceRule', { install: true, shell: true }],
-  ['css-conditional', 'CSSConditionRule', { install: true, shell: true }],
-  ['css-conditional', 'CSSMediaRule', { install: true, shell: true }],
-  ['css-conditional', 'CSSSupportsRule', { install: true, shell: true }],
-  ['css-conditional-5', 'CSSContainerRule', { install: true, shell: true }],
-  ['css-cascade', 'CSSLayerBlockRule', { install: true, shell: true }],
-  ['css-cascade', 'CSSLayerStatementRule', { install: true, shell: true }],
-  ['css-cascade-6', 'CSSScopeRule', { install: true, shell: true }],
-  ['css-transitions-2', 'CSSStartingStyleRule', { install: true, shell: true }],
-  ['css-fonts-5', 'CSSFontFaceRule', { install: true, shell: true }],
-  ['css-fonts', 'CSSFontFeatureValuesRule', { install: true, shell: true }],
-  ['css-fonts', 'CSSFontFeatureValuesMap', { install: true, shell: true }],
-  ['css-fonts', 'CSSFontPaletteValuesRule', { install: true, shell: true }],
-  ['css-animations', 'CSSKeyframeRule', { install: true, shell: true }],
-  ['css-animations', 'CSSKeyframesRule', { install: true, shell: true, indexedProperties: 'the Proxy each @keyframes rule is (cssom.js `withIndexedGetter`)' }],
-  ['css-counter-styles', 'CSSCounterStyleRule', { install: true, shell: true }],
-  ['css-properties-values-api', 'CSSPropertyRule', { install: true, shell: true }],
-  ['css-nesting', 'CSSNestedDeclarations', { install: true, shell: true }],
-  ['css-anchor-position', 'CSSPositionTryRule', { install: true, shell: true }],
-  ['dom', 'MutationObserver', { install: true, shell: true }],
-  ['cssom-view', 'MediaQueryList', { install: true, shell: true, slots: ['media'] }],
+  ['cssom', 'CSSRule', { shell: true, platform: 4 }],
+  ['cssom', 'CSSGroupingRule', { shell: true, platform: 4 }],
+  ['cssom', 'CSSStyleRule', { shell: true, platform: 4 }],
+  ['cssom', 'CSSImportRule', { shell: true, platform: 4 }],
+  ['cssom', 'CSSPageRule', { shell: true, platform: 4 }],
+  ['cssom', 'CSSMarginRule', { shell: true, platform: 4 }],
+  ['cssom', 'CSSNamespaceRule', { shell: true, platform: 4 }],
+  ['css-conditional', 'CSSConditionRule', { shell: true, platform: 4 }],
+  ['css-conditional', 'CSSMediaRule', { shell: true, platform: 4 }],
+  ['css-conditional', 'CSSSupportsRule', { shell: true, platform: 4 }],
+  ['css-conditional-5', 'CSSContainerRule', { shell: true, platform: 4 }],
+  ['css-cascade', 'CSSLayerBlockRule', { shell: true, platform: 4 }],
+  ['css-cascade', 'CSSLayerStatementRule', { shell: true, platform: 4 }],
+  ['css-cascade-6', 'CSSScopeRule', { shell: true, platform: 4 }],
+  ['css-transitions-2', 'CSSStartingStyleRule', { shell: true, platform: 4 }],
+  ['css-fonts-5', 'CSSFontFaceRule', { shell: true, platform: 4 }],
+  ['css-fonts', 'CSSFontFeatureValuesRule', { shell: true, platform: 4 }],
+  ['css-fonts', 'CSSFontFeatureValuesMap', { shell: true, platform: 0 }],
+  ['css-fonts', 'CSSFontPaletteValuesRule', { shell: true, platform: 4 }],
+  ['css-animations', 'CSSKeyframeRule', { shell: true, platform: 4 }],
+  ['css-animations', 'CSSKeyframesRule', { shell: true, platform: 4, indexedProperties: 'the Proxy each @keyframes rule is (cssom.js `withIndexedGetter`)' }],
+  ['css-counter-styles', 'CSSCounterStyleRule', { shell: true, platform: 4 }],
+  ['css-properties-values-api', 'CSSPropertyRule', { shell: true, platform: 4 }],
+  ['css-nesting', 'CSSNestedDeclarations', { shell: true, platform: 4 }],
+  ['css-anchor-position', 'CSSPositionTryRule', { shell: true, platform: 4 }],
+  ['dom', 'MutationObserver', { shell: true }],
+  ['cssom-view', 'MediaQueryList', { shell: true, platform: 1, slots: ['media'] }],
   ['geolocation', 'Geolocation'],
   ['geolocation', 'GeolocationPosition', { slots: ['coords', 'timestamp'] }],
   ['geolocation', 'GeolocationCoordinates'],
@@ -642,11 +641,11 @@ const INTERFACES = [
       'permissions-revoke': 'revoke: Relinquishing Permissions is a WICG proposal (headless Chrome exposes none)'
     }
   }],
-  ['permissions', 'PermissionStatus', { install: true, shell: true, slots: ['state', 'name'] }],
-  ['cssom-view', 'CaretPosition', { install: true, shell: true, slots: ['offsetNode', 'offset'] }],
-  ['dom', 'MutationRecord', { install: true, shell: true, slots: ['type', 'target', 'previousSibling', 'nextSibling', 'attributeName', 'attributeNamespace', 'oldValue'] }],
-  ['dom', 'AbortController', { install: true, shell: true, slots: ['signal'] }],
-  ['dom', 'AbortSignal', { install: true }],
+  ['permissions', 'PermissionStatus', { shell: true, platform: 3, slots: ['state', 'name'] }],
+  ['cssom-view', 'CaretPosition', { shell: true, platform: 2, slots: ['offsetNode', 'offset'] }],
+  ['dom', 'MutationRecord', { shell: true, slots: ['type', 'target', 'previousSibling', 'nextSibling', 'attributeName', 'attributeNamespace', 'oldValue'] }],
+  ['dom', 'AbortController', { shell: true, slots: ['signal'] }],
+  ['dom', 'AbortSignal', { shell: true, platform: 1 }],
   ['dom', 'ShadowRoot', { install: true, omitMembers: { setHTML: 'the Sanitizer API is not implemented' } }],
   ['html', 'WorkerGlobalScope', {
     install: true,
@@ -659,7 +658,7 @@ const INTERFACES = [
   ['html', 'DedicatedWorkerGlobalScope', { install: true, omit: { 'webrtc-encoded-transform': 'onrtctransform: WebRTC encoded transforms are not implemented' } }],
   ['html', 'SharedWorkerGlobalScope', { install: true }],
   ['html', 'Navigator', {
-    install: true, shell: true,
+    shell: true, platform: 0,
     omit: {
       attribution: 'attribution: the Attribution Reporting API is not implemented',
       'audio-session': 'audioSession: the Audio Session API is not implemented',
@@ -719,7 +718,7 @@ const INTERFACES = [
     }
   }],
   ['html', 'WorkerNavigator', {
-    install: true, shell: true,
+    shell: true,
     omit: {
       NavigatorBadge: 'setAppBadge / clearAppBadge: the Badging API is not implemented',
       NavigatorCrossOriginStorage: 'crossOriginStorage: Cross-Origin Storage is not implemented (a WICG proposal)',
@@ -733,7 +732,7 @@ const INTERFACES = [
       usb: 'usb: WebUSB is not implemented'
     }
   }],
-  ['html', 'WorkerLocation', { install: true, shell: true }]
+  ['html', 'WorkerLocation', { shell: true }]
 ];
 
 // …and from reflect.js, the [Reflect…] attributes' steps.
@@ -744,7 +743,7 @@ const REFLECTION = [
 ];
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'createObject', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'createObject', 'rootInterface', 'inheritInterface', 'checkPlatformSteps', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -1391,6 +1390,28 @@ function listSecureContext(def, memberList, addedSecure) {
 }
 
 // The options the table gives an interface ({} for one it does not list).
+// (…a shell an `install` too, for all that reads one)
+for (const [, , options] of INTERFACES) if (options?.shell) options.install = true;
+
+// What a `new X(PLATFORM, …)` of the sources passes a shell, past what its `platform` says `init` takes, would be dropped.
+function checkPlatformConstructions(dir) {
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.js'))) {
+    const source = readFileSync(join(dir, file), 'utf8');
+    for (const match of source.matchAll(/\bnew (\w+)\(PLATFORM\b/g)) {
+      const options = interfaceOptions(match[1]);
+      if (!options.shell) continue;
+      let depth = 0, given = 0;
+      for (let i = match.index + match[0].length; depth >= 0; i++) {
+        const c = source[i];
+        if ('([{'.includes(c)) depth++;
+        else if (')]}'.includes(c)) depth--;
+        else if (c === ',' && depth === 0) given++;
+      }
+      if (given > (options.platform ?? 0)) throw new Error(`${file}: new ${match[1]}(PLATFORM, …) passes ${given}, its platform takes ${options.platform ?? 0}`);
+    }
+  }
+}
+
 function interfaceOptions(name) {
   const entry = INTERFACES.find(([, n]) => n === name);
   return (entry && entry[2]) || {};
@@ -1845,8 +1866,10 @@ function shellClass(def, constructors) {
   // (…the interfaces it inherits that are shells too, the topmost first: the record stamped by that one's brand)
   const chain = [];
   for (let d = def; d && interfaceOptions(d.name).shell; d = definitions.get(d.inheritance)) chain.unshift(d.name);
-  const platformArguments = 'arguments[1], arguments[2], arguments[3], arguments[4], arguments[5], arguments[6]';
+  const { platform } = interfaceOptions(name);
+  const platformArguments = ['slots', ...Array.from({ length: platform ?? 0 }, (_, i) => `arguments[${i + 1}]`)].join(', ');
   const lines = [`export function define${name}(${def.inheritance ? 'Parent, ' : ''}impl) {`];
+  lines.push(`  checkPlatformSteps('${name}', impl, ${platform});`);
   lines.push(`  registerInterface('${name}', (o) => slotsOf(o, '${name}') !== undefined);`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
   // (…its object made after its arguments are converted: webidl.js `createObject`; `slots.owner` what it answers, a Proxy
@@ -1855,25 +1878,28 @@ function shellClass(def, constructors) {
   for (const n of chain.slice(1)) made.push(`      slots.${n} = true;`);
   lines.push(`  const ${name} = ({ ${name}: class extends Object {`);
   lines.push(`    constructor() {`);
+  // (…a script's construction, in an `if` where the platform has one of its own too)
   if (ctor) {
     const message = `Failed to construct '${name}': ${required} argument${required === 1 ? '' : 's'} required, but only `;
-    lines.push(`      if (arguments[0] !== PLATFORM) {`);
-    if (required) lines.push(`        if (arguments.length < ${required}) throw new TypeError(${JSON.stringify(message)} + arguments.length + ' present.');`);
-    converted.forEach((value, i) => lines.push(`        const a${i} = ${value};`));
-    lines.push(...made.map((l) => `  ${l}`));
-    lines.push(`        impl.construct(${['slots', ...converted.map((_, i) => `a${i}`)].join(', ')});`);
-    lines.push(`        return slots.owner;`);
-    lines.push(`      }`);
+    const pad = platform === undefined ? '' : '  ';
+    if (platform !== undefined) lines.push(`      if (arguments[0] !== PLATFORM) {`);
+    if (required) lines.push(`${pad}      if (arguments.length < ${required}) throw new TypeError(${JSON.stringify(message)} + arguments.length + ' present.');`);
+    converted.forEach((value, i) => lines.push(`${pad}      const a${i} = ${value};`));
+    lines.push(...made.map((l) => `${pad}${l}`));
+    lines.push(`${pad}      impl.construct(${['slots', ...converted.map((_, i) => `a${i}`)].join(', ')});`);
+    lines.push(`${pad}      return slots.owner;`);
+    if (platform !== undefined) lines.push(`      }`);
   } else {
     lines.push(`      constructedBy(PLATFORM, arguments[0], '${name}');`);
   }
-  lines.push(...made);
-  lines.push(`      impl.init(slots, ${platformArguments});`);
-  lines.push(`      return slots.owner;`);
+  if (!ctor || platform !== undefined) {
+    lines.push(...made);
+    if (platform !== undefined) lines.push(`      impl.init(${platformArguments});`);
+    lines.push(`      return slots.owner;`);
+  }
   lines.push(`    }`);
   lines.push(`  } }).${name};`);
-  lines.push(`  Object.setPrototypeOf(${name}, ${def.inheritance ? 'Parent' : 'Function.prototype'});`);
-  if (def.inheritance) lines.push(`  Object.setPrototypeOf(${name}.prototype, Parent.prototype);`);
+  lines.push(def.inheritance ? `  inheritInterface(${name}, Parent);` : `  rootInterface(${name});`);
   lines.push(`  install${name}(${name}, impl);`);
   lines.push(`  return ${name};`);
   lines.push(`}`);
@@ -1959,8 +1985,7 @@ function eventInterface(def, { init, slots = {}, steps = [] }, { memberList, bod
   lines.push(`    }`);
   lines.push(...body);
   lines.push(`  } }).${name};`);
-  lines.push(`  Object.setPrototypeOf(${name}, ${def.inheritance ? 'Parent' : 'Function.prototype'});`);
-  if (def.inheritance) lines.push(`  Object.setPrototypeOf(${name}.prototype, Parent.prototype);`);
+  lines.push(def.inheritance ? `  inheritInterface(${name}, Parent);` : `  rootInterface(${name});`);
   lines.push(`  registerInterface('${name}', (o) => slotsOf(o, '${name}') !== undefined);`);
   const isUnforgeable = (m) => (m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable');
   const onPrototype = memberList.filter((m) => (m.type === 'attribute' || m.type === 'operation') && m.name && m.special !== 'static' && !isUnforgeable(m));
@@ -2489,6 +2514,8 @@ pub(crate) static LEGACY_HANDLER_EVENT_TYPES: &[(&str, &str)] = &[
 ${Object.entries(LEGACY_HANDLER_EVENT_TYPES).map(([k, v]) => `    (${JSON.stringify(k)}, ${JSON.stringify(v)}),`).join('\n')}
 ];
 `;
+
+checkPlatformConstructions(dirname(dirname(OUT)));
 
 if (process.argv.includes('--check')) {
   for (const [path, text] of [[OUT, source], [RUST_OUT, rustSource]]) {
