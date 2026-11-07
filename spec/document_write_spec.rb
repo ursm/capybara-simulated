@@ -230,4 +230,32 @@ RSpec.describe 'document.write during parsing' do
     s.execute_script('document.close()')
     expect(s.evaluate_async_script('setTimeout(() => arguments[0]([document.readyState, L]), 50)')).to eq(['complete', %w[dcl load]])
   end
+
+  # An `open()` from the connectedCallback of a custom element the parser made: HTML "create an element for a token"
+  # raises the throw-on-dynamic-markup-insertion counter around creating the element alone, and "insert an element at
+  # the adjusted insertion location" runs its insertion reactions with none. Chrome opens (`ok`, `opened`); Firefox throws
+  # InvalidStateError — the spec's text wins.
+  it 'opens the document from a parser-made custom element’s connectedCallback' do
+    s = session_for(<<~HTML)
+      <script>
+        window.L = [];
+        customElements.define('x-a', class extends HTMLElement {
+          connectedCallback() {
+            if (window.done) return;
+            window.done = true;
+            try {
+              document.open();
+              document.write('<p>opened</p>');
+              document.close();
+              L.push('ok');
+            } catch (e) {
+              L.push(e.name);
+            }
+          }
+        });
+      </script>
+      <x-a></x-a><p>after</p>
+    HTML
+    expect(s.evaluate_script('[L, document.body.textContent.trim()]')).to eq([['ok'], 'opened'])
+  end
 end
