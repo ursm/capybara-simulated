@@ -155,10 +155,10 @@ pub(crate) fn remove_types(partition: u64, types: &[String]) {
     let entries = lock().get(&partition).map_or_else(Vec::new, |c| c.entries.clone());
     write(partition, entries.into_iter().filter(|(ty, _)| !types.contains(ty)).collect());
 }
-// The text the session's clipboard holds as `text/plain`, UTF-8 decoded: what a paste types.
-pub(crate) fn plain_text(partition: u64) -> Vec<u16> {
+// What the session's clipboard holds as text of a type, UTF-8 decoded: what a paste inserts.
+pub(crate) fn text_of(partition: u64, ty: &str) -> Vec<u16> {
     let reg = lock();
-    let held = reg.get(&partition).and_then(|c| c.entries.iter().find(|(ty, _)| ty == "text/plain"));
+    let held = reg.get(&partition).and_then(|c| c.entries.iter().find(|(key, _)| key == ty));
     held.map_or_else(Vec::new, |(_, bytes)| String::from_utf8_lossy(bytes).encode_utf16().collect())
 }
 
@@ -173,7 +173,7 @@ mod tests {
         assert!(lock().get(&partition).is_none());
         write_selected(partition, "t", "");
         assert_eq!(lock().get(&partition).map(|c| c.entries.len()), Some(1));
-        assert_eq!(plain_text(partition), "t".encode_utf16().collect::<Vec<u16>>());
+        assert_eq!(text_of(partition, "text/plain"), "t".encode_utf16().collect::<Vec<u16>>());
         // (…nothing selected leaves the clipboard as it was)
         let count = lock().get(&partition).map(|c| c.count);
         write_selected(partition, "", "");
@@ -181,7 +181,7 @@ mod tests {
         write_selected(partition, "t", "<b>t</b>");
         assert_eq!(lock().get(&partition).map(|c| c.entries.iter().map(|(ty, _)| ty.clone()).collect::<Vec<_>>()), Some(vec!["text/plain".to_owned(), "text/html".to_owned()]));
         remove_types(partition, &["text/plain".to_owned()]);
-        assert_eq!(plain_text(partition), Vec::<u16>::new());
+        assert_eq!(text_of(partition, "text/plain"), Vec::<u16>::new());
         assert_eq!(lock().get(&partition).map(|c| c.entries.len()), Some(1));
         clear(partition);
     }

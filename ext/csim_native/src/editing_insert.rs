@@ -217,6 +217,59 @@ impl<'s> Edit<'s, '_> {
         crate::cloning::clone_into(scope, self.cid, self.caller, src, None, false, doc, self.held, self.copies)
     }
 
+    // A fragment's children `kids` at the caret (the Editing draft's insertHTML; a paste's markup): a `<br>` holding the
+    // line open that they take the place of removed first, a text split at the caret, a block among them out of a `<p>`
+    // — the draft's "fix disallowed ancestors" of what a `<p>` holds, the paragraph split around it — and a block left
+    // holding nothing visible held open. The place after the last of them, none where a change failed.
+    pub(crate) fn fragment(&mut self, scope: &mut v8::PinScope<'_, '_>, caret: (NodeId, u32), kids: &[NodeId]) -> Option<(NodeId, u32)> {
+        let last = *kids.last()?;
+        let arena = realm(scope, self.cid);
+        if inline_level(arena, caret.0) == Some(false) {
+            let held = arena.get(caret.0).and_then(|n| n.children.get(caret.1 as usize).copied()).filter(|&c| placeholder(arena, c));
+            if let Some(br) = held {
+                self.remove(scope, br)?;
+            }
+        }
+        let (parent, before) = self.split_at(scope, caret)?;
+        self.move_before(scope, parent, kids, before)?;
+        if realm(scope, self.cid).get(parent).is_some_and(|n| n.is_html_named("p")) {
+            self.out_of_paragraph(scope, parent, kids)?;
+        }
+        let arena = realm(scope, self.cid);
+        if arena.parent_of(parent).is_some() && inline_level(arena, parent) == Some(false) && !has_content(arena, parent) {
+            let br = self.element(scope, parent, "br");
+            self.insert(scope, parent, &[br], None)?;
+        }
+        let arena = realm(scope, self.cid);
+        Some((arena.parent_of(last)?, arena.child_index(last) as u32 + 1))
+    }
+    // …each block of `kids` moved out of the paragraph `p` holding it, what followed it in a copy of `p` after it — one that
+    // holds nothing removed.
+    fn out_of_paragraph(&mut self, scope: &mut v8::PinScope<'_, '_>, p: NodeId, kids: &[NodeId]) -> Option<()> {
+        let mut current = p;
+        for &kid in kids {
+            let arena = realm(scope, self.cid);
+            if inline_level(arena, kid) != Some(false) {
+                continue;
+            }
+            let (outer, next) = (arena.parent_of(current)?, arena.sibling(current, 1));
+            let at = arena.child_index(kid) + 1;
+            let after = arena.get(current)?.children[at..].to_vec();
+            let copy = self.copy(scope, current)?;
+            self.move_into(scope, copy, &after)?;
+            self.move_before(scope, outer, &[kid], next)?;
+            self.insert(scope, outer, &[copy], next)?;
+            if realm(scope, self.cid).get(current)?.children.is_empty() {
+                self.remove(scope, current)?;
+            }
+            current = copy;
+        }
+        if current != p && realm(scope, self.cid).get(current)?.children.is_empty() {
+            self.remove(scope, current)?;
+        }
+        Some(())
+    }
+
     // Text of lines: each line at the caret, a paragraph's break between them (CR LF, CR or LF — Enter's); where one
     // inserts nothing the next goes where the caret was. Where the caret goes, none where nothing went in or a copy's
     // shadow root threw.

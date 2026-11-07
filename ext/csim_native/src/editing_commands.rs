@@ -21,6 +21,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "clipboardEventTarget", clipboard_event_target_op, context_id);
     crate::dom::register(scope, ns, "clipboardWriteControl", clipboard_write_control_op, context_id);
     crate::dom::register(scope, ns, "clipboardMarkup", clipboard_markup_op, context_id);
+    crate::dom::register(scope, ns, "editInsertFragment", edit_insert_fragment, context_id);
+    crate::dom::register(scope, ns, "pasteRemovals", paste_removals_op, context_id);
 }
 
 // What carrying a command out comes to, beyond `inputType`'s `input`: the engine's edit of it alone; text inserted (the
@@ -141,8 +143,10 @@ fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active
     // (…the arena again: reading the selection needed the scope it was borrowed from)
     let arena = realm(scope, cid);
     let Some(host) = arena.editing_root(anchor) else { return page(scope) };
-    let plaintext = arena.get(host).and_then(|n| n.plain_attr("contenteditable")).is_some_and(|v| v.eq_ignore_ascii_case("plaintext-only"));
-    if support != 1 && plaintext { (TARGET_NONE, None) } else { (TARGET_HOST, Some(host)) }
+    if support != 1 && arena.get(host).is_some_and(plaintext_only) { (TARGET_NONE, None) } else { (TARGET_HOST, Some(host)) }
+}
+fn plaintext_only(n: &crate::dom::NodeData) -> bool {
+    n.plain_attr("contenteditable").is_some_and(|v| v.eq_ignore_ascii_case("plaintext-only"))
 }
 // __dom.commandTarget(command, activeNid | -1, selection | null) -> [kind, node | null]: what the command acts on
 // (`command_target`, `TARGET_*`), the document's active element and its selection's state given.
@@ -178,17 +182,24 @@ const GESTURE_AFTER_EVENT: u32 = 2;
 // beforeinput — Chrome); a cancelable `beforeinput` first (a user's cut and paste; a script's edit fires only `input`:
 // the input-events tests, Chrome, Firefox — the Editing draft's step otherwise is w3c/editing#200, open); the paste's
 // clipboard flavors a read-only DataTransfer on the InputEvents, its `data` null (Input Events §4: an editing host's); the
-// value markup whose text is what goes in (a control's `insertHTML`).
+// value markup whose text is what goes in (a control's `insertHTML`, and a `plaintext-only` host's: Chrome, Firefox); the
+// value markup whose fragment goes in (`insertHTML` in a host, the Editing draft's); that fragment one parsed as a paste's,
+// nothing of it running (Clipboard API: the page's own markup is none it asked for).
 const PLAN_WRITE_SELECTION: u32 = 1;
 const PLAN_BEFORE_INPUT: u32 = 2;
 const PLAN_PASTE_TRANSFER: u32 = 4;
 const PLAN_MARKUP_TEXT: u32 = 8;
-fn plan_flags(step: u32, action: Action, asked: u32) -> u32 {
+const PLAN_MARKUP_FRAGMENT: u32 = 16;
+const PLAN_PASTED_FRAGMENT: u32 = 32;
+fn plan_flags(step: u32, action: Action, asked: u32, plaintext: bool, pasted_markup: bool) -> u32 {
     let user_edit = asked == GESTURE_AFTER_EVENT && matches!(action, Action::Cut | Action::Paste);
+    let html = action == Action::Html;
     (if action == Action::Cut { PLAN_WRITE_SELECTION } else { 0 })
         | (if user_edit { PLAN_BEFORE_INPUT } else { 0 })
         | (if step == STEP_HOST && action == Action::Paste { PLAN_PASTE_TRANSFER } else { 0 })
-        | (if step == STEP_CONTROL && action == Action::Html { PLAN_MARKUP_TEXT } else { 0 })
+        | (if html && (step == STEP_CONTROL || (step == STEP_HOST && plaintext)) { PLAN_MARKUP_TEXT } else { 0 })
+        | (if html && step == STEP_HOST && !plaintext { PLAN_MARKUP_FRAGMENT } else { 0 })
+        | (if pasted_markup && step == STEP_HOST && action == Action::Paste && !plaintext { PLAN_PASTED_FRAGMENT } else { 0 })
 }
 #[allow(clippy::too_many_arguments)]
 fn command_plan(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, action: Action, active: Option<NodeId>, selection: v8::Local<'_, v8::Value>, has_view: bool, asked: u32) -> (u32, Option<NodeId>) {
@@ -234,8 +245,8 @@ fn str_value<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8:
 }
 // __dom.commandPlan(command, activeNid | -1, selection | null, hasView, asked, partition) -> [step, node | null, flags,
 // inputType, name, pasted] (`command_plan`, `STEP_*`; `PLAN_*`; the `inputType` of the InputEvents it fires, '' for none;
-// its name as `COMMANDS` spells it; the text a paste goes on to type, that the session's clipboard holds, null for none
-// and for any other command), the document's active element, its selection's state, whether it has a browsing context and who asks
+// its name as `COMMANDS` spells it; what a paste goes on to insert, that the session's clipboard holds — its markup in an
+// editing host that takes it, else its text — null for none and for any other command), the document's active element, its selection's state, whether it has a browsing context and who asks
 // (`ASKED_BY_SCRIPT` …) given — undefined for no command.
 fn command_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = args.get(0).to_rust_string_lossy(scope);
@@ -245,9 +256,15 @@ fn command_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let has_view = args.get(3).is_true();
     let asked = args.get(4).uint32_value(scope).unwrap_or(ASKED_BY_SCRIPT);
     let (step, node) = command_plan(scope, cid, &name, action, active, args.get(2), has_view, asked);
-    let pasted = if action == Action::Paste && asked != ASKED_BY_SCRIPT && matches!(step, STEP_CONTROL | STEP_HOST) {
-        let partition = args.get(5).integer_value(scope).unwrap_or(0) as u64;
-        crate::system_clipboard::plain_text(partition)
+    let arena = realm(scope, cid);
+    let plaintext = step == STEP_HOST && node.is_some_and(|host| arena.get(host).is_some_and(plaintext_only));
+    let pasting = action == Action::Paste && asked != ASKED_BY_SCRIPT && matches!(step, STEP_CONTROL | STEP_HOST);
+    let partition = args.get(5).integer_value(scope).unwrap_or(0) as u64;
+    let markup = if pasting && step == STEP_HOST && !plaintext { crate::system_clipboard::text_of(partition, "text/html") } else { Vec::new() };
+    let pasted = if !markup.is_empty() {
+        markup.clone()
+    } else if pasting {
+        crate::system_clipboard::text_of(partition, "text/plain")
     } else {
         Vec::new()
     };
@@ -255,7 +272,7 @@ fn command_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let items = [
         v8::Integer::new_from_unsigned(scope, step).into(),
         crate::dom::node_value(scope, node),
-        v8::Integer::new_from_unsigned(scope, plan_flags(step, action, asked)).into(),
+        v8::Integer::new_from_unsigned(scope, plan_flags(step, action, asked, plaintext, !markup.is_empty())).into(),
         str_value(scope, input_type),
         str_value(scope, canonical),
         pasted,
@@ -459,7 +476,7 @@ enum Caret {
 // offset, 3 collapsed, a change to announce: node, offset); the elements whose CSS the bindings set; then, as `editInsert`
 // answers them, the elements it copied and the changes of children it made.
 //
-// The commands of the plain text kinds — text, a deletion, a break, a cut and a paste — say whether anything went in or
+// The commands of the plain text kinds — text, markup's text, a deletion, a break, a cut and a paste — say whether anything went in or
 // came out, and answer the same for a selection nowhere they can edit: `input` is fired where it did and none where it
 // did not, true all the same (Chrome): text the selection's deletion for none, a cut's `input` only where it deleted, a
 // paste's whatever it held (Chrome). Every other is the edit of the selection's range, in the editing host it is in.
@@ -477,7 +494,7 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let (mut fire, mut data, mut align, mut caret, mut styled) = (false, None, "", Caret::Keep, Vec::new());
     let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
     match action {
-        Action::Text | Action::Paste | Action::LineBreak | Action::Paragraph if !(action == Action::Text && value.is_empty()) => {
+        Action::Text | Action::Html | Action::Paste | Action::LineBreak | Action::Paragraph if !(matches!(action, Action::Text | Action::Html) && value.is_empty()) => {
             let kind = match action {
                 Action::LineBreak => crate::editing_insert::LINE_BREAK,
                 Action::Paragraph => crate::editing_insert::PARAGRAPH,
@@ -493,9 +510,9 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
                 data = Some(value);
             }
         }
-        Action::Delete | Action::ForwardDelete | Action::Text | Action::Cut => {
-            // (…of a selection, where these two ask one: `execCommand('insertText', false, '')` at a caret, none)
-            let selection_only = matches!(action, Action::Text | Action::Cut);
+        Action::Delete | Action::ForwardDelete | Action::Text | Action::Html | Action::Cut => {
+            // (…of a selection, where these ask one: `execCommand('insertText', false, '')` at a caret, none)
+            let selection_only = matches!(action, Action::Text | Action::Html | Action::Cut);
             if !(selection_only && a == f) {
                 if let Some((_, place, made)) = crate::editing_delete::deletion(scope, &args, steps, a, f, action == Action::ForwardDelete, false) {
                     fire = true;
@@ -568,9 +585,55 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
             };
         }
     }
+    answer_edit(scope, &mut rv, cid, fire, data.as_deref(), align, caret, &styled, &copies, &changes, held);
+}
+
+// __dom.editInsertFragment(hostNid, anchorNid, anchorOffset, focusNid, focusOffset, fragmentNid, steps) -> as `editCommand`
+// answers (`input` fired; its `data` none), or undefined where nothing goes in: the children of `fragment`, a document
+// fragment of the document's, at the start of the selection in the editing host `host` (the Editing draft's insertHTML:
+// the selection deleted before the fragment is made, in the place that left), the caret after the last of them (`Edit::fragment`).
+fn edit_insert_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(host), Some(anchor), Some(focus), Some(fragment)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1), crate::dom::nid_arg(scope, &args, 3), crate::dom::nid_arg(scope, &args, 5)) else { return };
+    let (ao, fo) = (args.get(2).uint32_value(scope).unwrap_or(0), args.get(4).uint32_value(scope).unwrap_or(0));
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(6)) else { return };
+    let caller = crate::dom::realm_id(scope, &args);
+    let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
+    crate::cloning::begin_clone(scope);
+    let steps = v8::Local::new(scope, steps);
+    let arena = realm(scope, cid);
+    let Some((host, range)) = crate::editing::selection_host(arena, (anchor, ao), (focus, fo)).filter(|_| arena.editing_root(anchor) == Some(host)) else { return };
+    let kids = arena.get(fragment).map_or_else(Vec::new, |n| n.children.clone());
+    if kids.is_empty() {
+        return;
+    }
+    let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
+    let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
+    let caret = match edit.fragment(scope, range.0, &kids) {
+        Some((node, offset)) => Caret::At(node, offset),
+        None if crate::dom::dom(scope).clone_exception.is_some() => Caret::Keep,
+        None => return,
+    };
+    answer_edit(scope, &mut rv, cid, true, None, "", caret, &[], &copies, &changes, held);
+}
+
+// (…what `editCommand` answers)
+#[allow(clippy::too_many_arguments)]
+fn answer_edit(
+    scope: &mut v8::PinScope<'_, '_>,
+    rv: &mut v8::ReturnValue<'_, v8::Value>,
+    cid: i32,
+    fire: bool,
+    data: Option<&[u16]>,
+    align: &str,
+    caret: Caret,
+    styled: &[NodeId],
+    copies: &crate::cloning::BindingsSteps,
+    changes: &[crate::mutation::Change],
+    held: Vec<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
+) {
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![
         v8::Boolean::new(scope, fire).into(),
-        data_value(scope, data.as_deref()),
+        data_value(scope, data),
         str_value(scope, align),
     ];
     let places: Vec<(NodeId, u32)> = match caret {
@@ -599,18 +662,72 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         out.push(v8::Integer::new_from_unsigned(scope, offset).into());
     }
     out.push(v8::Integer::new_from_unsigned(scope, styled.len() as u32).into());
-    let styled = crate::dom::nodes_value(scope, cid, &styled);
+    let styled = crate::dom::nodes_value(scope, cid, styled);
     let Ok(styled) = v8::Local::<v8::Array>::try_from(styled) else { return };
     for k in 0..styled.length() {
         out.push(styled.get_index(scope, k).unwrap_or_else(|| v8::null(scope).into()));
     }
     out.push(v8::Integer::new_from_unsigned(scope, copies.len() as u32).into());
-    out.extend(crate::cloning::bindings_value(scope, cid, &copies));
-    out.extend(crate::mutation::changes_value(scope, cid, &changes));
+    out.extend(crate::cloning::bindings_value(scope, cid, copies));
+    out.extend(crate::mutation::changes_value(scope, cid, changes));
     if crate::dom::factory_threw(scope) {
         return;
     }
     drop(held);
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
+}
+
+// What a paste makes no part of the page of the markup it is given, as Chrome and Firefox both take it (the Clipboard API
+// says "the most suitable content", and "if the implementation supports pasting HTML" leaves the rest to it): the elements
+// that run, load or say something of a document — a script; a frame, an object, an embed (Firefox; Chrome falls back to
+// the text for those, and keeps a frame); a document's own metadata — and comments; of the rest, `on*` handlers and the
+// URL attributes that would run a script (`<a href="javascript:…">`). A template's contents are no part of it.
+const PASTE_DROPS: [&str; 11] = ["script", "iframe", "frame", "frameset", "object", "embed", "applet", "meta", "title", "base", "link"];
+const PASTE_URLS: [&str; 7] = ["href", "src", "action", "formaction", "data", "xlink:href", "background"];
+fn paste_removals(arena: &RealmArena, fragment: NodeId) -> (Vec<NodeId>, Vec<(NodeId, String)>) {
+    let (mut nodes, mut attributes) = (Vec::new(), Vec::new());
+    let mut stack: Vec<NodeId> = arena.get(fragment).map_or_else(Vec::new, |n| n.children.clone());
+    while let Some(id) = stack.pop() {
+        let Some(n) = arena.get(id) else { continue };
+        match n.kind {
+            NodeKind::Comment | NodeKind::ProcessingInstruction => nodes.push(id),
+            NodeKind::Element if PASTE_DROPS.iter().any(|d| (*n.local_name).eq_ignore_ascii_case(d)) => nodes.push(id),
+            NodeKind::Element => {
+                for (name, value) in &n.attributes {
+                    let handler = name.len() > 2 && name.as_bytes()[..2].eq_ignore_ascii_case(b"on");
+                    let scripted = PASTE_URLS.iter().any(|u| name.eq_ignore_ascii_case(u)) && runs_script(value);
+                    if handler || scripted {
+                        attributes.push((id, name.to_string()));
+                    }
+                }
+                stack.extend(n.children.iter().copied());
+            }
+            _ => {}
+        }
+    }
+    (nodes, attributes)
+}
+// Whether a URL attribute's value is a `javascript:` one, as a URL parser reads it: past C0 controls and spaces, tabs and
+// newlines anywhere in it dropped.
+fn runs_script(value: &str) -> bool {
+    let scheme = value.trim_start_matches(|c: char| c <= ' ').chars().filter(|c| !matches!(c, '\t' | '\n' | '\r'));
+    let lower: String = scheme.take(11).map(|c| c.to_ascii_lowercase()).collect();
+    lower == "javascript:"
+}
+// __dom.pasteRemovals(fragmentNid) -> [nodes, element, attribute, …]: what the bindings take out of a paste's fragment
+// before it goes in (`paste_removals`).
+fn paste_removals_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(fragment) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let (nodes, attributes) = paste_removals(realm(scope, cid), fragment);
+    let mut out = vec![crate::dom::nodes_value(scope, cid, &nodes)];
+    for (element, name) in attributes {
+        out.push(crate::dom::node_value(scope, Some(element)));
+        out.push(str_value(scope, &name));
+    }
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
     rv.set(v8::Array::new_with_elements(scope, &out).into());
 }
 
@@ -857,14 +974,21 @@ mod tests {
     #[test]
     fn a_plan_says_what_goes_round_the_edit() {
         // (…a script's edit fires `input` alone, a user's cut and paste a cancelable beforeinput too)
-        assert_eq!(plan_flags(STEP_CONTROL, Action::Text, ASKED_BY_SCRIPT), 0);
-        assert_eq!(plan_flags(STEP_HOST, Action::Cut, SCRIPT_AFTER_EVENT), PLAN_WRITE_SELECTION);
-        assert_eq!(plan_flags(STEP_HOST, Action::Cut, GESTURE_AFTER_EVENT), PLAN_WRITE_SELECTION | PLAN_BEFORE_INPUT);
-        assert_eq!(plan_flags(STEP_CONTROL, Action::Paste, GESTURE_AFTER_EVENT), PLAN_BEFORE_INPUT);
-        assert_eq!(plan_flags(STEP_HOST, Action::Paste, GESTURE_AFTER_EVENT), PLAN_BEFORE_INPUT | PLAN_PASTE_TRANSFER);
-        assert_eq!(plan_flags(STEP_HOST, Action::Paste, SCRIPT_AFTER_EVENT), PLAN_PASTE_TRANSFER);
-        assert_eq!(plan_flags(STEP_CONTROL, Action::Html, ASKED_BY_SCRIPT), PLAN_MARKUP_TEXT);
-        assert_eq!(plan_flags(STEP_HOST, Action::Html, ASKED_BY_SCRIPT), 0);
+        let plan = |step, action, asked| plan_flags(step, action, asked, false, false);
+        assert_eq!(plan(STEP_CONTROL, Action::Text, ASKED_BY_SCRIPT), 0);
+        assert_eq!(plan(STEP_HOST, Action::Cut, SCRIPT_AFTER_EVENT), PLAN_WRITE_SELECTION);
+        assert_eq!(plan(STEP_HOST, Action::Cut, GESTURE_AFTER_EVENT), PLAN_WRITE_SELECTION | PLAN_BEFORE_INPUT);
+        assert_eq!(plan(STEP_CONTROL, Action::Paste, GESTURE_AFTER_EVENT), PLAN_BEFORE_INPUT);
+        assert_eq!(plan(STEP_HOST, Action::Paste, GESTURE_AFTER_EVENT), PLAN_BEFORE_INPUT | PLAN_PASTE_TRANSFER);
+        assert_eq!(plan(STEP_HOST, Action::Paste, SCRIPT_AFTER_EVENT), PLAN_PASTE_TRANSFER);
+        assert_eq!(plan(STEP_CONTROL, Action::Html, ASKED_BY_SCRIPT), PLAN_MARKUP_TEXT);
+        assert_eq!(plan(STEP_HOST, Action::Html, ASKED_BY_SCRIPT), PLAN_MARKUP_FRAGMENT);
+        // (…markup a `plaintext-only` host takes as text; a paste's fragment only where the clipboard holds markup, and a
+        // host that takes it)
+        assert_eq!(plan_flags(STEP_HOST, Action::Html, ASKED_BY_SCRIPT, true, false), PLAN_MARKUP_TEXT);
+        assert_eq!(plan_flags(STEP_HOST, Action::Paste, SCRIPT_AFTER_EVENT, false, true), PLAN_PASTE_TRANSFER | PLAN_PASTED_FRAGMENT);
+        assert_eq!(plan_flags(STEP_HOST, Action::Paste, SCRIPT_AFTER_EVENT, true, true), PLAN_PASTE_TRANSFER);
+        assert_eq!(plan_flags(STEP_CONTROL, Action::Paste, SCRIPT_AFTER_EVENT, false, true), 0);
     }
 
     fn control(arena: &mut RealmArena, tag: &str, value: &str) -> NodeId {
@@ -917,6 +1041,32 @@ mod tests {
         arena.set_text_selection(line, 0, 0, Direction::None);
         let e = control_command(arena, line, Action::Delete, "deleteContentBackward", &[], at);
         assert_eq!((e.fire, e.data), (false, None));
+    }
+
+    #[test]
+    fn a_paste_takes_what_runs_out() {
+        let mut arena = RealmArena::default();
+        let arena = &mut arena;
+        let fragment = arena.create(NodeData::of_kind(NodeKind::Fragment, Vec::new()), None);
+        let element = |arena: &mut RealmArena, parent, tag: &str, attributes: &[(&str, &str)]| {
+            let mut n = NodeData::of_kind(NodeKind::Element, Vec::new());
+            n.local_name = tag.into();
+            n.ns = ns!(html);
+            n.attributes = attributes.iter().map(|&(name, value)| (name.to_owned(), value.to_owned())).collect();
+            arena.create(n, Some(parent))
+        };
+        let script = element(arena, fragment, "script", &[]);
+        let link = element(arena, fragment, "a", &[("href", "  java\tscript:alert(1)"), ("onclick", "x"), ("title", "keep"), ("on", "keep")]);
+        let safe = element(arena, link, "b", &[]);
+        let comment = arena.create(NodeData::of_kind(NodeKind::Comment, Vec::new()), Some(safe));
+        let (nodes, attributes) = paste_removals(arena, fragment);
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes.contains(&script) && nodes.contains(&comment));
+        let mut names: Vec<&str> = attributes.iter().map(|(_, n)| n.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["href", "onclick"]);
+        assert!(!runs_script("https://x/"));
+        assert!(runs_script("JAVASCRIPT:1"));
     }
 
     #[test]

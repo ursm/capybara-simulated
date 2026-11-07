@@ -282,6 +282,85 @@ RSpec.describe 'Clipboard actions' do
     end
   end
 
+  # A paste into an editing host inserts the clipboard's markup, in the document's own terms: what runs or loads taken out,
+  # as both engines take it — a frame out (Firefox; Chrome keeps it), a `<style>` kept (Firefox; Chrome inlines it) — a
+  # block in a `<p>` the paragraph split around it (the Editing draft's "fix disallowed ancestors", Firefox: Chrome merges
+  # the `<p>`s). A `plaintext-only` host takes the text.
+  describe 'pasting markup' do
+    def copy_markup(html)
+      script(<<~JS)
+        selectText();
+        document.addEventListener('copy', (e) => {
+          e.clipboardData.setData('text/plain', 'PLAIN');
+          e.clipboardData.setData('text/html', #{html.to_json});
+          e.preventDefault();
+        }, {once: true});
+      JS
+      press 'c'
+      script('log.length = 0;')
+    end
+
+    def paste_at_caret
+      script("E('h').focus(); const t = E('hq').firstChild; sel(t, 1, t, 1);")
+      press 'v'
+      session.evaluate_script("E('h').lastElementChild.parentNode.innerHTML.replace(/^.*?<\\/p>/, '')")
+    end
+
+    it 'inserts it at the caret, its data in the event' do
+      copy_markup('<b>x</b>y')
+      expect(paste_at_caret).to eq('<p id="hq">j<b>x</b>ykl</p>')
+      expect(events).to eq(['paste@hq', 'beforeinput@h insertFromPaste null', 'input@h insertFromPaste null'])
+      expect(session.evaluate_script('getSelection().anchorNode.id + getSelection().anchorOffset')).to eq('hq3')
+    end
+
+    it 'takes out what runs, loads or says something of a document' do
+      copy_markup(<<~HTML.delete("\n"))
+        <div id="d" onclick="1" class="c"><script>window.ran = 1</script><a href="java\tscript:window.ran = 2" onmouseover="1" title="t">l</a>
+        <img src="x" onerror="window.ran = 3"><iframe src="about:blank"></iframe><object data="x"></object><embed src="x"><meta name="a"><title>t</title>
+        <base href="http://x/"><link rel="stylesheet" href="x"><form action="x"><button formaction="javascript:1">b</button></form><!--c--><style>b{}</style>t</div>
+      HTML
+      expect(paste_at_caret).to eq(<<~HTML.delete("\n"))
+        <p id="hq">j</p><div id="d" class="c"><a title="t">l</a><img src="x"><form action="x"><button>b</button></form><style>b{}</style>t</div><p id="hq">kl</p>
+      HTML
+      expect(session.evaluate_script('window.ran')).to be_nil
+    end
+
+    it 'takes the fragment out of a whole document' do
+      copy_markup('<html><head><meta charset=utf-8><title>tt</title></head><body><!--StartFragment--><i>x</i>y<!--EndFragment--></body></html>')
+      expect(paste_at_caret).to eq('<p id="hq">j<i>x</i>ykl</p>')
+    end
+
+    it 'splits a paragraph around a block' do
+      copy_markup('<p>one</p><p>two</p>')
+      expect(paste_at_caret).to eq('<p id="hq">j</p><p>one</p><p>two</p><p id="hq">kl</p>')
+      expect(session.evaluate_script('[getSelection().anchorNode.id, getSelection().anchorOffset]')).to eq(['h', 4])
+    end
+
+    it 'replaces what is selected, and an empty line' do
+      copy_markup('<b>x</b>')
+      script('selectHost();')
+      press 'v'
+      expect(session.evaluate_script("E('hp').innerHTML")).to eq('<b>x</b>&nbsp;ghi')
+      script("E('hq').innerHTML = '<br>'; E('h').focus(); sel(E('hq'), 0, E('hq'), 0);")
+      press 'v'
+      expect(session.evaluate_script("E('hq').innerHTML")).to eq('<b>x</b>')
+    end
+
+    it 'gives a text control and a plaintext-only host its text' do
+      copy_markup('<b>x</b>')
+      expect(clipboard_text).to eq('PLAIN')
+      script("log.mute = undefined; log.length = 0; E('h').setAttribute('contenteditable', 'plaintext-only'); E('h').focus(); const t = E('hq').firstChild; sel(t, 1, t, 1);")
+      press 'v'
+      expect(session.evaluate_script("E('hq').innerHTML")).to eq('jPLAINkl')
+    end
+
+    it 'leaves the page as it was where its beforeinput is canceled' do
+      copy_markup('<b>x</b>')
+      script("document.addEventListener('beforeinput', (e) => e.preventDefault(), {once: true});")
+      expect(paste_at_caret).to eq('<p id="hq">jkl</p>')
+    end
+  end
+
   # What the selected number's `select()` selects (HTML's table: its row says yes), and the `input`-free read the rest of
   # this file's figures go by.
   it "selects a number field's text" do

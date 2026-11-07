@@ -376,4 +376,63 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     JS
     expect(got).to eq([%w[inner sh i body], ['j', 1, 1, 'renewed']])
   end
+
+  # `insertHTML` in an editing host, the Editing draft's: the selection deleted, the fragment made by
+  # `createContextualFragment` at the place that left and inserted there — its `input` of no inputType nor data where
+  # anything changed (Chrome, Firefox) — the caret after its last child; a block in a `<p>` the paragraph split around it,
+  # "fix disallowed ancestors" (Firefox; Chrome merges the paragraphs); nothing with no fragment. A script in it runs, as
+  # `createContextualFragment` unmarks it: the draft's text, where Chrome and Firefox run none of it but its images.
+  it 'inserts markup at the selection' do
+    session = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable></div><div id=p contenteditable=plaintext-only>plain</div>']]
+    }).tap {|s| s.visit '/' }
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const e = document.getElementById('e');
+        const run = (html, value, pick) => {
+          e.innerHTML = html;
+          e.focus();
+          const [a, ao, b, bo] = pick();
+          getSelection().setBaseAndExtent(a, ao, b, bo);
+          const fired = [];
+          const listen = (ev) => fired.push(`${ev.inputType}|${ev.data}`);
+          e.addEventListener('input', listen);
+          const returned = document.execCommand('insertHTML', false, value);
+          e.removeEventListener('input', listen);
+          const s = getSelection();
+          return [returned, e.innerHTML, s.anchorNode.nodeName, s.anchorOffset, fired];
+        };
+        const text = (at) => () => { const t = e.querySelector('p').firstChild; return [t, at, t, at]; };
+        const out = [
+          run('<p>jkl</p>', '<b>x</b>y', text(1)),
+          run('<p>abc</p>', '<i>x</i>', () => { const t = e.querySelector('p').firstChild; return [t, 0, t, 3]; }),
+          run('<p>jkl</p>', '<p>x</p><p>y</p>', text(1)),
+          run('', '<b>x</b>', () => [e, 0, e, 0]),
+          run('<p><br></p>', '<b>x</b>', () => { const p = e.querySelector('p'); return [p, 0, p, 0]; }),
+          run('<p>abc</p>', '', () => { const t = e.querySelector('p').firstChild; return [t, 0, t, 3]; }),
+          run('<p>abc</p>', '', text(1)),
+          run('', '<script>window.ran = (window.ran || 0) + 1<\/script><span onclick="1">s</span>', () => [e, 0, e, 0])
+        ];
+        out.push(window.ran);
+        const p = document.getElementById('p');
+        p.focus();
+        getSelection().setBaseAndExtent(p.firstChild, 5, p.firstChild, 5);
+        out.push(document.execCommand('insertHTML', false, '<b>x</b>'), p.innerHTML);
+        return out;
+      })()
+    JS
+    expect(got).to eq([
+      [true, '<p>j<b>x</b>ykl</p>', 'P', 3, ['|null']],
+      [true, '<p><i>x</i></p>', 'P', 1, ['|null']],
+      [true, '<p>j</p><p>x</p><p>y</p><p>kl</p>', 'DIV', 3, ['|null']],
+      [true, '<b>x</b>', 'DIV', 1, ['|null']],
+      [true, '<p><b>x</b></p>', 'P', 1, ['|null']],
+      [true, '<p><br></p>', 'P', 0, ['|null']],
+      [true, '<p>abc</p>', '#text', 1, []],
+      [true, '<script>window.ran = (window.ran || 0) + 1</script><span onclick="1">s</span>', 'DIV', 2, ['|null']],
+      1,
+      true,
+      'plainx'
+    ])
+  end
 end
