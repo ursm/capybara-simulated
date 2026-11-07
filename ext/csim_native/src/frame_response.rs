@@ -1,5 +1,5 @@
 // The response a frame's document is made of (HTML "process the iframe attributes" and "navigate", as far as "create and
-// initialize a Document object" takes them): where its build loads it from — a scripted navigation's response, its
+// initialize a Document object" takes them): where its build loads it from — the document a navigation carries, its
 // `srcdoc`, an about:, data:, javascript: or blob: URL's, or the network's, a service worker's on the way — what that
 // response says of the document (its URL after redirects, its Content-Type, its Content-Security-Policy, Referrer-Policy
 // and Refresh, the Referer its request sent, the client it reserved), its Resource Timing entry, and the origins and

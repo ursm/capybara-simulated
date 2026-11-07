@@ -196,11 +196,15 @@ fn route(arena: &crate::dom::RealmArena, realm: i32, target: &[u16]) -> Route {
         Choice::Blocked => Route::Blocked,
     }
 }
-// …a form's of realm `realm`'s document with target `target` and link types `rel`, and the Referer it sends: that
-// document's, `no-referrer` for its `rel=noreferrer`.
-fn target_route(arena: &mut crate::dom::RealmArena, realm: i32, target: &[u16], rel: &str) -> (Route, (String, String)) {
+// The Referer a form of realm `realm`'s document with link types `rel` sends: that document's, `no-referrer` for its
+// `rel=noreferrer`.
+pub(crate) fn form_referrer(arena: &mut crate::dom::RealmArena, realm: i32, rel: &str) -> (String, String) {
     let policy = if crate::token_list::link_types(rel) & crate::token_list::LINK_NOREFERRER != 0 { "no-referrer" } else { "" };
-    let referrer = crate::referrer::navigation_referrer(arena, realm, policy);
+    crate::referrer::navigation_referrer(arena, realm, policy)
+}
+// …and where it goes, with target `target`.
+fn target_route(arena: &mut crate::dom::RealmArena, realm: i32, target: &[u16], rel: &str) -> (Route, (String, String)) {
+    let referrer = form_referrer(arena, realm, rel);
     (route(arena, realm, target), referrer)
 }
 // …its request's (the bindings' record of it: its `target`, its `rel`).
@@ -379,13 +383,18 @@ fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn plan_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
     let cid = realm_id(scope, &args);
+    note_activation(scope, cid, object);
+    let request = v8::Global::new(scope, args.get(0));
+    plan(scope, &args).submission = Some(Submission(request));
+}
+
+// …a form's request told whether its realm's window has transient activation now.
+pub(crate) fn note_activation(scope: &mut v8::PinScope<'_, '_>, cid: i32, request: v8::Local<'_, v8::Object>) {
     let activated = realm(scope, cid).transiently_activated(cid);
     if let Some(key) = v8::String::new(scope, "userActivated") {
         let value = v8::Boolean::new(scope, activated);
-        object.set(scope, key.into(), value.into());
+        request.set(scope, key.into(), value.into());
     }
-    let request = v8::Global::new(scope, args.get(0));
-    plan(scope, &args).submission = Some(Submission(request));
 }
 
 // __dom.planDownload(url, filename, policy): a hyperlink's download planned, under the referrer policy the hyperlink sets
@@ -780,7 +789,6 @@ fn route_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     // (…one targeting its own navigable replacing what that planned: the host's navigation of it, a parent's form)
     let own = matches!(route, Route::SelfTarget) || matches!((&route, container), (Route::Frame(c), Some(own)) if *c == own);
     if let (true, Some(c)) = (own, container) {
-        arena.frame_navigations.cancel_form(c);
         if let Some(host) = arena.frame_navigations.host_mut(c) {
             *host = None;
         }
@@ -849,8 +857,9 @@ fn submission_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let items = [kind, at, container, v8::String::new(scope, &referrer.0).unwrap().into(), v8::String::new(scope, &referrer.1).unwrap().into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.takeRoutedSubmission() -> the first of the submissions frames' documents made that the host routes, in the order
-// they were made, which none plans any more: `[realm, request, kind, realm, container, referrerSource,
+// __dom.takeRoutedSubmission() -> the first of the submissions that navigate as the host routes them, in the order they
+// were made, which none plans any more — those frames' documents made, and a form's the navigable of a frame its target
+// chose plans (frame_navigation.rs `HostNavigation::Submit`): `[realm, request, kind, realm, container, referrerSource,
 // referrerPolicy]` (`route_items`). None whose frame is gone (no container: its navigable discarded with its document,
 // HTML "plan to navigate" queueing on a document no longer fully active), nor whose request no realm holds any more (a
 // click that took it); null where none is left. One at a time: the one before may have given the frame chosen a new
@@ -859,7 +868,14 @@ fn take_routed_submission(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionC
     rv.set_null();
     loop {
         let arena = &mut crate::dom::dom(scope).arena;
-        if !arena.routed_submissions.first_planned().is_some_and(|at| arena.frame_navigations.due(at)) {
+        let routed = arena.routed_submissions.first_planned();
+        let framed = arena.frame_navigations.first_submission();
+        if let Some(at) = framed.filter(|&at| arena.frame_navigations.due(at) && routed.is_none_or(|r| at < r)) {
+            let Some((container, request, source, referrer)) = arena.frame_navigations.take_submission(at) else { continue };
+            crate::frame_navigation::FrameNavigations::begin_submission(arena, container);
+            return rv.set(routed_item(scope, source, &request, Route::Frame(container), referrer));
+        }
+        if !routed.is_some_and(|at| arena.frame_navigations.due(at)) {
             return;
         }
         let entries = &mut arena.routed_submissions.entries;
@@ -881,18 +897,21 @@ fn take_routed_submission(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionC
             (Route::SelfTarget, Some(c)) | (&Route::Frame(c), _) => crate::frame_navigation::FrameNavigations::begin_submission(arena, c),
             _ => {}
         }
-        let [kind, at, container] = route_items(scope, route);
-        let item = [
-            v8::Integer::new(scope, e.source).into(),
-            v8::Local::new(scope, request),
-            kind,
-            at,
-            container,
-            v8::String::new(scope, &referrer.0).unwrap().into(),
-            v8::String::new(scope, &referrer.1).unwrap().into(),
-        ];
-        return rv.set(v8::Array::new_with_elements(scope, &item).into());
+        return rv.set(routed_item(scope, e.source, &request, route, referrer));
     }
+}
+fn routed_item<'s>(scope: &mut v8::PinScope<'s, '_>, source: i32, request: &v8::Global<v8::Value>, route: Route, referrer: (String, String)) -> v8::Local<'s, v8::Value> {
+    let [kind, at, container] = route_items(scope, route);
+    let item = [
+        v8::Integer::new(scope, source).into(),
+        v8::Local::new(scope, request),
+        kind,
+        at,
+        container,
+        v8::String::new(scope, &referrer.0).unwrap().into(),
+        v8::String::new(scope, &referrer.1).unwrap().into(),
+    ];
+    v8::Array::new_with_elements(scope, &item).into()
 }
 // __dom.takeFrameSubmission() -> [realm, request, referrerSource, referrerPolicy] of that submission, which it plans no
 // more — or null.

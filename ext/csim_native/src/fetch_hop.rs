@@ -17,12 +17,8 @@ struct Client {
     mode: Option<String>,
     // Its destination as an element's load names it ('' is one), None for none.
     dest: Option<String>,
-    // A navigation's destination ("document", "iframe"), for a document's own navigation request or a worker's re-issue
-    // of the navigation it intercepted.
+    // A navigation's destination ("document", "iframe"), for a worker's re-issue of the navigation it intercepted.
     nav_dest: Option<String>,
-    // Whether it is a document's own navigation request, and whether its document had transient activation.
-    navigation: bool,
-    user_activated: bool,
     // Its credentials mode: "include", "same-origin", "omit".
     credentials: String,
     // Its origin, and the document origin a mode's response type is judged by (None for a mode-less load).
@@ -49,7 +45,7 @@ struct Client {
 }
 
 // What a hop carries (`FetchHops#hop`).
-pub(crate) type Hop = (bool, Option<String>, Option<(&'static str, String, String, bool)>, Option<u32>);
+pub(crate) type Hop = (bool, Option<String>, Option<(&'static str, String, String)>, Option<u32>);
 
 pub(crate) struct FetchHops {
     client: Client,
@@ -104,8 +100,6 @@ pub(crate) struct ClientFacts {
     pub(crate) mode: Option<String>,
     pub(crate) dest: Option<String>,
     pub(crate) nav_dest: Option<String>,
-    pub(crate) navigation: bool,
-    pub(crate) user_activated: bool,
     pub(crate) credentials: String,
     pub(crate) origin: Option<String>,
     pub(crate) doc_origin: Option<String>,
@@ -128,15 +122,13 @@ impl FetchHops {
             None if f.client_origin.as_deref() == Some("null") => Some("null".to_owned()),
             None => f.client_url.or_else(|| f.sec_initiator.clone()),
         };
-        // (…a navigate-mode request with a navigation's destination that is no document's own navigation request)
-        let reissued = (f.mode.as_deref() == Some("navigate") && f.nav_dest.as_deref().is_some_and(|d| !d.is_empty()) && !f.navigation)
+        // (…a navigate-mode request with a navigation's destination)
+        let reissued = (f.mode.as_deref() == Some("navigate") && f.nav_dest.as_deref().is_some_and(|d| !d.is_empty()))
             .then_some(f.navigation_cross_site);
         let client = Client {
             mode: f.mode,
             dest: f.dest,
             nav_dest: f.nav_dest,
-            navigation: f.navigation,
-            user_activated: f.user_activated,
             credentials: f.credentials,
             origin: f.origin,
             doc_origin: f.doc_origin,
@@ -158,7 +150,7 @@ impl FetchHops {
     }
 
     // #hop(target, method, origin, policy, taint) -> [cross-origin CORS hop, Origin (nil none), Sec-Fetch
-    // ([site, mode, dest, user]; nil none), cookie context (nil where it includes no credentials: no `Cookie` sent, no
+    // ([site, mode, dest]; nil none), cookie context (nil where it includes no credentials: no `Cookie` sent, no
     // `Set-Cookie` stored)] for the hop to `target` of a request of `method` whose origin is `origin` ('null' tainted)
     // under referrer policy `policy`, its redirect-taint `taint` (the chain's, fetch_chain.rs).
     pub(crate) fn hop(&self, target: String, method: String, origin: Option<String>, policy: Option<String>, taint: RedirectTaint) -> Hop {
@@ -181,12 +173,8 @@ impl FetchHops {
             None
         };
         let sec = c.advance(&mut self.sec_site.borrow_mut(), &target).map(|site| {
-            let dest = if c.navigation {
-                c.nav_dest.clone().unwrap_or_default()
-            } else {
-                c.dest.clone().filter(|d| !d.is_empty()).unwrap_or_else(|| "empty".to_owned())
-            };
-            (site, c.mode.clone().unwrap_or_else(|| "no-cors".to_owned()), dest, c.navigation && c.user_activated)
+            let dest = c.dest.clone().filter(|d| !d.is_empty()).unwrap_or_else(|| "empty".to_owned());
+            (site, c.mode.clone().unwrap_or_else(|| "no-cors".to_owned()), dest)
         });
         // The cookie context, where it includes credentials (Fetch "HTTP-network-or-cache fetch": its cookies sent, and
         // its response's `Set-Cookie` stored, only then): over a secure channel where the target's origin is
@@ -233,8 +221,6 @@ mod tests {
             mode: mode.map(str::to_owned),
             dest: None,
             nav_dest: None,
-            navigation: false,
-            user_activated: false,
             credentials: "same-origin".to_owned(),
             origin: o("http://a.test"),
             doc_origin: mode.and(o("http://a.test")),
@@ -310,12 +296,11 @@ mod tests {
     #[test]
     fn a_navigation_keeps_lax_cookies_at_the_top_level_alone() {
         // (…a navigation's credentials mode `include`, as Fetch makes one)
-        let nav = Client { nav_dest: Some("document".into()), navigation: true, user_activated: true, credentials: "include".to_owned(), ..client(Some("navigate")) };
+        let nav = Client { nav_dest: Some("document".into()), credentials: "include".to_owned(), ..client(Some("navigate")) };
         let hop = hops(nav).hop("http://b.test/".into(), "GET".into(), Some("http://a.test".into()), None, RedirectTaint::SameOrigin);
-        assert_eq!(hop.2.map(|s| (s.2, s.3)), Some(("document".to_owned(), true)));
         assert_eq!(hop.3.map(|c| c & (LAX_RETRIEVE | TOP_LEVEL_NAV)), Some(LAX_RETRIEVE | TOP_LEVEL_NAV));
         // (…a POST's response may set a SameSite cookie, its request retrieves no Lax one)
-        let post = Client { nav_dest: Some("document".into()), navigation: true, ..client(Some("navigate")) };
+        let post = Client { nav_dest: Some("document".into()), ..client(Some("navigate")) };
         let hop = hops(post).hop("http://a.test/".into(), "POST".into(), Some("http://a.test".into()), None, RedirectTaint::SameOrigin);
         assert_eq!(hop.3.map(|c| c & (LAX_RETRIEVE | TOP_LEVEL_NAV)), Some(TOP_LEVEL_NAV));
         // (…a frame's navigation none of either, cross-site where the frame has a cross-site ancestor; a re-issued

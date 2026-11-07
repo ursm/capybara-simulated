@@ -118,21 +118,17 @@ pub(crate) fn sw_subresource_usable(destination: &str, mode: &str, response_type
 pub(crate) const ROUTE_NETWORK: u32 = 0;
 pub(crate) const ROUTE_DATA: u32 = 1;
 pub(crate) const ROUTE_BLOB: u32 = 2;
-pub(crate) const ROUTE_NAVIGATION: u32 = 3;
 pub(crate) const ROUTE_REFUSED: u32 = 4;
 pub(crate) const ROUTE_SERVICE_WORKER: u32 = 5;
 pub(crate) const ROUTE_KEEPALIVE: u32 = 6;
 pub(crate) const FETCH_CONTROLLED: u32 = 1;
 pub(crate) const FETCH_KEEPALIVE: u32 = 4;
-pub(crate) const FETCH_NAVIGATE: u32 = 8;
-pub(crate) const FETCH_IN_WORKER: u32 = 16;
 pub(crate) const FETCH_SAME_ORIGIN: u32 = 32;
 pub(crate) fn fetch_route(url: &str, flags: u32, here: &str) -> u32 {
     let Ok(u) = ada_url::Url::parse(url, None) else { return ROUTE_NETWORK };
     match u.protocol() {
         "data:" => ROUTE_DATA,
         "blob:" => ROUTE_BLOB,
-        "http:" | "https:" if flags & (FETCH_NAVIGATE | FETCH_IN_WORKER) == FETCH_NAVIGATE => ROUTE_NAVIGATION,
         "http:" | "https:" if flags & FETCH_SAME_ORIGIN != 0 && u.origin() != here => ROUTE_REFUSED,
         "http:" | "https:" if flags & FETCH_CONTROLLED != 0 => ROUTE_SERVICE_WORKER,
         "http:" | "https:" if flags & FETCH_KEEPALIVE != 0 => ROUTE_KEEPALIVE,
@@ -734,8 +730,6 @@ mod tests {
         assert_eq!(fetch_route("http://a.test/x", FETCH_CONTROLLED, here), ROUTE_SERVICE_WORKER);
         assert_eq!(fetch_route("http://a.test/x", FETCH_CONTROLLED | FETCH_KEEPALIVE, here), ROUTE_SERVICE_WORKER);
         assert_eq!(fetch_route("http://a.test/x", FETCH_KEEPALIVE, here), ROUTE_KEEPALIVE);
-        assert_eq!(fetch_route("http://a.test/x", FETCH_NAVIGATE | FETCH_CONTROLLED, here), ROUTE_NAVIGATION);
-        assert_eq!(fetch_route("http://a.test/x", FETCH_NAVIGATE | FETCH_IN_WORKER | FETCH_CONTROLLED, here), ROUTE_SERVICE_WORKER);
         // (…a scheme Handle Fetch never sees, even controlled: the network's to refuse)
         assert_eq!(fetch_route("about:blank", FETCH_CONTROLLED, here), ROUTE_NETWORK);
         assert_eq!(fetch_route("x-custom:y", FETCH_CONTROLLED | FETCH_KEEPALIVE, here), ROUTE_NETWORK);

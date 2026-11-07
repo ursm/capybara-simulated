@@ -497,6 +497,8 @@ RSpec.describe 'Handle Fetch outcomes' do
     }
     frame.call("f.src = '/first';")
     frame.call("f.src = '/second';")
+    # (…a form's into it by the frame's name too, as Chrome gives it: the document it replaces, none made up for it)
+    frame.call("frames[0].name = 'n'; const form = document.body.appendChild(document.createElement('form')); form.action = '/third'; form.target = 'n'; form.submit();")
     seen = session.evaluate_async_script(<<~JS)
       const done = arguments[0];
       const channel = new MessageChannel();
@@ -505,5 +507,6 @@ RSpec.describe 'Handle Fetch outcomes' do
     JS
     expect(seen.fetch('/first')[0]).not_to be_empty
     expect(seen.fetch('/second')[0]).to eq(seen.fetch('/first')[1])
+    expect(seen.fetch('/third')[0]).to eq(seen.fetch('/second')[1])
   end
 end

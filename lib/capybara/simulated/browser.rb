@@ -7349,8 +7349,7 @@ module Capybara
         end
       end
 
-      # One navigation fetch for a FRAME load — the bridge's __csimFrameWindow build
-      # (GET) and a form submission to a named frame (POST, fetch.js mode 'navigate'):
+      # One navigation fetch for a FRAME load — the bridge's __csimFrameWindow build:
       # per hop, consult the controlling SW across the whole window set (a redirect
       # out of one SW's scope can land in another registration's — or on the
       # network), then fall through to a network navigation request; FOLLOW
@@ -7369,8 +7368,7 @@ module Capybara
                                  coop_realm: nil, replaces_realm: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
-        # A caller in a script (`defer_ok`: the iframe build, a form submission to a named frame
-        # — fetch.js) can't block for it — the settling message may be sent by this very page's JS —
+        # A caller in a script (`defer_ok`: the iframe build) can't block for it — the settling message may be sent by this very page's JS —
         # so it gets a deferral marker: the caller parks the navigation and the activated marker
         # makes it again (__csim_swRetryDeferredNavs). Any other (a window `window.open` made,
         # waited for already: `navigate_window_realm`) waits what it can (`await_sw_activation`).
@@ -7458,8 +7456,7 @@ module Capybara
         when 'hand_off', 'no_content'
           return {'no_document' => true}
         # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate"; the
-        # frame builder's, whose container's document `container_realm` is, alone — a named-frame form's navigation
-        # still makes a document of it)
+        # frame builder's, whose container's document `container_realm` is)
         # (…a window's navigation's alike, `download_realm` the document that navigated it)
         when 'download'
           if download_realm
@@ -10611,9 +10608,7 @@ module Capybara
           cookie_cross_site:     r['cookieCrossSite'] == true,
           navigation_cross_site: r['navigationCrossSite'] == true,
           nav_dest:              r['navDest'],
-          navigation:            r['navigation'] == true,
           dest:                  r['dest'],
-          user_activated:        r['userActivated'] == true,
           ua_headers:            r['uaHeaders'],
           env_extras:            env_extras,
           transport:             transport,
@@ -10631,8 +10626,8 @@ module Capybara
       # (…`transport` what sends each hop where it is not the app's or Net::HTTP's — `dispatch_rack_or_http` — and
       # `stream` whether the response is answered with its body unread, `[status, headers, body, url]`, for a reader that
       # takes it as it comes: an event stream's)
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, redirect_taint: nil, origin_null: false, client_url: nil, cookie_cross_site: false, navigation_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false, dest: nil,
-                     user_activated: false, ancestors: nil, ua_headers: nil, transport: nil, stream: false)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, redirect_taint: nil, origin_null: false, client_url: nil, cookie_cross_site: false, navigation_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, dest: nil,
+                     ancestors: nil, ua_headers: nil, transport: nil, stream: false)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -10677,9 +10672,7 @@ module Capybara
             cookie_cross_site:     cookie_cross_site == true,
             navigation_cross_site: navigation_cross_site == true,
             nav_dest:              nav_dest,
-            navigation:            navigation == true,
             dest:                  dest,
-            user_activated:        user_activated == true,
             top_url:               page_url,
             worker:                worker&.key?(:site_for_cookies) ? [worker[:site_for_cookies]] : nil,
             ua_headers:            ua_headers
@@ -10741,8 +10734,7 @@ module Capybara
           end
           env['HTTP_ORIGIN'] = origin_value if origin_value
           if sec_fetch
-            env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_SEC_FETCH_DEST'], user = sec_fetch
-            env['HTTP_SEC_FETCH_USER'] = '?1' if user
+            env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_SEC_FETCH_DEST'] = sec_fetch
           end
           if env_extras
             env.merge!(env_extras)
@@ -10808,7 +10800,7 @@ module Capybara
             close_rack_body(resp_body)
             next
           end
-          kind, null_body, store, expose, total_delay, tainted, nav = args
+          kind, null_body, store, expose, total_delay, tainted = args
           if stream
             trace_network(method, target, status, hop_headers, body, resp_headers, nil, t0, false)
             return [status.to_i, expose.nil? ? resp_headers : cors_exposed_headers(resp_headers, expose), resp_body, target]
@@ -10844,13 +10836,6 @@ module Capybara
             return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size, opaque_render_meta: meta)
           end
           out = response_hash(status, exposed_headers, body_str, target, plan.redirected?, type: kind, body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
-          # (…a document's navigation request's the method its last hop went with, which its session history entry keeps —
-          # a POST's through a 307 / 308 still one, a 303's a GET — and the Referer it sent, the referrer of the document
-          # it makes)
-          if nav && out
-            out['method']   = nav[0]
-            out['referrer'] = nav[1] if nav[1]
-          end
           return chain_response(out, plan, tainted)
         end
       rescue StandardError => e
@@ -11647,17 +11632,23 @@ module Capybara
       rescue StandardError => e
         log_console('warn', "nested-context form submission failed: #{e.message}")
       end
-      # The submissions frames' documents made that the host routes, taken at the navigation turn one at a time in the order
-      # they were made (navigation_plan.rs `takeRoutedSubmission`: the frame one chose may have a new document by the next):
-      # each its realm, its request, the navigable its target chose (`submission_route`'s) and its Referer.
-      # (Never while the form's `submit()` is still on the V8 stack.)
+      # The submissions the host routes — of frames' documents, and any into a frame its target chose — taken at the
+      # navigation turn one at a time in the order they were made (navigation_plan.rs `takeRoutedSubmission`: the frame one
+      # chose may have a new document by the next): each its realm, its request, the navigable its target chose
+      # (`submission_route`'s) and its Referer. (Never while the form's `submit()` is still on the V8 stack.) A frame's
+      # navigation finalized with it, as `consume_pending_frame_nav`'s, what it made or not, by its container taken before
+      # it ran.
       def consume_pending_frame_submit
         while (realm_id, spec, kind, at, source, policy = @runtime.call('__csimTakeRoutedSubmission'))
           invalidate_find_cache
+          parent = kind == 'frame' ? @runtime.frame_realm_parent(at) : nil
+          container = parent && frame_container_handle(at, parent)
           begin
-            submit_routed_form(realm_id, spec, submission_route(kind, at, source, policy))
+            from_document(realm_id) { submit_routed_form(realm_id, spec, submission_route(kind, at, source, policy)) }
           rescue StandardError => e
             log_console('warn', "nested-context form submission failed: #{e.message}")
+          ensure
+            frame_navigation_finalized(parent, container)
           end
         end
       end
@@ -11967,7 +11958,15 @@ module Capybara
           return javascript_form_action(target, spec['action'].to_s, realm_id) if target
           return if to == :new_window
         end
-        request = form_request(spec, spec['action'].to_s)
+        frame = to == :self ? (realm_id unless @runtime.window_realm_meta.key?(realm_id)) : (to if to.is_a?(Integer))
+        begin
+          request = form_request(spec, spec['action'].to_s)
+        rescue IOError
+          raise unless frame
+
+          # (…a file gone since it was picked fails the frame's navigation, as Chrome's upload does: an error document)
+          return commit_failed_frame_form(frame, spec['action'].to_s)
+        end
         return unless request
 
         method, url, body, content_type = request
@@ -11995,6 +11994,14 @@ module Capybara
         when :new_window
           submit_into_new_window(realm_id, spec, route[:name], url, post, initiator, activated)
         end
+      end
+      # …a frame's navigation by a form whose request could not be made: its document asked whether it may be unloaded, its
+      # entry recorded, an error document at the form's action.
+      private def commit_failed_frame_form(frame, url)
+        return unless @runtime.frame_realm_alive?(frame) && prompt_to_unload_frame(frame)
+
+        record_frame_nav(frame, url)
+        commit_frame_error_document(frame, url, entry: @frame_stack.find {|e| e[:realm_id] == frame })
       end
       # …into the page: the page's own form navigating it in place — replacing its session history entry where it is not
       # completely loaded yet (`spec['replace']`), with no Referer for `rel=noreferrer` — or a frame's adding the page's
@@ -12121,6 +12128,24 @@ module Capybara
         origin_url: nil,
         user_activated: false
       )
+        # (…one of a URL no network answers: `data:` and about:blank answer a POST as they answer a GET, Chrome and Firefox
+        # alike, and any other navigation fails on it: navigation_fetch.rs `start`)
+        start = Native.navigation_start(url.to_s, 'POST', false)
+        if %w[about_blank data].include?(start)
+          return navigate_realm_self_get(
+            realm_id,
+            url,
+            is_reload:      is_reload,
+            is_history:     is_history,
+            origin_null:    origin_null,
+            referrer:       referrer,
+            initiator:      initiator,
+            origin_url:     origin_url,
+            user_activated: user_activated
+          )
+        end
+        return commit_failed_frame_form(realm_id, url) if start == 'fail'
+
         referrer ||= realm_referrer_initiator(realm_id)
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry

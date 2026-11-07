@@ -50,6 +50,82 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     end
   end
 
+  # A form's plan begins its navigation before a `javascript:` URL's task runs, which it ends in either order, whatever
+  # HTML queues them on: no script run (Chrome and Firefox, measured 2026-11-07: whatwg/html#12120).
+  ['f.submit(); frames[0].location = "javascript:parent.ran = true"', 'frames[0].location = "javascript:parent.ran = true"; f.submit()'].each do |js|
+    it "runs no javascript: URL of a frame a form plans to navigate: #{js}" do
+      hits = []
+      session = session_with(hits)
+      session.visit '/top'
+      session.execute_script("window.ran = false; #{js}")
+      session.evaluate_script('1')
+      expect(session.evaluate_script('[ran, frames[0].location.pathname]')).to eq([false, '/x'])
+      expect(hits).to include('POST /x')
+    end
+  end
+
+  # A POST to a URL no network answers: `data:` and about:blank answer it as they answer a GET (Chrome and Firefox, measured
+  # 2026-11-07), and a blob: URL with a network error — Fetch's blob scheme takes a GET alone (Chrome; Firefox renders it).
+  it "posts to a data: or an about:blank URL as it gets them, and a blob: one fails" do
+    session = session_with([])
+    session.visit '/top'
+    session.execute_script('window.loads = 0; fr.onload = () => loads++; f.action = "about:blank"; f.submit()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('[frames[0].location.href, loads]')).to eq(['about:blank', 1])
+    session.execute_script('f.action = "data:text/html,<title>dp</title>"; f.submit()')
+    expect(session).to have_css('iframe')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('loads')).to eq(2)
+    expect(session.evaluate_script('fr.contentDocument')).to be_nil
+    session.execute_script('f.action = URL.createObjectURL(new Blob(["<title>bl</title>"], {type: "text/html"})); f.submit()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('loads')).to eq(3)
+    expect(session.evaluate_script('fr.contentDocument')).to be_nil
+  end
+
+  # An action that is no URL ends the submission and leaves what is planned (HTML "submit" step 14).
+  it 'goes on with the plan before it where a submission of no URL comes after' do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    session.execute_script('const g = document.createElement("form"); g.target = "n"; g.setAttribute("action", "http://[x"); document.body.append(g); f.submit(); g.submit()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/x')
+    expect(hits).to include('POST /x')
+  end
+
+  # A frame whose navigation to its `src` has not got far makes none of it: the form's replaces it, in the entry of its
+  # initial about:blank document (Chrome and Firefox, measured 2026-11-07: no script of it run, one `load`).
+  it "replaces the navigation to the src of a frame just inserted" do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    hits.clear
+    session.execute_script('window.loads = 0; const e = document.createElement("iframe"); e.name = "m"; e.src = "/src"; e.onload = () => loads++; document.body.append(e); f.target = "m"; f.submit()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('[frames[1].location.pathname, loads, history.length]')).to eq(['/x', 1, 1])
+    expect(hits).not_to include('GET /src')
+  end
+
+  # …and goes to the frame that had the name as it was submitted, whatever it is called after (Chrome and Firefox).
+  it 'navigates the frame it chose as it was submitted, its name changed since' do
+    session = session_with([])
+    session.visit '/top'
+    session.execute_script('f.submit(); fr.name = "other"')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/x')
+  end
+
+  # …into a frame of a frame's document too, its request the form's as it was submitted, whatever the page does after.
+  it "navigates a frame of a frame's document, by that frame's form" do
+    session = session_with([])
+    session.visit '/top'
+    session.execute_script('frames[0].document.body.innerHTML = "<iframe name=in></iframe><form id=g action=/in target=in><input name=a value=1></form>"')
+    session.execute_script('frames[0].g.submit(); frames[0].g.a.value = 2')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('frames[0].frames[0].location.pathname + frames[0].frames[0].location.search')).to eq('/in?a=1')
+  end
+
   # A link to a fragment of the frame's document moves it within it, fetching nothing (HTML "navigate to a fragment").
   it "fetches nothing for a link to the frame's own fragment" do
     hits = []

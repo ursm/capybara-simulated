@@ -58,7 +58,6 @@ pub(crate) struct FetchPlan {
     redirect_mode: String,
     cache_mode: String,
     conditional: bool,
-    navigation: bool,
     // The credentials an XHR's `open()` brought, as an `Authorization` value, answering a Basic challenge.
     challenge: Option<String>,
     // The headers the user agent set itself where a CORS-preflight would not ask about them (lowercased names): an
@@ -119,7 +118,7 @@ impl FetchPlan {
     // `origin_null`, `redirect_taint` (the redirect-taint its URL list has so far, a network leg's after a service worker
     // answered a hop with a redirect: referrer.rs `RedirectTaint::name`, nil none), `client_url`, `client_origin`,
     // `ancestors`, `cookie_cross_site`, `navigation_cross_site`, `nav_dest`,
-    // `navigation`, `dest`, `user_activated`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil
+    // `dest`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil
     // for none), `ua_headers` (the names of headers the user agent set itself that no CORS-preflight asks about, nil for
     // none); `sessions` [preflight cache, authentication entries].
     fn new(ruby: &Ruby, request: RHash, sessions: (u64, u64)) -> Result<Option<Self>, Error> {
@@ -146,8 +145,7 @@ impl FetchPlan {
         // of its document's.
         let moded = matches!(mode.as_deref(), Some("cors" | "no-cors" | "same-origin"));
         let initiator = text("initiator")?;
-        let navigation = flag("navigation")?;
-        let origin = initiator.clone().or_else(|| (navigation || moded).then(|| client_origin.clone()).flatten());
+        let origin = initiator.clone().or_else(|| moded.then(|| client_origin.clone()).flatten());
         let doc_origin = moded.then(|| client_origin.clone()).flatten();
         // Its referrer: an explicit one, else its client's URL; '' none.
         let ref_source = if get("referrer")?.is_nil() { client.clone() } else { text("referrer")? };
@@ -182,8 +180,6 @@ impl FetchPlan {
             mode: mode.clone(),
             dest: text("dest")?,
             nav_dest: text("nav_dest")?,
-            navigation,
-            user_activated: flag("user_activated")?,
             credentials: credentials.clone(),
             origin: origin.clone(),
             doc_origin: doc_origin.clone(),
@@ -209,7 +205,6 @@ impl FetchPlan {
             redirect_mode: named("redirect")?.unwrap_or_else(|| "follow".to_owned()),
             cache_mode,
             conditional,
-            navigation,
             challenge,
             ua_headers,
             preflight_cache: sessions.0,
@@ -300,7 +295,7 @@ impl FetchPlan {
     // - ['opaque_redirect_cached'] — a stored redirect, its request's redirect mode "manual";
     // - ['dispatch', [method, target, header pairs, drop Content-Length, Referer, cookie context (nil: no credentials
     //   included — no `Cookie` sent, no `Set-Cookie` stored; fetch_hop.rs), pre-emptive Authorization, Origin, Sec-Fetch
-    //   [site, mode, dest, user], revalidate], preflight] — the request to send, the CORS-preflight first where
+    //   [site, mode, dest], revalidate], preflight] — the request to send, the CORS-preflight first where
     //   `preflight` [unsafe names, Origin] says so.
     fn begin_hop(ruby: &Ruby, rb_self: &Self, cache: Option<(u32, bool, RArray)>, now: f64) -> Result<RArray, Error> {
         let plan = rb_self;
@@ -428,7 +423,7 @@ impl FetchPlan {
     // - ['follow', store, to_get] — the next hop (`store` whether the redirect response is stored first, `to_get`
     //   whether the request's body goes);
     // - ['error', nil, store] — a redirect that fails to be followed (`store` whether it is stored all the same);
-    // - ['final', type, null body, store, expose, server delay, tainted, navigation [method, Referer]] — the response.
+    // - ['final', type, null body, store, expose, server delay, tainted] — the response.
     fn response(ruby: &Ruby, rb_self: &Self, status: u32, fields: RArray, sent_authorization: bool) -> Result<RArray, Error> {
         let plan = rb_self;
         let mut st = plan.st.borrow_mut();
@@ -492,7 +487,6 @@ impl FetchPlan {
             "basic"
         };
         let tainted = st.tainted && !st.crossed;
-        let navigation = plan.navigation.then(|| (st.chain.method.clone(), st.referer.clone()));
         Ok(command(
             ruby,
             "final",
@@ -503,7 +497,6 @@ impl FetchPlan {
                 expose.into_value_with(ruby),
                 st.delay_ms.into_value_with(ruby),
                 tainted.into_value_with(ruby),
-                navigation.into_value_with(ruby),
             ],
         ))
     }

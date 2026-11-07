@@ -113,13 +113,11 @@ fn processed_referrer(referrer: &str, base: &str, origin: &str) -> Result<String
 // The Request constructor's steps over the request (Fetch "new Request(input, init)"), the bindings' objects aside:
 // `source` the input Request's request (none for a URL string `input`, parsed against `base`), `init` the converted
 // RequestInit, `origin` the document's — every refusal a TypeError's message, the caller's prefix before it.
-// (`navigation`: a navigation's request, its URL the navigate algorithm's, which no credentials check refuses.)
 fn construct_request(
     scope: &mut v8::PinScope<'_, '_>,
     source: Option<Request>,
     input: &str,
     init: v8::Local<'_, v8::Object>,
-    navigation: bool,
     base: &str,
     origin: &str,
 ) -> Result<Request, String> {
@@ -130,7 +128,7 @@ fn construct_request(
             let Some(url) = crate::url_ops::encoding_parse(input, Some(base), None) else {
                 return Err(format!("Failed to parse URL from {input}"));
             };
-            if !navigation && (!url.username().is_empty() || !url.password().is_empty()) {
+            if !url.username().is_empty() || !url.password().is_empty() {
                 return Err(format!("Request cannot be constructed from a URL that includes credentials: {input}"));
             }
             (Request::new(url.href().to_owned()), Some("cors"))
@@ -211,7 +209,7 @@ fn construct_request(
 }
 
 // The constructor a Request object's request is made with — `new __dom.RequestStateBase(source, input, init,
-// navigation, base, origin, prefix)`, the constructor's steps (`construct_request`) against the calling realm's API base
+// base, origin, prefix)`, the constructor's steps (`construct_request`) against the calling realm's API base
 // URL and document origin (the template is the isolate's, which knows no realm): a TypeError, its message after
 // `prefix`, where they refuse. With no `init` at all, a copy of `source`'s request (Fetch "clone a request").
 fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -223,16 +221,15 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         Err(_) => source.ok_or_else(String::new),
         Ok(init) => {
             let input = args.get(1).to_rust_string_lossy(scope);
-            let navigation = args.get(3).boolean_value(scope);
-            let base = args.get(4).to_rust_string_lossy(scope);
-            let origin = args.get(5).to_rust_string_lossy(scope);
-            construct_request(scope, source, &input, init, navigation, &base, &origin)
+            let base = args.get(3).to_rust_string_lossy(scope);
+            let origin = args.get(4).to_rust_string_lossy(scope);
+            construct_request(scope, source, &input, init, &base, &origin)
         }
     };
     let request = match made {
         Ok(request) => request,
         Err(message) => {
-            let prefix = args.get(6).to_rust_string_lossy(scope);
+            let prefix = args.get(5).to_rust_string_lossy(scope);
             return throw_type_error(scope, &format!("{prefix}{message}"));
         }
     };
