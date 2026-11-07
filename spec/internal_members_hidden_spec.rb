@@ -63,6 +63,20 @@ RSpec.describe 'internal members' do
     expect(outcome("Object.create(document.body).addEventListener('x', () => {})")).to eq('TypeError: Illegal invocation')
   end
 
+  # …nor is an object a key of a page's makes one: EventTarget.prototype, every realm's, is told by a private mark — a
+  # brand keyed by a symbol of the agent's registry (`Symbol.for('csim.EventTarget')`) could be forged by any page
+  it 'takes no key a page can make for an EventTarget' do
+    expect(outcome(<<~JS)).to eq(['TypeError', 'TypeError', 'ok', 'ok'])
+      (() => {
+        const add = EventTarget.prototype.addEventListener;
+        const of = (self) => { try { add.call(self, 'x', () => {}); return 'ok'; } catch (e) { return e.constructor.name; } };
+        const forged = { [Symbol.for('csim.EventTarget')]: true };
+        return [of(forged), of(Object.create(Object.create(null, { [Symbol.for('csim.EventTarget')]: { value: true } }))),
+          of(new XMLHttpRequest()), of(document.getElementById('fr').contentWindow)];
+      })()
+    JS
+  end
+
   # The bindings reach none of their own steps through a prototype a page can change: a page's member of a form's
   # interface is overridden by the control it names ([LegacyOverrideBuiltIns]), whatever its name — the driver's own
   # `_`-prefixed members took precedence over such a control until they were functions — and a legacy factory's element
@@ -119,11 +133,7 @@ RSpec.describe 'internal members' do
   # JSON: support/internal_names_probe.js) — and every brand keyed by a symbol of the agent's registry, which a page can
   # make and forge (`@csim:Name` for `Symbol.for('csim.Name')`), is one of these: the campaign's worklist, which only
   # shrinks. A name that is no longer visible comes off it, as an allowlisted WPT subtest that starts passing does.
-  let(:still_visible) {
-    %w[
-      @csim:EventTarget
-    ]
-  }
+  let(:still_visible) { [] }
 
   it 'shows a page no internal name but the ones still to go' do
     found = session.evaluate_script(File.read(File.join(__dir__, 'support', 'internal_names_probe.js')))

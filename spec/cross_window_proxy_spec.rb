@@ -126,6 +126,14 @@ RSpec.describe 'a WindowProxy of a pop-up' do
       expect(read('w.__csimDocumentHtml')).to eq('SecurityError')
     end
 
+    # (…Web IDL's security check of an operation's `this`, ahead of its brand check: EventTarget's members, this realm's,
+    # called on it — Chrome and Firefox measured, 2026-11-08)
+    it "is a SecurityError for EventTarget's members called on it" do
+      expect(read("EventTarget.prototype.addEventListener.call(w, 'x', () => {})")).to eq('SecurityError')
+      expect(read("EventTarget.prototype.removeEventListener.call(w, 'x', () => {})")).to eq('SecurityError')
+      expect(read("EventTarget.prototype.dispatchEvent.call(w, new Event('x'))")).to eq('SecurityError')
+    end
+
     # (…[[HasProperty]] by [[GetOwnProperty]], HTML's: Chrome and Firefox measured)
     it 'is a SecurityError to ask for a member it does not expose, and true for one it does' do
       expect(read("'document' in w")).to eq('SecurityError')
