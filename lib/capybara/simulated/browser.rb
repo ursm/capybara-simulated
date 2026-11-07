@@ -2451,7 +2451,10 @@ module Capybara
       # one that makes the page's document again (`perform_history_traverse`), or one that moves a frame of it
       # (`traverse_navigables_of`) — applied, then those queued after it, which waited for it, from the step it went to:
       # round after round while one is planned. (…each failing alone)
+      # (…none asked of the page where none was planned since it last took one: session_history.rs `planned_for_host`)
       def consume_planned_traversal
+        return unless @session_history.take_traversal_planned
+
         while (planned = @runtime.call('__csimTakeTraversal'))
           kind, *plan = planned
           invalidate_find_cache
@@ -11094,6 +11097,15 @@ module Capybara
       JAVASCRIPT_DOCUMENT_ENTRY_KEEPS = %i[referer referrer_policy referrer origin cross_site opener_policy].freeze
       private def commit_javascript_document(url, markup)
         invalidate_find_cache
+        # (…a traversal its script asked for goes on after it, the session history's queue not the document's — its task,
+        # which the flush below may run, waiting for it, the host's to apply once it is made: both browsers make the
+        # document, then traverse)
+        @session_history.hold_traversals(true)
+        commit_javascript_document!(url, markup)
+      ensure
+        @session_history.hold_traversals(false)
+      end
+      private def commit_javascript_document!(url, markup)
         # (…what is due on the page run first, as before any navigation: `flush_outgoing_page_init`. The text asks no more of
         # the ongoing navigation as it finalizes this one, step 2 being behind it — both browsers end on it, a `void` or another
         # `javascript:` URL's begun after it — but where a task of the flush began a location navigation, the one the navigable
@@ -11110,9 +11122,8 @@ module Capybara
         self.page_url = url
         record_response(200, headers)
         @current_referer = ''
-        # (…a traversal its script asked for goes on after it, the session history's queue not the document's — its task
-        # gone with the document, the host's to apply: both browsers make the document, then traverse)
         boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy, controlled: false, keep_traversals: true)
+        @session_history.hold_traversals(false)
         @runtime.call('__csimApplyOwnTraversals', true)
         consume_planned_traversal
       end

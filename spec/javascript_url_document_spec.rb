@@ -59,11 +59,13 @@ RSpec.describe 'a top-level javascript: URL' do
       expect(requests.count {|_, path, _| path == '/target' }).to eq(1)
     end
 
-    # (…Chrome and Firefox make it, then traverse.)
+    # (…Chrome and Firefox make it, then traverse — its task, which the tasks due before the document run with, waiting
+    # for it.)
     it 'makes the document ahead of a traversal its script asked for' do
       go('/target')
       run("location.href = '/second'")
       expect(poll_until { read('location.pathname') == '/second' && read('document.readyState') == 'complete' }).to be(true)
+      run('setInterval(() => {}, 5)')
       run(%q(location.href = "javascript:history.back(); '<script>sessionStorage.made = 1<\\/script><title>K</title>'"))
       expect(poll_until { read('location.pathname') == '/target' }).to be(true)
       expect(read('sessionStorage.made')).to eq('1')

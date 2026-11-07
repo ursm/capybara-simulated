@@ -236,6 +236,11 @@ struct Traversable {
     // about to commit. (One that makes a document again is planned as any, the flush keeping what it planned apart:
     // navigation_plan.rs `flushBegin`.)
     flush_mark: Option<u64>,
+    // …whether its traversals wait, none applied: while the host commits a `javascript:` URL's document its script asked
+    // them before (browser.rb `commit_javascript_document`), which goes first — its flush running their tasks too — and
+    // whether one applied was planned for the host since it last took one (`applyTraversal`), its cheap gate.
+    holding: bool,
+    planned_for_host: bool,
     // Whether it closed: its window's browsing context discarded, which no opener of another window is then
     // (navigables.rs `opener_now`).
     closed: bool,
@@ -1121,6 +1126,15 @@ impl SessionHistory {
     fn flush_end(&self) {
         self.lock().flush_mark = None;
     }
+    // #hold_traversals(on): its traversals wait (`holding`), or go on.
+    fn hold_traversals(&self, on: bool) {
+        self.lock().holding = on;
+    }
+    // #traversal_planned? -> whether one was planned for the host since it last took one — and #take_traversal_planned,
+    // which says so and clears it.
+    fn take_traversal_planned(&self) -> bool {
+        std::mem::take(&mut self.lock().planned_for_host)
+    }
     // #clear_queued: the page's traversals let go — its document gone, whose traversals go with it.
     fn clear_queued(&self) {
         self.lock().queued.clear();
@@ -1211,6 +1225,7 @@ impl SessionHistory {
         t.opener_policy = crate::coop::Value::UnsafeNone;
         t.queued.clear();
         t.flush_mark = None;
+        (t.holding, t.planned_for_host) = (false, false);
         asking(&mut t, |t| t.asked = Asked::default());
     }
     // #session_storage = shed: its session storage's (`session_storage`), its Browser's.
@@ -1448,6 +1463,8 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
     class.define_method("flush_begin", method!(SessionHistory::flush_begin, 0))?;
     class.define_method("flush_end", method!(SessionHistory::flush_end, 0))?;
+    class.define_method("hold_traversals", method!(SessionHistory::hold_traversals, 1))?;
+    class.define_method("take_traversal_planned", method!(SessionHistory::take_traversal_planned, 0))?;
     class.define_method("queued?", method!(SessionHistory::is_queued, 0))?;
     class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
     class.define_method("clear_queued", method!(SessionHistory::clear_queued, 0))?;
@@ -2139,7 +2156,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     // `javascript:` URL's document its script asked them before, which goes first — both browsers make the document,
     // then traverse: browser.rb `commit_javascript_document`)
     let plan = &crate::dom::realm(scope, top).navigation_plan;
-    if plan.traversal_waiting() || plan.javascript_document_planned() {
+    if plan.traversal_waiting() || plan.javascript_document_planned() || lock(&traversable).holding {
         let items = [v8::Integer::new(scope, top).into(), v8::Boolean::new(scope, false).into(), v8::Array::new(scope, 0).into()];
         return rv.set(v8::Array::new_with_elements(scope, &items).into());
     }
@@ -2165,6 +2182,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
                 planned = Some(Traversal { step, delta: q.delta, url: entry.url, referrer, post: entry.data.post.clone() });
                 t.begin_navigation(TOP);
                 asking(&mut t, |t| t.asked.planned = None);
+                t.planned_for_host = true;
                 break;
             }
             // (…one that moves a frame of it — its document made again, or moved within — the host's, the top-level
@@ -2176,6 +2194,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
                     t.queued.splice(0..0, rest);
                 });
                 frames_planned = Some(crate::navigation_plan::FrameTraversal { step, changes });
+                t.planned_for_host = true;
                 break;
             }
             if t.flush_mark.is_some_and(|mark| q.token > mark) {

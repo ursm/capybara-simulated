@@ -500,7 +500,9 @@ fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     // finalizes it with no more asked of the ongoing navigation — both browsers end on the first, a `void` or another's after it)
     let location = plan.own.location.take().filter(|l| l.document.is_some());
     let planned = if location.is_some() { plan.own.planned } else { 0 };
-    plan.own = Own { submission, reload, location, planned, ..Own::default() };
+    // (…not a traversal moving a frame, no navigation of this navigable's: `let_go`)
+    let frame_traversal = plan.own.frame_traversal.take();
+    plan.own = Own { submission, reload, location, planned, frame_traversal, ..Own::default() };
     rv.set_double(begin_navigation_of(arena, cid, None) as f64);
 }
 // __dom.navigationBegun() — a navigation of the calling realm's navigable planned elsewhere than in its plan (a frame's,

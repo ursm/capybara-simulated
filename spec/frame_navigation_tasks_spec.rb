@@ -1013,6 +1013,31 @@ RSpec.describe 'a frame navigation as tasks' do
     expect(s.find('#out', visible: :all).text(:all)).to eq('about:srcdoc:SD about:srcdoc:SD')
   end
 
+  # …and one the page's own `javascript:` URL, begun after it, lets go on: no navigation of the frame's (HTML "apply the
+  # history step" sets the ongoing navigation of the navigables whose documents it changes alone).
+  it "goes back in a frame past a javascript: URL the page began after the traversal" do
+    s = session(
+      '/child' => child_log,
+      '/'      => <<~HTML
+        <title>page</title><iframe id="f" src="/child?old"></iframe><pre id="out"></pre><script>
+          window.L = [];
+          const f = document.getElementById('f');
+          const P = (ms) => new Promise((r) => setTimeout(r, ms));
+          onload = async () => {
+            await P(50);
+            f.src = '/child?a'; await P(100);
+            history.back(); setTimeout(() => { location.href = 'javascript:void 0'; }, 0); await P(200);
+            document.getElementById('out').textContent = f.contentWindow.location.search;
+            document.title = 'done';
+          };
+        </script>
+      HTML
+    )
+    s.visit '/'
+    expect(s).to have_title('done', wait: 10)
+    expect(s.find('#out', visible: :all).text(:all)).to eq('?old')
+  end
+
   # …and a fragment of a srcdoc entry its traversal keeps. Chrome: `b1:about:srcdoc#h`, `b2:about:srcdoc`.
   it "keeps the fragment of a srcdoc entry on a traversal to it" do
     s = session(
