@@ -313,6 +313,31 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     end
   end
 
+  # …and of a form's and a reload of the window, the later: Chrome 157, popups allowed, 3 runs each (measured 2026-11-07):
+  # `x.submit(); w.location.reload()` leaves it at its document, `w.location.reload(); x.submit()` posts. Firefox 159 sends the
+  # form either way, as it does for a frame; unforced, Chrome's kept, as a frame's is.
+  {
+    'x.submit(); w.location.reload()' => ['/w', false],
+    'w.location.reload(); x.submit()' => ['/pg', true]
+  }.each do |js, (lands, posted)|
+    it "takes the later of a form into a window and its reload: #{js}" do
+      hits = []
+      session = simulated_session(lambda {|env|
+        hits << "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
+        body = env['PATH_INFO'] == '/top' ? '<form id=x method=post action=/pg target=pw></form>' : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      session.visit '/top'
+      session.execute_script('window.w = open("/w", "pw")')
+      session.evaluate_script('1')
+      hits.clear
+      session.execute_script(js)
+      session.evaluate_script('1')
+      expect(session.evaluate_script('w.location.pathname')).to eq(lands)
+      expect(hits.include?('POST /pg')).to be(posted)
+    end
+  end
+
   # A frame's reload after its document was opened is of its session history entry, the URL it was at before (Chrome), a form
   # planned before it replaced as by any reload.
   it 'reloads an opened frame at its entry, in place of the form before it' do
