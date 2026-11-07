@@ -23,6 +23,11 @@ require_relative 'webauthn'
 
 module Capybara
   module Simulated
+    # ISO-8859-1's transcoder is a `require` Ruby runs on its first use: a `Thread#raise` landing in that (an event source's
+    # cancelling, `header_text` on a connection's thread) comes out as `TypeError: no implicit conversion of Encoding into String`
+    # and takes the raised exception with it. Loaded here, before any thread is.
+    'x'.b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
+
     # An asynchronous script that never called its callback in the time Capybara waits (`evaluate_async_script`), as
     # Selenium's and Cuprite's ScriptTimeoutError say of one.
     class ScriptTimeoutError < StandardError; end

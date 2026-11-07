@@ -1950,8 +1950,6 @@ css/cssom/serialize-values.html:
 - 'outline-color: invert'
 - 'widows: 101'
 - 'widows: inherit'
-custom-elements/cross-realm-callback-report-exception.html:
-- constructor
 custom-elements/custom-element-reaction-queue.html:
 - Upgrading a custom element must not invoke disconnectedCallback if the element is
   disconnected during upgrading
@@ -2021,8 +2019,6 @@ custom-elements/reactions/Document.html:
 custom-elements/registries/Element-innerHTML.html:
 - createContextualFragment on a range inside a template should use null registry even
   when the template has a scoped registry
-custom-elements/registries/constructor-reentry-with-different-definition.html:
-- Re-entry via direct constructor call after calling super()
 custom-elements/registries/global.window.js:
 - attachShadow() should throw with global registry from another document
 - createElement() should throw with global registry from another document
@@ -2047,36 +2043,6 @@ custom-elements/registries/scoped-registry-define-upgrade-order.html:
 custom-elements/upgrading.html:
 - If definition's disable shadow is true and element's shadow root is non-null, then
   throw a "NotSupportedError" DOMException.
-custom-elements/upgrading/Node-cloneNode.html:
-- HTMLElement constructor must throw an TypeError when the top of the construction
-  stack is marked AlreadyConstructed due to a custom element constructor constructing
-  itself after super() call
-- HTMLElement constructor must throw an TypeError when the top of the construction
-  stack is marked AlreadyConstructed due to a custom element constructor constructing
-  itself before super() call
-- Inserting an element must not try to upgrade a custom element when it had already
-  failed to upgrade once
-- Upgrading a custom element must throw TypeError when the custom element's constructor
-  returns another element
-custom-elements/upgrading/upgrade-custom-element-error-event.html:
-- 'autonomous: exception thrown by spec due to invalid element state is reported to
-  definition''s global'
-- 'autonomous: exception thrown in constructor is reported to definition''s global'
-- 'customized built-in: exception thrown by spec due to not returning the same value
-  is reported to definition''s global'
-- 'customized built-in: exception thrown in constructor is reported to definition''s
-  global'
-custom-elements/upgrading/upgrading-parser-created-element.html:
-- HTMLElement constructor must throw an TypeError when the top of the construction
-  stack is marked AlreadyConstructed due to a custom element constructor constructing
-  itself after super() call
-- HTMLElement constructor must throw an TypeError when the top of the construction
-  stack is marked AlreadyConstructed due to a custom element constructor constructing
-  itself before super() call
-- Upgrading a custom element must throw an TypeError when the returned element is
-  not SameValue as the upgraded element
-- Upgrading a custom element whose constructor returns a Text node must throw
-- Upgrading a custom element whose constructor returns an Element must throw
 dom/events/EventListener-incumbent-global-1.sub.html:
 - "[harness] TIMEOUT"
 dom/events/EventListener-incumbent-global-2.sub.html:
