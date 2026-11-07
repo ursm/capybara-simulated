@@ -6436,7 +6436,10 @@ module Capybara
       # replaced it, as HTML "navigate" aborts the one ongoing. Whether it was deferred. (…none
       # given — a redirect's hop, which no deferral makes again — the hop waits what it can, and goes on; a caller asks
       # `sw_registered?` first, which spares it the site)
-      private def await_sw_activation(url, site, ongoing: nil, &remake)
+      # (…`frame` a frame's navigation, which goes on only as its navigable's ongoing one, a `stop()` or a later navigation
+      # in the wait ending it: a top-level one's number moves with what plans a navigation, which the wait's tasks may do
+      # without beginning one — a click superseding what was planned — and goes on)
+      private def await_sw_activation(url, site, ongoing: nil, frame: false, &remake)
         return false unless http_url?(url) && sw_activating_controller_for(url, site)
 
         waited = 0
@@ -6450,8 +6453,7 @@ module Capybara
           @sw_deferred_navigations << [ongoing, remake]
           return true
         end
-        # (…none where the wait saw it ended: a `stop()`, a later navigation of its navigable)
-        !navigation_ongoing?(ongoing)
+        frame && !navigation_ongoing?(ongoing)
       end
       # …whether a navigation, its session history, navigable and number (`begin_navigation`), still is its navigable's
       # ongoing one; one of no history always.
@@ -12225,7 +12227,7 @@ module Capybara
         ongoing = history && [history, nav, history.begin_navigation(nav)]
         dest = @runtime.realm_direct_call(0, '__csimFrameDestination', realm_id.to_i)
         if sw_registered?
-          deferred = await_sw_activation(url, blob_partition_site(realm_id), ongoing:) do
+          deferred = await_sw_activation(url, blob_partition_site(realm_id), ongoing:, frame: true) do
             navigate_realm_self(
               realm_id,
               url,
