@@ -5,13 +5,14 @@ require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 require_relative 'support/https_app_host'
 require_relative 'support/every_host_local'
+require_relative 'support/engine_global'
 
 # An image a rendered element's style uses is fetched at the rendering update that renders it — a page with nothing else
 # to run is stepped for it (timers.rs `realmPending`), the restyle that owed it a task's or a script's read's — its
 # `css` Resource Timing entry recorded. (Its request is no-cors, credentials `include`: CSS Values 4 "fetch a style
 # resource".) And a document that lost its root since owes it no more.
 # (…the other origin served in-process)
-RSpec.describe 'an image a style sheet references', :https, :every_host_local do
+RSpec.describe 'an image a style sheet references', :https, :every_host_local, engine_global: true do
   include PollUntil
 
   png = File.binread(File.expand_path('wpt/common/square.png', __dir__))

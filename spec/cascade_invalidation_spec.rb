@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # A selector matches against the live state — that is how a DYNAMIC pseudo-class takes effect at all — so every
 # input a selector reads has to reach the style engine as a restyle of what it changes. Most move `settleGen` (an
@@ -18,7 +19,7 @@ require_relative 'support/session_teardown'
 # So the rows come in two flavours: the property setter AND, where one exists, the interaction path
 # a user actually takes. Every case READS BEFORE MUTATING, because a cache that is only ever cold
 # cannot go stale. When a pseudo-class is added, add both.
-RSpec.describe 'cascade invalidation' do
+RSpec.describe 'cascade invalidation', engine_global: true do
   # [name, body, css, mutation, colour after the mutation]. The rule paints green when the
   # pseudo-class matches, so a passing case is one where the colour CHANGES.
   #

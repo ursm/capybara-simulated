@@ -2,10 +2,11 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # The arena mirrors every node, so what it costs to keep it has to grow with the CHANGE, not with the tree: each
 # example counts what crosses into the arena for a change that used to re-send everything it touched.
-RSpec.describe 'native arena upkeep' do
+RSpec.describe 'native arena upkeep', engine_global: true do
   let(:session) {
     simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><div id="h"></div>']] })
   }

@@ -5,11 +5,12 @@ require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 require_relative 'support/every_host_local'
 require_relative 'support/https_app_host'
+require_relative 'support/engine_global'
 
 # `document.domain` is its origin's effective domain (HTML §7.5.2): none for an opaque origin — a document sandboxed
 # without allow-same-origin, which may not set one — and its creator's for a document with no browsing context, which
 # may not set one either. Chrome's figures and messages.
-RSpec.describe 'document.domain' do
+RSpec.describe 'document.domain', engine_global: true do
   include PollUntil
 
   def session

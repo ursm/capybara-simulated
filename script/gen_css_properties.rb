@@ -24,14 +24,16 @@ module CssProperties
     "#{HEADER}export const PROPERTIES = [\n#{rows.map {|row| "  #{JSON.generate(row)}" }.join(",\n")}\n];\n"
   end
 
-  # The engine's rows, asked of a page.
+  # The engine's rows, asked of a page whose realm names its engine ops `__dom` (dom.rs `ENGINE_GLOBAL`).
   def self.engine_rows
     require 'capybara/simulated'
+    Capybara::Simulated::Native.engine_global = true
     session = Capybara::Session.new(:simulated, ->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html>']] })
     session.visit '/'
     session.evaluate_script('__dom.styleProperties()')
   ensure
     session&.quit
+    Capybara::Simulated::Native.engine_global = false
   end
 end
 

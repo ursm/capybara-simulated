@@ -3,12 +3,13 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # `document.write` from a script the parser is running writes at the INSERTION POINT (HTML §8.4.3): into the input
 # stream right after that script's `</script>`, tokenized there before `write` returns. It used to parse the markup as
 # a fragment and append it to `<body>`, which is the same place only for a script that is a direct child of `<body>` —
 # anywhere else it reordered the page. Every expectation here is Chrome's.
-RSpec.describe 'document.write during parsing' do
+RSpec.describe 'document.write during parsing', engine_global: true do
   def session_for(body)
     html = "<!DOCTYPE html><html><head></head><body>#{body}</body></html>"
     simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|s| s.visit '/' }

@@ -1,12 +1,13 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # A nested browsing context's viewport is its container's content box — not the top window's. That
 # is what makes a responsive component inside a narrow frame take its narrow branch, and it has to
 # be true from the frame's very first script: everything here is what real Chrome reports for the
 # same markup (read back with `--headless --dump-dom` over http, window 1024x768).
-RSpec.describe 'frame viewport' do
+RSpec.describe 'frame viewport', engine_global: true do
   CHILD = <<~HTML
     <!DOCTYPE html>
     <html><head><style>

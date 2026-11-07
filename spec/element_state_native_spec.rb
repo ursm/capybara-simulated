@@ -2,12 +2,13 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # The element states no attribute records — checkedness, selectedness, focus, hover, an open popover, a modal dialog —
 # live in the native arena beside the tree (dom.rs `STATE_*`, written wherever the JS DOM changes one), and the native
 # matcher derives the rest from attributes and the tree (element_state.rs): `:disabled` through a `<fieldset>`,
 # `:read-write`, `:default`. Each answer here is held against the HTML rule's.
-RSpec.describe 'element state in the native arena' do
+RSpec.describe 'element state in the native arena', engine_global: true do
   STATE_PAGE = <<~HTML
     <!DOCTYPE html>
     <form id="f">

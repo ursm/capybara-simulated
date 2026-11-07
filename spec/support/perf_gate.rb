@@ -3,6 +3,7 @@
 require 'yaml'
 require 'capybara'
 require 'capybara/simulated'
+require_relative 'engine_global'
 
 # Performance regression gate — the SPEED counterpart to wpt_gate (which holds
 # spec conformance). Speed is the driver's reason to exist (CLAUDE.md rule 3):
@@ -316,12 +317,15 @@ module PerfGate
   end
 
   # Counts come from a FRESH session (counters start at 0 on a new VM), so the
-  # returned values are the workload's absolute op-counts, not a diff.
+  # returned values are the workload's absolute op-counts, not a diff — its realms
+  # naming their engine ops `__dom`, which the counts read (the walls' none).
   def self.capture_counts(workload)
-    with_session(workload) do |session|
-      session.visit('/')
-      session.evaluate_script(interaction_js(workload))
-      session.evaluate_script(COUNTS_JS).transform_keys(&:to_s).transform_values(&:to_i)
+    EngineGlobal.within do
+      with_session(workload) do |session|
+        session.visit('/')
+        session.evaluate_script(interaction_js(workload))
+        session.evaluate_script(COUNTS_JS).transform_keys(&:to_s).transform_values(&:to_i)
+      end
     end
   end
   def self.capture_wall(workload)

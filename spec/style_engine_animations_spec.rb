@@ -2,12 +2,13 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # CSS animations and transitions in the style engine: its Web Animations model runs them, the page's clock moves them
 # (an animation-only restyle each time it does), and a rendering update fires the events the phases they moved through
 # owe. Each example drives the clock the way a page does — a pending interval keeps it stepping,
 # and every script evaluation is a step — with CSIM_STYLE_VERIFY holding each incremental restyle against a full one.
-RSpec.describe 'style engine animations' do
+RSpec.describe 'style engine animations', engine_global: true do
   around do |example|
     saved = ENV['CSIM_STYLE_VERIFY']
     ENV['CSIM_STYLE_VERIFY'] = '1'

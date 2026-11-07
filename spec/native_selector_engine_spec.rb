@@ -6,11 +6,12 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # Asks the production arena — the one every node joins at construction — so what native answers is what it answers
 # for querySelector and the cascade alike. Every selector is native: a structural one, element state, a pseudo-element
 # (none matches), a shadow-tree one, a namespaced attribute; one it does not parse is null (the caller's SyntaxError).
-RSpec.describe 'native selector engine' do
+RSpec.describe 'native selector engine', engine_global: true do
   let(:app) {
     html = <<~HTML
       <!doctype html>

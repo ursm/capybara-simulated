@@ -1,11 +1,12 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/engine_global'
 
 # HTML "unload a document and its descendants": a navigation that replaces the page's document fires its `pagehide`
 # and `unload` — and its frames' — while its realms still live, so what their handlers do (a beacon, a storage write)
 # is done. (The page's own teardown never ran: only a frame's, and a closed window's.)
-RSpec.describe 'unloading the page as a navigation replaces it' do
+RSpec.describe 'unloading the page as a navigation replaces it', engine_global: true do
   it "runs the page's and its frames' pagehide and unload handlers" do
     beacons = []
     app = lambda do |env|

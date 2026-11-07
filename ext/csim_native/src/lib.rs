@@ -258,6 +258,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         .define_module("Simulated")?
         .define_module("Native")?;
     native.define_module_function("unicode_class_ranges", magnus::function!(unicode::class_ranges, 1))?;
+    // Whether the realms made from now on name their engine ops `__dom` on their globals: a spec's switch, to read the
+    // engine's own state off a page (dom.rs `ENGINE_GLOBAL`).
+    native.define_module_function("engine_global=", magnus::function!(dom::set_engine_global, 1))?;
     // A form the host submits, as its request: method, URL and body (text_codec.rs, multipart.rs).
     native.define_module_function("form_request", magnus::function!(text_codec::form_request_for_ruby, 5))?;
     // An image resource's bytes decoded to RGBA, on whichever thread fetched them.

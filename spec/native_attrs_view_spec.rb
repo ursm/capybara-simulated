@@ -10,8 +10,9 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
-RSpec.describe 'native-backed attribute store view (store-flip foundation)' do
+RSpec.describe 'native-backed attribute store view (store-flip foundation)', engine_global: true do
   let(:app) { Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><title>t</title>']] } }.to_app }
   let(:session) { simulated_session(app) }
 

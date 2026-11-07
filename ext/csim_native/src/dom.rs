@@ -2650,6 +2650,8 @@ pub(crate) struct Dom {
     // not a context's embedder data: a context slot gives V8 a finalizer to run at teardown (rusty_racer's
     // `id_of_context` says why it keeps none either).
     realm_key: Option<v8::Global<v8::Private>>,
+    // …and the one it carries its engine ops under (`engine_of`): another realm's code holding the window reaches them so.
+    engine_key: Option<v8::Global<v8::Private>>,
     // The template a legacy platform object with an indexed getter is made from (legacy.rs).
     pub(crate) indexed_template: Option<v8::Global<v8::ObjectTemplate>>,
     // …and the one an HTMLAllCollection is (legacy.rs `allCollectionObject`).
@@ -2953,6 +2955,33 @@ fn realm_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Private>
     dom(scope).realm_key = Some(v8::Global::new(scope, key));
     key
 }
+// …and the key its engine ops are under.
+fn engine_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Private> {
+    if let Some(key) = &dom(scope).engine_key {
+        let key = key.clone();
+        return v8::Local::new(scope, key);
+    }
+    let name = v8::String::new(scope, "csim#engine").expect("a short string");
+    let key = v8::Private::for_api(scope, Some(name));
+    dom(scope).engine_key = Some(v8::Global::new(scope, key));
+    key
+}
+// __dom.engineOf(global) -> the engine ops of the realm whose global `global` is (its raw global: a JS Proxy of it, a
+// WindowProxy, has none), or undefined.
+fn engine_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(global) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    let key = engine_key(scope);
+    if let Some(ops) = global.get_private(scope, key).filter(|v| v.is_object()) {
+        rv.set(ops);
+    }
+}
+// Whether a realm's global names its engine ops `__dom` besides (`Native.engine_global=`): for a spec that reads the
+// engine's own state off a page — never a page's of an app, whose scripts it would hand every op of the engine.
+pub(crate) static ENGINE_GLOBAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) fn set_engine_global(on: bool) {
+    ENGINE_GLOBAL.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 // The realm whose global `global` is — a context's (`v8::Context::global`) — as `install` stamped it: none for a context
 // no realm's `__dom` was installed into.
 pub(crate) fn realm_of_global(scope: &mut v8::PinScope<'_, '_>, global: v8::Local<'_, v8::Object>) -> Option<i32> {
@@ -2960,7 +2989,7 @@ pub(crate) fn realm_of_global(scope: &mut v8::PinScope<'_, '_>, global: v8::Loca
     global.get_private(scope, key).filter(|v| v.is_int32()).and_then(|v| v.int32_value(scope))
 }
 
-// Install `globalThis.__dom` (the arena build / query / match surface + attrsView) into |ctx|, building
+// Install the realm's engine ops (`__dom`: the arena build / query / match surface + attrsView) into |ctx|, building
 // the isolate-shared templates on first call. Mirrors install_host_namespace's shape (its own
 // HandleScope + ContextScope, safe to re-run per realm — each realm gets its own function set carrying
 // its context_id).
@@ -3323,15 +3352,30 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "forgetRealmObjects", forget_realm_objects, context_id);
     // The layout walk's reuse counts (the pass itself, `layoutBuild`, is walk_ops.rs's).
     register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
-    if let Some(key) = v8::String::new(scope, "__dom") {
-        let global = context.global(scope);
-        global.set(scope, key.into(), ns.into());
+    register(scope, ns, "engineOf", engine_of, context_id);
+    // The ops are no property of the global: the realm's bindings take them as the realm is made, before any script of a
+    // page's runs (engine.js `__csimTakeEngine`, which the snapshot's global holds until then and loses as it is called),
+    // and its global keeps them under a private key, for another realm's code holding the window (`engine_of`).
+    let global = context.global(scope);
+    let key = engine_key(scope);
+    global.set_private(scope, key, ns.into());
+    let take = v8::String::new(scope, "__csimTakeEngine").expect("a short string");
+    if let Some(take) = global.get(scope, take.into()).and_then(|f| v8::Local::<v8::Function>::try_from(f).ok()) {
+        v8::tc_scope!(let tc, scope);
+        let _ = take.call(tc, global.into(), &[ns.into()]);
+        if let Some(e) = tc.exception() {
+            eprintln!("[csim] realm {context_id}'s bindings refused its engine: {}", e.to_rust_string_lossy(tc));
+        }
+    }
+    if ENGINE_GLOBAL.load(std::sync::atomic::Ordering::Relaxed) {
+        let name = v8::String::new(scope, "__dom").expect("a short string");
+        let _ = global.define_own_property(scope, name.into(), ns.into(), v8::PropertyAttribute::DONT_ENUM);
     }
 }
 
-// Register one `__dom.<name>` for a realm, carrying the realm's `context_id` as the function's DATA so
-// `realm_id(scope, &args)` can work in that realm's state (each realm gets its own `__dom` with
-// its own functions, so the data is per-realm).
+// Register one `__dom.<name>` for a realm — `__dom` the name of a realm's ops object, which its bindings hold as `dom`
+// (engine.js) — carrying the realm's `context_id` as the function's DATA so `realm_id(scope, &args)` can work in that
+// realm's state (each realm gets its own ops object with its own functions, so the data is per-realm).
 pub(crate) fn register(
     scope: &mut v8::PinScope<'_, '_>,
     ns: v8::Local<'_, v8::Object>,

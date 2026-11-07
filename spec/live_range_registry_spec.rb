@@ -3,12 +3,13 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/garbage'
+require_relative 'support/engine_global'
 
 # The DOM's mutations update every live range (DOM §5.5) — the engine keeps their boundary points (ranges.rs) — and a
 # range is held by its object alone: one a script dropped goes with it, where a strong set kept every range ever made
 # for the page's life — each walked, ancestor by ancestor, on every removal. A range the page still holds keeps being
 # updated.
-RSpec.describe 'live range registry' do
+RSpec.describe 'live range registry', engine_global: true do
   it 'lets go of the ranges a script dropped and keeps updating the ones it holds' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><p id=p>a<b>b</b>c</p>']] })
     s.visit '/'

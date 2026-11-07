@@ -3,11 +3,12 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/garbage'
+require_relative 'support/engine_global'
 
 # A NodeIterator's state is the engine's (node_iterators.rs), which runs every removal's pre-removing steps on it, and
 # its handle is held by the iterator alone: one a script dropped goes with it, while one it holds keeps its reference —
 # a node held by nothing else — and keeps being moved.
-RSpec.describe 'NodeIterator registry' do
+RSpec.describe 'NodeIterator registry', engine_global: true do
   let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><div id=r><p id=a>1</p><p id=b>2</p><p id=c>3</p></div>']] }) }
 
   it 'lets go of the iterators a script dropped and keeps moving the one it holds' do

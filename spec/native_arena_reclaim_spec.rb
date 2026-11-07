@@ -17,8 +17,9 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
-RSpec.describe 'native arena reclamation (generational)' do
+RSpec.describe 'native arena reclamation (generational)', engine_global: true do
   let(:app) {
     html = <<~HTML
       <!doctype html>

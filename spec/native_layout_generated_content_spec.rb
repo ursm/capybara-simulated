@@ -9,8 +9,9 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/layout_golden'
+require_relative 'support/engine_global'
 
-RSpec.describe 'native layout generated content' do
+RSpec.describe 'native layout generated content', engine_global: true do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app

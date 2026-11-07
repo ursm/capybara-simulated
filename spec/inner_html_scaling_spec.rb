@@ -2,13 +2,14 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # `innerHTML` is LINEAR in the nodes it parses. It was quadratic twice over: the parser's fragment step moved the parsed
 # nodes into a fragment one `detachNode` at a time (an `indexOf` + `splice` off the front of the list, and a child-list
 # effect over every remaining sibling), and the insertion asked whether the target's `:empty` could have flipped with an
 # `indexOf` into the batch per child. 60,000 nodes took 4 s; 200 ms now. A RATIO, taken as the best of three: a 4x
 # larger fragment takes ~4x as long, where a quadratic one took ~16x.
-RSpec.describe 'innerHTML scaling' do
+RSpec.describe 'innerHTML scaling', engine_global: true do
   it 'parses and inserts a fragment in time linear in its size' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><div id="h"></div>']] })
     s.visit '/'

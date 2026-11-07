@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # `::before` / `::after` with a `content` are boxes in the flow (CSS Pseudo-Elements 4 §4): an inline
 # by default holding the text the `content` names, sized, placed and painted like any other. They
@@ -20,7 +21,7 @@ require_relative 'support/session_teardown'
 #     `<button>` or an `<hr>` does
 #
 # Every x is a formula over runs measured on the same page.
-RSpec.describe 'generated content' do
+RSpec.describe 'generated content', engine_global: true do
   def page(body, css = '')
     session = simulated_session(->(_env) {
       [200, {'content-type' => 'text/html; charset=utf-8'}, [<<~HTML]]

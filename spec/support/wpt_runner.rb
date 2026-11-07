@@ -13,6 +13,7 @@ require 'securerandom'
 require 'cgi/escape'
 # The reftest raster diff reads both renderings' PNGs with the driver's own decoder.
 require_relative 'raster'
+require_relative 'engine_global'
 
 # Drives the vendored web-platform-tests (spec/wpt/) through the :simulated
 # driver and normalises each file's testharness.js results. Shared by the
@@ -1322,8 +1323,10 @@ module WptRunner
     'input-events/input-events-exec-command.html' => %w[clipboard-read clipboard-write]
   }.freeze
 
+  # (…each page's realms naming their engine ops `__dom`, which resources/testdriver.js reaches the engine by — an
+  # injection of the driver's own, which no page-visible path of the host's serves yet: engine_global.rb)
   def run(rel)
-    result = run_variants(rel)
+    result = EngineGlobal.within { run_variants(rel) }
     failures = arena_verify_failures
     failures ? {completed: false, error: "arena verify: #{failures}"} : result
   end

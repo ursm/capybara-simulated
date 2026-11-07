@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # A node's object is a wrapper of a handle on V8's C++ heap (node_handle.rs): when V8 collects the object it collects the
 # handle, and the node's arena slot is freed — at the next node the page makes. That holds for a subtree a script builds
@@ -9,7 +10,7 @@ require_relative 'support/session_teardown'
 # table Ruby names nodes by, which registered every inserted node, in a document or not. That table now holds what is in
 # the document, shadow trees included — a shadow root attached while its host was detached (a custom element's
 # constructor) is reachable from Ruby, and one removed with its host lets the host go — and its ids are each realm's own.
-RSpec.describe 'node handles' do
+RSpec.describe 'node handles', engine_global: true do
   let(:app) { ->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><p id=keep>k</p>']] } }
 
   it 'frees the slots of nodes V8 collected, and keeps those of nodes a page holds' do

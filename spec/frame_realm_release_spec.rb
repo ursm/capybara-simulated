@@ -10,6 +10,7 @@ RSpec.describe 'A frame realm navigated away from' do
   it 'is collected once the page is left' do
     script = <<~'RUBY'
       require 'capybara/simulated'
+      Capybara::Simulated::Native.engine_global = true
       app = ->(env) {
         body = env['PATH_INFO'] == '/' ? '<!doctype html><meta charset=utf-8><body><iframe id=f src="/f/0"></iframe>' : '<!doctype html><meta charset=utf-8><body><p>frame</p>'
         [200, {'content-type' => 'text/html'}, [body]]
@@ -31,6 +32,7 @@ RSpec.describe 'A frame realm navigated away from' do
   it 'is collected once the page is left, though it had timers pending' do
     script = <<~'RUBY'
       require 'capybara/simulated'
+      Capybara::Simulated::Native.engine_global = true
       app = ->(env) {
         body = env['PATH_INFO'] == '/' ? '<!doctype html><meta charset=utf-8><body><iframe id=f src="/f/0"></iframe>' :
           '<!doctype html><meta charset=utf-8><body><p>frame</p><script>setTimeout(() => {}, 1e9); setInterval(() => {}, 1000)</script>'
@@ -52,6 +54,7 @@ RSpec.describe 'A frame realm navigated away from' do
   it 'is collected though its code added a timer after its iframe was removed' do
     script = <<~'RUBY'
       require 'capybara/simulated'
+      Capybara::Simulated::Native.engine_global = true
       app = ->(env) {
         body = env['PATH_INFO'] == '/' ? '<!doctype html><meta charset=utf-8><body><iframe id=f src="/f/0"></iframe>' :
           '<!doctype html><meta charset=utf-8><body><p>frame</p><script>const kept = setTimeout; ' \

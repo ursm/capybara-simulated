@@ -2,12 +2,13 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/chrome_figures'
+require_relative 'support/engine_global'
 
 # Layout keeps a subtree across a bare style-state bump (focus, checkedness) when no dynamic rule
 # can reach it. That is a claim about REACHABILITY: any box a dynamic rule can move, directly,
 # through inheritance, or through the flow around it, must still be laid out again. Every case here
 # reads geometry BEFORE the state change, because a cache that is only ever cold cannot serve stale.
-RSpec.describe 'layout reuse across dynamic style state' do
+RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
   def session_for(css, body)
     html = "<!DOCTYPE html><html><head><style>#{css}</style></head><body>#{body}</body></html>"
     app = lambda {|_env| [200, {'content-type' => 'text/html'}, [html]] }

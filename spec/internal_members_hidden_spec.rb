@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # What the bindings keep of an object is no property a page can see: a browser's platform object has no own property
 # (`JSON.stringify(new Text('a'))` is `{}`), and its interface object and prototype hold the IDL members alone. A node's
@@ -127,6 +128,19 @@ RSpec.describe 'internal members' do
           e.cloneNode().prefix, f.prefix, f.cloneNode().prefix];
       })()
     JS
+  end
+
+  # The engine's ops are no global of a page's, a frame's nor a worker's: the bindings hold them (engine.js), taken as the
+  # realm is made, by a hook its global loses then; the host reaches the few it calls under its own namespace.
+  it "gives a page's globals no engine" do
+    probe = "[typeof __dom, '__dom' in globalThis, typeof __csimTakeEngine, typeof RustyRacer.engine.nidOf, typeof RustyRacer.engine.setSandbox]"
+    expected = ['undefined', false, 'undefined', 'undefined', 'function']
+    expect(outcome(probe)).to eq(expected)
+    expect(outcome("document.getElementById('fr').contentWindow.eval(#{probe.to_json})")).to eq(expected)
+    session.execute_script(<<~JS)
+      new Worker(URL.createObjectURL(new Blob([#{"postMessage(#{probe})".to_json}]))).onmessage = (e) => { window.workerSaw = e.data; };
+    JS
+    expect(poll_until { session.evaluate_script('window.workerSaw') }).to eq(expected)
   end
 
   # Every `_` name a page can see — on an interface object, its prototype, or an instance made here (own, for…in or

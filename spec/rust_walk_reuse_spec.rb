@@ -2,12 +2,13 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # The Rust walk's pass puts back the layout of every subtree it built exactly as the last pass did
 # (`walk_reuse.rs`): each element's subtree is a chunk of the measure cache, keeping its id for as long as its records,
 # runs, grid values and inline entries are the same, positions made its own. A geometry read cannot tell a put-back
 # layout from a fresh one, so these count the put-backs — and hold the geometry against a page laid out afresh.
-RSpec.describe 'the Rust walk puts back what did not change' do
+RSpec.describe 'the Rust walk puts back what did not change', engine_global: true do
   around do |example|
     saved = ENV['CSIM_NL_REUSE_VERIFY']
     ENV['CSIM_NL_REUSE_VERIFY'] = nil

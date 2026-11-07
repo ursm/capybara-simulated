@@ -9,6 +9,7 @@ RSpec.describe 'Node wrappers dropped young' do
   it 'clears the reference a scavenge dropped, and goes on' do
     script = <<~'RUBY'
       require 'capybara/simulated'
+      Capybara::Simulated::Native.engine_global = true
       app = ->(_) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body><p id=p>x</p>']] }
       s = Capybara::Session.new(:simulated, app)
       s.visit '/'
