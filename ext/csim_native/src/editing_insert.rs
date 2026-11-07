@@ -150,7 +150,7 @@ fn typing_place(arena: &RealmArena, place: (NodeId, u32)) -> (NodeId, u32) {
     shown_end(arena, before).unwrap_or(place)
 }
 // The end of what typing after `nodes` goes into: their last that shows anything, past what shows nothing (a style, a script,
-// a `display: none` or `hidden` element, an empty one, a comment: `<b>x</b><style>…</style>`, typed after, is `<b>xT</b>`,
+// a `display: none`, `visibility: hidden` or `hidden` element, an empty one, a comment: `<b>x</b><style>…</style>`, typed after, is `<b>xT</b>`,
 // Chrome; a `<br>` is a line's end, no nothing) — none where that one holds no caret at its end.
 pub(crate) fn shown_end(arena: &RealmArena, nodes: &[NodeId]) -> Option<(NodeId, u32)> {
     let last = nodes.iter().rev().copied().find(|&c| !shows_nothing(arena, c))?;
@@ -165,6 +165,7 @@ fn shows_nothing(arena: &RealmArena, id: NodeId) -> bool {
             ["script", "style", "template", "title", "meta", "link", "base", "noscript"].iter().any(|t| (*d.local_name).eq_ignore_ascii_case(t))
                 || (crate::geometry::box_style(arena, id).is_some() && !crate::rendered::has_own_box(arena, id))
                 || d.plain_attr("hidden").is_some_and(|v| !v.eq_ignore_ascii_case("until-found"))
+                || crate::rendered::hides_by_visibility(arena, id, false)
                 || (!d.is_html_named("br") && !crate::editing::has_content(arena, id))
         }
         _ => false,

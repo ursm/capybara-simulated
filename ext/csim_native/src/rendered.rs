@@ -346,6 +346,9 @@ struct Walk<'a> {
     clip: Option<((NodeId, u32), (NodeId, u32))>,
     // (…the tree the range is in: a shadow tree a host in the range renders, whole)
     clip_root: Option<NodeId>,
+    // (…what a copy reads, where `innerText` reads otherwise: the flat tree, an image's `alt`, no `text-transform`, nothing a
+    // `user-select: none` holds — Chrome and Firefox — whatever range it reads)
+    copy: bool,
     // Nothing rendered yet: a leading collapsible space is dropped.
     at_start: bool,
     // The last thing rendered was a collapsible space.
@@ -406,7 +409,10 @@ impl Walk<'_> {
                 return Vec::new();
             }
             // (…an image a copy takes as its `alt`, Chrome and Firefox)
-            if self.clip.is_some() && tag(node) == "img" && !hidden {
+            if self.copy && unselectable(arena, id) {
+                return Vec::new();
+            }
+            if self.copy && tag(node) == "img" && !hidden {
                 if let Some(alt) = node.plain_attr_units("alt").filter(|a| !a.is_empty()) {
                     self.last_collapsible_only = false;
                     self.any_rendered = true;
@@ -456,7 +462,7 @@ impl Walk<'_> {
         });
         // (…a copy's the flat tree: a host's shadow tree with what its slots take — Chrome, Firefox — where `innerText` reads
         // the node tree, a host's light children through the slots they are assigned to)
-        let flat = self.clip.is_some();
+        let flat = self.copy;
         let host_root = node.shadow_root.filter(|_| node.kind == NodeKind::Element && !flat);
         let kids = if flat { crate::geometry::flat_children(arena, node) } else { &node.children[..] };
         let mut out: Vec<u16> = Vec::new();
@@ -646,7 +652,7 @@ impl Walk<'_> {
             }
         };
         // (…a copy's text as the page has it: no `text-transform`, Chrome and Firefox)
-        let mut text = if self.clip.is_some() { raw } else { apply_transform(raw, transform, !self.in_word) };
+        let mut text = if self.copy { raw } else { apply_transform(raw, transform, !self.in_word) };
         if let Some(&last) = text.last() {
             self.in_word = char::from_u32(u32::from(last)).is_some_and(continues_word);
         }
@@ -747,7 +753,19 @@ fn has_next_cell(arena: &RealmArena, parent: &NodeData, cell: NodeId) -> bool {
 // value, else the rendered text collection from `id` under what its parent hands down — its `text-transform`, its
 // `white-space` mode and its `visibility`.
 pub(crate) fn visible_text(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> Vec<u16> {
-    visible_text_in(engine, arena, id, None, now)
+    visible_text_in(engine, arena, id, None, false, now)
+}
+// Whether `id`'s used `user-select` is `none`: its own computed one, or an ancestor's — `auto`, the initial value, a child
+// of one of those computes, uses the parent's (CSS UI 4 §6.1).
+fn unselectable(arena: &RealmArena, id: NodeId) -> bool {
+    let mut at = Some(id);
+    while let Some(n) = at.filter(|&n| arena.is_element(n)) {
+        if primary_style(arena, n).is_some_and(|s| s.get_ui().clone_user_select() == style::values::computed::UserSelect::None) {
+            return true;
+        }
+        at = arena.parent_of(n);
+    }
+    false
 }
 fn tree_root(arena: &RealmArena, mut id: NodeId) -> NodeId {
     while let Some(p) = arena.parent_of(id) {
@@ -772,7 +790,10 @@ fn intersects(arena: &RealmArena, id: NodeId, (start, end): ((NodeId, u32), (Nod
 pub(crate) fn range_text(engine: &mut StyleEngine, arena: &RealmArena, start: (NodeId, u32), end: (NodeId, u32), now: f64) -> Vec<u16> {
     let common = crate::ranges::common_ancestor(arena, start.0, end.0);
     let root = if arena.is_element(common) || arena.get(common).is_some_and(|n| n.kind == NodeKind::Document) { common } else { arena.parent_of(common).unwrap_or(common) };
-    let mut text = visible_text_in(engine, arena, root, Some((start, end)), now);
+    if unselectable(arena, root) {
+        return Vec::new();
+    }
+    let mut text = visible_text_in(engine, arena, root, Some((start, end)), true, now);
     for u in text.iter_mut() {
         if *u == 0xA0 {
             *u = SPACE;
@@ -797,7 +818,7 @@ pub(crate) fn range_text(engine: &mut StyleEngine, arena: &RealmArena, start: (N
     }
     text
 }
-fn visible_text_in(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, clip: Option<((NodeId, u32), (NodeId, u32))>, now: f64) -> Vec<u16> {
+fn visible_text_in(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, clip: Option<((NodeId, u32), (NodeId, u32))>, copy: bool, now: f64) -> Vec<u16> {
     let Some(node) = arena.get(id) else { return Vec::new() };
     let el = if node.kind == NodeKind::Element { Some(id) } else { node.parent };
     if el.and_then(|e| arena.get(e)).is_some_and(|e| e.kind == NodeKind::Element) && !rendered(engine, arena, el.unwrap_or(id), true, true, None, now) {
@@ -816,6 +837,7 @@ fn visible_text_in(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, cli
         root: id,
         clip,
         clip_root: clip.map(|((start, _), _)| tree_root(arena, start)),
+        copy,
         at_start: true,
         ends_collapsible: false,
         break_pending: false,

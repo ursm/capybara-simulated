@@ -276,7 +276,7 @@ module Capybara
           def grant_permissions(names, **) = Array(names).each {|name| browser.set_permission(name.to_s, 'granted') }
           def clear_permissions = browser.clear_permissions
           def add_cookies(cookies) = browser.add_cookies(cookies)
-          def cookies(*) = browser.cookies
+          def cookies(urls = nil) = browser.cookies(urls)
           def new_cdp_session(*) = FakeCdpSession.new
         end
         # (…a CDP session's messages — a timezone override, a debugger — taken and answered with nothing)

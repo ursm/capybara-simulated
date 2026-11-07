@@ -747,9 +747,13 @@ fn edit_insert_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
     let caret = match edit.fragment(scope, range.0, &kids, &descendants) {
         Some((node, offset)) if pasted => {
-            let arena = realm(scope, cid);
-            let before = arena.get(node).map_or(&[][..], |n| &n.children[..(offset as usize).min(n.children.len())]);
-            let (node, offset) = crate::editing_insert::shown_end(arena, before).unwrap_or((node, offset));
+            // (…what shows nothing told by the styles the pasted nodes have: they are styled first — a paste, no keystroke)
+            let place = crate::rendered::with_engine(scope, &args, |engine, arena, now| {
+                engine.flush(arena, now);
+                let before = arena.get(node).map_or(&[][..], |n| &n.children[..(offset as usize).min(n.children.len())]);
+                crate::editing_insert::shown_end(arena, before)
+            });
+            let (node, offset) = place.flatten().unwrap_or((node, offset));
             Caret::At(node, offset)
         }
         Some((node, offset)) => Caret::At(node, offset),

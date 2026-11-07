@@ -2988,25 +2988,36 @@ module Capybara
       end
 
       # Playwright's `context.add_cookies` / `cookies`: each cookie set as a response from its `url` (or its `domain` and
-      # `path`, over the page's scheme) would set it; the cookies the page's URL is sent.
+      # `path` — `/` without one — over the page's scheme) would set it, an HttpOnly one too, `expires` (Unix seconds, -1 none)
+      # and `sameSite` as given; one with neither `url` nor `domain` an ArgumentError, as Playwright raises.
       def add_cookies(cookies)
         cookies.each do |c|
           c = c.transform_keys(&:to_s)
+          raise ArgumentError, "Cookie should have a url or a domain/path pair: #{c['name']}" unless c['url'] || c['domain']
+
           url = c['url'] || "#{parse_url(page_url.to_s)&.fetch(:protocol) || 'http:'}//#{c['domain'].to_s.delete_prefix('.')}#{c['path'] || '/'}"
           line = +"#{c['name']}=#{c['value']}"
-          line << "; Path=#{c['path']}" if c['path']
+          line << "; Path=#{c['path'] || '/'}" if c['path'] || !c['url']
           line << "; Domain=#{c['domain']}" if c['domain']
+          line << "; Expires=#{Time.at(c['expires'].to_f).httpdate}" if c['expires'] && c['expires'].to_f >= 0
+          line << "; SameSite=#{c['sameSite']}" if c['sameSite']
           line << '; Secure' if c['secure']
           line << '; HttpOnly' if c['httpOnly']
-          Native.cookie_jar_set(@cookie_jar, url, line, Native.document_cookie_context(url), cookie_now)
+          # (…as an HTTP response sets it, which may set HttpOnly — a secure one over a secure channel)
+          secure = url.start_with?('https:') || c['secure'] ? 2 : 0
+          Native.cookie_jar_set(@cookie_jar, url, line, 1 | secure, cookie_now)
         end
         nil
       end
 
-      def cookies
-        url = page_url.to_s
-        line = RuntimeShared.utf8_text(Native.cookie_jar_get(@cookie_jar, url, Native.document_cookie_context(url), cookie_now))
-        line.split('; ').filter_map {|pair| name, value = pair.split('=', 2); {'name' => name, 'value' => value.to_s} unless name.to_s.empty? }
+      # Every cookie of the session — HttpOnly ones and every path's — in Playwright's shape, those `urls` are sent where given.
+      def cookies(urls = nil)
+        keys = %w[name value domain path expires httpOnly secure sameSite]
+        all = Native.cookie_jar_list(@cookie_jar, cookie_now).map {|c| keys.zip(c).to_h }
+        return all unless urls
+
+        sent = Array(urls).flat_map {|u| RuntimeShared.utf8_text(Native.cookie_jar_get(@cookie_jar, u, 1 | (u.start_with?('https:') ? 2 : 0), cookie_now)).split('; ') }
+        all.select {|c| sent.include?("#{c['name']}=#{c['value']}") }
       end
 
       def set_geolocation(latitude: nil, longitude: nil, accuracy: 10, denied: false, **rest)

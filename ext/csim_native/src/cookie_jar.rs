@@ -463,6 +463,25 @@ pub(crate) fn set_for_ruby(jar: u64, url: magnus::RString, line: magnus::RString
         j.store(&url, &line, context, now);
     }
 }
+// Every cookie of the store unexpired at `now` — a driver's listing (Playwright's `context.cookies()`): each its name, value,
+// domain, path, expiry (Unix seconds, -1 for a session cookie), HttpOnly, Secure and SameSite ("None", "Lax", "Strict"; an
+// unset one Lax, as Chrome treats it).
+pub(crate) fn list_for_ruby(ruby: &magnus::Ruby, jar: u64, now: f64) -> magnus::RArray {
+    let out = ruby.ary_new();
+    let mut reg = lock();
+    let Some(j) = reg.jars.get_mut(&jar) else { return out };
+    j.cookies.retain(|c| c.expiry.is_none_or(|e| e > now));
+    for c in &j.cookies {
+        let same_site = match c.same_site {
+            SameSite::None => "None",
+            SameSite::Strict => "Strict",
+            SameSite::Lax | SameSite::Unset => "Lax",
+        };
+        let expires = c.expiry.map_or(-1, |e| (e / 1000.0).floor() as i64);
+        let _ = out.push((c.name.clone(), c.value.clone(), c.domain.clone(), c.path.clone(), expires, c.http_only, c.secure, same_site));
+    }
+    out
+}
 // The cookie-string a request to `url` in `context` at `now` takes ('' for none), as bytes.
 pub(crate) fn get_for_ruby(ruby: &magnus::Ruby, jar: u64, url: magnus::RString, context: u32, now: f64) -> magnus::RString {
     let url = url_text(url);

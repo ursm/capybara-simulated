@@ -128,10 +128,30 @@ RSpec.describe 'Clipboard actions' do
       expect { session.driver.grant_permissions('geolocation') }.to raise_error(ArgumentError, /geolocation/)
       session.driver.with_playwright_page do |pw|
         expect { pw.context.bogus }.to raise_error(NoMethodError)
-        pw.context.add_cookies([{url: session.current_url, name: 'k', value: 'v'}])
-        expect(pw.context.cookies).to include({'name' => 'k', 'value' => 'v'})
       end
-      expect(session.evaluate_script('document.cookie')).to include('k=v')
+      expect(session.evaluate_script('document.cookie')).to eq('')
+    end
+
+    # Playwright's `context.add_cookies` and `cookies`: an HttpOnly cookie set, an expired one gone, one with no `url` nor
+    # `domain` refused; the cookies every one, in Playwright's shape, or those `urls` are sent.
+    it "sets and lists the session's cookies as Playwright's context does" do
+      url = session.current_url
+      host = URI(url).host
+      session.driver.with_playwright_page do |pw|
+        pw.context.add_cookies([
+          {url: url, name: 'k', value: 'v'},
+          {url: url, name: 'h', value: '1', httpOnly: true},
+          {url: url, name: 'old', value: '1', expires: Time.now.to_i - 60},
+          {domain: host, path: '/other', name: 'o', value: '2', sameSite: 'Strict'}
+        ])
+        expect { pw.context.add_cookies([{name: 'bad', value: 'x'}]) }.to raise_error(ArgumentError)
+        expect(pw.context.cookies.map {|c| c['name'] }).to eq(%w[k h o])
+        expect(pw.context.cookies.find {|c| c['name'] == 'o' }).to eq(
+          'name' => 'o', 'value' => '2', 'domain' => host, 'path' => '/other', 'expires' => -1, 'httpOnly' => false, 'secure' => false, 'sameSite' => 'Strict'
+        )
+        expect(pw.context.cookies(url).map {|c| c['name'] }).to eq(%w[k h])
+      end
+      expect(session.evaluate_script('document.cookie')).to eq('k=v')
     end
   end
 
@@ -334,6 +354,8 @@ RSpec.describe 'Clipboard actions' do
       expect(copied.call('<span style="text-transform:uppercase">low</span>', nil, nil)).to eq('low')
       expect(copied.call('a<img alt="ALT" src="x">b', nil, nil)).to eq('aALTb')
       expect(copied.call('a&nbsp;b', nil, nil)).to eq('a b')
+      expect(copied.call('a<span style="user-select:none">NO<i>x</i></span>b', nil, nil)).to eq('ab')
+      expect(copied.call('a<span style="-webkit-user-select:none">NO</span>b', nil, nil)).to eq('ab')
       script("E('plain').innerHTML = 'a<span id=sh></span>b'; E('sh').attachShadow({mode: 'open'}).innerHTML = '<i>S</i>'; document.activeElement.blur(); getSelection().selectAllChildren(E('plain'));")
       press 'c'
       expect(clipboard_text).to eq('aSb')
@@ -576,6 +598,7 @@ RSpec.describe 'Clipboard actions' do
       expect(typed.call('x<img alt="i">')).to eq('x<img alt="i">T')
       expect(typed.call('<b>x</b><style>i{}</style>')).to eq('<b>xT</b><style>i{}</style>')
       expect(typed.call('a<span hidden="">h</span>')).to eq('aT<span hidden="">h</span>')
+      expect(typed.call('a<span style="visibility:hidden">h</span>')).to eq('aT<span style="visibility:hidden">h</span>')
       expect(typed.call('a<b></b>')).to eq('aT<b></b>')
       expect(typed.call('a<b><span contenteditable="false">r</span></b>')).to eq('a<b><span contenteditable="false">r</span></b>T')
     end
