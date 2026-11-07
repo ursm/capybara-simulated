@@ -345,8 +345,20 @@ RSpec.describe 'the platform\'s token for its own constructions' do
           Document: () => new Document(),
           Text: () => new Text(1),
           Comment: () => new Comment(1),
-          ProcessingInstruction: () => new ProcessingInstruction('p', 1)
+          ProcessingInstruction: () => new ProcessingInstruction('p', 1),
+          Animation: () => new Animation(),
+          DOMMatrix: () => new DOMMatrix(),
+          DOMMatrixReadOnly: () => new DOMMatrixReadOnly(),
+          Image: () => new Image(),
+          Audio: () => new Audio(),
+          Option: () => new Option(),
+          HeadersRecord: () => new Headers({ a: 'b' }),
+          URLSearchParamsRecord: () => new URLSearchParams({ a: '1' }),
+          ClipboardItem: () => new ClipboardItem({ 'text/plain': 'x' }),
+          FormDataOfForm: () => new FormData(form)
         };
+        const form = document.createElement('form');
+        form.innerHTML = '<input name=q value=1>';
         const names = Object.keys(makers), threw = [];
         const original = Array.prototype[Symbol.iterator];
         Array.prototype[Symbol.iterator] = function () { throw new Error('the page'); };
@@ -354,6 +366,41 @@ RSpec.describe 'the platform\'s token for its own constructions' do
           try { makers[names[i]](); } catch (e) { threw.push(names[i] + ': ' + e); }
         }
         Array.prototype[Symbol.iterator] = original;
+        return threw;
+      })()
+    JS
+    expect(got).to eq([])
+  end
+
+  # …nor of the other builtins of the language a constructor's work would read at the time, each a page's to replace.
+  it 'constructs whatever a page has made of the builtins it would use', :every_host_local do
+    session.visit('https://a.test/')
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const typedArray = Object.getPrototypeOf(Float64Array);
+        const threw = [];
+        const under = (holder, member, makers) => {
+          const original = holder[member];
+          holder[member] = function () { throw new Error('the page'); };
+          for (let i = 0; i < makers.length; i++) {
+            try { makers[i](); } catch (e) { threw.push(member + ': ' + makers[i] + ': ' + e); }
+          }
+          holder[member] = original;
+        };
+        under(typedArray, 'from', [() => new DOMMatrix(), () => new DOMMatrixReadOnly()]);
+        under(Reflect, 'construct', [() => new DOMException('m')]);
+        under(Reflect, 'ownKeys', [() => new Headers({ a: 'b' })]);
+        under(Object, 'create', [() => new Request('/x'), () => new Response(), () => new DOMQuad()]);
+        under(Object, 'defineProperty', [() => new Document(), () => new DOMParser().parseFromString('<p>', 'text/html')]);
+        under(Object, 'freeze', [() => new IntersectionObserver(() => {})]);
+        under(Object, 'assign', [() => new KeyframeEffect(null, null)]);
+        under(Object, 'keys', [() => new Request('/x')]);
+        under(String.prototype, 'startsWith', [() => new URLSearchParams('?a=b')]);
+        under(String.prototype, 'slice', [() => new URLSearchParams('?a=b')]);
+        Object.defineProperty(Array.prototype, 0, { set() { threw.push('a setter of an index'); }, configurable: true });
+        new File(['a'], 'f');
+        new Headers({ a: 'b' });
+        delete Array.prototype[0];
         return threw;
       })()
     JS
