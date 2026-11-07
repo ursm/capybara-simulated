@@ -16,8 +16,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // What an insertion inserts (`editInsert`'s `kind`): text, a line break, a paragraph's break.
-const TEXT: u32 = 0;
-const LINE_BREAK: u32 = 1;
+pub(crate) const TEXT: u32 = 0;
+pub(crate) const LINE_BREAK: u32 = 1;
+pub(crate) const PARAGRAPH: u32 = 2;
 
 // __dom.editInsert(anchorNode, anchorOffset, focusNode, focusOffset, kind, text, steps) -> [caretNode, caretOffset,
 // copies, (source, copy, names)…, changes…], or undefined where nothing is inserted: the insertion in the editing host
@@ -40,35 +41,8 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     });
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(6)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
-    if kind == TEXT && text.is_empty() {
-        return;
-    }
-    let Some((host, ((sc, so), (ec, eo)))) = selection_host(&crate::dom::dom(scope).arena, (sc, so), (ec, eo)) else { return };
-    let collapsed = (sc, so) == (ec, eo);
-    let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
     let steps = v8::Local::new(scope, steps);
-    let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
-    let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
-    let mut caret = (sc, so);
-    if !collapsed {
-        let took = crate::editing_delete::Took::Step;
-        // (…none deleted — a range a non-editable island's edge left empty — and the insertion at its start)
-        let Some(deleted) = crate::editing_delete::delete(scope, caller, steps, host, ((sc, so), (ec, eo)), took, false, false) else { return };
-        if let Some((at, made)) = deleted {
-            caret = at;
-            edit.changes.extend(made);
-        }
-    }
-    let caret = match kind {
-        TEXT => edit.lines(scope, caret, &text),
-        LINE_BREAK => edit.line_break(scope, caret),
-        _ => edit.paragraph(scope, caret),
-    };
-    // (…where a copy's shadow root threw, what it changed answered all the same — no caret — for the bindings to finish
-    // before they throw it: `takeCloneException`)
-    if caret.is_none() && crate::dom::dom(scope).clone_exception.is_none() {
-        return;
-    }
+    let Some(Inserted { cid, caret, changes, copies, held }) = insertion(scope, caller, steps, (sc, so), (ec, eo), kind, &text) else { return };
     let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, caret.map(|(node, _)| node))];
     if crate::dom::factory_threw(scope) {
         return;
@@ -85,6 +59,54 @@ fn edit_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
     drop(held);
     rv.set(v8::Array::new_with_elements(scope, &out).into());
+}
+
+// What an insertion made: the host's realm, where the caret goes (none where a copy's shadow root threw, what it changed
+// answered all the same for the bindings to finish before they throw it: `takeCloneException`), the changes of children,
+// the elements a split copied, and what holds the nodes it made.
+pub(crate) struct Inserted {
+    pub(crate) cid: i32,
+    pub(crate) caret: Option<(NodeId, u32)>,
+    pub(crate) changes: Vec<Change>,
+    pub(crate) copies: BindingsSteps,
+    pub(crate) held: Vec<v8::cppgc::Persistent<NodeHandle>>,
+}
+// The insertion `editInsert` answers, by realm `caller`'s code: none where nothing is inserted.
+pub(crate) fn insertion<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    caller: i32,
+    steps: v8::Local<'s, v8::Array>,
+    anchor: (NodeId, u32),
+    focus: (NodeId, u32),
+    kind: u32,
+    text: &[u16],
+) -> Option<Inserted> {
+    if kind == TEXT && text.is_empty() {
+        return None;
+    }
+    let (host, ((sc, so), (ec, eo))) = selection_host(&crate::dom::dom(scope).arena, anchor, focus)?;
+    let collapsed = (sc, so) == (ec, eo);
+    let cid = crate::dom::dom(scope).arena.get(host).map(|n| n.realm)?;
+    let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
+    let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
+    let mut caret = (sc, so);
+    if !collapsed {
+        let took = crate::editing_delete::Took::Step;
+        // (…none deleted — a range a non-editable island's edge left empty — and the insertion at its start)
+        if let Some((at, made)) = crate::editing_delete::delete(scope, caller, steps, host, ((sc, so), (ec, eo)), took, false, false)? {
+            caret = at;
+            edit.changes.extend(made);
+        }
+    }
+    let caret = match kind {
+        TEXT => edit.lines(scope, caret, text),
+        LINE_BREAK => edit.line_break(scope, caret),
+        _ => edit.paragraph(scope, caret),
+    };
+    if caret.is_none() && crate::dom::dom(scope).clone_exception.is_none() {
+        return None;
+    }
+    Some(Inserted { cid, caret, changes, copies, held })
 }
 
 // Where what is inserted at a place goes: outside a link the place is at the edge of (`<a>link</a>`, typed at its end,

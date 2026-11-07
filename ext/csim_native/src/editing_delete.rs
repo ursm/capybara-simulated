@@ -72,12 +72,37 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let (so, eo) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
     let (forward, word) = (args.get(4).is_true(), args.get(5).is_true());
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(6)) else { return };
+    let steps = v8::Local::new(scope, steps);
+    let Some((cid, caret, changes)) = deletion(scope, &args, steps, (sc, so), (ec, eo), forward, word) else { return };
+    let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, Some(caret.0))];
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
+    out.push(v8::Integer::new_from_unsigned(scope, caret.1).into());
+    out.extend(crate::mutation::changes_value(scope, cid, &changes));
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
+}
+
+// The deletion `editDelete` answers: the host's realm, where the caret goes and the changes of children — none where
+// nothing is deleted.
+pub(crate) fn deletion<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    steps: v8::Local<'s, v8::Array>,
+    (sc, so): (NodeId, u32),
+    (ec, eo): (NodeId, u32),
+    forward: bool,
+    word: bool,
+) -> Option<(i32, (NodeId, u32), Vec<Change>)> {
     let collapsed = sc == ec && so == eo;
-    let Some((host, ((sc, so), (ec, eo)))) = selection_host(&crate::dom::dom(scope).arena, (sc, so), (ec, eo)) else { return };
-    let caller = crate::dom::realm_id(scope, &args);
+    let (host, ((sc, so), (ec, eo))) = selection_host(&crate::dom::dom(scope).arena, (sc, so), (ec, eo))?;
+    let caller = crate::dom::realm_id(scope, args);
     // (…the range: the selection's, or the caret's to where a step takes it — none past the host's edge)
     let range = if collapsed {
-        crate::rendered::with_engine(scope, &args, |engine, arena, now| {
+        crate::rendered::with_engine(scope, args, |engine, arena, now| {
             let mut to = if word { arena.caret_word_step(engine, now, sc, so, forward) } else { arena.caret_step(engine, now, sc, so, forward) }?;
             let mut took = Took::Step;
             // (…a step into an island, or past a block atom, to its far edge: it whole)
@@ -108,20 +133,10 @@ fn edit_delete(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     } else {
         Some((((sc, so), (ec, eo)), Took::Step))
     };
-    let Some((range, took)) = range else { return };
-    let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
-    let steps = v8::Local::new(scope, steps);
-    let Some(Some((caret, changes))) = delete(scope, caller, steps, host, range, took, forward, collapsed) else { return };
-    let mut out: Vec<v8::Local<'_, v8::Value>> = vec![crate::dom::node_value(scope, Some(caret.0))];
-    if crate::dom::factory_threw(scope) {
-        return;
-    }
-    out.push(v8::Integer::new_from_unsigned(scope, caret.1).into());
-    out.extend(crate::mutation::changes_value(scope, cid, &changes));
-    if crate::dom::factory_threw(scope) {
-        return;
-    }
-    rv.set(v8::Array::new_with_elements(scope, &out).into());
+    let (range, took) = range?;
+    let cid = crate::dom::dom(scope).arena.get(host).map(|n| n.realm)?;
+    let (caret, changes) = delete(scope, caller, steps, host, range, took, forward, collapsed)??;
+    Some((cid, caret, changes))
 }
 
 // The deletion of the range from `start` to `end` in the editing host `host` by realm `caller`'s code — a step's, back
@@ -416,5 +431,11 @@ fn tidy<'s>(
         }
     }
     rebalance_space(scope, caller, caret.0, caret.1, caret.1)?;
+    // (…and, still between children, what the text after it starts with: ` c` a selection left at its line's start is
+    // `&nbsp;c`, Chrome and Firefox)
+    let arena = realm(scope, cid);
+    if let Some(after) = arena.get(caret.0).filter(|n| n.kind == NodeKind::Element).and_then(|n| n.children.get(caret.1 as usize).copied()) {
+        rebalance_space(scope, caller, after, 0, 0)?;
+    }
     Some(caret)
 }

@@ -33,7 +33,8 @@ pub(crate) const TEXTUAL: u32 = 1 << 6;
 pub(crate) const BUTTON: u32 = 1 << 7;
 // The selection APIs (`selectionStart`, `setSelectionRange()`, `setRangeText()`).
 pub(crate) const SELECTION: u32 = 1 << 8;
-// `select()` — an email field's too (Chrome: its offsets read null, its selection shows in `getSelection()`).
+// `select()` — an email and a number field's too (HTML's table; Chrome: their offsets read null, an email's selection
+// shows in `getSelection()`).
 pub(crate) const SELECT: u32 = 1 << 9;
 // `dirname` submitting a directionality entry: the types it applies to that submit one (HTML lists reset and button
 // too, whose fields submit nothing).
@@ -63,7 +64,7 @@ pub(crate) fn facts(ty: &str) -> u32 {
         "password" => (text_like & !LIST) | SELECTION | NO_AUTOCORRECT,
         "date" | "month" | "week" | "time" => temporal | DATE,
         "datetime-local" => temporal,
-        "number" => READONLY | REQUIRED | NUMERIC | LIST | TYPED | TEXTUAL | NO_DIRECTIONAL_VALUE,
+        "number" => READONLY | REQUIRED | NUMERIC | LIST | TYPED | TEXTUAL | SELECT | NO_DIRECTIONAL_VALUE,
         "range" => NUMERIC | LIST | NO_DIRECTIONAL_VALUE,
         "color" => LIST | NO_DIRECTIONAL_VALUE,
         "hidden" => DIRNAME | mode(MODE_DEFAULT),
@@ -119,7 +120,7 @@ mod tests {
         assert_eq!(with(FREE_TEXT).len(), 6);
         assert_eq!(with(BUTTON), vec!["submit", "image", "reset", "button"]);
         assert_eq!(with(SELECTION), vec!["text", "search", "tel", "url", "password"]);
-        assert_eq!(with(SELECT), vec!["text", "search", "tel", "url", "email", "password"]);
+        assert_eq!(with(SELECT), vec!["text", "search", "tel", "url", "email", "password", "number"]);
         assert_eq!(with(DIRNAME), vec!["hidden", "text", "search", "tel", "url", "email", "password", "submit"]);
         let non_text: Vec<&str> = TYPES.iter().copied().filter(|t| facts(t) & TEXTUAL == 0).collect();
         assert_eq!(non_text, vec!["hidden", "range", "color", "checkbox", "radio", "file", "submit", "image", "reset", "button"]);

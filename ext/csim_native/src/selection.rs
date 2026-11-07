@@ -313,6 +313,13 @@ pub(crate) fn document_anchor(scope: &mut v8::PinScope<'_, '_>, cid: i32, value:
     Some((if s.backward { s.end.0 } else { s.start.0 }, s.start == s.end))
 }
 
+// The node the selection's range starts in, of a document's selection (its state object, as `document_anchor` takes it).
+pub(crate) fn document_start(scope: &mut v8::PinScope<'_, '_>, cid: i32, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
+    let sel = handle(scope, value)?;
+    let s = selected(scope, cid, sel)?;
+    in_document(realm(scope, cid), sel, s.start.0).then_some(s.start.0)
+}
+
 // The document a selection (its state object, as `document_anchor` takes it) is of.
 pub(crate) fn document_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
     handle(scope, value)?.document.get()

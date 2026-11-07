@@ -50,8 +50,8 @@ pub(crate) const TYPE_AT_CARET: u32 = 0;
 pub(crate) const TYPE_WHOLE: u32 = 1;
 pub(crate) const TYPE_AT_SELECTION: u32 = 2;
 // The editing keys a text control takes (`edit_control`) — the moves extending the selection with `EDIT_EXTEND` (Shift).
-const EDIT_BACKSPACE: u32 = 0;
-const EDIT_DELETE: u32 = 1;
+pub(crate) const EDIT_BACKSPACE: u32 = 0;
+pub(crate) const EDIT_DELETE: u32 = 1;
 const EDIT_LEFT: u32 = 2;
 const EDIT_RIGHT: u32 = 3;
 const EDIT_HOME: u32 = 4;
@@ -66,7 +66,7 @@ const EDIT_LINE_BACKSPACE: u32 = 12;
 const EDIT_EXTEND: u32 = 16;
 // …made where the selection a script reads is — the start where none was ever set — as a scripted edit
 // (`execCommand`) makes it, not at the value's end, where a WebDriver key sent to the control finds its caret.
-const EDIT_AT_SELECTION: u32 = 32;
+pub(crate) const EDIT_AT_SELECTION: u32 = 32;
 
 // Why `setRangeText()` refused.
 #[derive(Debug, PartialEq)]
@@ -172,6 +172,19 @@ impl RealmArena {
         (changed, text.to_vec())
     }
 
+    // The text selected in the control `id` that a copy or a cut takes: none for nothing selected, and none in a password
+    // field, whose value no clipboard is given (Chrome, Firefox).
+    pub(crate) fn selected_text(&mut self, id: NodeId) -> Option<String> {
+        let (sel, _) = self.text_selection(id);
+        let n = self.get(id)?;
+        let value = self.relevant_value(n);
+        let (start, end) = ((sel.start as usize).min(value.len()), (sel.end as usize).min(value.len()));
+        (start < end && !self.is_password(n)).then(|| String::from_utf16_lossy(&value[start..end]))
+    }
+    pub(crate) fn is_password(&self, n: &NodeData) -> bool {
+        n.is_html_named("input") && n.input_type() == "password"
+    }
+
     // An editing key pressed in the control `id`, as Chrome takes it: Backspace / Delete remove the selection, or what
     // is before / after the caret — Delete a grapheme cluster, Backspace a code point but for an emoji sequence or a
     // flag, which go whole ("é" leaves "e"; "👍🏽" nothing); ArrowLeft / ArrowRight collapse a selection to its start /
@@ -186,7 +199,7 @@ impl RealmArena {
         let value = self.relevant_value(n);
         let multiline = n.is_html_named("textarea");
         // (…a password's words its whole value: Blink steps a password field by its line, its words told to nobody)
-        let password = n.is_html_named("input") && n.input_type() == "password";
+        let password = self.is_password(n);
         let len = value.len();
         let (sel, set) = self.text_selection(id);
         let (start, end) = if set || edit & EDIT_AT_SELECTION != 0 { (sel.start as usize, sel.end as usize) } else { (len, len) };

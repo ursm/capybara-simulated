@@ -70,6 +70,21 @@ struct Store {
     drop_effect: u8,
     effect_allowed: u8,
     operation: u8,
+    // (…what a clipboard event's page cleared: Clipboard API "fire a clipboard event", its clear-was-called flag and
+    // types-to-clear list)
+    clear_was_called: bool,
+    types_to_clear: Vec<Vec<u16>>,
+}
+
+// What a canceled copy or cut does with what its page left in the event's store (Clipboard API, "write content to the
+// clipboard"): the items' strings held instead — every part given the type the page gave it, as Chrome's custom data, a
+// file's bytes being the bindings' — the clipboard cleared, those types taken off it, or nothing.
+#[derive(Debug, PartialEq)]
+enum ClipboardWrite {
+    Items(Vec<(String, Vec<u8>)>),
+    Clear,
+    Remove(Vec<String>),
+    Nothing,
 }
 
 fn ascii_lower(units: &[u16]) -> Vec<u16> {
@@ -108,6 +123,7 @@ impl Store {
             return Err(Refused::Duplicate);
         }
         self.next += 1;
+        self.note_added(&kind_type);
         self.items.push(Item { number: self.next, file, kind_type, data });
         self.changed();
         Ok(self.next)
@@ -120,6 +136,7 @@ impl Store {
         let kind_type = normalize_format(format);
         self.items.retain(|i| i.file || i.kind_type != kind_type);
         self.next += 1;
+        self.note_added(&kind_type);
         self.items.push(Item { number: self.next, file: false, kind_type, data });
         self.changed();
     }
@@ -130,7 +147,34 @@ impl Store {
         }
         let kind_type = format.map(normalize_format);
         self.items.retain(|i| i.file || kind_type.as_ref().is_some_and(|t| *t != i.kind_type));
+        self.clear_was_called = true;
+        self.types_to_clear.extend(kind_type);
         self.changed();
+    }
+    // Clipboard API: an item of a type the page cleared set again takes that clear back — every clear, for one with no
+    // type.
+    fn note_added(&mut self, kind_type: &[u16]) {
+        if !self.clear_was_called {
+            return;
+        }
+        if self.types_to_clear.is_empty() {
+            self.clear_was_called = false;
+        } else if let Some(at) = self.types_to_clear.iter().position(|t| t == kind_type) {
+            self.types_to_clear.remove(at);
+            self.clear_was_called = !self.types_to_clear.is_empty();
+        }
+    }
+    fn clipboard_write(&self) -> ClipboardWrite {
+        let text = |units: &[u16]| String::from_utf16_lossy(units);
+        if !self.items.is_empty() {
+            let strings = self.items.iter().filter(|i| !i.file);
+            return ClipboardWrite::Items(strings.map(|i| (text(&i.kind_type), text(&i.data).into_bytes())).collect());
+        }
+        match (self.clear_was_called, self.types_to_clear.is_empty()) {
+            (false, _) => ClipboardWrite::Nothing,
+            (true, true) => ClipboardWrite::Clear,
+            (true, false) => ClipboardWrite::Remove(self.types_to_clear.iter().map(|t| text(t)).collect()),
+        }
     }
     // getData(): none once the store is gone or while protected; a "url" the first URL of its text/uri-list.
     fn get_data(&self, format: &[u16]) -> &[u16] {
@@ -224,7 +268,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
-    let store = Store { mode: Mode::ReadWrite, items: Vec::new(), next: 0, version: 0, drop_effect: NONE, effect_allowed: NONE, operation: NONE };
+    let store = Store { mode: Mode::ReadWrite, items: Vec::new(), next: 0, version: 0, drop_effect: NONE, effect_allowed: NONE, operation: NONE, clear_was_called: false, types_to_clear: Vec::new() };
     let handle = DragDataStoreHandle { store: RefCell::new(store) };
     let heap = scope.get_cpp_heap().expect("DragDataStoreBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
@@ -285,6 +329,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "dragStoreSetEffect", set_effect, context_id);
     crate::dom::register(scope, ns, "dragStoreBegin", begin, context_id);
     crate::dom::register(scope, ns, "dragStoreEnd", end, context_id);
+    crate::dom::register(scope, ns, "clipboardEventDone", clipboard_event_done, context_id);
 }
 
 fn string<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
@@ -366,7 +411,10 @@ fn remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
         return rv.set_bool(false);
     }
     match index {
-        None => store.items.clear(),
+        None => {
+            store.items.clear();
+            store.clear_was_called = true;
+        }
         Some(i) if i < store.items.len() => {
             store.items.remove(i);
         }
@@ -387,6 +435,27 @@ fn clear_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let format = args.get(1);
     let format = (!format.is_undefined()).then(|| crate::dom::utf16_arg(scope, format));
     h.store.borrow_mut().clear_data(format.as_deref());
+}
+// __dom.clipboardEventDone(kind, store, canceled, partition) -> what the action ends with, once its clipboard event is
+// dispatched (Clipboard API §8): true for a copy or a cut a listener canceled, what its page left in the event's store
+// written to the session's clipboard in its stead; false for a paste it canceled; null where the action goes on.
+fn clipboard_event_done(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if !args.get(2).is_true() {
+        return rv.set_null();
+    }
+    if args.get(0).to_rust_string_lossy(scope) == "paste" {
+        return rv.set_bool(false);
+    }
+    let partition = args.get(3).integer_value(scope).unwrap_or(0) as u64;
+    if let Some(h) = handle(scope, args.get(1)) {
+        match h.store.borrow().clipboard_write() {
+            ClipboardWrite::Items(entries) => crate::system_clipboard::write(partition, entries),
+            ClipboardWrite::Clear => crate::system_clipboard::write(partition, Vec::new()),
+            ClipboardWrite::Remove(types) => crate::system_clipboard::remove_types(partition, &types),
+            ClipboardWrite::Nothing => {}
+        }
+    }
+    rv.set_bool(true);
 }
 // __dom.dragStoreGetData(store, format) -> `Store::get_data`.
 fn get_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -478,7 +547,7 @@ mod tests {
     use super::*;
 
     fn store() -> Store {
-        Store { mode: Mode::ReadWrite, items: Vec::new(), next: 0, version: 0, drop_effect: NONE, effect_allowed: NONE, operation: NONE }
+        Store { mode: Mode::ReadWrite, items: Vec::new(), next: 0, version: 0, drop_effect: NONE, effect_allowed: NONE, operation: NONE, clear_was_called: false, types_to_clear: Vec::new() }
     }
 
     fn u(s: &str) -> Vec<u16> {
@@ -504,6 +573,35 @@ mod tests {
         s.set_data(&u("text"), u("z"));
         assert!(s.get_data(&u("text")).is_empty());
         assert_eq!(s.types(), [u("Files")]);
+    }
+
+    #[test]
+    fn a_canceled_clipboard_event_writes_what_its_page_left() {
+        let mut s = store();
+        assert_eq!(s.clipboard_write(), ClipboardWrite::Nothing);
+        s.set_data(&u("text/plain"), u("over"));
+        s.set_data(&u("text/x-custom"), u("c"));
+        assert_eq!(
+            s.clipboard_write(),
+            ClipboardWrite::Items(vec![("text/plain".to_owned(), b"over".to_vec()), ("text/x-custom".to_owned(), b"c".to_vec())])
+        );
+        // (…a clear of everything, the clipboard cleared; taken back by what is set after it)
+        s.clear_data(None);
+        assert_eq!(s.clipboard_write(), ClipboardWrite::Clear);
+        s.set_data(&u("text/plain"), u("x"));
+        assert!(!s.clear_was_called);
+        // (…a clear of a type, that type taken off; taken back by that type alone)
+        let mut s = store();
+        s.clear_data(Some(&u("text/plain")));
+        assert_eq!(s.clipboard_write(), ClipboardWrite::Remove(vec!["text/plain".to_owned()]));
+        s.add(false, &u("text/html"), u("h")).ok();
+        s.clear_data(Some(&u("text/html")));
+        assert_eq!(s.clipboard_write(), ClipboardWrite::Remove(vec!["text/plain".to_owned(), "text/html".to_owned()]));
+        s.set_data(&u("text/html"), u("h"));
+        s.clear_data(None);
+        assert_eq!(s.clipboard_write(), ClipboardWrite::Remove(vec!["text/plain".to_owned()]));
+        s.set_data(&u("text/plain"), u("p"));
+        assert!(!s.clear_was_called);
     }
 
     #[test]

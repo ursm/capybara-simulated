@@ -172,6 +172,23 @@ pub(crate) fn html(arena: &RealmArena, id: NodeId, outer: bool, shadows: &[(Node
     w.out
 }
 
+// …a node's children written inside the elements `holders`, innermost first — their start tags, attributes and all, around
+// what they are not asked to hold of their own.
+pub(crate) fn html_in(arena: &RealmArena, id: NodeId, holders: &[NodeId]) -> Vec<u16> {
+    let mut w = Writer { arena, shadows: &[], out: Vec::new() };
+    let mut ends = Vec::new();
+    for n in holders.iter().rev().filter_map(|&h| arena.get(h)) {
+        ends.extend(w.start_tag(n));
+    }
+    let mut stack = Vec::new();
+    w.children(id, &mut stack);
+    w.run(stack);
+    for name in ends.iter().rev() {
+        w.push(&format!("</{name}>"));
+    }
+    w.out
+}
+
 // ── XML serialization (DOM Parsing §3.2) ──
 // The spec's algorithm step for step — a namespace prefix map copied per element, generated `ns{n}` prefixes, the
 // nearest declared prefix for a namespaced attribute — its require-well-formed checks on for the innerHTML / outerHTML

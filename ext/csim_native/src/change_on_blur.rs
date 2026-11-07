@@ -37,6 +37,13 @@ impl RealmArena {
         self.change_baselines.insert(id, (value, false));
     }
 
+    // The user edited the control's value (`edited`), or a `change` the edit fired at once committed it (not).
+    pub(crate) fn mark_change(&mut self, id: NodeId, edited: bool) {
+        if let Some(entry) = self.change_baselines.get_mut(&id) {
+            entry.1 = edited;
+        }
+    }
+
     // Whether the user edited it since it was focused, and its value is another: what it had is forgotten, and it fires
     // `change` where so — `keep_focus` (implicit submission) arms it again with the value it has now.
     fn change_committed(&mut self, id: NodeId, keep_focus: bool) -> bool {
@@ -71,9 +78,7 @@ fn arm_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
 fn edited_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let edited = args.get(1).is_true();
-    if let Some(entry) = crate::dom::dom(scope).arena.change_baselines.get_mut(&id) {
-        entry.1 = edited;
-    }
+    crate::dom::dom(scope).arena.mark_change(id, edited);
 }
 
 // __dom.changeCommit(nid, keepFocus) -> whether the control fires `change` as it is blurred — or, `keepFocus`, as

@@ -76,7 +76,7 @@
     var k = String(letter).toLowerCase();
     var clip = k === 'c' ? 'copy' : k === 'x' ? 'cut' : k === 'v' ? 'paste' : null;
     if (clip) {
-      if (typeof W.__csimClipboardGesture === 'function') W.__csimClipboardGesture(clip, target);
+      if (typeof W.__csimClipboardGesture === 'function') W.__csimClipboardGesture(clip, target.ownerDocument);
     } else if (k === 'z') {
       historyKeyAction(__shiftHeld ? 'historyRedo' : 'historyUndo', target);   // Ctrl/Cmd+Z, +Shift = redo
     } else if (k === 'y') {

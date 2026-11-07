@@ -5,7 +5,9 @@
 // shape of the edit — the shapes editors and the exec-command tests take — not the Editing spec's styling algorithm
 // (merging runs, `<font>`, lists inside blocks), which is in-scope backlog. Every change of children the engine's; the
 // bindings finish them, set the CSS a command gives the elements it answers (a colour, a font, an alignment, a cleared
-// style), put the selection where it says, and fire `input`.
+// style), put the selection where it says, and fire `input`. And how a command is carried out (`commandPlan`), which
+// holds the clipboard's actions too, whichever of a script and the user asks: what is decided here, and what the bindings
+// walk, firing the events it names — page code runs between them, so each part of the plan is asked after the last's has.
 
 use crate::dom::{realm, NodeId, NodeKind, RealmArena};
 use crate::editing_insert::Edit;
@@ -15,15 +17,17 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "commandSupport", command_support_op, context_id);
     crate::dom::register(scope, ns, "commandTarget", command_target_op, context_id);
     crate::dom::register(scope, ns, "commandPlan", command_plan_op, context_id);
-    crate::dom::register(scope, ns, "commandStyle", command_style_op, context_id);
+    crate::dom::register(scope, ns, "controlCommand", control_command_op, context_id);
+    crate::dom::register(scope, ns, "clipboardEventTarget", clipboard_event_target_op, context_id);
+    crate::dom::register(scope, ns, "clipboardWriteControl", clipboard_write_control_op, context_id);
+    crate::dom::register(scope, ns, "clipboardMarkup", clipboard_markup_op, context_id);
 }
 
-// What the bindings do to carry a command out, beyond `inputType`'s `input` (codes as `commandPlan` hands them): the
-// engine's edit of it alone (`editCommand`); text inserted (the selection deleted, for none); the selection's deletion,
-// backward or forward; a line break, a paragraph; a span carrying a CSS property (`commandStyle`); the block aligned
-// (its `text-align`); the styles cleared; a link; the clipboard's cut, copy and paste; markup — in a text control, its
-// text; in an editing host, the edit; everything selected.
-#[derive(Clone, Copy)]
+// What carrying a command out comes to, beyond `inputType`'s `input`: the engine's edit of it alone; text inserted (the
+// selection deleted, for none); the selection's deletion, backward or forward; a line break, a paragraph; a span carrying
+// a CSS property; the block aligned (its `text-align`); the styles cleared; a link; the clipboard's cut, copy and paste;
+// markup — in a text control, its text; in an editing host, the edit; everything selected.
+#[derive(Clone, Copy, PartialEq)]
 enum Action {
     Edit,
     Text,
@@ -40,27 +44,6 @@ enum Action {
     Paste,
     Html,
     SelectAll,
-}
-impl Action {
-    fn code(self) -> (u32, &'static str) {
-        match self {
-            Action::Edit => (0, ""),
-            Action::Text => (1, ""),
-            Action::Delete => (2, ""),
-            Action::ForwardDelete => (3, ""),
-            Action::LineBreak => (4, ""),
-            Action::Paragraph => (5, ""),
-            Action::Style(property) => (6, property),
-            Action::Align(value) => (7, value),
-            Action::RemoveFormat => (8, ""),
-            Action::Link => (9, ""),
-            Action::Cut => (10, ""),
-            Action::Copy => (11, ""),
-            Action::Paste => (12, ""),
-            Action::Html => (13, ""),
-            Action::SelectAll => (14, ""),
-        }
-    }
 }
 
 // The commands `execCommand` carries out, by name (matched ASCII case-insensitively), each with whether it is one a
@@ -122,7 +105,7 @@ fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // selection's anchor is in (its own range's, a shadow tree's too — the anchor, which the engine's edits go by:
 // element_state.rs `editing_root` — a `contenteditable=true` nested in an editable element no root of its own, the
 // body in design mode), its kind deciding — a `plaintext-only` one takes the text commands alone (`TARGET_HOST`). None
-// for no range at all, and for `unlink` with one that selects nothing. `selectAll` selects in any focused text control,
+// for no range at all, and for `unlink` and `cut` with one that selects nothing. `selectAll` selects in any focused text control,
 // a readonly or disabled one's too (Chrome), and in no host the document's body — its document element where it has
 // none, and none at all (`TARGET_HOST` with no node: the selection emptied) where it has no document element either
 // (the Editing draft's selectAll; Chrome).
@@ -132,6 +115,7 @@ const TARGET_HOST: u32 = 2;
 fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active: Option<NodeId>, selection: v8::Local<'_, v8::Value>) -> (u32, Option<NodeId>) {
     let Some(support) = command_support(name) else { return (TARGET_NONE, None) };
     let select_all = name.eq_ignore_ascii_case("selectall");
+    let cut = name.eq_ignore_ascii_case("cut");
     let arena = realm(scope, cid);
     let control = active.filter(|&a| {
         arena.get(a).is_some_and(|n| n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::TYPED)))
@@ -139,10 +123,7 @@ fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active
     if let Some(control) = control {
         let n = arena.get(control).expect("filtered above");
         let refused = support != 1 || (!select_all && (n.is_read_only() || arena.is_actually_disabled(control)));
-        let nothing_cut = name.eq_ignore_ascii_case("cut") && {
-            let (sel, _) = arena.text_selection(control);
-            sel.start == sel.end
-        };
+        let nothing_cut = cut && arena.selected_text(control).is_none();
         return if refused || nothing_cut { (TARGET_NONE, None) } else { (TARGET_CONTROL, Some(control)) };
     }
     let page = |scope: &mut v8::PinScope<'_, '_>| -> (u32, Option<NodeId>) {
@@ -154,7 +135,7 @@ fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active
         (TARGET_HOST, arena.relative(doc, crate::dom::RELATIVE_BODY).or_else(|| arena.get(doc)?.children.iter().copied().find(|&c| arena.is_element(c))))
     };
     let Some((anchor, collapsed)) = crate::selection::document_anchor(scope, cid, selection) else { return page(scope) };
-    if name.eq_ignore_ascii_case("unlink") && collapsed {
+    if (cut || name.eq_ignore_ascii_case("unlink")) && collapsed {
         return (TARGET_NONE, None);
     }
     // (…the arena again: reading the selection needed the scope it was borrowed from)
@@ -174,35 +155,62 @@ fn command_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// How `execCommand` carries a command out (`commandPlan`): everything in what `command_target` answers selected
-// (`selectAll`); not at all (it answers false) — in a document with no
-// browsing context, whose selection is no window's, nothing; the selection copied, whatever it is in; in a focused text
-// control, its `Action` — the ones a control takes: text typed, the selection's deletion, a line break (which an input
-// takes as nothing: true all the same, Chrome), markup's text (a textarea's or a free-text input's), and cut and paste
-// where its selection APIs apply; in an editing host, its `Action`.
+// How a command is carried out (`commandPlan`): not at all (it answers false) — in a document with no browsing context,
+// whose selection is no window's, nothing; everything in what `command_target` answers selected (`selectAll`); a
+// clipboard action, its event first, whose listeners may move the selection the rest acts on (§5.3.5), so the rest is
+// planned after it — a script's cut, copy and paste whatever is selected, as Clipboard API §5.3.3 has them; the selection
+// copied, whatever it is in; in a focused text control, its `Action` — the ones a control takes: text typed, the
+// selection's deletion, a line break (which an input takes as nothing: true all the same, Chrome), markup's text (a
+// textarea's or a free-text input's), and cut and paste where its selection APIs apply — a user's in a number or an email
+// field too (Chrome, Firefox); in an editing host, its `Action`.
 const STEP_NONE: u32 = 0;
 const STEP_COPY: u32 = 1;
 const STEP_CONTROL: u32 = 2;
 const STEP_HOST: u32 = 3;
 const STEP_SELECT_ALL: u32 = 4;
-fn command_plan(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active: Option<NodeId>, selection: v8::Local<'_, v8::Value>, has_view: bool) -> (u32, Option<NodeId>) {
-    let Some(&(_, _, _, action)) = command(name) else { return (STEP_NONE, None) };
+const STEP_CLIPBOARD_EVENT: u32 = 5;
+// Who asks: a script's `execCommand`; the rest of a clipboard action's, or of a user's gesture, its event dispatched.
+const ASKED_BY_SCRIPT: u32 = 0;
+#[cfg(test)]
+const SCRIPT_AFTER_EVENT: u32 = 1;
+const GESTURE_AFTER_EVENT: u32 = 2;
+// What the bindings do around the edit of a step: the selection written to the clipboard (a cut's, canceled or not a
+// beforeinput — Chrome); a cancelable `beforeinput` first (a user's cut and paste; a script's edit fires only `input`:
+// the input-events tests, Chrome, Firefox — the Editing draft's step otherwise is w3c/editing#200, open); the paste's
+// clipboard flavors a read-only DataTransfer on the InputEvents, its `data` null (Input Events §4: an editing host's); the
+// value markup whose text is what goes in (a control's `insertHTML`).
+const PLAN_WRITE_SELECTION: u32 = 1;
+const PLAN_BEFORE_INPUT: u32 = 2;
+const PLAN_PASTE_TRANSFER: u32 = 4;
+const PLAN_MARKUP_TEXT: u32 = 8;
+fn plan_flags(step: u32, action: Action, asked: u32) -> u32 {
+    let user_edit = asked == GESTURE_AFTER_EVENT && matches!(action, Action::Cut | Action::Paste);
+    (if action == Action::Cut { PLAN_WRITE_SELECTION } else { 0 })
+        | (if user_edit { PLAN_BEFORE_INPUT } else { 0 })
+        | (if step == STEP_HOST && action == Action::Paste { PLAN_PASTE_TRANSFER } else { 0 })
+        | (if step == STEP_CONTROL && action == Action::Html { PLAN_MARKUP_TEXT } else { 0 })
+}
+#[allow(clippy::too_many_arguments)]
+fn command_plan(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, action: Action, active: Option<NodeId>, selection: v8::Local<'_, v8::Value>, has_view: bool, asked: u32) -> (u32, Option<NodeId>) {
     if !has_view {
         return (STEP_NONE, None);
     }
-    if matches!(action, Action::Copy) {
-        return (STEP_COPY, None);
+    if asked == ASKED_BY_SCRIPT && matches!(action, Action::Cut | Action::Copy | Action::Paste) {
+        return (STEP_CLIPBOARD_EVENT, None);
+    }
+    if action == Action::Copy {
+        return (STEP_COPY, typed_control(realm(scope, cid), active));
     }
     match command_target(scope, cid, name, active, selection) {
         (TARGET_NONE, _) => (STEP_NONE, None),
-        (_, node) if matches!(action, Action::SelectAll) => (STEP_SELECT_ALL, node),
+        (_, node) if action == Action::SelectAll => (STEP_SELECT_ALL, node),
         (TARGET_HOST, host) => (STEP_HOST, host),
         (TARGET_CONTROL, Some(control)) => {
             let arena = realm(scope, cid);
             let n = arena.get(control).expect("a target is a node");
             let takes = match action {
                 Action::Text | Action::Delete | Action::ForwardDelete | Action::LineBreak | Action::Paragraph => true,
-                Action::Cut | Action::Paste => arena.selection_applies(n, false),
+                Action::Cut | Action::Paste => asked == GESTURE_AFTER_EVENT || arena.selection_applies(n, false),
                 Action::Html => n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::FREE_TEXT)),
                 _ => false,
             };
@@ -211,43 +219,206 @@ fn command_plan(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active: 
         _ => (STEP_NONE, None),
     }
 }
-// __dom.commandPlan(command, activeNid | -1, selection | null, hasView) -> [step, node | null, action, its argument,
-// inputType, name] (`command_plan`, `STEP_*`; `Action::code`; the `inputType` of the `input` it fires, '' for none; its
-// name as `COMMANDS` spells it), the document's active element, its selection's state and whether it has a browsing
-// context given — undefined for no command.
+// …the active element where it is a text control, one text is typed into — what holds the selection while it is focused.
+fn typed_control(arena: &RealmArena, active: Option<NodeId>) -> Option<NodeId> {
+    active.filter(|&a| arena.get(a).is_some_and(|n| n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::TYPED))))
+}
+fn data_value<'s>(scope: &mut v8::PinScope<'s, '_>, data: Option<&[u16]>) -> v8::Local<'s, v8::Value> {
+    match data {
+        Some(units) => crate::dom::utf16_value(scope, units),
+        None => v8::null(scope).into(),
+    }
+}
+fn str_value<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
+    v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
+// __dom.commandPlan(command, activeNid | -1, selection | null, hasView, asked, partition) -> [step, node | null, flags,
+// inputType, name, pasted] (`command_plan`, `STEP_*`; `PLAN_*`; the `inputType` of the InputEvents it fires, '' for none;
+// its name as `COMMANDS` spells it; the text a paste goes on to type, that the session's clipboard holds, null for none
+// and for any other command), the document's active element, its selection's state, whether it has a browsing context and who asks
+// (`ASKED_BY_SCRIPT` …) given — undefined for no command.
 fn command_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = args.get(0).to_rust_string_lossy(scope);
     let Some(&(canonical, _, input_type, action)) = command(&name) else { return };
     let active = crate::dom::nid_arg(scope, &args, 1);
     let cid = crate::dom::realm_id(scope, &args);
     let has_view = args.get(3).is_true();
-    let (step, node) = command_plan(scope, cid, &name, active, args.get(2), has_view);
-    let (code, arg) = action.code();
+    let asked = args.get(4).uint32_value(scope).unwrap_or(ASKED_BY_SCRIPT);
+    let (step, node) = command_plan(scope, cid, &name, action, active, args.get(2), has_view, asked);
+    let pasted = if action == Action::Paste && asked != ASKED_BY_SCRIPT && matches!(step, STEP_CONTROL | STEP_HOST) {
+        let partition = args.get(5).integer_value(scope).unwrap_or(0) as u64;
+        crate::system_clipboard::plain_text(partition)
+    } else {
+        Vec::new()
+    };
+    let pasted = data_value(scope, Some(&pasted[..]).filter(|p| !p.is_empty()));
     let items = [
         v8::Integer::new_from_unsigned(scope, step).into(),
         crate::dom::node_value(scope, node),
-        v8::Integer::new_from_unsigned(scope, code).into(),
-        v8::String::new(scope, arg).map_or_else(|| v8::undefined(scope).into(), Into::into),
-        v8::String::new(scope, input_type).map_or_else(|| v8::undefined(scope).into(), Into::into),
-        v8::String::new(scope, canonical).map_or_else(|| v8::undefined(scope).into(), Into::into),
+        v8::Integer::new_from_unsigned(scope, plan_flags(step, action, asked)).into(),
+        str_value(scope, input_type),
+        str_value(scope, canonical),
+        pasted,
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.commandStyle(property, value, docNid) -> [the style attribute a styling command's span carries, the `input`
-// event's `data`]: `property: value` as an inline style of the document serializes it, in its mode (a quirks one's
-// hashless colour) — '' for a value that does not parse, which styles nothing; the data a colour
-// as the value's CSS serialization — a legacy-syntax one's (a name, a hex, rgb()), lowercased where it is a bare word,
-// `currentcolor` and the CSS-wide keywords so; the string itself where it does not parse — Chrome's report; a font name
-// as given.
-fn command_style_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let property = args.get(0).to_rust_string_lossy(scope);
-    let value = args.get(1).to_rust_string_lossy(scope);
-    let quirks = crate::dom::quirks_arg(scope, &args, 2);
+
+// The element a clipboard event is fired at (Clipboard API "fire a clipboard event" — whose "focused node" is
+// w3c/clipboard-apis#70, open — as Chrome and Firefox both have it, editable context or not): a focused text control;
+// else the element holding the start of the selection's range; else the body, a focused button's selection-less page
+// too.
+fn clipboard_event_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, active: Option<NodeId>, selection: v8::Local<'_, v8::Value>) -> Option<NodeId> {
+    if let Some(control) = typed_control(realm(scope, cid), active) {
+        return Some(control);
+    }
+    let start = crate::selection::document_start(scope, cid, selection);
+    let doc = crate::selection::document_of(scope, selection)?;
+    let arena = realm(scope, cid);
+    let mut at = start;
+    while let Some(n) = at {
+        if arena.is_element(n) {
+            return Some(n);
+        }
+        at = arena.parent_of(n);
+    }
+    arena.relative(doc, crate::dom::RELATIVE_BODY)
+}
+// __dom.clipboardEventTarget(activeNid | -1, selection | null) -> `clipboard_event_target`, null for none.
+fn clipboard_event_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let active = crate::dom::nid_arg(scope, &args, 0);
+    let cid = crate::dom::realm_id(scope, &args);
+    let target = clipboard_event_target(scope, cid, active, args.get(1));
+    rv.set(crate::dom::node_value(scope, target));
+}
+// __dom.clipboardMarkup(fragmentNid, startNid, endNid) -> what a copy holds of a Range's contents as markup: the clone of
+// them `fragment`, in the inline elements that hold the whole of it (`<b>f[o]o</b>` is `<b>o</b>`, its ancestors' up to
+// the block or the editing host holding it, as Chrome and Firefox copy it).
+fn clipboard_markup_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let (Some(fragment), Some(start), Some(end)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1), crate::dom::nid_arg(scope, &args, 2)) else { return };
+    let arena = realm(scope, cid);
+    let mut holders = Vec::new();
+    let mut at = Some(crate::ranges::common_ancestor(arena, start, end));
+    while let Some(n) = at {
+        if arena.is_element(n) {
+            if arena.editing_host(n) == Some(n) || crate::editing::inline_level(arena, n) != Some(true) {
+                break;
+            }
+            holders.push(n);
+        }
+        at = arena.parent_of(n);
+    }
+    let out = crate::serialize::html_in(arena, fragment, &holders);
+    rv.set(crate::dom::utf16_value(scope, &out));
+}
+// __dom.clipboardWriteControl(partition, controlNid): what is selected in the text control copied (`selected_text`) —
+// nothing selected leaving the clipboard as it was.
+fn clipboard_write_control_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let partition = args.get(0).integer_value(scope).unwrap_or(0) as u64;
+    let Some(id) = crate::dom::nid_arg(scope, &args, 1) else { return };
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return };
+    if let Some(text) = realm(scope, cid).selected_text(id) {
+        crate::system_clipboard::write_selected(partition, &text, "");
+    }
+}
+
+// What a command's edit of a text control comes to: what it changed (text_selection.rs `TYPED_*`), whether `input` fires
+// for it, its `data` and `inputType`.
+#[derive(Debug, PartialEq)]
+struct ControlEdited {
+    changed: u32,
+    fire: bool,
+    data: Option<Vec<u16>>,
+    input_type: &'static str,
+}
+// A command's edit of the text control `id`, its `value` what goes in — where `at` says (`TYPE_*`: the selection a script
+// reads, or the one a user made) — as Chrome takes it; a user edit, so a `change` is owed on blur. Text and markup's text
+// fire `input` where something went in or the selection was replaced (`maxlength` may leave no room, a number field refuse
+// it: none there, and one for text the same as what it replaced), its `data` what went in — markup's in an input
+// `insertText`, a textarea's with neither `inputType` nor `data` and whatever went in (Chrome; Firefox inserts nothing and
+// no spec says); a cut and a paste always, a paste's `data` what went in (a text control's: Input Events §4); a deletion
+// Backspace's or Delete's at the selection a script reads — its start where none was ever set, Chrome's caret after
+// focus() — where the value changed; a line break where it went in, into a textarea: an input takes none and stays as it
+// was (Chrome).
+fn control_command(arena: &mut RealmArena, id: NodeId, action: Action, input_type: &'static str, value: &[u16], at: u32) -> ControlEdited {
+    use crate::text_selection::{EDIT_AT_SELECTION, EDIT_BACKSPACE, EDIT_DELETE, TYPED_VALUE};
+    let selected = arena.text_selection(id).0;
+    let selected = selected.start != selected.end;
+    let textarea = arena.get(id).is_some_and(|n| n.is_html_named("textarea"));
+    let mut edited = ControlEdited { changed: 0, fire: false, data: None, input_type };
+    match action {
+        Action::Delete | Action::ForwardDelete => {
+            let key = if action == Action::ForwardDelete { EDIT_DELETE } else { EDIT_BACKSPACE };
+            edited.changed = arena.edit_control(id, key | EDIT_AT_SELECTION);
+            edited.fire = edited.changed & TYPED_VALUE != 0;
+            if edited.fire {
+                arena.mark_change(id, true);
+            }
+        }
+        Action::LineBreak | Action::Paragraph if !textarea => {}
+        Action::LineBreak | Action::Paragraph => {
+            let (changed, typed) = arena.type_text(id, &[0x0A], at);
+            arena.mark_change(id, true);
+            edited.changed = changed;
+            edited.fire = !typed.is_empty();
+        }
+        Action::Cut => {
+            edited.changed = arena.type_text(id, &[], at).0;
+            arena.mark_change(id, true);
+            edited.fire = true;
+        }
+        _ => {
+            let (changed, typed) = arena.type_text(id, value, at);
+            arena.mark_change(id, true);
+            edited.changed = changed;
+            match action {
+                Action::Paste => edited.fire = true,
+                Action::Html if textarea => edited.fire = true,
+                Action::Html => edited.input_type = "insertText",
+                _ => {}
+            }
+            edited.fire |= !typed.is_empty() || selected;
+            // (…a paste of a clipboard holding no text none: Chrome)
+            let no_data = (action == Action::Html && textarea) || (action == Action::Paste && value.is_empty());
+            if !no_data {
+                edited.data = Some(typed);
+            }
+        }
+    }
+    edited
+}
+// __dom.controlCommand(control, command, value, byUser) -> [what it changed, fire, data, inputType] (`control_command`),
+// the command's edit of the text control the plan named — at the selection a script reads, or, `byUser`, the one the user
+// made (an email or a number field's too, which a script reads none of).
+fn control_command_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let control = args.get(0);
+    let Some(id) = crate::node_handle::nid_of(scope, control) else { return };
+    let Some(&(_, _, input_type, action)) = command(&args.get(1).to_rust_string_lossy(scope)) else { return };
+    let value = crate::dom::utf16_arg(scope, args.get(2));
+    let at = if args.get(3).is_true() { crate::text_selection::TYPE_AT_CARET } else { crate::text_selection::TYPE_AT_SELECTION };
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return };
+    let edited = control_command(realm(scope, cid), id, action, input_type, &value, at);
+    if edited.changed & crate::text_selection::TYPED_VALUE != 0 {
+        crate::node_handle::forget_live_value(scope, control);
+    }
+    let items = [
+        v8::Integer::new_from_unsigned(scope, edited.changed).into(),
+        v8::Boolean::new(scope, edited.fire).into(),
+        data_value(scope, edited.data.as_deref()),
+        str_value(scope, edited.input_type),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// The style attribute a styling command's span carries, and the `input` event's `data`: `property: value` as an inline
+// style of the document serializes it, in its mode (a quirks one's hashless colour) — '' for a value that does not parse,
+// which styles nothing; the data a colour as the value's CSS serialization — a legacy-syntax one's (a name, a hex, rgb()),
+// lowercased where it is a bare word, `currentcolor` and the CSS-wide keywords so; the string itself where it does not
+// parse — Chrome's report; a font name as given.
+fn command_style(scope: &mut v8::PinScope<'_, '_>, cid: i32, quirks: bool, property: &str, value: &str) -> (String, String) {
     let key = crate::cssom_decl::Key::new("", crate::cssom_decl::Kind::Style, quirks, "about:blank");
-    let text = crate::cssom_decl::set(&key, None, &property, &value, false).map(|w| w.text).unwrap_or_default();
+    let text = crate::cssom_decl::set(&key, None, property, value, false).map(|w| w.text).unwrap_or_default();
     let data = if property.ends_with("color") {
         let trimmed = value.trim_matches(|c: char| c.is_ascii_whitespace());
-        let cid = crate::dom::realm_id(scope, &args);
         let d = crate::dom::dom(scope);
         let arena = d.arena.enter(cid);
         let parsed = crate::style::parse_color(d.styles.get(&cid), arena, trimmed, "").filter(|c| c.is_legacy_syntax());
@@ -261,13 +432,9 @@ fn command_style_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
             trimmed.to_owned()
         }
     } else {
-        value
+        value.to_owned()
     };
-    let items: Vec<v8::Local<v8::Value>> = [text, data]
-        .iter()
-        .map(|t| v8::String::new(scope, t).map_or_else(|| v8::undefined(scope).into(), Into::into))
-        .collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+    (text, data)
 }
 
 // (…an element of the local name `tag`, ASCII case-insensitively, in any namespace: the tags the commands compare)
@@ -275,68 +442,137 @@ fn tag_is(arena: &RealmArena, id: NodeId, tag: &str) -> bool {
     arena.get(id).is_some_and(|n| n.kind == NodeKind::Element && (*n.local_name).eq_ignore_ascii_case(tag))
 }
 
-// Where the selection goes after a command: left where it is, collapsed at a place, or around a node.
+// Where the selection goes after a command: left where it is, collapsed at a place, around a node; or collapsed at a
+// place after an edit that moved its range already, so the change is one to announce however the collapse finds it.
 enum Caret {
     Keep,
     At(NodeId, u32),
     Around(NodeId, u32, NodeId, u32),
+    Moved(NodeId, u32),
 }
 
-// __dom.editCommand(hostNid, anchorNid, anchorOffset, focusNid, focusOffset, command, value, steps) -> [fire, caret…,
-// styled, nodes…, copies, changes…], or undefined for a command it does not know or a selection out of the host: the
-// edit of `command` (its name ASCII lowercased, `value` its argument: a link's URL, a span's `style`) in the editing
-// host `host` over the selection's range — whether the bindings fire `input` for it; where the selection goes (0 left,
-// 1 collapsed: node, offset, 2 around: node, offset, node, offset); the elements whose CSS the bindings set (the block
-// to align, the block whose style is cleared); then, as `editInsert` answers them, the elements it copied (none) and
-// the changes of children it made.
+// __dom.editCommand(hostNid, anchorNid, anchorOffset, focusNid, focusOffset, command, value, documentNid, steps) -> [fire,
+// data, alignment, caret, place…, styled, nodes…, copies, changes…], or undefined for a command it does not know or a
+// selection out of the host: the edit of `command` (`value` its argument) in the editing host `host` over the selection —
+// whether the bindings fire `input` for it, with what `data`; the `text-align` they give the elements it answers ('' to
+// clear their style); where the selection goes (`Caret`: 0 left, 1 collapsed: node, offset, 2 around: node, offset, node,
+// offset, 3 collapsed, a change to announce: node, offset); the elements whose CSS the bindings set; then, as `editInsert`
+// answers them, the elements it copied and the changes of children it made.
+//
+// The commands of the plain text kinds — text, a deletion, a break, a cut and a paste — say whether anything went in or
+// came out, and answer the same for a selection nowhere they can edit: `input` is fired where it did and none where it
+// did not, true all the same (Chrome): text the selection's deletion for none, a cut's `input` only where it deleted, a
+// paste's whatever it held (Chrome). Every other is the edit of the selection's range, in the editing host it is in.
 fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(host), Some(anchor), Some(focus)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1), crate::dom::nid_arg(scope, &args, 3)) else { return };
     let (ao, fo) = (args.get(2).uint32_value(scope).unwrap_or(0), args.get(4).uint32_value(scope).unwrap_or(0));
-    let command = args.get(5).to_rust_string_lossy(scope);
+    let Some(&(canonical, _, _, action)) = command(&args.get(5).to_rust_string_lossy(scope)) else { return };
     let value = crate::dom::utf16_arg(scope, args.get(6));
-    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(7)) else { return };
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(8)) else { return };
     let caller = crate::dom::realm_id(scope, &args);
     let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
     crate::cloning::begin_clone(scope);
     let steps = v8::Local::new(scope, steps);
-    // (…its range as the selection's in the editing host it is in — its anchor's, the focus clamped to it, nothing
-    // selected in a comment: editing.rs `selection_host` — where `host` is the anchor's root editable element (a
-    // `contenteditable=true` nested in an editable one edits in its own, the outer root firing `input`); a selection of
-    // another host's, or none, edits nothing: Chrome)
-    let arena = realm(scope, cid);
-    let Some((host, range)) = crate::editing::selection_host(arena, (anchor, ao), (focus, fo)).filter(|_| arena.editing_root(anchor) == Some(host)) else { return };
+    let (a, f) = ((anchor, ao), (focus, fo));
+    let (mut fire, mut data, mut align, mut caret, mut styled) = (false, None, "", Caret::Keep, Vec::new());
     let (mut changes, mut copies, mut held) = (Vec::new(), Vec::new(), Vec::new());
-    let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
-    let done = match command.as_str() {
-        "insertorderedlist" => list(scope, &mut edit, range.0, "ol"),
-        "insertunorderedlist" => list(scope, &mut edit, range.0, "ul"),
-        "bold" => wrap(scope, &mut edit, range, "b", None, None),
-        "italic" => wrap(scope, &mut edit, range, "i", None, None),
-        "underline" => wrap(scope, &mut edit, range, "u", None, None),
-        "strikethrough" => wrap(scope, &mut edit, range, "strike", None, None),
-        "superscript" => wrap(scope, &mut edit, range, "sup", Some("sub"), None),
-        "subscript" => wrap(scope, &mut edit, range, "sub", Some("sup"), None),
-        "createlink" => wrap(scope, &mut edit, range, "a", None, Some(("href", &value[..]))),
-        "span" => wrap(scope, &mut edit, range, "span", None, Some(("style", &value[..])).filter(|_| !value.is_empty())),
-        "justify" => justify(scope, &mut edit, range.0),
-        "removeformat" => {
-            let block = selection_block(realm(scope, cid), host, range.0, true);
-            Some((true, Caret::Keep, block.filter(|&b| b != host).into_iter().collect()))
+    match action {
+        Action::Text | Action::Paste | Action::LineBreak | Action::Paragraph if !(action == Action::Text && value.is_empty()) => {
+            let kind = match action {
+                Action::LineBreak => crate::editing_insert::LINE_BREAK,
+                Action::Paragraph => crate::editing_insert::PARAGRAPH,
+                _ => crate::editing_insert::TEXT,
+            };
+            if let Some(made) = crate::editing_insert::insertion(scope, caller, steps, a, f, kind, &value) {
+                fire = true;
+                caret = made.caret.map_or(Caret::Keep, |(node, offset)| Caret::Moved(node, offset));
+                (changes, copies, held) = (made.changes, made.copies, made.held);
+            }
+            fire |= action == Action::Paste;
+            if action == Action::Text {
+                data = Some(value);
+            }
         }
-        "indent" => indent(scope, &mut edit, range.0),
-        "outdent" => outdent(scope, &mut edit, range.0),
-        "unlink" => unlink(scope, &mut edit, range),
-        "inserthorizontalrule" => horizontal_rule(scope, &mut edit, range),
-        _ => return,
-    };
-    // (…where a copy's shadow root threw, what it changed answered all the same, the selection kept, for the bindings to
-    // finish before they throw it: `takeCloneException`)
-    let (fire, caret, styled) = match done {
-        Some(done) => done,
-        None if crate::dom::dom(scope).clone_exception.is_some() => (false, Caret::Keep, Vec::new()),
-        None => return,
-    };
-    let mut out: Vec<v8::Local<'_, v8::Value>> = vec![v8::Boolean::new(scope, fire).into()];
+        Action::Delete | Action::ForwardDelete | Action::Text | Action::Cut => {
+            // (…of a selection, where these two ask one: `execCommand('insertText', false, '')` at a caret, none)
+            let selection_only = matches!(action, Action::Text | Action::Cut);
+            if !(selection_only && a == f) {
+                if let Some((_, place, made)) = crate::editing_delete::deletion(scope, &args, steps, a, f, action == Action::ForwardDelete, false) {
+                    fire = true;
+                    caret = Caret::Moved(place.0, place.1);
+                    changes = made;
+                }
+            }
+            if action == Action::Text {
+                data = Some(value);
+            }
+        }
+        _ => {
+            // (…its range as the selection's in the editing host it is in — its anchor's, the focus clamped to it, nothing
+            // selected in a comment: editing.rs `selection_host` — where `host` is the anchor's root editable element (a
+            // `contenteditable=true` nested in an editable one edits in its own, the outer root firing `input`); a selection
+            // of another host's, or none, edits nothing: Chrome)
+            let arena = realm(scope, cid);
+            let Some((host, range)) = crate::editing::selection_host(arena, a, f).filter(|_| arena.editing_root(anchor) == Some(host)) else { return };
+            let mut edit = Edit { cid, caller, steps, host, changes: &mut changes, copies: &mut copies, held: &mut held };
+            let value_text = String::from_utf16_lossy(&value);
+            let done = match action {
+                Action::Style(property) => {
+                    let quirks = crate::dom::quirks_arg(scope, &args, 7);
+                    let (style, reported) = command_style(scope, cid, quirks, property, &value_text);
+                    data = Some(reported.encode_utf16().collect());
+                    // (…a value that styles nothing makes no span: the `input` alone where it would have styled the
+                    // selection — none for a caret, as a value that styles fires none there: Chrome)
+                    if style.is_empty() {
+                        Some((range.0 != range.1, Caret::Keep, Vec::new()))
+                    } else {
+                        let units: Vec<u16> = style.encode_utf16().collect();
+                        wrap(scope, &mut edit, range, "span", None, Some(("style", &units[..])))
+                    }
+                }
+                Action::Align(alignment) => {
+                    align = alignment;
+                    justify(scope, &mut edit, range.0)
+                }
+                Action::RemoveFormat => {
+                    let block = selection_block(realm(scope, cid), host, range.0, true);
+                    Some((true, Caret::Keep, block.filter(|&b| b != host).into_iter().collect()))
+                }
+                Action::Link => {
+                    data = Some(value.clone());
+                    wrap(scope, &mut edit, range, "a", None, Some(("href", &value[..])))
+                }
+                Action::Edit => match canonical {
+                    "insertorderedlist" => list(scope, &mut edit, range.0, "ol"),
+                    "insertunorderedlist" => list(scope, &mut edit, range.0, "ul"),
+                    "bold" => wrap(scope, &mut edit, range, "b", None, None),
+                    "italic" => wrap(scope, &mut edit, range, "i", None, None),
+                    "underline" => wrap(scope, &mut edit, range, "u", None, None),
+                    "strikethrough" => wrap(scope, &mut edit, range, "strike", None, None),
+                    "superscript" => wrap(scope, &mut edit, range, "sup", Some("sub"), None),
+                    "subscript" => wrap(scope, &mut edit, range, "sub", Some("sup"), None),
+                    "indent" => indent(scope, &mut edit, range.0),
+                    "outdent" => outdent(scope, &mut edit, range.0),
+                    "unlink" => unlink(scope, &mut edit, range),
+                    "inserthorizontalrule" => horizontal_rule(scope, &mut edit, range),
+                    _ => return,
+                },
+                _ => return,
+            };
+            // (…where a copy's shadow root threw, what it changed answered all the same, the selection kept, for the
+            // bindings to finish before they throw it: `takeCloneException`)
+            (fire, caret, styled) = match done {
+                Some(done) => done,
+                None if crate::dom::dom(scope).clone_exception.is_some() => (false, Caret::Keep, Vec::new()),
+                None => return,
+            };
+        }
+    }
+    let mut out: Vec<v8::Local<'_, v8::Value>> = vec![
+        v8::Boolean::new(scope, fire).into(),
+        data_value(scope, data.as_deref()),
+        str_value(scope, align),
+    ];
     let places: Vec<(NodeId, u32)> = match caret {
         Caret::Keep => {
             out.push(v8::Integer::new(scope, 0).into());
@@ -349,6 +585,10 @@ fn edit_command(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         Caret::Around(a, ao, b, bo) => {
             out.push(v8::Integer::new(scope, 2).into());
             vec![(a, ao), (b, bo)]
+        }
+        Caret::Moved(node, offset) => {
+            out.push(v8::Integer::new(scope, 3).into());
+            vec![(node, offset)]
         }
     };
     for (node, offset) in places {
@@ -601,4 +841,92 @@ fn horizontal_rule<'s>(scope: &mut v8::PinScope<'s, '_>, edit: &mut Edit<'s, '_>
     edit.insert(scope, parent, &[rule], before)?;
     let at = realm(scope, edit.cid).child_index(rule) as u32 + 1;
     Some((true, Caret::At(parent, at), Vec::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dom::NodeData;
+    use crate::text_selection::{Direction, TYPE_AT_SELECTION, TYPED_VALUE};
+    use web_atoms::ns;
+
+    fn u(s: &str) -> Vec<u16> {
+        s.encode_utf16().collect()
+    }
+
+    #[test]
+    fn a_plan_says_what_goes_round_the_edit() {
+        // (…a script's edit fires `input` alone, a user's cut and paste a cancelable beforeinput too)
+        assert_eq!(plan_flags(STEP_CONTROL, Action::Text, ASKED_BY_SCRIPT), 0);
+        assert_eq!(plan_flags(STEP_HOST, Action::Cut, SCRIPT_AFTER_EVENT), PLAN_WRITE_SELECTION);
+        assert_eq!(plan_flags(STEP_HOST, Action::Cut, GESTURE_AFTER_EVENT), PLAN_WRITE_SELECTION | PLAN_BEFORE_INPUT);
+        assert_eq!(plan_flags(STEP_CONTROL, Action::Paste, GESTURE_AFTER_EVENT), PLAN_BEFORE_INPUT);
+        assert_eq!(plan_flags(STEP_HOST, Action::Paste, GESTURE_AFTER_EVENT), PLAN_BEFORE_INPUT | PLAN_PASTE_TRANSFER);
+        assert_eq!(plan_flags(STEP_HOST, Action::Paste, SCRIPT_AFTER_EVENT), PLAN_PASTE_TRANSFER);
+        assert_eq!(plan_flags(STEP_CONTROL, Action::Html, ASKED_BY_SCRIPT), PLAN_MARKUP_TEXT);
+        assert_eq!(plan_flags(STEP_HOST, Action::Html, ASKED_BY_SCRIPT), 0);
+    }
+
+    fn control(arena: &mut RealmArena, tag: &str, value: &str) -> NodeId {
+        let mut n = NodeData::of_kind(NodeKind::Element, Vec::new());
+        n.local_name = tag.into();
+        n.ns = ns!(html);
+        let id = arena.create(n, None);
+        arena.write_live_value(id, Some(u(value).into_boxed_slice()));
+        id
+    }
+
+    #[test]
+    fn a_control_edit_says_whether_input_fires() {
+        let mut arena = RealmArena::default();
+        let arena = &mut arena;
+        let ta = control(arena, "textarea", "hello");
+        let at = TYPE_AT_SELECTION;
+        arena.set_text_selection(ta, 1, 1, Direction::None);
+        // (…text: what went in, nothing at a caret firing none)
+        let e = control_command(arena, ta, Action::Text, "insertText", &u("x"), at);
+        assert_eq!((e.fire, e.data, e.changed & TYPED_VALUE != 0), (true, Some(u("x")), true));
+        let e = control_command(arena, ta, Action::Text, "insertText", &[], at);
+        assert_eq!((e.fire, e.data), (false, Some(Vec::new())));
+        // (…and nothing over a selection firing all the same)
+        arena.set_text_selection(ta, 0, 2, Direction::None);
+        let e = control_command(arena, ta, Action::Text, "insertText", &[], at);
+        assert_eq!((e.fire, e.data), (true, Some(Vec::new())));
+        // (…a cut no data, a paste what went in; markup's text as a textarea takes it)
+        arena.set_text_selection(ta, 0, 1, Direction::None);
+        let e = control_command(arena, ta, Action::Cut, "deleteByCut", &[], at);
+        assert_eq!((e.fire, e.data), (true, None));
+        let e = control_command(arena, ta, Action::Paste, "insertFromPaste", &u("p"), at);
+        assert_eq!((e.fire, e.data), (true, Some(u("p"))));
+        let e = control_command(arena, ta, Action::Paste, "insertFromPaste", &[], at);
+        assert_eq!((e.fire, e.data), (true, None));
+        let e = control_command(arena, ta, Action::Html, "", &u("m"), at);
+        assert_eq!((e.fire, e.data, e.input_type), (true, None, ""));
+        // (…a line break: `data` none, into a textarea)
+        let e = control_command(arena, ta, Action::LineBreak, "insertLineBreak", &[], at);
+        assert_eq!((e.fire, e.data), (true, None));
+        let line = control(arena, "input", "ab");
+        let e = control_command(arena, line, Action::LineBreak, "insertLineBreak", &[], at);
+        assert_eq!((e.fire, e.changed), (false, 0));
+        // (…markup's text as an input takes it: `insertText`, none for nothing at a caret)
+        let e = control_command(arena, line, Action::Html, "", &[], at);
+        assert_eq!((e.fire, e.input_type), (false, "insertText"));
+        let e = control_command(arena, line, Action::Html, "", &u("q"), at);
+        assert_eq!((e.fire, e.data, e.input_type), (true, Some(u("q")), "insertText"));
+        // (…a deletion fires only where the value changed)
+        arena.set_text_selection(line, 0, 0, Direction::None);
+        let e = control_command(arena, line, Action::Delete, "deleteContentBackward", &[], at);
+        assert_eq!((e.fire, e.data), (false, None));
+    }
+
+    #[test]
+    fn a_password_gives_a_clipboard_nothing() {
+        let mut arena = RealmArena::default();
+        let arena = &mut arena;
+        let plain = control(arena, "input", "secret");
+        arena.set_text_selection(plain, 0, 3, Direction::None);
+        assert_eq!(arena.selected_text(plain).as_deref(), Some("sec"));
+        arena.set_text_selection(plain, 2, 2, Direction::None);
+        assert_eq!(arena.selected_text(plain), None);
+    }
 }
