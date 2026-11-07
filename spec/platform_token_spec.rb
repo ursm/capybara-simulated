@@ -6,8 +6,7 @@ require_relative 'support/every_host_local'
 # object's [[Prototype]] is a page's to change, and a `super(…)` through it would hand the page's function what `super` was
 # given. As an event interface's, an interface's class is flat: chained to the one it inherits by its [[Prototype]]s alone, so
 # nothing of a page's in that chain is called, with the token or at all, and `new` works whatever is put there — Chrome's and
-# Firefox's `Object.setPrototypeOf(X, null); new X` do. (A node's chain, whose objects a `super()` makes natively, stays as it
-# was: nothing of it passes the token.)
+# Firefox's `Object.setPrototypeOf(X, null); new X` do. A node's too: `extends` has it inherit, no constructor of it calls `super`.
 RSpec.describe 'the platform\'s token for its own constructions' do
   let(:app) {
     lambda {|env|
@@ -163,6 +162,9 @@ RSpec.describe 'the platform\'s token for its own constructions' do
         MutationObserver: (arg) => [() => { log.push('no'); }],
         KeyframeEffect: (arg) => [null, [], { get duration() { log.push('arg'); return 1; } }],
         Animation: (arg) => [null, document.timeline],
+        Text: (arg) => [arg],
+        Comment: (arg) => [arg],
+        ProcessingInstruction: () => [{ toString() { log.push('arg'); return 'x'; } }, 'd'],
         Option: (arg) => [arg],
         Image: (arg) => [arg],
         Audio: (arg) => [arg]
@@ -188,6 +190,98 @@ RSpec.describe 'the platform\'s token for its own constructions' do
     # (…MutationObserver's and Animation's arguments no user code: its `prototype` read once)
     expect(got.to_h.reject {|name, _| %w[MutationObserver Animation].include?(name) }.values.uniq).to eq(['arg>proto'])
     expect(got.to_h.values_at('MutationObserver', 'Animation')).to eq(%w[proto proto])
+  end
+
+  # (…the interfaces of a node's chain, with what a page does that makes an object of each: Chrome and Firefox make them all)
+  [
+    ['null', 'null'],
+    ['a function', 'function () { window.called.push(arguments.length); return {}; }']
+  ].each do |what, parent|
+    it "makes a node's object with #{what} as its interface's [[Prototype]]", :every_host_local do
+      session.visit('https://a.test/')
+      session.execute_script(<<~JS)
+        window.called = [];
+        const chain = ['EventTarget', 'Node', 'CharacterData', 'Text', 'CDATASection', 'Comment', 'ProcessingInstruction', 'Attr', 'DocumentType',
+          'Element', 'HTMLElement', 'HTMLMediaElement', 'HTMLAudioElement', 'HTMLDivElement', 'HTMLFormElement', 'HTMLInputElement', 'HTMLUnknownElement',
+          'SVGElement', 'MathMLElement', 'DocumentFragment', 'ShadowRoot', 'Document', 'XMLDocument', 'AbstractRange', 'Range', 'NodeList', 'RadioNodeList'];
+        class Custom extends HTMLElement {}
+        customElements.define('x-custom', Custom);
+        for (const name of chain) Object.setPrototypeOf(window[name], #{parent});
+      JS
+      got = session.evaluate_script(<<~JS)
+        (() => {
+          const form = document.createElement('form');
+          form.innerHTML = '<input type=radio name=r><input type=radio name=r>';
+          const xml = () => document.implementation.createDocument(null, null);
+          return Object.fromEntries(Object.entries({
+            createDocument: () => Object.prototype.toString.call(xml()),
+            createHTMLDocument: () => document.implementation.createHTMLDocument('t').title,
+            newDocument: () => new Document().nodeType,
+            cloneNode: () => document.getElementById('p').cloneNode(true).textContent,
+            cloneDocument: () => xml().cloneNode(true).nodeType,
+            createElement: () => document.createElement('div').localName,
+            createElementNS: () => document.createElementNS('http://www.w3.org/2000/svg', 'g').localName,
+            unknown: () => document.createElement('nope').localName,
+            innerHTML: () => { const d = document.createElement('div'); d.innerHTML = '<b>x</b>y<!--z-->'; return d.childNodes.length; },
+            audio: () => new Audio().localName,
+            shadow: () => document.createElement('div').attachShadow({mode: 'open'}).nodeType,
+            radio: () => form.elements.namedItem('r').length,
+            text: () => new Text('t').data,
+            comment: () => new Comment('c').data,
+            fragment: () => new DocumentFragment().nodeType,
+            cdata: () => xml().createCDATASection('c').nodeType,
+            processingInstruction: () => new ProcessingInstruction('p', 'd').target,
+            attribute: () => document.createAttribute('a').name,
+            doctype: () => document.implementation.createDocumentType('d', '', '').name,
+            range: () => new Range().collapsed,
+            custom: () => document.createElement('x-custom').localName,
+            newCustom: () => new (customElements.get('x-custom'))().localName
+          }).map(([name, make]) => { try { return [name, make()]; } catch (e) { return [name, String(e)]; } }));
+        })()
+      JS
+      expect(got).to eq(
+        'createDocument'        => '[object XMLDocument]',
+        'createHTMLDocument'    => 't',
+        'newDocument'           => 9,
+        'cloneNode'             => 'x',
+        'cloneDocument'         => 9,
+        'createElement'         => 'div',
+        'createElementNS'       => 'g',
+        'unknown'               => 'nope',
+        'innerHTML'             => 3,
+        'audio'                 => 'audio',
+        'shadow'                => 11,
+        'radio'                 => 2,
+        'text'                  => 't',
+        'comment'               => 'c',
+        'fragment'              => 11,
+        'cdata'                 => 4,
+        'processingInstruction' => 'p',
+        'attribute'             => 'a',
+        'doctype'               => 'd',
+        'range'                 => true,
+        'custom'                => 'x-custom',
+        'newCustom'             => 'x-custom'
+      )
+      expect(session.evaluate_script('window.called')).to eq([])
+    end
+  end
+
+  # Web IDL's constructor steps: "If I was not declared with a constructor operation, then throw a TypeError." Whatever NewTarget is.
+  it 'has no constructor of an interface with none make an object for a subclass', :every_host_local do
+    session.visit('https://a.test/')
+    got = session.evaluate_script(<<~JS)
+      ['Node', 'CharacterData', 'AbstractRange', 'StyleSheet', 'CSSStyleDeclaration', 'HTMLCollection', 'NodeList', 'Lock', 'History'].filter((name) => {
+        function Other() {}
+        try {
+          Reflect.construct(window[name], [], Other);
+          return true;
+        } catch (e) {
+          return !(e instanceof TypeError);
+        }
+      })
+    JS
+    expect(got).to eq([])
   end
 
   it 'answers a class without `new` and with another NewTarget as a class does', :every_host_local do
