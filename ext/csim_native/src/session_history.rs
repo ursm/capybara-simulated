@@ -857,10 +857,13 @@ impl Traversable {
 
     // Its top-level navigable's document made anew — the page's, a window's — whose frames are new navigables: the nested
     // histories the document state kept from before none of them, though they still count their steps.
+    // (…and a traversal its document planned gone with that document's plan — a flush's let go as the navigation it ran
+    // before commits: none of its navigables traversing)
     fn rebuilt(&mut self) {
         self.version += 1;
         self.build += 1;
         self.state.held.clear();
+        self.end_traversal();
     }
 
     // HTML "destroy a child navigable": navigable `nav`'s nested history removed from its parent's document state — its
@@ -1527,6 +1530,20 @@ mod tests {
         let id = h.id;
         drop(h);
         assert_eq!(opener_policy_of(id), Value::UnsafeNone);
+    }
+
+    // A traversal planned of a document made anew since — its plan gone with it — leaves no navigable traversing: a
+    // navigation of the page asked after is planned.
+    #[test]
+    fn a_document_made_anew_ends_the_traversals_it_planned() {
+        let h = history();
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
+        h.lock().begin_traversal(TOP);
+        h.lock().begin_traversal(1);
+        assert!(h.lock().traversing(TOP));
+        h.rebuilt();
+        assert!(!h.lock().traversing(TOP) && !h.lock().traversing(1));
+        assert_ne!(h.ongoing_navigation(TOP), Some(TRAVERSAL));
     }
 
     // A page's flush marks the traversals queued before it — those after it that move the page within its documents let
