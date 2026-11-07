@@ -67,6 +67,28 @@ RSpec.describe "a node's steps, by the realm they are of" do
     )
   end
 
+  # …a removed frame's node too, kept by the parent: its realm's steps are the ones it was made with, gone frame or not.
+  it "makes a removed frame's kept node's objects, from a parent's member" do
+    session.visit '/'
+    expect(session.evaluate_script("document.getElementById('fr').contentDocument.body.textContent")).to eq('frame')
+    session.execute_script(<<~JS)
+      const fd = document.getElementById('fr').contentDocument;
+      window.kd = fd.createElement('div');
+      fd.body.append(kd);
+      window.kfd = fd;
+      document.getElementById('fr').remove();
+    JS
+    expect(session.evaluate_script(<<~JS)).to eq(['<div><b>z</b></div>', 'z', 't', 'P'])
+      (() => {
+        Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML').set.call(kd, '<b>z</b>');
+        const r = [Node.prototype.cloneNode.call(kd, true).outerHTML, kd.textContent];
+        Object.getOwnPropertyDescriptor(Node.prototype, 'textContent').set.call(kd, 't');
+        r.push(kd.textContent, Document.prototype.createElement.call(kfd, 'p').localName.toUpperCase());
+        return r;
+      })()
+    JS
+  end
+
   it "focuses a frame's autofocus candidate in the frame" do
     session.visit '/af'
     expect(session).to have_css('#out', text: '[')
