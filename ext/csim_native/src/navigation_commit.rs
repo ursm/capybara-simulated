@@ -95,8 +95,9 @@ pub(crate) struct Commit {
     // on the traversal queue behind it, where each returns: "If targetNavigable's active session history entry is not
     // targetEntry, then return".
     began: Option<crate::session_history::Kept>,
-    // Whether it holds the page's traversals behind it (`SessionHistory::begin_page_traversal`), to let go as it ends.
-    holds: bool,
+    // The token of its hold of the page's traversals behind it (`SessionHistory::begin_page_traversal`), let go as it
+    // ends — or as the host is done with it (`NavigationFetch#close`).
+    holds: Option<u64>,
     // Whether it ended: once, whatever asks again.
     ended: bool,
 }
@@ -116,7 +117,7 @@ impl Commit {
             to_get: false,
             leaving_origin,
             began: None,
-            holds: false,
+            holds: None,
             ended: false,
         }
     }
@@ -248,10 +249,11 @@ impl Commit {
 }
 
 impl Commit {
-    // …the page's traversals it held let go (`holds`): as it ends, or is dropped unended (a failure of the host's).
-    fn let_go(&mut self) {
-        if std::mem::take(&mut self.holds) {
-            self.history.end_page_traversal();
+    // …the page's traversals it held let go (`holds`): as it ends, as the host is done with it (another navigation ended
+    // it, a failure of the host's), or as it is dropped — its own hold alone, never one a later traversal took.
+    pub(crate) fn let_go(&mut self) {
+        if let Some(token) = self.holds.take() {
+            self.history.end_page_traversal(token);
         }
     }
 }
@@ -375,12 +377,25 @@ mod tests {
         let b = history.record_page_entry("http://a.test/b".into(), false, Data::default()).unwrap();
         history.go_to(0);
         let mut c = commit(&history, Handling::Traverse(1, b), "http://a.test/b");
-        assert!(!history.begin_page_traversal());
+        assert_eq!(history.begin_page_traversal(), None);
         c.end(&Step::None, false);
-        assert!(history.begin_page_traversal());
-        history.end_page_traversal();
+        let token = history.begin_page_traversal().unwrap();
+        history.end_page_traversal(token);
         drop(commit(&history, Handling::Traverse(1, b), "http://a.test/b"));
-        assert!(history.begin_page_traversal());
+        assert!(history.begin_page_traversal().is_some());
+    }
+
+    #[test]
+    fn a_stale_commit_lets_go_of_no_hold_but_its_own() {
+        let history = page();
+        let b = history.record_page_entry("http://a.test/b".into(), false, Data::default()).unwrap();
+        let mut stale = commit(&history, Handling::Traverse(1, b), "http://a.test/b");
+        stale.let_go();
+        let later = commit(&history, Handling::Traverse(1, b), "http://a.test/b");
+        drop(stale);
+        assert_eq!(history.begin_page_traversal(), None);
+        drop(later);
+        assert!(history.begin_page_traversal().is_some());
     }
 
     #[test]

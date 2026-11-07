@@ -12985,6 +12985,8 @@ module Capybara
           @restoring_history_state = @session_history.entry(@session_history.active(0))[:state] if replay
           commit_page_navigation(fetch, step, hop, document, blob, initiator)
         ensure
+          # (…what it holds let go however it ended: another navigation ending it, a failure of this host's)
+          fetch.close
           @restoring_history_state = nil
           @navigating = prior_navigating
           note_url_changes

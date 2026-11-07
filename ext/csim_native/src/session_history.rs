@@ -272,7 +272,7 @@ struct Traversable {
     // …and whether a traversal of the page is under way, its document being made (navigation_commit.rs): those queued
     // meanwhile wait behind it, as HTML's session history traversal queue runs its steps one after another — each
     // judged from the step the one before it went to ("traverse the history by a delta": currentStepIndex as it runs).
-    page_traversal: bool,
+    page_traversal: Option<u64>,
     // How many same-document updates — pushState, replaceState, a fragment's — its navigables made (`update`): what a
     // traversal judges the history it began with by (`Kept`).
     same_document: u64,
@@ -423,7 +423,8 @@ struct Queued {
     source: u64,
     replaces: bool,
     // Whether it was queued behind a traversal of the page whose document was being made (`page_traversal`), which it
-    // is judged after, from the step that one goes to: what the document made anew keeps (`#clear_queued`).
+    // is judged after, from the step that one goes to: what the document made anew keeps (`#clear_queued`) — the first
+    // of a document's that makes the page's document again winning, as for any (`take_due`).
     behind: bool,
 }
 #[cfg(test)]
@@ -845,7 +846,7 @@ impl Traversable {
         let documents = changes.iter().any(|&(_, _, same)| !same);
         let replaces = changes.iter().any(|&(nav, _, same)| nav == TOP && !same);
         let source = self.state.current_entry(TOP, self.build).map_or(0, |e| e.doc);
-        self.queued.push(Queued { token, delta, documents, source, replaces, behind: self.page_traversal });
+        self.queued.push(Queued { token, delta, documents, source, replaces, behind: self.page_traversal.is_some() });
         (token, if documents { 0 } else { 1 })
     }
     // …those queued up to and with the one of `token`, taken off the queue to be applied in order: none where it is not
@@ -1232,13 +1233,22 @@ impl SessionHistory {
         let mut t = self.lock();
         t.queued.retain_mut(|q| std::mem::take(&mut q.behind));
     }
-    // A traversal of the page under way (`page_traversal`) — none where one already is — and over.
-    pub(crate) fn begin_page_traversal(&self) -> bool {
+    // A traversal of the page under way (`page_traversal`): the token of its hold — none where another holds them — and
+    // over, by the holder of that token alone.
+    pub(crate) fn begin_page_traversal(&self) -> Option<u64> {
         let mut t = self.lock();
-        !std::mem::replace(&mut t.page_traversal, true)
+        if t.page_traversal.is_some() {
+            return None;
+        }
+        t.tokens += 1;
+        t.page_traversal = Some(t.tokens);
+        t.page_traversal
     }
-    pub(crate) fn end_page_traversal(&self) {
-        self.lock().page_traversal = false;
+    pub(crate) fn end_page_traversal(&self, token: u64) {
+        let mut t = self.lock();
+        if t.page_traversal == Some(token) {
+            t.page_traversal = None;
+        }
     }
     // A replaceState of the page's document (`Traversable::update`), which the tests make.
     #[cfg(test)]
@@ -1388,7 +1398,7 @@ impl SessionHistory {
         t.opener_policy = crate::coop::Value::UnsafeNone;
         t.queued.clear();
         t.flush_mark = None;
-        (t.holding, t.planned_for_host, t.page_traversal) = (false, false, false);
+        (t.holding, t.planned_for_host, t.page_traversal) = (false, false, None);
         asking(&mut t, |t| t.asked = Asked::default());
     }
     // #session_storage = shed: its session storage's (`session_storage`), its Browser's.
@@ -2395,7 +2405,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     // `javascript:` URL's document its script asked them before, which goes first — both browsers make the document,
     // then traverse: browser.rb `commit_javascript_document`)
     let plan = &crate::dom::realm(scope, top).navigation_plan;
-    if plan.traversal_waiting() || plan.javascript_document_planned() || lock(&traversable).holding || lock(&traversable).page_traversal {
+    if plan.traversal_waiting() || plan.javascript_document_planned() || lock(&traversable).holding || lock(&traversable).page_traversal.is_some() {
         let items = [v8::Integer::new(scope, top).into(), v8::Boolean::new(scope, false).into(), v8::Array::new(scope, 0).into()];
         return rv.set(v8::Array::new_with_elements(scope, &items).into());
     }

@@ -637,6 +637,11 @@ impl NavigationFetch {
         rb_self.ended(ruby, step)
     }
 
+    // #close: the host done with it, whatever became of it — another navigation ended it, the host failed in it — what it
+    // holds let go (`Commit::let_go`).
+    fn close(&self) {
+        self.commit_with(Commit::let_go);
+    }
     fn commit_with(&self, f: impl FnOnce(&mut Commit)) {
         if let Some(commit) = self.commit.borrow_mut().as_mut() {
             f(commit);
@@ -695,6 +700,7 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("begin_commit", method!(NavigationFetch::begin_commit, 0))?;
     class.define_method("blob_commit", method!(NavigationFetch::blob_commit, 2))?;
     class.define_method("response_commit", method!(NavigationFetch::response_commit, 1))?;
+    class.define_method("close", method!(NavigationFetch::close, 0))?;
     Ok(())
 }
 

@@ -236,6 +236,34 @@ RSpec.describe 'a navigation whose server takes its time', :every_host_local do
     expect(session.evaluate_script('location.pathname')).to eq('/slow')
   end
 
+  # (…the first of them alone where it makes the page's document again: that document's later ones let go with it, as
+  # for any traversals a document asks for in one task — WPT traverse_the_history_1, `go(-2); go(-1)` opening page 2
+  # alone, Chrome and Firefox alike)
+  it "runs the first of a document's traversals asked for as one was awaited, from the step it went to" do
+    [['history.back(); history.back()', '/b'], ['history.go(-2); history.go(1)', '/a']].each do |script, at|
+      session.visit('http://a.test/a')
+      session.visit('http://a.test/b')
+      session.visit('http://a.test/slowc')
+      session.visit('http://a.test/d')
+      session.execute_script("setTimeout(() => { #{script} }, 30)")
+      session.go_back
+      expect(poll_until { session.evaluate_script('location.pathname') == at }).to be(true), script
+    end
+  end
+
+  # (…and lets go of them as it is ended — a location navigation begun as it was awaited — that page's own traversals
+  # going on at once)
+  it "lets go of the page's traversals as another navigation ends it" do
+    session.visit('http://a.test/a')
+    session.visit('http://a.test/slowb')
+    session.go_back
+    session.execute_script("setTimeout(() => { location = '/c' }, 30)")
+    session.go_forward
+    expect(poll_until { session.evaluate_script('location.pathname') == '/c' }).to be(true)
+    session.execute_script('history.back()')
+    expect(poll_until { session.evaluate_script('location.pathname') == '/a' }).to be(true)
+  end
+
   # (…and the driver's URL its document's at once: what the document it left moved through as the response was awaited
   # none of the intermediates a polling `current_url` walks)
   it "reports its document's URL, none the left document moved through as it was awaited" do
