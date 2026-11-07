@@ -163,3 +163,52 @@ RSpec.describe 'a navigation into the scope of an activating service worker', :e
     session.within_window(session.windows.last) { expect(session).to have_title('FROM-SW') }
   end
 end
+
+# …a traversal's too, whose step is applied only as the entry's document is made (HTML "apply the history step"): one a
+# navigation replaced while it waited left the history where it was, the replacing one's entry after the page's.
+RSpec.describe 'a traversal into the scope of an activating service worker', :every_host_local, :https do
+  include PollUntil
+
+  let(:session) do
+    simulated_session(lambda {|env|
+      html = ->(body) { [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8>#{body}"]] }
+      case env['PATH_INFO']
+      when '/sw.js'
+        [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+          self.addEventListener('install', () => self.skipWaiting());
+          self.addEventListener('activate', (e) => e.waitUntil(new Promise(() => {})));
+          self.addEventListener('fetch', (e) => {
+            if (new URL(e.request.url).pathname.startsWith('/sw/')) {
+              e.respondWith(new Response('<!doctype html><title>FROM-SW</title>', {headers: {'content-type': 'text/html'}}));
+            }
+          });
+        JS
+      when '/reg'
+        html.(<<~HTML)
+          <title>reg</title>
+          <script>
+            navigator.serviceWorker.register('/sw.js', {scope: '/sw/'}).then((r) => {
+              const worker = r.installing || r.waiting || r.active;
+              const seen = () => { if (worker.state === 'activating') document.title = 'activating'; };
+              seen();
+              worker.addEventListener('statechange', seen);
+            });
+          </script>
+        HTML
+      else html.("<title>NET#{env['PATH_INFO']}</title>")
+      end
+    })
+  end
+
+  it 'leaves the history where it was when a navigation replaced it' do
+    session.visit 'https://a.test/sw/x'
+    session.visit 'https://a.test/reg'
+    expect(poll_until { session.evaluate_script('document.title') == 'activating' }).to be(true)
+    session.go_back
+    expect(session.title).to eq('activating')
+    session.visit 'https://a.test/second'
+    expect(session.evaluate_script('history.length')).to eq(3)
+    session.go_back
+    expect(session.current_url).to eq('https://a.test/reg')
+  end
+end

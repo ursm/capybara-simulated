@@ -9,9 +9,14 @@ require_relative 'support/every_host_local'
 # ("finalize a cross-document navigation") — a traversal brings back the one its entry had, a window `window.open` named
 # has it from its first document on, and the name a script gives it is the one a later `window.open` finds it by.
 RSpec.describe 'a top-level window’s name', :every_host_local do
+  let(:moved) { [] }
   let(:session) {
+    moved = self.moved
     simulated_session(lambda {|env|
-      req  = Rack::Request.new(env)
+      req = Rack::Request.new(env)
+      # (…a page that has moved to another origin since it was first reached: a reload of it redirected there)
+      next [302, {'location' => 'http://b.test/next'}, []] if req.path == '/moved' && !(moved << req.path).one?
+
       body = "<!DOCTYPE html><body>#{req.host}#{req.path}<a id=same href=/next>same</a><a id=away href=http://b.test/next>away</a>"
       body = "<!DOCTYPE html><script>top.location.href = 'about:blank'</script>" if req.path == '/to-blank'
       [200, {'content-type' => 'text/html'}, [body]]
@@ -85,6 +90,17 @@ RSpec.describe 'a top-level window’s name', :every_host_local do
     JS
     expect(session).to have_current_path('about:blank', url: true)
     expect(name).to eq('')
+  end
+
+  # (…and by a reload whose document is of another origin than the one its entry's was — its classic history API state
+  # with it: HTML "apply the history step", afterDocumentPopulated, `oldOrigin`)
+  it 'is cleared by a reload that makes a document of another origin, its history state with it' do
+    session.visit 'http://a.test/moved'
+    session.execute_script("window.name = 'n'; history.replaceState('s', '')")
+    session.refresh
+    expect(session.current_url).to eq('http://b.test/next')
+    expect(name).to eq('')
+    expect(session.evaluate_script('history.state')).to be_nil
   end
 
   it 'is the one its entry had, after a traversal' do

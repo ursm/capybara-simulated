@@ -104,6 +104,8 @@ RSpec.describe 'the blob URL store' do
   # …its document an entry of the session history as any is: back leaves it, forward returns to its URL (Chrome; the
   # document there is the blob's where the URL still resolves — here the page that made it went with the back, revoking
   # it, where Chrome's back-forward cache keeps that page).
+  # (…its blob with it: the URL record a session history entry keeps keeps its blob URL entry, resolved as it was parsed
+  # (URL parser) — a traversal back to it, its maker's document gone since and its URLs with it, fetches that blob again)
   it "keeps a blob URL's document in the session history" do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><p id=h>home</p>']] })
     s.visit '/'
@@ -114,6 +116,7 @@ RSpec.describe 'the blob URL store' do
     expect(s).to have_css('#h')
     s.go_forward
     expect(s).to have_current_path(u, url: true)
+    expect(s).to have_css('#b')
   end
 
   # A redirect to a blob: URL is a network error (Fetch's HTTP-redirect fetch: a location URL of no HTTP(S) scheme),

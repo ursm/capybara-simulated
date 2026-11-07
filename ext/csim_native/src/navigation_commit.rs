@@ -1,51 +1,45 @@
-// What a navigation of the page's document does to its top-level traversable's session history as it goes, and what it
-// comes to (HTML "navigate", "finalize a cross-document navigation", "apply the history step"): the history kept as it
-// begins, its entry made — pushed after the current one, or in its place — or none (a reload's, a traversal's, a window
-// at its initial about:blank going to about:blank: that document is left the initial one); whether the request its
-// entry's document is reached by was cross-site and the redirect it is made by (navigation_fetch.rs, hop by hop); and,
-// as it ends, its navigable's target name cleared where its document is of another origin than the one it leaves — or,
-// none made (a 204, a download, a hand-off, another navigation begun meanwhile), the history as it stood. Each answer
-// a `Step` the host takes: what it makes — the document of a response, of about:blank, of a blob, an error document,
-// a viewer's — or that it makes none. The host has the transport, the blobs and the documents; the decisions are here.
+// What a navigation of the page's document comes to, and what it does to its top-level traversable's session history
+// (HTML "navigate", "finalize a cross-document navigation", "apply the history step"). Nothing until it makes a
+// document: what its request is reached by — the redirects it is made by, whether its cookies were cross-site
+// (navigation_fetch.rs, hop by hop) — is kept here, and only the document it makes changes the history: its entry
+// pushed after the current one or put in its place — none of about:blank in a window of no entry yet, which such a
+// navigation leaves the initial one — or, a reload's and a traversal's, the entry it goes to applied then; the entry the
+// leaving document is at noted, which takes its controls' state as it unloads; and its navigable's target name cleared
+// where its document is of another origin than the one before it. A navigation that makes none — a 204, a download, a
+// hand-off, one another navigation ended meanwhile, one the host failed in — leaves the history as it is, the page's
+// `history.length` and the step the same all along (Chrome and Firefox: `history.length` read during a slow
+// navigation's fetch is the one before it, measured 2026-11-08). Each answer a `Step` the host takes: what it makes —
+// the document of a response, of about:blank, of a blob, an error document, a viewer's — or that it makes none. The
+// host has the transport, the blobs and the documents; the decisions are here.
 
 use crate::referrer::http_origin;
 use crate::session_history::{Data, SessionHistory};
 
 // How the navigation is of the session history (HTML's "history handling" and the navigation API's navigation type): a
-// new entry after the current one, one in its place, a reload of the active one, a traversal to one — the step applied
-// by the traversal itself as it began (`#begin_page_traversal`).
+// new entry after the current one, one in its place, a reload of the active one, a traversal to a step.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Handling {
     Push,
     Replace,
     Reload,
-    Traverse,
+    Traverse(i64),
 }
 
 impl Handling {
-    pub(crate) fn named(name: &str) -> Option<Self> {
-        Some(match name {
-            "push" => Self::Push,
-            "replace" => Self::Replace,
-            "reload" => Self::Reload,
-            "traverse" => Self::Traverse,
+    // …by its name, a traversal's of its step `step`.
+    pub(crate) fn named(name: &str, step: Option<i64>) -> Option<Self> {
+        Some(match (name, step) {
+            ("push", _) => Self::Push,
+            ("replace", _) => Self::Replace,
+            ("reload", _) => Self::Reload,
+            ("traverse", Some(step)) => Self::Traverse(step),
             _ => return None,
         })
     }
     // A reload or a traversal: the entry it goes to an entry already made, which it makes the document of again.
     fn replays(self) -> bool {
-        matches!(self, Self::Reload | Self::Traverse)
+        matches!(self, Self::Reload | Self::Traverse(_))
     }
-}
-
-// The document a navigation leaves, by what its target name is cleared by: a window's initial about:blank no creator
-// made (a `noopener` window's: its origin, its creator's, not known here — Chrome and Firefox leave its name), one of an
-// opaque origin (never the same as another), or one of a tuple origin, serialized.
-#[derive(Debug, PartialEq, Eq)]
-enum Leaving {
-    Initial,
-    Opaque,
-    Origin(String),
 }
 
 // What the host makes of the navigation, its history done with as it says (`Commit`).
@@ -73,17 +67,30 @@ pub(crate) enum Step {
     Document(Option<(String, Vec<u8>)>),
 }
 
+impl Step {
+    // Whether it makes a document.
+    fn makes_document(&self) -> bool {
+        !matches!(self, Step::Fetch | Step::Blob | Step::None | Step::Download(..))
+    }
+}
+
 pub(crate) struct Commit {
     history: SessionHistory,
     handling: Handling,
-    // The entry it makes (HTML's document state: what a replay of it sends and restores), taken as it is made.
-    data: Option<Data>,
+    // The URL its document is at, a redirect's (`redirected`); the entry it makes (HTML's document state: what a replay
+    // of it sends and restores) — none of a replay's — what its redirects and its hops made it; whether a redirect made its
+    // request a GET, which a replay's entry then sends no POST of again.
+    url: String,
+    start: &'static str,
+    data: Data,
+    redirected: bool,
+    to_get: bool,
+    // The origin of the document it leaves, serialized (`null` an opaque one's, never the same as another's) — a
+    // window's initial about:blank's its creator's, none where no creator made it: a `noopener` window's, whose origin
+    // is not known here, its target name left as it is (Chrome and Firefox).
     leaving_origin: Option<String>,
-    leaving: Leaving,
-    // The entry its document is of: its own (`own`), or the one a reload or a traversal goes to; none for a window's
-    // initial about:blank left so.
-    entry: Option<u64>,
-    own: bool,
+    // Whether it ended: once, whatever asks again.
+    ended: bool,
 }
 
 impl Commit {
@@ -91,88 +98,128 @@ impl Commit {
     // of the document it leaves, serialized (`null` an opaque one's) — a window's initial about:blank's its creator's,
     // none where no creator made it.
     pub(crate) fn new(history: SessionHistory, handling: Handling, data: Option<Data>, leaving_origin: Option<String>) -> Self {
-        Commit { history, handling, data, leaving_origin, leaving: Leaving::Initial, entry: None, own: false }
+        Commit {
+            history,
+            handling,
+            url: String::new(),
+            start: "fetch",
+            data: data.unwrap_or_default(),
+            redirected: false,
+            to_get: false,
+            leaving_origin,
+            ended: false,
+        }
     }
 
-    // …begun, its URL `url` making it `start` (navigation_fetch.rs `start`): the history kept, and the entry made — none
-    // of about:blank's in a window of no entry yet (its initial about:blank, which such a navigation leaves the initial
-    // one: HTML "navigate", "replace" history handling) — or the one it replays found.
-    pub(crate) fn begin(&mut self, url: &str, start: &str) {
-        let leaves = !self.handling.replays();
-        // (…a traversal's history kept as it began: `#begin_page_traversal`)
-        let active = if self.handling == Handling::Traverse { self.history.active(0) } else { self.history.begin_page_navigation(leaves) };
-        if !leaves {
-            self.entry = active;
-            return;
-        }
-        // (…a window at its initial about:blank, of no entry, leaving the origin of its creator: none where none is known)
-        self.leaving = match self.leaving_origin.take() {
-            Some(origin) if origin != "null" => Leaving::Origin(origin),
-            _ if active.is_none() => Leaving::Initial,
-            _ => Leaving::Opaque,
-        };
-        if start == "about_blank" && active.is_none() {
-            return;
-        }
-        let data = self.data.take().unwrap_or_default();
-        self.entry = self.history.record_page_entry(url.to_owned(), self.handling == Handling::Replace, data);
-        self.own = self.entry.is_some();
+    // …begun at `url`, which makes it `start` (navigation_fetch.rs `start`).
+    pub(crate) fn begin(&mut self, url: &str, start: &'static str) {
+        url.clone_into(&mut self.url);
+        self.start = start;
     }
 
     // A hop begun, its cookies `cross` site or not: the request its own entry's document is reached by, which a reload
     // of it through a user interface element is judged by (RFC 6265bis §5.2) — a replay's left as the navigation that
     // made the entry had it.
-    pub(crate) fn crossed(&self, cross: bool) {
-        if let Some(id) = self.entry.filter(|_| self.own) {
-            self.history.set_cross_site_of(id, cross);
-        }
+    pub(crate) fn crossed(&mut self, cross: bool) {
+        self.data.set_cross_site(cross);
     }
 
-    // A redirect followed to `url`, the request now a GET or not (`get`): the entry the redirect's
-    // (`SessionHistory::redirect_entry`).
-    pub(crate) fn redirected(&self, url: &str, get: bool) {
-        if let Some(id) = self.entry {
-            self.history.redirect_entry(id, url, get);
+    // A redirect followed to `url`, the request now a GET or not (`get`): its entry's URL the redirect's, and — `get` —
+    // none of what a re-post sends again: so a reload gets the page it was redirected to, not the chain run again, a
+    // Post/Redirect/Get page's not the form submitted again (Chrome).
+    pub(crate) fn redirected(&mut self, url: &str, get: bool) {
+        url.clone_into(&mut self.url);
+        self.redirected = true;
+        self.to_get |= get;
+    }
+
+    // The entry a replay goes to: a reload's the active one, a traversal's the one its step gives.
+    fn replayed(&self) -> Option<u64> {
+        match self.handling {
+            Handling::Reload => self.history.active(0),
+            Handling::Traverse(step) => self.history.entry_at_step(step),
+            Handling::Push | Handling::Replace => None,
         }
     }
 
     // The opener policy a document of a local scheme it makes takes (about:blank's, a blob's): a replay's the one its
-    // entry kept (HTML's history policy container), else the one `inherited` gives (coop.rs `inherited`), kept by its
-    // entry for one.
-    pub(crate) fn local_policy<E>(&self, inherited: impl FnOnce() -> Result<String, E>) -> Result<String, E> {
-        if self.handling.replays() {
-            let kept = self.entry.and_then(|id| self.history.text_of(id, "opener_policy"));
-            return Ok(kept.unwrap_or_else(|| "unsafe-none".to_owned()));
-        }
-        let policy = inherited()?;
-        if let Some(id) = self.entry.filter(|_| self.own) {
-            self.history.set_text_of(id, "opener_policy", policy.clone());
-        }
-        Ok(policy)
+    // entry kept (HTML's history policy container) — none of another's, which takes the one the document that made the
+    // navigation has (coop.rs `inherited`), kept by the entry it makes (`keep_policy`).
+    pub(crate) fn replayed_policy(&self) -> Option<String> {
+        self.handling.replays().then(|| self.replayed().and_then(|id| self.history.text_of(id, "opener_policy")).unwrap_or_else(|| "unsafe-none".to_owned()))
+    }
+    pub(crate) fn keep_policy(&mut self, policy: &str) {
+        self.data.set_text("opener_policy", policy.to_owned());
+    }
+    // …and the blob of a `blob:` URL's document, of type `given`, which the entry it makes keeps (`Data::blob`).
+    pub(crate) fn keep_blob(&mut self, bytes: std::sync::Arc<[u8]>, given: &str) {
+        self.data.set_blob(bytes, given);
     }
 
-    // …ended, at `url`, in `step`: no document's the history given back as it stood; a document's its navigable's target
-    // name cleared where that document's origin (`step`'s, at `url`) is another than the one it leaves (HTML "finalize a
-    // cross-document navigation" — a replay's left as its entry has it).
-    pub(crate) fn end(&self, url: &str, step: &Step) {
-        let origin = match step {
-            Step::Fetch | Step::Blob => return,
-            Step::None | Step::Download(..) => return self.history.end_page_navigation(false),
-            Step::Error | Step::Inline(..) | Step::Document(Some(_)) => None,
-            Step::AboutBlank(origin, _) => origin.clone(),
-            Step::BlobDocument(..) => blob_origin(url),
-            Step::Document(None) => http_origin(url),
-        };
-        self.history.end_page_navigation(true);
-        if self.handling.replays() {
+    // …ended, at `url`, in `step`, its document's origin a new opaque one where `sandboxed` (its response's
+    // Content-Security-Policy `sandbox`): a document's committed to the session history (`commit`), no document's
+    // changing none of it.
+    pub(crate) fn end(&mut self, step: &Step, sandboxed: bool) {
+        if self.ended || !step.makes_document() {
+            self.ended |= !matches!(step, Step::Fetch | Step::Blob);
             return;
         }
-        let same = match &self.leaving {
-            Leaving::Initial => true,
-            Leaving::Opaque => false,
-            Leaving::Origin(leaving) => origin.as_ref() == Some(leaving),
+        self.ended = true;
+        let origin = match step {
+            _ if sandboxed => None,
+            Step::AboutBlank(origin, _) => origin.clone(),
+            Step::BlobDocument(..) => blob_origin(&self.url),
+            Step::Document(None) => http_origin(&self.url),
+            _ => None,
         };
-        if !same {
+        self.commit(origin);
+    }
+
+    // The document it made, of origin `origin` (none an opaque one): its entry pushed or put in place of the active one
+    // — none of about:blank in a window of no entry — or the one a replay goes to the step's (HTML "apply the history
+    // step"), its URL a redirect's; the entry the page's document leaves noted (a reload's none: its document is the
+    // entry's own); the origin its document state is of kept; and the navigable's target name — and a replay's
+    // classic history API state too — cleared where that origin is not the one before it: the document it leaves, for an
+    // entry made (HTML "finalize a cross-document navigation"), the one its entry's document was of, for a replay (HTML
+    // "apply the history step", afterDocumentPopulated, `oldOrigin`).
+    fn commit(&mut self, origin: Option<String>) {
+        let active = self.history.active(0);
+        let doc_origin = origin.clone().unwrap_or_else(|| "null".to_owned());
+        let same = |before: Option<&str>| before.is_some_and(|b| b != "null" && origin.as_deref() == Some(b));
+        if self.handling.replays() {
+            let Some(id) = self.replayed() else { return };
+            if let Handling::Traverse(step) = self.handling {
+                self.history.set_leaving(active);
+                self.history.go_to(step);
+            } else {
+                self.history.set_leaving(None);
+            }
+            if self.redirected {
+                self.history.redirect_entry(id, &self.url, self.to_get);
+            }
+            let before = self.history.text_of(id, "document_origin");
+            if before.is_some() && !same(before.as_deref()) {
+                self.history.clear_name();
+                self.history.forget_state_of(id);
+            }
+            self.history.set_text_of(id, "document_origin", doc_origin);
+            return;
+        }
+        self.history.set_leaving(active);
+        let initial = active.is_none();
+        let kept = match self.leaving_origin.as_deref() {
+            None if initial => true,
+            before => same(before),
+        };
+        if !(self.start == "about_blank" && initial) {
+            let mut data = std::mem::take(&mut self.data);
+            if self.to_get {
+                data.forget_request();
+            }
+            data.set_text("document_origin", doc_origin);
+            self.history.record_page_entry(self.url.clone(), self.handling == Handling::Replace, data);
+        }
+        if !kept {
             self.history.clear_name();
         }
     }
@@ -187,57 +234,100 @@ fn blob_origin(url: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn committed(handling: Handling, leaving: Option<&str>, url: &str, step: Step) -> (SessionHistory, Commit) {
+    fn page() -> SessionHistory {
         let history = SessionHistory::new();
-        history.record_page_entry("http://a.test/".into(), false, Data::default());
+        let mut data = Data::default();
+        data.set_text("document_origin", "http://a.test".into());
+        history.record_page_entry("http://a.test/".into(), false, data);
         history.set_name("kept".into());
-        let mut commit = Commit::new(SessionHistory::of(history.id()).unwrap(), handling, Some(Data::default()), leaving.map(str::to_owned));
+        history
+    }
+
+    fn commit(history: &SessionHistory, handling: Handling, url: &str) -> Commit {
+        let mut commit = Commit::new(SessionHistory::of(history.id()).unwrap(), handling, Some(Data::default()), Some("http://a.test".into()));
         commit.begin(url, "fetch");
-        commit.end(url, &step);
-        (history, commit)
+        commit
     }
 
     #[test]
-    fn a_push_adds_an_entry_and_no_document_gives_the_history_back() {
-        let (history, _) = committed(Handling::Push, Some("http://a.test"), "http://a.test/b", Step::Document(None));
+    fn its_entry_is_made_as_its_document_is_and_none_without_one() {
+        let history = page();
+        let mut c = commit(&history, Handling::Push, "http://a.test/b");
+        assert_eq!(history.length(), 1);
+        c.end(&Step::Document(None), false);
         assert_eq!(history.length(), 2);
-        let (history, _) = committed(Handling::Push, Some("http://a.test"), "http://a.test/b", Step::None);
+        let history = page();
+        commit(&history, Handling::Push, "http://a.test/b").end(&Step::None, false);
         assert_eq!(history.length(), 1);
         assert_eq!(history.url(history.active(0).unwrap()).as_deref(), Some("http://a.test/"));
     }
 
     #[test]
+    fn it_ends_once() {
+        let history = page();
+        let mut c = commit(&history, Handling::Push, "http://a.test/b");
+        c.end(&Step::None, false);
+        c.end(&Step::Document(None), false);
+        assert_eq!(history.length(), 1);
+    }
+
+    #[test]
     fn a_document_of_another_origin_clears_the_target_name() {
-        let (history, _) = committed(Handling::Push, Some("http://a.test"), "http://a.test/b", Step::Document(None));
-        assert_eq!(history.name(), "kept");
-        let (history, _) = committed(Handling::Push, Some("http://a.test"), "http://b.test/", Step::Document(None));
+        for (url, step, sandboxed, name) in [
+            ("http://a.test/b", Step::Document(None), false, "kept"),
+            ("http://a.test/b", Step::Document(None), true, ""),
+            ("http://b.test/", Step::Document(None), false, ""),
+            ("http://a.test/e", Step::Error, false, ""),
+            ("about:blank", Step::AboutBlank(None, "unsafe-none".into()), false, ""),
+            ("blob:http://a.test/x", Step::BlobDocument("text/html".into(), "unsafe-none".into()), false, "kept"),
+        ] {
+            let history = page();
+            commit(&history, Handling::Push, url).end(&step, sandboxed);
+            assert_eq!(history.name(), name, "{url}");
+        }
+    }
+
+    #[test]
+    fn a_replay_of_another_origin_clears_the_name_and_the_state() {
+        let history = page();
+        let id = history.active(0).unwrap();
+        let mut c = commit(&history, Handling::Reload, "http://a.test/");
+        c.redirected("http://b.test/", true);
+        c.end(&Step::Document(None), false);
         assert_eq!(history.name(), "");
-        let (history, _) = committed(Handling::Push, Some("http://a.test"), "http://a.test/e", Step::Error);
-        assert_eq!(history.name(), "");
-        // (…an about:blank of an opaque initiator's of no tuple origin: another than any)
-        let (history, _) = committed(Handling::Push, Some("http://a.test"), "about:blank", Step::AboutBlank(None, "unsafe-none".into()));
-        assert_eq!(history.name(), "");
-        let (history, _) = committed(Handling::Push, Some("http://a.test"), "blob:http://a.test/x", Step::BlobDocument("text/html".into(), "unsafe-none".into()));
-        assert_eq!(history.name(), "kept");
-        // (…a replay's left as its entry has it)
-        let (history, _) = committed(Handling::Reload, Some("http://a.test"), "http://b.test/", Step::Document(None));
+        assert_eq!(history.url(id).as_deref(), Some("http://b.test/"));
+        assert_eq!(history.text_of(id, "document_origin").as_deref(), Some("http://b.test"));
+        let history = page();
+        commit(&history, Handling::Reload, "http://a.test/").end(&Step::Document(None), false);
         assert_eq!(history.name(), "kept");
     }
 
     #[test]
     fn a_redirect_makes_the_entry_its_own() {
         let history = SessionHistory::new();
-        let mut commit = Commit::new(SessionHistory::of(history.id()).unwrap(), Handling::Push, Some(Data::default()), None);
-        commit.begin("http://a.test/form", "fetch");
-        commit.redirected("http://a.test/done", true);
+        let mut c = Commit::new(SessionHistory::of(history.id()).unwrap(), Handling::Push, Some(Data::default()), None);
+        c.begin("http://a.test/form", "fetch");
+        c.redirected("http://a.test/done", true);
+        c.end(&Step::Document(None), false);
         assert_eq!(history.url(history.active(0).unwrap()).as_deref(), Some("http://a.test/done"));
     }
 
     #[test]
     fn about_blank_in_a_window_of_no_entry_makes_none() {
         let history = SessionHistory::new();
-        let mut commit = Commit::new(SessionHistory::of(history.id()).unwrap(), Handling::Push, Some(Data::default()), None);
-        commit.begin("about:blank", "about_blank");
+        let mut c = Commit::new(SessionHistory::of(history.id()).unwrap(), Handling::Push, Some(Data::default()), None);
+        c.begin("about:blank", "about_blank");
+        c.end(&Step::AboutBlank(None, "unsafe-none".into()), false);
         assert_eq!(history.active(0), None);
+    }
+
+    #[test]
+    fn a_traversal_goes_to_its_step_only_as_it_makes_a_document() {
+        let history = page();
+        history.record_page_entry("http://a.test/b".into(), false, Data::default());
+        commit(&history, Handling::Traverse(0), "http://a.test/").end(&Step::None, false);
+        assert_eq!(history.url(history.active(0).unwrap()).as_deref(), Some("http://a.test/b"));
+        commit(&history, Handling::Traverse(0), "http://a.test/").end(&Step::Document(None), false);
+        assert_eq!(history.url(history.active(0).unwrap()).as_deref(), Some("http://a.test/"));
     }
 }

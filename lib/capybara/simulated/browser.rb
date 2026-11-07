@@ -2508,11 +2508,10 @@ module Capybara
         end
         step, changes = plan
         if (page = changes&.find {|nav, _, same_document| nav.zero? && !same_document })
-          # (…the history as it stood kept, for an entry whose response now makes no document — a download, a 204 —
-          # which leaves the page at the document it is at, and its step with it: navigation_commit.rs)
-          @session_history.begin_page_traversal(step)
-          replay_history_entry(page[1])
-          restore_form_state(page[1])
+          # (…the step applied as the entry's document is made — none where its response now makes none, a download's, a
+          # 204's, which leaves the page at the document it is at and its step with it: navigation_commit.rs)
+          replay_history_entry(page[1], step: step)
+          restore_form_state(page[1]) if @session_history.active(0) == page[1]
           restore_flushed_nav_intents
           return
         end
@@ -2546,7 +2545,7 @@ module Capybara
         # response making none, a 204's, a download's: `frame_navigation_made_no_document` — which then leaves the frames
         # and the step where they were; one whose others' are made applies, the frame whose is not staying at its own
         # document, as HTML "apply the history step" has it)
-        history.save(1)
+        history.save
         @traversing_frames = {none: []}
         at     = frames.to_h {|nav, _, _| [nav, history.active(nav)] }
         before = history.step
@@ -2554,9 +2553,9 @@ module Capybara
         changes.each {|nav, id, same_document| traverse_same_document(history, nav, id, top: top) if same_document }
         frames.each {|_, id, realm| reload_frame_to_entry(realm, history.entry(id)) if realm && @runtime.frame_realm_alive?(realm) }
         if changes.all? {|_, _, same_document| !same_document } && @traversing_frames[:none].size == frames.size
-          history.restore(1)
+          history.restore
         else
-          history.forget(1)
+          history.forget
           frames.each {|nav, _, realm| history.hold(nav, at[nav], before) if at[nav] && @traversing_frames[:none].include?(realm) }
         end
       ensure
@@ -2643,28 +2642,28 @@ module Capybara
       # client the page's document all the same, by whose origin its redirect-taint is walked (`navigate_top_level`): the
       # same step of HTML's, the navigable's active document's source snapshot params, "as if navigable navigated
       # itself".)
-      def replay_history_entry(id, is_reload: false, user_activated: false, through_ui: false)
+      # (…`step` a traversal's, the step it goes to)
+      def replay_history_entry(id, step: nil, is_reload: false, user_activated: false, through_ui: false)
         return unless id
 
         entry    = @session_history.entry(id)
         by_page  = is_reload && !through_ui
         made     = by_page ? {initiator: realm_creator_url(0), **initiating_document(0)} : {initiator: nil}
         reloaded = {reloaded_cross_site: (entry[:cross_site] if is_reload && through_ui)}
-        @restoring_history_state = entry[:state]
         # (…a traversal referred as the entry's document's request was, HTML's document state, and a POST's re-post too,
         # under the policy it was first sent under; a GET's reload by the document reloading, under its policy — Chrome,
         # measured: `location.reload()` sends the page's own URL, a re-posted `no-referrer` form none)
         # (…an entry reached by a POST keeps its body)
         referred = is_reload && !entry[:body] ? {} : {referer: entry[:referer], referrer_policy: entry[:referrer_policy]}
-        handling = is_reload ? 'reload' : 'traverse'
+        handling = {history_handling: is_reload ? 'reload' : 'traverse', history_step: step}
+        # (…a `blob:` URL's document's the blob its entry kept, revoked since or not: navigation_commit.rs `keep_blob`)
+        kept, type = @session_history.blob(id)
         if entry[:body]
-          navigate_post(entry[:url], entry[:body], entry[:content_type], history_handling: handling, origin: (entry[:origin] unless by_page),
+          navigate_post(entry[:url], entry[:body], entry[:content_type], **handling, origin: (entry[:origin] unless by_page),
                                                                          user_activated: user_activated, **made, **referred, **reloaded)
         else
-          navigate(entry[:url], history_handling: handling, user_activated: user_activated, **made, **referred, **reloaded)
+          navigate(entry[:url], **handling, blob: kept && {bytes: kept, type: type}, user_activated: user_activated, **made, **referred, **reloaded)
         end
-      ensure
-        @restoring_history_state = nil
       end
       def active_element_handle
         tick_real_time
@@ -3631,6 +3630,7 @@ module Capybara
         body,
         content_type,
         history_handling: 'push',
+        history_step: nil,
         referer: page_url,
         referrer_policy: nil,
         initiator: page_url,
@@ -3649,6 +3649,7 @@ module Capybara
           referer:                       referer,
           referrer_policy:               referrer_policy,
           history_handling:              history_handling,
+          history_step:                  history_step,
           initiator:                     initiator,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
@@ -11103,7 +11104,7 @@ module Capybara
       # origin, policy container and opener policy, no browsing context group left; its own referrer none, of no request
       # (Chrome keeps the last, Firefox none), its classic history state none (Chrome keeps it, Firefox none), and no service
       # worker's client: "reserved environment: null", no fetch for Handle Fetch to set one (Chrome and Firefox: no controller).
-      JAVASCRIPT_DOCUMENT_ENTRY_KEEPS = %i[referer referrer_policy referrer origin cross_site opener_policy].freeze
+      JAVASCRIPT_DOCUMENT_ENTRY_KEEPS = %i[referer referrer_policy referrer origin cross_site opener_policy document_origin].freeze
       private def commit_javascript_document(url, markup)
         invalidate_find_cache
         # (…a traversal its script asked for goes on after it, the session history's queue not the document's — its task,
@@ -12774,6 +12775,7 @@ module Capybara
         referer: page_url,
         referrer_policy: nil,
         history_handling: 'push',
+        history_step: nil,
         initiator: page_url,
         origin_null: false,
         initiator_cross_site_ancestor: false,
@@ -12790,6 +12792,7 @@ module Capybara
           referer:                       referer,
           referrer_policy:               referrer_policy,
           history_handling:              history_handling,
+          history_step:                  history_step,
           initiator:                     initiator,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
@@ -12815,9 +12818,9 @@ module Capybara
       # to the network. Its redirects followed, an SW's as the network's: a POST's 307 / 308 re-POSTing, the others
       # GETting, a fragment the redirect names none of carried over.
       # What it does to the session history and what it comes to are the engine's (navigation_commit.rs, through its
-      # NavigationFetch): its entry, made as it begins and given its redirects' requests as they come, or the history as it
-      # stood where it makes no document; its navigable's target name; the document it makes — each answer a step this
-      # host takes (`commit_page_navigation`).
+      # NavigationFetch): its entry — or a replay's step — committed as it makes a document, of the request its redirects
+      # made it, the history left as it is where it makes none (a failure of this host's among them); its navigable's
+      # target name; the document it makes — each answer a step this host takes (`commit_page_navigation`).
       private def navigate_top_level(
         url,
         body,
@@ -12831,6 +12834,7 @@ module Capybara
         client_id:,
         user_activated:,
         reloaded_cross_site:,
+        history_step: nil,
         blob: nil,
         origin: nil,
         ongoing: nil
@@ -12857,6 +12861,7 @@ module Capybara
               referer:,
               referrer_policy:,
               history_handling:,
+              history_step:,
               initiator:,
               origin_null:,
               initiator_cross_site_ancestor:,
@@ -12882,6 +12887,8 @@ module Capybara
         # (…a traversal's or a user's reload's, of no initiator: `replay_history_entry` — its client the document it leaves,
         # and its top-level navigation initiator origin the one its entry's document state keeps, Fetch's step 2)
         traversed = replay && !initiator
+        # (…the entry a replay goes to: a reload's the active one, a traversal's its step's)
+        replayed = history_step ? @session_history.entry_at_step(history_step) : @session_history.active(0) if replay
         # (…the request as it is sent — a POST's body and origin, its referrer and referrer policy — what a reload or a
         # traversal refers by again, a POST's re-posts: HTML's document state; and its initiator origin, which a
         # traversal's step 2 reads: none of a user's)
@@ -12904,9 +12911,9 @@ module Capybara
           sw:                            ([true, nil] if sw_registered?),
           reloaded_cross_site:           reloaded_cross_site,
           client_origin:                 (document_origin(0) if traversed),
-          traversed_initiator:           (@session_history.entry(@session_history.active(0))[:origin] if traversed),
+          traversed_initiator:           (@session_history.entry(replayed)[:origin] if traversed),
           traversable:                   @session_history.id,
-          commit:                        {handling: history_handling, entry: entry, leaving_origin: (leaving_document_origin unless replay)}
+          commit:                        {handling: history_handling, step: history_step, entry: entry, leaving_origin: (leaving_document_origin unless replay)}
         })
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
@@ -12938,7 +12945,7 @@ module Capybara
           # as a response of it is, a PDF its viewer's: mime.rs `load`)
           if step[0] == 'blob'
             blob ||= blob_snapshot(url)
-            step = fetch.blob_commit(blob && blob[:type], blob && blob[:bytes].to_s.byteslice(0, 1445), &policy)
+            step = fetch.blob_commit(blob && blob[:type], blob && blob[:bytes].to_s, &policy)
           end
           if step[0] == 'fetch'
             # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
@@ -12967,15 +12974,18 @@ module Capybara
             # "navigate", "this will abort other ongoing navigations" — a timer's `location` with the app taking its time)
             unless navigation_mark(@session_history, 0) == awaited
               close_rack_body(hop.rack_body) unless document
-              fetch.abandon
               superseded = true
               return
             end
             @current_referer = fetch.referrer.to_s
             step = fetch.response_commit(hop.command)
           end
+          # (…a replay's document made with its entry's classic history API state — `history.state` before its scripts run,
+          # HTML "update document for history step application" — as the step left it: none where its origin changed)
+          @restoring_history_state = @session_history.entry(@session_history.active(0))[:state] if replay
           commit_page_navigation(fetch, step, hop, document, blob, initiator)
         ensure
+          @restoring_history_state = nil
           @navigating = prior_navigating
           note_url_changes
           # No document committed (a download, a raise mid-fetch) → the page that

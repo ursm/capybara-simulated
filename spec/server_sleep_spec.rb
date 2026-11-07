@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # The app's `sleep` on the driver's thread, in the middle of a request the driver made of it, as a server takes its time: the
 # page's event loop runs on meanwhile (Driver::SleepHook), as a browser's does as a response is awaited. A navigation that begins
@@ -164,5 +165,26 @@ RSpec.describe 'a server that takes its time' do
     session.execute_script("setTimeout(() => { document.title = 'paced'; }, 100)")
     sleep(0.2)
     expect(session.evaluate_script('document.title')).to eq('paced')
+  end
+end
+
+# …its entry made as its document is (HTML "finalize a cross-document navigation"): `history.length` read as the response is
+# awaited the one before it — Chrome 157 and Firefox 159, measured 2026-11-08 (~/.local/share/csim-bench/nc/probe).
+RSpec.describe 'a navigation whose server takes its time', :every_host_local do
+  include PollUntil
+
+  let(:session) {
+    simulated_session(lambda {|env|
+      sleep(0.3) if env['PATH_INFO'] == '/slow'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><title>#{env['PATH_INFO']}</title>"]]
+    })
+  }
+
+  it 'adds its session history entry only as its document is made' do
+    session.visit('http://a.test/a')
+    session.execute_script("sessionStorage.n = ''; location = '/slow'; setTimeout(() => { sessionStorage.n = history.length + ' ' + location.pathname; }, 30)")
+    expect(poll_until { session.evaluate_script('location.pathname') == '/slow' }).to be(true)
+    expect(session.evaluate_script('sessionStorage.n')).to eq('1 /a')
+    expect(session.evaluate_script('history.length')).to eq(2)
   end
 end

@@ -33,7 +33,7 @@ struct Entry {
 
 // The text fields of an entry's `Data`: the origin, Referer and referrer policy its request was sent with, and its
 // document's referrer.
-const TEXT_FIELDS: [&str; 5] = ["origin", "referer", "referrer_policy", "referrer", "opener_policy"];
+const TEXT_FIELDS: [&str; 6] = ["origin", "referer", "referrer_policy", "referrer", "opener_policy", "document_origin"];
 
 // What a replay of an entry sends and restores: how it was reached — a POST's body and content type, the origin, Referer
 // and referrer policy its request was sent with (HTML's document state), whether its cookies were cross-site (which a
@@ -48,13 +48,17 @@ pub(crate) type Post = (Arc<[u8]>, Option<String>);
 pub(crate) struct Data {
     post: Option<Post>,
     // (…by `TEXT_FIELDS`)
-    texts: [Option<String>; 5],
+    texts: [Option<String>; 6],
     cross_site: Option<bool>,
     name: Option<Vec<u16>>,
     state: Option<Arc<[u8]>>,
     form_state: Option<Arc<[u8]>>,
     // A frame's about:srcdoc document's markup: its document state's resource, what a traversal makes it of again.
     srcdoc: Option<Arc<str>>,
+    // A `blob:` URL's document's blob and its type: the one its URL record's blob URL entry resolved as it was parsed
+    // (URL parser), which a traversal or a reload of it fetches again — not the document state's, a pushState's URL of
+    // none.
+    blob: Option<(Arc<[u8]>, String)>,
 }
 
 impl Data {
@@ -126,9 +130,26 @@ impl Data {
     fn text(&self, key: &str) -> Option<&str> {
         self.texts[TEXT_FIELDS.iter().position(|&k| k == key)?].as_deref()
     }
-    fn set_text(&mut self, key: &str, value: String) {
+    pub(crate) fn set_text(&mut self, key: &str, value: String) {
         if let Some(at) = TEXT_FIELDS.iter().position(|&k| k == key) {
             self.texts[at] = Some(value);
+        }
+    }
+
+    // …the blob it is of (`blob`).
+    pub(crate) fn set_blob(&mut self, bytes: Arc<[u8]>, given: &str) {
+        self.blob = Some((bytes, given.to_owned()));
+    }
+    // …whether the request it is reached by was cross-site (`cross_site`).
+    pub(crate) fn set_cross_site(&mut self, cross: bool) {
+        self.cross_site = Some(cross);
+    }
+    // …none of what a re-post sends again — its body, the origin, Referer and referrer policy it was sent with — its request
+    // a GET from a redirect on (Fetch "HTTP-redirect fetch").
+    pub(crate) fn forget_request(&mut self) {
+        self.post = None;
+        for key in ["origin", "referer", "referrer_policy"] {
+            self.texts[TEXT_FIELDS.iter().position(|&k| k == key).unwrap_or_default()] = None;
         }
     }
 
@@ -210,13 +231,12 @@ struct Traversable {
     state: State,
     made: u64,
     build: u32,
-    // The history as it stood before a navigation that may end in no document (a download, a hand-off), by slot: the
-    // page's (0) and a traversal's of its frames (1) — and before a frame's, by the frame's navigable (`save_frame`).
-    saved: [Option<State>; 2],
+    // The history as it stood before a traversal of the page's frames that may end in no document (a download, a
+    // hand-off) — and before a frame's navigation, by the frame's navigable (`save_frame`).
+    saved: Option<State>,
     frames_saved: HashMap<u32, FrameSaved>,
-    // The page's entry a navigation of its document leaves, noted as it begins (`begin_page_navigation`,
-    // `#begin_page_traversal`), which takes that document's controls' state as it unloads (`#take_leaving`) — none once
-    // the navigation makes no document.
+    // The page's entry a navigation of its document leaves, noted as it commits another (navigation_commit.rs
+    // `set_leaving`), which takes that document's controls' state as it unloads (`#take_leaving`).
     leaving: Option<u64>,
     // Each navigable's ongoing navigation (HTML "set the ongoing navigation"), by its number — the one record of it, every
     // way a navigation begins writing it: a location, hyperlink or form navigation planned, a `javascript:` URL's
@@ -1029,6 +1049,11 @@ impl SessionHistory {
             None => Ok(ruby.hash_new()),
         }
     }
+    // #blob(entry) -> [bytes, type] of the blob its document was made of (`Data::blob`), nil for none.
+    fn blob(ruby: &magnus::Ruby, rb_self: &Self, id: Option<u64>) -> Option<(RString, String)> {
+        let blob = id.and_then(|id| rb_self.lock().state.entry(id).and_then(|e| e.data.blob.clone()))?;
+        Some((ruby.str_from_slice(&blob.0), blob.1))
+    }
     // #text(entry, name) -> its text field `name` (`TEXT_FIELDS`: :origin, :referer, :referrer_policy, :referrer), nil
     // for none — what `#entry` gives without copying its bytes out.
     fn text(ruby: &magnus::Ruby, rb_self: &Self, id: Option<u64>, name: Symbol) -> Result<Option<String>, magnus::Error> {
@@ -1171,7 +1196,7 @@ impl SessionHistory {
         self.lock().plan(delta)
     }
     // #go_to(step): the traversal to `step` applied — the step a plan gave.
-    fn go_to(&self, step: i64) {
+    pub(crate) fn go_to(&self, step: i64) {
         self.lock().go_to(step);
     }
     // #step -> the current step.
@@ -1191,43 +1216,25 @@ impl SessionHistory {
     fn rebuilt(&self) {
         self.lock().rebuilt();
     }
-    // #save(slot) / #restore(slot) -> whether there was one / #forget(slot): the history as it stands, kept for a
-    // navigation that may end in no document.
-    fn save(&self, slot: usize) {
+    // #save / #restore -> whether there was one / #forget: the history as it stands, kept for a traversal of its frames
+    // whose documents may all be made of none (browser.rb `traverse_navigables`).
+    fn save(&self) {
         let mut t = self.lock();
-        let state = t.state.clone();
-        if let Some(s) = t.saved.get_mut(slot) {
-            *s = Some(state);
-        }
+        t.saved = Some(t.state.clone());
     }
-    fn restore(&self, slot: usize) -> bool {
+    fn restore(&self) -> bool {
         let mut t = self.lock();
-        let Some(state) = t.saved.get_mut(slot).and_then(Option::take) else { return false };
+        let Some(state) = t.saved.take() else { return false };
         t.state = state;
         true
     }
-    fn forget(&self, slot: usize) {
-        if let Some(s) = self.lock().saved.get_mut(slot) {
-            *s = None;
-        }
+    fn forget(&self) {
+        self.lock().saved = None;
     }
-    // A navigation of the page's document begun (navigation_commit.rs): the history as it stands kept, for one that ends
-    // in no document — and, `leaves`, the entry that document is at noted as the one it leaves (`leaving`). The page's
-    // active entry returned, none for a window at its initial about:blank.
-    pub(crate) fn begin_page_navigation(&self, leaves: bool) -> Option<u64> {
-        let mut t = self.lock();
-        t.saved[0] = Some(t.state.clone());
-        let active = t.state.current_entry(TOP, t.build).map(|e| e.id);
-        if leaves {
-            t.leaving = active;
-        }
-        active
-    }
-    // #begin_page_traversal(step): …a traversal's to `step` that makes the page's document again (HTML "apply the history
-    // step"): the history kept, the entry it leaves noted, and the step applied.
-    fn begin_page_traversal(&self, step: i64) {
-        self.begin_page_navigation(true);
-        self.lock().go_to(step);
+    // The entry the page's document leaves as a navigation of it commits another (navigation_commit.rs), none where it
+    // leaves none — a reload's, of the same entry (`leaving`).
+    pub(crate) fn set_leaving(&self, id: Option<u64>) {
+        self.lock().leaving = id;
     }
     // …its entry, of the step after the current one or, `replace`, in place of the active one (`#push`, `#replace`).
     pub(crate) fn record_page_entry(&self, url: String, replace: bool, data: Data) -> Option<u64> {
@@ -1243,11 +1250,7 @@ impl SessionHistory {
         let Some(e) = t.state.entry_mut(id) else { return };
         url.clone_into(&mut e.url);
         if get {
-            let data = Arc::make_mut(&mut e.data);
-            data.post = None;
-            for key in ["origin", "referer", "referrer_policy"] {
-                data.texts[TEXT_FIELDS.iter().position(|&k| k == key).unwrap_or_default()] = None;
-            }
+            Arc::make_mut(&mut e.data).forget_request();
         }
         t.version += 1;
     }
@@ -1263,27 +1266,14 @@ impl SessionHistory {
             t.version += 1;
         }
     }
-    // …and whether the request it is reached by was cross-site (`cross_site`).
-    pub(crate) fn set_cross_site_of(&self, id: u64, cross: bool) {
+    // …and its classic history API state none (HTML "apply the history step": StructuredSerializeForStorage(null)).
+    pub(crate) fn forget_state_of(&self, id: u64) {
         let mut guard = self.lock();
         let t = &mut *guard;
         if let Some(e) = t.state.entry_mut(id) {
-            Arc::make_mut(&mut e.data).cross_site = Some(cross);
+            Arc::make_mut(&mut e.data).state = None;
             t.version += 1;
         }
-    }
-    // …ended: `made` a document, its history as the navigation left it; else none, its history as it stood before and its
-    // page's document leaving no entry.
-    pub(crate) fn end_page_navigation(&self, made: bool) {
-        let mut t = self.lock();
-        let saved = t.saved[0].take();
-        if made {
-            return;
-        }
-        if let Some(state) = saved {
-            t.state = state;
-        }
-        t.leaving = None;
     }
     // #take_leaving -> the entry the page's document leaves (`leaving`), taken as it unloads.
     fn take_leaving(&self) -> Option<u64> {
@@ -1322,7 +1312,8 @@ impl SessionHistory {
         t.state = State::new();
         t.url = None;
         t.passed.clear();
-        t.saved = Default::default();
+        t.saved = None;
+        t.leaving = None;
         t.frames_saved.clear();
         t.ongoing.clear();
         (t.closed, t.by_web_content, t.popup_sandbox) = (false, false, 0);
@@ -1397,7 +1388,7 @@ impl SessionHistory {
     }
     // #entry_at_step(step) -> the id of the top-level entry current at `step` (a frame's entries have steps of their own), what a
     // traversal to it reads before it is applied.
-    fn entry_at_step(&self, step: i64) -> Option<u64> {
+    pub(crate) fn entry_at_step(&self, step: i64) -> Option<u64> {
         self.lock().state.entries.iter().filter(|e| e.step <= step).max_by_key(|e| e.step).map(|e| e.id)
     }
     // #opener_policy_isolates? { [origin, top-level origin] } -> whether a window a document of it opens is opened without
@@ -1535,6 +1526,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("set_url", method!(SessionHistory::set_url, 2))?;
     class.define_method("entry", method!(SessionHistory::entry, 1))?;
     class.define_method("text", method!(SessionHistory::text, 2))?;
+    class.define_method("blob", method!(SessionHistory::blob, 1))?;
     class.define_method("update", method!(SessionHistory::update, 2))?;
     class.define_method("name", method!(SessionHistory::name, 0))?;
     class.define_method("name=", method!(SessionHistory::set_name, 1))?;
@@ -1577,10 +1569,9 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("hold", method!(SessionHistory::hold, 3))?;
     class.define_method("step", method!(SessionHistory::step, 0))?;
     class.define_method("rebuilt", method!(SessionHistory::rebuilt, 0))?;
-    class.define_method("save", method!(SessionHistory::save, 1))?;
-    class.define_method("restore", method!(SessionHistory::restore, 1))?;
-    class.define_method("forget", method!(SessionHistory::forget, 1))?;
-    class.define_method("begin_page_traversal", method!(SessionHistory::begin_page_traversal, 1))?;
+    class.define_method("save", method!(SessionHistory::save, 0))?;
+    class.define_method("restore", method!(SessionHistory::restore, 0))?;
+    class.define_method("forget", method!(SessionHistory::forget, 0))?;
     class.define_method("take_leaving", method!(SessionHistory::take_leaving, 0))?;
     class.define_method("save_frame", method!(SessionHistory::save_frame, 1))?;
     class.define_method("restore_frame", method!(SessionHistory::restore_frame, 1))?;
@@ -1842,12 +1833,12 @@ mod tests {
     fn a_saved_history_is_restored() {
         let h = history();
         let a = h.push(TOP, TOP, "/a".into(), false, Data::default()).unwrap();
-        h.save(0);
+        h.save();
         h.push(TOP, TOP, "/dl".into(), false, Data::default());
-        assert!(h.restore(0));
+        assert!(h.restore());
         assert_eq!(h.active(TOP), Some(a));
         assert_eq!(h.length(), 1);
-        assert!(!h.restore(0));
+        assert!(!h.restore());
     }
 
     // A frame's navigation that made no document gives back the history as it was where nothing else changed it — and,
@@ -1901,7 +1892,7 @@ mod tests {
     #[test]
     fn an_entry_of_the_same_document_shares_what_it_was_reached_by() {
         let h = history();
-        let reached = Data { texts: [None, Some("/r".into()), None, None, None], cross_site: Some(true), post: Some((Arc::from(&b"q=1"[..]), None)), ..Default::default() };
+        let reached = Data { texts: [None, Some("/r".into()), None, None, None, None], cross_site: Some(true), post: Some((Arc::from(&b"q=1"[..]), None)), ..Default::default() };
         h.push(TOP, TOP, "/a".into(), false, reached);
         let pushed = h.push(TOP, TOP, "/b".into(), true, Data::default()).unwrap();
         let other = h.push(TOP, TOP, "/c".into(), false, Data::default()).unwrap();
@@ -2017,10 +2008,10 @@ mod tests {
     #[test]
     fn a_saved_history_keeps_the_data_it_had() {
         let h = history();
-        let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None, None], ..Default::default() }).unwrap();
-        h.save(0);
+        let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None, None, None], ..Default::default() }).unwrap();
+        h.save();
         Arc::make_mut(&mut h.lock().state.entry_mut(a).unwrap().data).texts[1] = Some("/changed".into());
-        assert!(h.restore(0));
+        assert!(h.restore());
         assert_eq!(h.lock().state.entry(a).unwrap().data.text("referer"), Some("/r"));
     }
 }
@@ -2436,7 +2427,7 @@ fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         match how.as_str() {
             "push" | "replace" | "javascript" => {
                 // (…its document state's navigable target name the window's as its document begins: HTML keeps it there)
-                let data = Data { post, texts: [None, referrer, None, None, None], name: Some(name), ..Data::default() };
+                let data = Data { post, texts: [None, referrer, None, None, None, None], name: Some(name), ..Data::default() };
                 let replace = how != "push" && !t.state.entries.is_empty();
                 t.commit(TOP, 0, &url, false, replace, data);
                 None

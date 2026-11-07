@@ -130,6 +130,8 @@ pub(crate) struct NavigationFetch {
     coop: RefCell<Option<CoopEnforcement>>,
     // …and, the page's, what it does to its session history and what it comes to (navigation_commit.rs).
     commit: RefCell<Option<Commit>>,
+    // Whether its last response's Content-Security-Policy sandboxes the document it makes into an opaque origin.
+    sandboxed: std::cell::Cell<bool>,
 }
 
 // HTML's opener policy enforcement result as a navigation's responses come ("enforce a response's opener policy"): the
@@ -276,7 +278,7 @@ impl NavigationFetch {
     // cookies are judged by alone, Fetch's step 2; nil none), `traversable` (a top-level traversable's, by its number: the
     // opener policy of its document — session_history.rs `opener_policy_of` — is what its responses' are enforced against:
     // `response`; nil a frame's, none), `commit` (the page's navigation, of that traversable: {handling: 'push', 'replace',
-    // 'reload' or 'traverse', entry: the fields of the entry it makes — session_history.rs `Data` — leaving_origin: the
+    // 'reload' or 'traverse', step: a traversal's, entry: the fields of the entry it makes — session_history.rs `Data` — leaving_origin: the
     // origin of the document it leaves, serialized, a window's initial about:blank's its creator's, nil none} —
     // navigation_commit.rs `Commit`, `#begin_commit`; nil any other navigation).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
@@ -301,7 +303,8 @@ impl NavigationFetch {
             (Some(commit), Some(history)) => {
                 let field = |key: &str| commit.aref::<_, Value>(ruby.to_symbol(key));
                 let handling = String::try_convert(field("handling")?)?;
-                let handling = Handling::named(&handling).ok_or_else(|| Error::new(ruby.exception_arg_error(), format!("no history handling {handling}")))?;
+                let step = Option::<i64>::try_convert(field("step")?)?;
+                let handling = Handling::named(&handling, step).ok_or_else(|| Error::new(ruby.exception_arg_error(), format!("no history handling {handling}")))?;
                 let entry = Option::<RHash>::try_convert(field("entry")?)?.map(|e| crate::session_history::Data::of(ruby, e)).transpose()?;
                 Some(Commit::new(history, handling, entry, Option::<String>::try_convert(field("leaving_origin")?)?))
             }
@@ -322,6 +325,7 @@ impl NavigationFetch {
             sw: Option::<(bool, Option<String>)>::try_convert(get("sw")?)?,
             coop: RefCell::new(coop),
             commit: RefCell::new(commit),
+            sandboxed: std::cell::Cell::new(false),
             st: RefCell::new(Nav {
                 chain: RequestChain {
                     method: text("method")?.filter(|m| !m.is_empty()).map_or_else(|| "GET".to_owned(), |m| m.to_ascii_uppercase()),
@@ -364,7 +368,7 @@ impl NavigationFetch {
         let (frame_cross, cookies) = st.cookies();
         st.cross = cookies & crate::cookie_jar::CROSS_SITE != 0;
         st.cookies = cookies;
-        if let Some(commit) = rb_self.commit.borrow().as_ref() {
+        if let Some(commit) = rb_self.commit.borrow_mut().as_mut() {
             commit.crossed(st.cross);
         }
         let headers = ruby.ary_new_capa(8);
@@ -466,6 +470,7 @@ impl NavigationFetch {
         if let Some(locations) = fields.redirect_locations(status) {
             return rb_self.redirect(ruby, status, &locations, fields.referrer_policy);
         }
+        rb_self.sandboxed.set(crate::sandbox::sandboxing(fields.csp.as_deref(), None) & crate::sandbox::ORIGIN != 0);
         let outcome = if matches!(status, 204 | 205) {
             "no_content"
         } else if fields.downloads() {
@@ -510,7 +515,7 @@ impl NavigationFetch {
             Followed::Follow(from, to_get) => {
                 st.chain.refer_on(sent, policy.map(str::to_owned));
                 let new_client = http_origin(&from) != http_origin(&st.chain.target);
-                if let Some(commit) = self.commit.borrow().as_ref() {
+                if let Some(commit) = self.commit.borrow_mut().as_mut() {
                     commit.redirected(&st.chain.target, st.chain.method == "GET");
                 }
                 Ok(command(ruby, "redirect", &[to_get.into_value_with(ruby), new_client.into_value_with(ruby)]))
@@ -589,18 +594,24 @@ impl NavigationFetch {
             "fetch" => Step::Fetch,
             _ => Step::Error,
         };
-        rb_self.ended(ruby, &url, step)
+        rb_self.ended(ruby, step)
     }
-    // #blob_commit(type, head) { policy } -> what the blob of a `blob:` URL's GET makes of it, its type `type` (nil none)
-    // and its bytes beginning with `head` (mime.rs `load`) — nil none, which no store resolved: a network error.
-    fn blob_commit(ruby: &Ruby, rb_self: &Self, given: Option<String>, head: Option<RString>) -> Result<RArray, Error> {
-        let url = rb_self.target();
+    // #blob_commit(type, bytes) { policy } -> what the blob of a `blob:` URL's GET makes of it, its type `type` (nil none)
+    // and its bytes `bytes` (mime.rs `load`) — nil none, which no store resolved: a network error. The blob its document
+    // is made of kept by its entry, as the URL record a session history entry keeps keeps its blob URL entry (URL
+    // parser): what a traversal or a reload of it fetches again, revoked since or not.
+    fn blob_commit(ruby: &Ruby, rb_self: &Self, given: Option<String>, bytes: Option<RString>) -> Result<RArray, Error> {
         let given = given.unwrap_or_default();
-        let step = match head {
+        let step = match bytes {
             None => Step::Error,
-            Some(head) => {
+            Some(bytes) => {
                 // SAFETY: read at once, before anything could run Ruby code that moves or frees it.
-                let load = crate::mime::load(Some(&given).filter(|t| !t.is_empty()).map(String::as_str), unsafe { head.as_slice() });
+                let bytes = unsafe { bytes.as_slice() };
+                let load = crate::mime::load(Some(&given).filter(|t| !t.is_empty()).map(String::as_str), &bytes[..bytes.len().min(1445)]);
+                if !matches!(load, crate::mime::Load::Download) {
+                    let blob: std::sync::Arc<[u8]> = bytes.into();
+                    rb_self.commit_with(|c| c.keep_blob(blob, &given));
+                }
                 match load {
                     crate::mime::Load::Download => Step::Download(Some(given), None),
                     crate::mime::Load::Inline => Step::Inline(Some(given), Some(rb_self.local_policy(ruby)?)),
@@ -611,7 +622,7 @@ impl NavigationFetch {
                 }
             }
         };
-        rb_self.ended(ruby, &url, step)
+        rb_self.ended(ruby, step)
     }
     // #response_commit(command) -> what its last hop's `command` (`#response`'s, a sniffed one's as `Native.navigation_load`
     // decided) makes of it.
@@ -623,12 +634,7 @@ impl NavigationFetch {
             "document" => Step::Document(None),
             _ => Step::Error,
         };
-        rb_self.ended(ruby, &rb_self.target(), step)
-    }
-    // #abandon: …ended by another navigation begun as its response was awaited: no document.
-    fn abandon(&self) {
-        let url = self.target();
-        self.commit_with(|c| c.end(&url, &Step::None));
+        rb_self.ended(ruby, step)
     }
 
     fn commit_with(&self, f: impl FnOnce(&mut Commit)) {
@@ -636,17 +642,18 @@ impl NavigationFetch {
             f(commit);
         }
     }
+    // (…the host's block run with no borrow of the commit held)
     fn local_policy(&self, ruby: &Ruby) -> Result<String, Error> {
-        let inherited = || ruby.yield_value::<_, String>(ruby.qnil());
-        match self.commit.borrow().as_ref() {
-            Some(commit) => commit.local_policy(inherited),
-            None => inherited(),
+        if let Some(kept) = self.commit.borrow().as_ref().and_then(Commit::replayed_policy) {
+            return Ok(kept);
         }
+        let policy = ruby.yield_value::<_, String>(ruby.qnil())?;
+        self.commit_with(|c| c.keep_policy(&policy));
+        Ok(policy)
     }
-    fn ended(&self, ruby: &Ruby, url: &str, step: Step) -> Result<RArray, Error> {
-        if let Some(commit) = self.commit.borrow().as_ref() {
-            commit.end(url, &step);
-        }
+    fn ended(&self, ruby: &Ruby, step: Step) -> Result<RArray, Error> {
+        let sandboxed = self.sandboxed.get() && matches!(step, Step::Document(None));
+        self.commit_with(|c| c.end(&step, sandboxed));
         Ok(step_for_ruby(ruby, step))
     }
 }
@@ -688,7 +695,6 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("begin_commit", method!(NavigationFetch::begin_commit, 0))?;
     class.define_method("blob_commit", method!(NavigationFetch::blob_commit, 2))?;
     class.define_method("response_commit", method!(NavigationFetch::response_commit, 1))?;
-    class.define_method("abandon", method!(NavigationFetch::abandon, 0))?;
     Ok(())
 }
 
@@ -749,6 +755,7 @@ mod tests {
             st: RefCell::new(st),
             coop: RefCell::new(None),
             commit: RefCell::new(None),
+            sandboxed: std::cell::Cell::new(false),
         };
         let header = |headers: &[(&str, Vec<u8>)], name: &str| headers.iter().find(|(n, _)| *n == name).map(|(_, v)| String::from_utf8_lossy(v).into_owned());
         let mut st = nav("POST", "http://a.test/form#frag", "http://a.test/page#x");
@@ -794,6 +801,7 @@ mod tests {
             st: RefCell::new(nav("GET", "http://a.test/", "")),
             coop: RefCell::new(None),
             commit: RefCell::new(None),
+            sandboxed: std::cell::Cell::new(false),
         };
         assert_eq!(fetch(None).sw_site("http://a.test/x"), None);
         // (…a top-level navigable's matched in each hop URL's site; a frame's in its top-level site)
