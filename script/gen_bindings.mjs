@@ -744,7 +744,7 @@ const REFLECTION = [
 ];
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'PlainObject', 'NO_ARGUMENTS', 'reflectConstruct', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'createObject', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -1834,7 +1834,7 @@ function installInterface(def, { shell, body, statics, unforgeables, checks, uns
 }
 
 // An interface's class, of a `shell`: what `install<Name>` puts its members on (see `shell` above). No `super` makes its object
-// (`class extends Object` makes it none before its body): webidl.js `reflectConstruct`.
+// (`class extends Object` makes it none before its body): webidl.js `createObject`.
 function shellClass(def, constructors) {
   const name = def.name;
   if (constructors.length > 1) throw new Error(`${name}: an overloaded constructor of a shell is not generated yet`);
@@ -1849,9 +1849,9 @@ function shellClass(def, constructors) {
   const lines = [`export function define${name}(${def.inheritance ? 'Parent, ' : ''}impl) {`];
   lines.push(`  registerInterface('${name}', (o) => slotsOf(o, '${name}') !== undefined);`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
-  // (…its object made after its arguments are converted: webidl.js `reflectConstruct`; `slots.owner` what it answers, a Proxy
+  // (…its object made after its arguments are converted: webidl.js `createObject`; `slots.owner` what it answers, a Proxy
   // of it where its `init` made one)
-  const made = [`      const slots = makeSlots(reflectConstruct(PlainObject, NO_ARGUMENTS, new.target), '${chain[0]}');`];
+  const made = [`      const slots = makeSlots(createObject(new.target), '${chain[0]}');`];
   for (const n of chain.slice(1)) made.push(`      slots.${n} = true;`);
   lines.push(`  const ${name} = ({ ${name}: class extends Object {`);
   lines.push(`    constructor() {`);
@@ -1951,7 +1951,7 @@ function eventInterface(def, { init, slots = {}, steps = [] }, { memberList, bod
     lines.push(`      init = platformInit;`);
   }
   lines.push(`      const state = new EventState(type, init);`);
-  lines.push(`      const self = reflectConstruct(PlainObject, NO_ARGUMENTS, new.target);`);
+  lines.push(`      const self = createObject(new.target);`);
   lines.push(`      stampSlots(self, 'Event', state);`);
   for (const n of chain) lines.push(`      fill${n}(state, init);`);
   lines.push(`      defineEventUnforgeables(self);`);
