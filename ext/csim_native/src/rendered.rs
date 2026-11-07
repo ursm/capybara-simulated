@@ -349,6 +349,8 @@ struct Walk<'a> {
     // (…what a copy reads, where `innerText` reads otherwise: the flat tree, an image's `alt`, no `text-transform`, nothing a
     // `user-select: none` holds — Chrome and Firefox — whatever range it reads)
     copy: bool,
+    // (…each element's used `user-select` none, as the copy walk has found it)
+    selectable: std::collections::HashMap<NodeId, bool>,
     // Nothing rendered yet: a leading collapsible space is dropped.
     at_start: bool,
     // The last thing rendered was a collapsible space.
@@ -391,6 +393,9 @@ impl Walk<'_> {
             if hidden {
                 return Vec::new();
             }
+            if self.copy && node.parent.filter(|&p| arena.is_element(p)).is_some_and(|p| unselectable(arena, p, &mut self.selectable)) {
+                return Vec::new();
+            }
             let Some(((start, from), (end, to))) = self.clip else { return self.text(&node.data, transform, ws) };
             let (from, to) = (if start == id { from as usize } else { 0 }, if end == id { to as usize } else { node.data.len() });
             let from = from.min(node.data.len());
@@ -409,7 +414,8 @@ impl Walk<'_> {
                 return Vec::new();
             }
             // (…an image a copy takes as its `alt`, Chrome and Firefox)
-            if self.copy && unselectable(arena, id) {
+            // (…what none of is selectable left out: its text — a descendant that makes itself selectable walked to)
+            if self.copy && unselectable(arena, id, &mut self.selectable) && !has_selectable_descendant(arena, id) {
                 return Vec::new();
             }
             if self.copy && tag(node) == "img" && !hidden {
@@ -755,17 +761,35 @@ fn has_next_cell(arena: &RealmArena, parent: &NodeData, cell: NodeId) -> bool {
 pub(crate) fn visible_text(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> Vec<u16> {
     visible_text_in(engine, arena, id, None, false, now)
 }
-// Whether `id`'s used `user-select` is `none`: its own computed one, or an ancestor's — `auto`, the initial value, a child
-// of one of those computes, uses the parent's (CSS UI 4 §6.1).
-fn unselectable(arena: &RealmArena, id: NodeId) -> bool {
-    let mut at = Some(id);
-    while let Some(n) = at.filter(|&n| arena.is_element(n)) {
-        if primary_style(arena, n).is_some_and(|s| s.get_ui().clone_user_select() == style::values::computed::UserSelect::None) {
-            return true;
-        }
-        at = arena.parent_of(n);
+// Whether `id`'s used `user-select` is `none` (CSS UI 4 §6.1): its own computed `none`; an `auto` one's the parent's used value
+// — an editable element's `contain` — and an explicit `text`, `all` or `contain` stands. Asked of each element as the walk
+// reaches it, its parent's answer kept (`selectable`), so a deep tree asks each once.
+fn unselectable(arena: &RealmArena, id: NodeId, kept: &mut std::collections::HashMap<NodeId, bool>) -> bool {
+    use style::values::computed::UserSelect;
+    if let Some(&known) = kept.get(&id) {
+        return known;
     }
-    false
+    let own = primary_style(arena, id).map(|s| s.get_ui().clone_user_select());
+    let none = match own {
+        Some(UserSelect::None) => true,
+        Some(UserSelect::Auto) | None => {
+            let editable = arena.get(id).is_some_and(|n| n.contenteditable_state() == Some(true)) || arena.editing_host(id) == Some(id);
+            !editable && arena.parent_of(id).filter(|&p| arena.is_element(p)).is_some_and(|p| unselectable(arena, p, kept))
+        }
+        Some(_) => false,
+    };
+    kept.insert(id, none);
+    none
+}
+// (…whether anything under `id` makes its own `user-select` other than `none`: the walk goes in for it)
+fn has_selectable_descendant(arena: &RealmArena, id: NodeId) -> bool {
+    use style::values::computed::UserSelect;
+    arena.get(id).is_some_and(|n| {
+        n.children.iter().any(|&c| {
+            arena.is_element(c)
+                && (primary_style(arena, c).is_some_and(|s| !matches!(s.get_ui().clone_user_select(), UserSelect::None | UserSelect::Auto)) || arena.get(c).is_some_and(|d| d.contenteditable_state() == Some(true)) || has_selectable_descendant(arena, c))
+        })
+    })
 }
 fn tree_root(arena: &RealmArena, mut id: NodeId) -> NodeId {
     while let Some(p) = arena.parent_of(id) {
@@ -790,7 +814,7 @@ fn intersects(arena: &RealmArena, id: NodeId, (start, end): ((NodeId, u32), (Nod
 pub(crate) fn range_text(engine: &mut StyleEngine, arena: &RealmArena, start: (NodeId, u32), end: (NodeId, u32), now: f64) -> Vec<u16> {
     let common = crate::ranges::common_ancestor(arena, start.0, end.0);
     let root = if arena.is_element(common) || arena.get(common).is_some_and(|n| n.kind == NodeKind::Document) { common } else { arena.parent_of(common).unwrap_or(common) };
-    if unselectable(arena, root) {
+    if arena.is_element(root) && unselectable(arena, root, &mut std::collections::HashMap::new()) && !has_selectable_descendant(arena, root) {
         return Vec::new();
     }
     let mut text = visible_text_in(engine, arena, root, Some((start, end)), true, now);
@@ -838,6 +862,7 @@ fn visible_text_in(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, cli
         clip,
         clip_root: clip.map(|((start, _), _)| tree_root(arena, start)),
         copy,
+        selectable: std::collections::HashMap::new(),
         at_start: true,
         ends_collapsible: false,
         break_pending: false,

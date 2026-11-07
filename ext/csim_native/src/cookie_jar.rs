@@ -466,12 +466,22 @@ pub(crate) fn set_for_ruby(jar: u64, url: magnus::RString, line: magnus::RString
 // Every cookie of the store unexpired at `now` — a driver's listing (Playwright's `context.cookies()`): each its name, value,
 // domain, path, expiry (Unix seconds, -1 for a session cookie), HttpOnly, Secure and SameSite ("None", "Lax", "Strict"; an
 // unset one Lax, as Chrome treats it).
-pub(crate) fn list_for_ruby(ruby: &magnus::Ruby, jar: u64, now: f64) -> magnus::RArray {
+// With a `url` ('' for none), those of them a request to it is sent, whatever its context.
+pub(crate) fn list_for_ruby(ruby: &magnus::Ruby, jar: u64, url: magnus::RString, now: f64) -> magnus::RArray {
     let out = ruby.ary_new();
+    let url = url_text(url);
+    let target = (!url.is_empty()).then(|| host_and_path(&url).map(|(host, path)| (host, path, url.starts_with("https:"))));
     let mut reg = lock();
     let Some(j) = reg.jars.get_mut(&jar) else { return out };
     j.cookies.retain(|c| c.expiry.is_none_or(|e| e > now));
-    for c in &j.cookies {
+    let sent = |c: &Cookie| match &target {
+        None => true,
+        Some(None) => false,
+        Some(Some((host, path, secure))) => {
+            (if c.host_only { *host == c.domain } else { domain_match(host, &c.domain) }) && path_match(path, &c.path) && (!c.secure || *secure)
+        }
+    };
+    for c in j.cookies.iter().filter(|c| sent(c)) {
         let same_site = match c.same_site {
             SameSite::None => "None",
             SameSite::Strict => "Strict",
@@ -481,6 +491,11 @@ pub(crate) fn list_for_ruby(ruby: &magnus::Ruby, jar: u64, now: f64) -> magnus::
         let _ = out.push((c.name.clone(), c.value.clone(), c.domain.clone(), c.path.clone(), expires, c.http_only, c.secure, same_site));
     }
     out
+}
+// Whether a cookie's Domain of `domain` names a public suffix (which a response's `Set-Cookie` cannot set but on that very
+// host): a driver's cookie of one refused.
+pub(crate) fn public_suffix_for_ruby(domain: magnus::RString) -> bool {
+    crate::realm_location::is_public_suffix(&text(domain).trim_start_matches('.').to_ascii_lowercase())
 }
 // The cookie-string a request to `url` in `context` at `now` takes ('' for none), as bytes.
 pub(crate) fn get_for_ruby(ruby: &magnus::Ruby, jar: u64, url: magnus::RString, context: u32, now: f64) -> magnus::RString {

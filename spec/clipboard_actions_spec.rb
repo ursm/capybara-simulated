@@ -150,6 +150,12 @@ RSpec.describe 'Clipboard actions' do
           'name' => 'o', 'value' => '2', 'domain' => host, 'path' => '/other', 'expires' => -1, 'httpOnly' => false, 'secure' => false, 'sameSite' => 'Strict'
         )
         expect(pw.context.cookies(url).map {|c| c['name'] }).to eq(%w[k h])
+        # (…a URL's path up to its last `/`, Playwright's: `__Host-` takes one at `/`; a public suffix's refused, and a
+        # `sameSite: 'None'` one not secure)
+        pw.context.add_cookies([{url: url.sub('http:', 'https:'), name: '__Host-x', value: '1', secure: true}])
+        expect(pw.context.cookies.map {|c| c['name'] }).to include('__Host-x')
+        expect { pw.context.add_cookies([{domain: 'com', path: '/', name: 'p', value: '1'}]) }.to raise_error(ArgumentError)
+        expect { pw.context.add_cookies([{url: url, name: 'n', value: '1', sameSite: 'None'}]) }.to raise_error(ArgumentError)
       end
       expect(session.evaluate_script('document.cookie')).to eq('k=v')
     end
@@ -356,6 +362,9 @@ RSpec.describe 'Clipboard actions' do
       expect(copied.call('a&nbsp;b', nil, nil)).to eq('a b')
       expect(copied.call('a<span style="user-select:none">NO<i>x</i></span>b', nil, nil)).to eq('ab')
       expect(copied.call('a<span style="-webkit-user-select:none">NO</span>b', nil, nil)).to eq('ab')
+      # (…the used value: `auto` takes the parent's `none`, an explicit `text` stands, an editable element is `contain`:
+      # CSS UI 4 §6.1, Firefox)
+      expect(copied.call('<div style="user-select:none">x<span style="user-select:auto">A</span><span style="user-select:text">T</span><span contenteditable>E</span></div>y', nil, nil)).to eq("TE\ny")
       script("E('plain').innerHTML = 'a<span id=sh></span>b'; E('sh').attachShadow({mode: 'open'}).innerHTML = '<i>S</i>'; document.activeElement.blur(); getSelection().selectAllChildren(E('plain'));")
       press 'c'
       expect(clipboard_text).to eq('aSb')
