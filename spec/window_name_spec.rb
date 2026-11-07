@@ -13,6 +13,7 @@ RSpec.describe 'a top-level window’s name', :every_host_local do
     simulated_session(lambda {|env|
       req  = Rack::Request.new(env)
       body = "<!DOCTYPE html><body>#{req.host}#{req.path}<a id=same href=/next>same</a><a id=away href=http://b.test/next>away</a>"
+      body = "<!DOCTYPE html><script>top.location.href = 'about:blank'</script>" if req.path == '/to-blank'
       [200, {'content-type' => 'text/html'}, [body]]
     })
   }
@@ -68,6 +69,21 @@ RSpec.describe 'a top-level window’s name', :every_host_local do
     session.visit 'http://a.test/'
     session.execute_script("window.name = 'n'; location.href = 'blob:http://a.test/gone'")
     session.evaluate_script('1')
+    expect(name).to eq('')
+  end
+
+  # (…and through about:blank a sandboxed frame of the page's own origin navigates it to: of that frame's origin, its
+  # initiator's (HTML "determine the origin"), an opaque one — another than the page's)
+  it 'is cleared through about:blank a sandboxed frame navigates it to' do
+    session.visit 'http://a.test/'
+    session.execute_script(<<~JS)
+      window.name = 'n';
+      const frame = document.createElement('iframe');
+      frame.sandbox = 'allow-scripts allow-top-navigation';
+      frame.src = '/to-blank';
+      document.body.append(frame);
+    JS
+    expect(session).to have_current_path('about:blank', url: true)
     expect(name).to eq('')
   end
 

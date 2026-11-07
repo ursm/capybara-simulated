@@ -104,6 +104,7 @@ mod search_params;
 mod select_options;
 mod session_history;
 mod fetch_chain;
+mod navigation_commit;
 mod navigation_fetch;
 mod response_headers;
 mod isomorphic;

@@ -668,7 +668,7 @@ module Capybara
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
           client_id:                     client_id,
           user_activated:                user_activated,
-          replace:                       replace
+          history_handling:              replace ? 'replace' : 'push'
         )
         # The native state of what earlier pages left unreachable freed, as a settle frees it (see the pump there): a
         # suite that only visits and reads never settles. A page's own FinalizationRegistry callbacks run here too, as a
@@ -2508,11 +2508,9 @@ module Capybara
         end
         step, changes = plan
         if (page = changes&.find {|nav, _, same_document| nav.zero? && !same_document })
-          leave_page_entry
           # (…the history as it stood kept, for an entry whose response now makes no document — a download, a 204 —
-          # which leaves the page at the document it is at, and its step with it)
-          save_navigation_history
-          @session_history.go_to(step)
+          # which leaves the page at the document it is at, and its step with it: navigation_commit.rs)
+          @session_history.begin_page_traversal(step)
           replay_history_entry(page[1])
           restore_form_state(page[1])
           restore_flushed_nav_intents
@@ -2594,15 +2592,13 @@ module Capybara
         @runtime.realm_call(realm, '__csimQueueHashChange', old_url, entry[:url]) if fragment_of(old_url) != fragment_of(entry[:url])
       end
 
-      # The history entry the page's document leaves, as a navigation of it begins — before record_history adds the next
-      # entry — which takes the OUTGOING document's form-control state once that document is unloaded
-      # (`capture_left_page_form_state`), so a later back/forward traversal to it restores the values the user, a script
-      # or its pagehide handler set (HTML "persisted user state"), not the markup defaults: Chrome keeps a value a
-      # pagehide handler writes, as a frame's entry keeps it (`frame_document_unloaded`).
-      def leave_page_entry = (@page_leaving_entry = @session_history.active(0))
-      # …taken as the document it was of is unloaded, its handlers run, its VM still live (`boot_response_into_ctx`).
+      # The history entry the page's document leaves — noted by the engine as a navigation of it begins, before its entry is
+      # made (navigation_commit.rs) — takes the OUTGOING document's form-control state once that document is unloaded, its
+      # handlers run, its VM still live (`boot_response_into_ctx`), so a later back/forward traversal to it restores the
+      # values the user, a script or its pagehide handler set (HTML "persisted user state"), not the markup defaults:
+      # Chrome keeps a value a pagehide handler writes, as a frame's entry keeps it (`frame_document_unloaded`).
       private def capture_left_page_form_state
-        id, @page_leaving_entry = @page_leaving_entry, nil
+        id = @session_history.take_leaving
         return unless id && (state = @runtime.call('__csimCaptureFormState'))
 
         @session_history.update(id, {form_state: state})
@@ -2660,11 +2656,12 @@ module Capybara
         # measured: `location.reload()` sends the page's own URL, a re-posted `no-referrer` form none)
         # (…an entry reached by a POST keeps its body)
         referred = is_reload && !entry[:body] ? {} : {referer: entry[:referer], referrer_policy: entry[:referrer_policy]}
+        handling = is_reload ? 'reload' : 'traverse'
         if entry[:body]
-          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, origin: (entry[:origin] unless by_page),
+          navigate_post(entry[:url], entry[:body], entry[:content_type], history_handling: handling, origin: (entry[:origin] unless by_page),
                                                                          user_activated: user_activated, **made, **referred, **reloaded)
         else
-          navigate(entry[:url], from_history: true, is_reload: is_reload, user_activated: user_activated, **made, **referred, **reloaded)
+          navigate(entry[:url], history_handling: handling, user_activated: user_activated, **made, **referred, **reloaded)
         end
       ensure
         @restoring_history_state = nil
@@ -3633,12 +3630,10 @@ module Capybara
         url,
         body,
         content_type,
-        from_history: false,
-        is_reload: false,
+        history_handling: 'push',
         referer: page_url,
         referrer_policy: nil,
         initiator: page_url,
-        replace: false,
         origin_null: false,
         initiator_cross_site_ancestor: false,
         client_id: nil,
@@ -3653,13 +3648,11 @@ module Capybara
           content_type,
           referer:                       referer,
           referrer_policy:               referrer_policy,
-          from_history:                  from_history,
-          is_reload:                     is_reload,
+          history_handling:              history_handling,
           initiator:                     initiator,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
           client_id:                     client_id,
-          replace:                       replace,
           origin:                        origin,
           user_activated:                user_activated,
           reloaded_cross_site:           reloaded_cross_site
@@ -11371,7 +11364,7 @@ module Capybara
             origin_agent_cluster: origin_agent_cluster
           }
           made[:doc_origin] = 'null' if resp['error']
-          # (…a PDF its viewer's document for inline content: `boot_inline_document`)
+          # (…a PDF its viewer's document for inline content: `commit_page_navigation`)
           if resp['inline']
             body, ctype, opener_policy = '', 'text/html', nil
             made = {doc_origin: 'null', referrer: resp['referrer'], client_id: resp['resulting_client_id']}
@@ -11980,13 +11973,13 @@ module Capybara
           return in_top_context { navigate_top_from(realm_id, initiator, url, post: post, user_activated: activated) }
         end
 
-        policy  = Native.link_noreferrer(spec['rel'].to_s) ? 'no-referrer' : nil
-        replace = spec['replace'] == true
+        policy   = Native.link_noreferrer(spec['rel'].to_s) ? 'no-referrer' : nil
+        handling = spec['replace'] == true ? 'replace' : 'push'
         # (…a POST's Origin the form document's, `null` where that is opaque: `initiating_document`)
         initiating = initiating_document(realm_id)
-        return navigate(url, referrer_policy: policy, replace: replace, user_activated: activated, **initiating) unless post
+        return navigate(url, referrer_policy: policy, history_handling: handling, user_activated: activated, **initiating) unless post
 
-        navigate_post(url, *post, referrer_policy: policy, replace: replace, user_activated: activated, **initiating)
+        navigate_post(url, *post, referrer_policy: policy, history_handling: handling, user_activated: activated, **initiating)
       end
       # …a `javascript:` action's script run in realm `target`'s document, navigated by realm `realm_id`'s.
       # (…none of a frame realm disposed since it was routed: `realm_call` would run it in the page)
@@ -12242,7 +12235,8 @@ module Capybara
           replaces_client_id: sw_replaced_document(realm_id),
           is_reload:          is_reload,
           is_history:         is_history,
-          # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
+          # (…its session history entry the redirect's where it is followed, as the page's is: navigation_commit.rs
+          # `Commit::redirected`)
           redirected:         lambda {
             history, id = frame_entry(realm_id)
             history&.set_url(id, fetch.target)
@@ -12256,7 +12250,7 @@ module Capybara
           return frame_navigation_made_no_document(realm_id)
         when 'download'
           return save_downloaded_response(target, hop.headers, hop.rack_body || [hop.document.to_s], realm: realm_id)
-        # (…a PDF its viewer's document for inline content: `boot_inline_document`)
+        # (…a PDF its viewer's document for inline content: `commit_page_navigation`)
         when 'inline'
           return commit_frame_document(realm_id, entry, target, '', 'text/html', doc_origin: 'null', client_id: hop.client_id)
         end
@@ -12436,7 +12430,6 @@ module Capybara
       def refresh(user_activated: source_activated?(0), through_ui: true)
         # Before the replay below commits anything (see `flush_outgoing_page_init`).
         flush_outgoing_page_init if @timers_active
-        save_navigation_history
         replay_history_entry(@session_history.active(0), is_reload: true, user_activated: user_activated, through_ui: through_ui)
         restore_flushed_nav_intents
       end
@@ -12564,10 +12557,11 @@ module Capybara
         site           = realm_creator_url(realm)
         initiating     = initiating_document(realm)
         from_document(realm) do
+          handling = replace ? 'replace' : 'push'
           if post
-            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace, user_activated: user_activated, **initiating)
+            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, history_handling: handling, user_activated: user_activated, **initiating)
           else
-            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob, user_activated: user_activated, ongoing: ongoing, **initiating)
+            navigate(url, referer: source, referrer_policy: policy, initiator: site, history_handling: handling, blob: blob, user_activated: user_activated, ongoing: ongoing, **initiating)
           end
         end
       end
@@ -12772,17 +12766,18 @@ module Capybara
       # (…`reloaded_cross_site` a reload through a user interface element's: whether the request the document it reloads was
       # reached by was cross-site, its cookies judged by that — nil for any other navigation)
       # (…`origin_null` and `initiator_cross_site_ancestor` the initiating document's: `initiating_document`)
+      # (…`history_handling` how it is of the page's session history: 'push' an entry after the current one, 'replace' one
+      # in its place, 'reload' and 'traverse' a replay of the entry the history is at — a traversal's step applied as it
+      # began, `perform_history_traverse`: navigation_commit.rs `Handling`)
       def navigate(
         url,
         referer: page_url,
         referrer_policy: nil,
-        from_history: false,
-        is_reload: false,
+        history_handling: 'push',
         initiator: page_url,
         origin_null: false,
         initiator_cross_site_ancestor: false,
         client_id: nil,
-        replace: false,
         blob: nil,
         user_activated: false,
         reloaded_cross_site: nil,
@@ -12794,19 +12789,19 @@ module Capybara
           nil,
           referer:                       referer,
           referrer_policy:               referrer_policy,
-          from_history:                  from_history,
-          is_reload:                     is_reload,
+          history_handling:              history_handling,
           initiator:                     initiator,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
           client_id:                     client_id,
-          replace:                       replace,
           blob:                          blob,
           user_activated:                user_activated,
           reloaded_cross_site:           reloaded_cross_site,
           ongoing:                       ongoing
         )
       end
+      # The history handlings that replay the entry the page's session history is at, which makes no entry.
+      REPLAYS = %w[reload traverse].freeze
       # …the navigation itself, hop by hop (navigation_fetch.rs): its Referer the initiating document's URL — `referer` —
       # under that document's referrer policy, the policy its `<meta name="referrer">` sets (the default where none does)
       # read before the page goes, determined anew at each redirect hop as Fetch's main fetch does, a redirect's
@@ -12818,27 +12813,29 @@ module Capybara
       # (mode 'navigate', dest 'document') — the session's registration, whose worker the session's host runs
       # (`sw_host`) — respondWith serving the document, a network error failing it, none falling through
       # to the network. Its redirects followed, an SW's as the network's: a POST's 307 / 308 re-POSTing, the others
-      # GETting, a fragment the redirect names none of carried over, its session history entry the redirect's
-      # (`redirect_history_entry`).
+      # GETting, a fragment the redirect names none of carried over.
+      # What it does to the session history and what it comes to are the engine's (navigation_commit.rs, through its
+      # NavigationFetch): its entry, made as it begins and given its redirects' requests as they come, or the history as it
+      # stood where it makes no document; its navigable's target name; the document it makes — each answer a step this
+      # host takes (`commit_page_navigation`).
       private def navigate_top_level(
         url,
         body,
         content_type,
         referer:,
         referrer_policy:,
-        from_history:,
-        is_reload:,
+        history_handling:,
         initiator:,
         origin_null:,
         initiator_cross_site_ancestor:,
         client_id:,
-        replace:,
         user_activated:,
         reloaded_cross_site:,
         blob: nil,
         origin: nil,
         ongoing: nil
       )
+        replay = REPLAYS.include?(history_handling)
         # (…its navigation begun, the page's ongoing one: session_history.rs `begin_navigation` — or, a navigation the page
         # planned, the one its plan began, the same record: navigation_plan.rs `Location::ongoing`)
         # (…a reload's a fresh number too, where HTML's "apply the reload history step" sets the ongoing navigation to
@@ -12848,7 +12845,7 @@ module Capybara
         # (…none at all of a document's to a `data:` URL that is no download, before it begins — its ongoing one, its
         # unload prompt, its entry — which a top-level traversable refuses: the user's, a reload's and a traversal's of the
         # one it made not; navigation_fetch.rs `start`)
-        return if !from_history && initiator && Native.navigation_start(url.to_s, body ? 'POST' : 'GET', true) == 'refused'
+        return if !replay && initiator && Native.navigation_start(url.to_s, body ? 'POST' : 'GET', true) == 'refused'
 
         ongoing = [@session_history, 0, ongoing || @session_history.begin_navigation(0)]
         if sw_registered?
@@ -12859,13 +12856,11 @@ module Capybara
               content_type,
               referer:,
               referrer_policy:,
-              from_history:,
-              is_reload:,
+              history_handling:,
               initiator:,
               origin_null:,
               initiator_cross_site_ancestor:,
               client_id:,
-              replace:,
               user_activated:,
               reloaded_cross_site:,
               blob:,
@@ -12877,24 +12872,21 @@ module Capybara
 
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
-        # `from_history` already flushed at its own entry point, which commits the
+        # A replay already flushed at its own entry point, which commits the
         # history index before it gets here.
-        flush_outgoing_page_init if !from_history && @timers_active
+        flush_outgoing_page_init if !replay && @timers_active
         # (…a traversal's page asked as its step is applied: `perform_history_traverse`)
-        prompt_page_to_unload if !from_history || is_reload
-        # (…the origin of the document it leaves, which one of another origin clears the navigable's name by as it commits
-        # — `clear_navigable_name`, an error document's of an opaque one — a replay's left as it was)
-        leaving_origin = leaving_document_origin unless from_history
-        commits        = lambda {|origin| clear_navigable_name(leaving_origin, origin) unless from_history }
-        error_document = lambda {|at, coop_switch = false|
-          commits.(nil)
-          commit_error_document(at, coop_switch: coop_switch)
-        }
+        prompt_page_to_unload unless history_handling == 'traverse'
         referrer_policy ||= main_document_referrer_policy if referer
         req_body = body&.b
         # (…a traversal's or a user's reload's, of no initiator: `replay_history_entry` — its client the document it leaves,
         # and its top-level navigation initiator origin the one its entry's document state keeps, Fetch's step 2)
-        traversed = from_history && !initiator
+        traversed = replay && !initiator
+        # (…the request as it is sent — a POST's body and origin, its referrer and referrer policy — what a reload or a
+        # traversal refers by again, a POST's re-posts: HTML's document state; and its initiator origin, which a
+        # traversal's step 2 reads: none of a user's)
+        entry = {referer: referer, referrer_policy: referrer_policy, origin: origin || initiator_origin(initiator, origin_null)}.compact
+        entry.update(body: body, content_type: content_type) if body
         fetch = Native::NavigationFetch.new({
           method:                        body ? 'POST' : 'GET',
           url:                           url.to_s,
@@ -12913,7 +12905,8 @@ module Capybara
           reloaded_cross_site:           reloaded_cross_site,
           client_origin:                 (document_origin(0) if traversed),
           traversed_initiator:           (@session_history.entry(@session_history.active(0))[:origin] if traversed),
-          traversable:                   @session_history.id
+          traversable:                   @session_history.id,
+          commit:                        {handling: history_handling, entry: entry, leaving_origin: (leaving_document_origin unless replay)}
         })
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
@@ -12930,146 +12923,58 @@ module Capybara
         # `history.pushState`/`replaceState` chain belongs to that load
         # — record intermediates so a polling matcher can walk them.
         prior_navigating = @navigating
-        @navigating = true unless from_history
+        @navigating = true unless replay
         note_url_changes
         begin
           # The document's referrer is the request's, the last hop's (a redirect determines it anew).
           @current_referer = fetch.referrer.to_s
-          # (…the session history as it stands, which a download it ends in restores — a re-post's too, whose entry a
-          # redirect rewrites: `redirect_history_entry`)
-          save_navigation_history unless from_history
-          # (…what its URL makes of it before any request: navigation_fetch.rs `start`)
-          start = fetch.start
-          # (…none for about:blank in a window of no entry yet — its initial about:blank, which a navigation to about:blank
-          # leaves the initial one, the next navigation replacing it: HTML "navigate", historyHandling "replace")
-          unless from_history || (start == 'about_blank' && !@session_history.active(0))
-            leave_page_entry
-            # (…the request as it was sent — a POST's body and origin, its referrer and referrer policy — what a reload or
-            # a traversal refers by again, a POST's re-posts: HTML's document state)
-            # (…and its initiator origin, HTML's document state keeps, a traversal's step 2 reads: none of a user's)
-            entry = {url: url, referer: referer, referrer_policy: referrer_policy, origin: origin || initiator_origin(initiator, origin_null)}.compact
-            entry.update(body: body, content_type: content_type) if body
-            record_history(entry, replace: replace)
-          end
-          case start
-          # A URL that matches about:blank names an empty, network-less document — there's nothing to fetch; route straight
-          # to an empty document, its history entry the one above (HTML "navigate": about:blank's navigation params made
-          # with no fetch). (Narrow to about:blank specifically — about:srcdoc carries its own markup.)
-          when 'about_blank'
-            # (…its origin its initiator's, an opaque one for none: a visit's — HTML "determine the origin", Chrome
-            # measured — and its base URL that document's: the page's own where the page navigates itself, else the
-            # initiator's URL (its base URL not known here — a gap); its referrer the request's, under the initiator's
-            # policy — the initiator's, though the window be at its initial about:blank still (that one made with the window,
-            # its creator's: `open_initial_document`) — and an opaque initiator's (a sandboxed document's: `origin_null`,
-            # `initiating_document`) one of no tuple origin, a new opaque one here where HTML has that one)
-            if initiator && !origin_null
-              own  = initiator == page_url
-              base = own ? @runtime.realm_direct_call(0, '__csimBaseURL').to_s : initiator.to_s
-              inherit_creator(origin: url_origin(initiator).to_s, base: base)
-            end
-            commits.(initiator && url_origin(initiator))
-            self.page_url = url.to_s
-            record_response(*ABOUT_BLANK_RESPONSE)
-            return boot_response_into_ctx('', inherited_coop: page_local_scheme_policy(from_history, referer))
-          # A `blob:` URL's GET, which no server answers: its blob's document — wherever the window that made it is (its
-          # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
-          # the one above, which a traversal or a reload replays here. (A redirect to one is followed to none:
-          # navigation_fetch.rs `redirect`.)
-          when 'blob'
+          # (…what its URL makes of it before any request, its entry made: navigation_commit.rs `Commit::begin` — an
+          # about:blank's or a blob's document of the opener policy of the document that made the navigation, which its
+          # entry keeps for a replay: `Commit::local_policy`)
+          policy = proc { inherited_opener_policy(@download_source, navigated: @session_history, source: referer) }
+          step = fetch.begin_commit(&policy)
+          # (…a `blob:` URL's GET, which no server answers: its blob's document — wherever the window that made it is (its
+          # partition's) — or, one no store resolves, a failed load at the URL; one of a type that makes no document saved,
+          # as a response of it is, a PDF its viewer's: mime.rs `load`)
+          if step[0] == 'blob'
             blob ||= blob_snapshot(url)
-            return error_document.(url) unless blob
-
-            # (…one of a type that makes no document saved, as a response of it is, a PDF its viewer's: mime.rs `load`)
-            given = blob[:type].to_s
-            load, type = Native.navigation_load(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
-            return download_in_place(url, {'content-type' => given}, [blob[:bytes].to_s]) if load == 'download'
-            inherited = page_local_scheme_policy(from_history, referer)
-            return boot_inline_document(url, 200, {'content-type' => given}, commits, inherited_coop: inherited) if load == 'inline'
-
-            commits.(url_origin(url.to_s.sub(/\Ablob:/i, '')))
-            return boot_blob_document(url, blob[:bytes], given.empty? ? type : given, flushed: true, inherited_coop: inherited)
-          # A `data:` URL's response its own (Fetch "scheme fetch"): a download where it makes no document; else its
-          # document, of a new opaque origin — a document's refused before it began (above) — and a malformed one a network
-          # error (navigation_fetch.rs `data_navigation`).
-          when 'data'
-            verdict, mime, bytes = Native.data_navigation(url.to_s)
-            return error_document.(url) if verdict == 'fail'
-            return download_in_place(url, {'content-type' => mime}, [bytes]) if verdict == 'download'
-            return boot_inline_document(url, 200, {'content-type' => mime}, commits) if verdict == 'inline'
-
-            commits.(nil)
-            self.page_url = url.to_s
-            record_response(200, {'content-type' => mime})
-            return boot_response_into_ctx(bytes, opaque_origin: true)
-          # (…a POST to any URL but an HTTP(S) one a network error, its error document at the URL: Fetch "scheme fetch" —
-          # a `blob:` URL's fetched by a GET alone)
-          when 'fail'
-            return error_document.(url)
+            step = fetch.blob_commit(blob&.[](:type), blob && blob[:bytes].to_s.byteslice(0, 1445), &policy)
           end
-
-          # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
-          # `event.request.headers` alike)
-          content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
-          awaited = navigation_mark(@session_history, 0)
-          hop = run_navigation_fetch(
-            fetch,
-            body:               req_body,
-            content_type:       content_type,
-            dest:               'document',
-            frame_type:         'top-level',
-            origin_url:         origin || initiator,
-            client_id:          client_id || (sw_client_id(0) if traversed),
-            replaces_client_id: (sw_replaced_document(0) if window_has_document?),
-            is_reload:          is_reload,
-            is_history:         from_history && !is_reload,
-            coop_realm:         0,
-            begun:              lambda {|_|
-              @current_referer = fetch.referrer.to_s
-              # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
-              # cross-site, which a reload of it through a user interface element is judged by; a traversal's leaving it
-              # as the navigation that made the entry had it)
-              if !from_history && (id = @session_history.active(0))
-                @session_history.update(id, {cross_site: fetch.cross_site?})
-              end
-            },
-            # (…a hop into the scope of a worker still activating waiting for it, each hop's, before its request is made:
-            # Handle Fetch)
-            ready:              ->(target) { await_sw_activation(target, Native.site(target).to_s) if sw_registered? },
-            redirected:         -> { redirect_history_entry(fetch.target, get: fetch.request_method == 'GET') }
-          )
-          target = fetch.target
-          # (…none where a navigation begun as the response was awaited ended it, whose own plan the page then takes: HTML
-          # "navigate", "this will abort other ongoing navigations" — a timer's `location` with the app taking its time)
-          # (…its body read first, which an app may take its time over too)
-          document = hop.document || read_rack_body(hop.rack_body) unless NO_DOCUMENT_COMMANDS.include?(hop.command)
-          unless navigation_mark(@session_history, 0) == awaited
-            close_rack_body(hop.rack_body) unless document
-            restore_navigation_history
-            @session_history.forget(0)
-            superseded = true
-            return
+          if step[0] == 'fetch'
+            # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
+            # `event.request.headers` alike)
+            content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
+            awaited = navigation_mark(@session_history, 0)
+            hop = run_navigation_fetch(
+              fetch,
+              body:               req_body,
+              content_type:       content_type,
+              dest:               'document',
+              frame_type:         'top-level',
+              origin_url:         origin || initiator,
+              client_id:          client_id || (sw_client_id(0) if traversed),
+              replaces_client_id: (sw_replaced_document(0) if window_has_document?),
+              is_reload:          history_handling == 'reload',
+              is_history:         history_handling == 'traverse',
+              coop_realm:         0,
+              # (…a hop into the scope of a worker still activating waiting for it, each hop's, before its request is made:
+              # Handle Fetch)
+              ready:              ->(target) { await_sw_activation(target, Native.site(target).to_s) if sw_registered? }
+            )
+            # (…its body read first, which an app may take its time over)
+            document = hop.document || read_rack_body(hop.rack_body) if hop.command == 'document'
+            # (…none where a navigation begun as the response was awaited ended it, whose own plan the page then takes: HTML
+            # "navigate", "this will abort other ongoing navigations" — a timer's `location` with the app taking its time)
+            unless navigation_mark(@session_history, 0) == awaited
+              close_rack_body(hop.rack_body) unless document
+              fetch.abandon
+              superseded = true
+              return
+            end
+            @current_referer = fetch.referrer.to_s
+            step = fetch.response_commit(hop.command)
           end
-          case hop.command
-          when 'fail'
-            return error_document.(target, fetch.coop_switch?)
-          when 'hand_off', 'no_content'
-            return navigation_made_no_document(target)
-          # A response that downloads makes no document: a window stays at the one it has (`download_in_place`).
-          when 'download'
-            return download_in_place(target, hop.headers, hop.rack_body || [hop.document])
-          when 'inline'
-            return boot_inline_document(target, hop.status, hop.headers, commits, client_id: hop.client_id, coop_switch: fetch.coop_switch?)
-          end
-
-          self.page_url = target
-          record_response(hop.status, hop.headers)
-          commits.(url_origin(target))
-          # Full-reload navigation rebuilds the JS Context from the warm
-          # snapshot. Per-visit fresh VM avoids partial-reset drift
-          # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
-          # `$(document).on(...)` delegates) — snapshot warmup keeps the
-          # rebuild itself cheap; app-bundle re-eval dominates.
-          boot_response_into_ctx(document, coop_switch: fetch.coop_switch?, content_type: hop.document_type, client_id: hop.client_id)
+          commit_page_navigation(fetch, step, hop, document, blob, initiator)
         ensure
           @navigating = prior_navigating
           note_url_changes
@@ -13079,87 +12984,85 @@ module Capybara
           drain_pending_navigation if superseded
         end
       end
-      # What a navigation's last hop may say that makes no document of a response to read.
-      NO_DOCUMENT_COMMANDS = %w[fail hand_off no_content download inline].freeze
+      # The page's navigation `fetch` ended in `step` (navigation_commit.rs `Step`, its session history done with as that
+      # says): the document it makes committed — of its last hop `hop`'s response (`document` its body), or of a local
+      # scheme's (a `blob:` URL's `blob`, about:blank of initiator `initiator`'s origin) — or none.
+      private def commit_page_navigation(fetch, (step, type, payload), hop, document, blob, initiator)
+        url = fetch.target
+        case step
+        when 'none'
+          navigation_made_no_document
+        # A response that downloads makes no document: a window stays at the one it has.
+        when 'download'
+          headers, body = hop ? [hop.headers, hop.rack_body || [hop.document]] : [{'content-type' => type.to_s}, [(payload || blob[:bytes]).to_s]]
+          save_downloaded_response(url, headers, body)
+          navigation_made_no_document
+        when 'error'
+          commit_error_document(url, coop_switch: fetch.coop_switch?)
+        # HTML "create a document for inline content that doesn't have a DOM", a PDF's — its viewer's (mime.rs
+        # `Load::Inline`): an empty `text/html` document at the response's URL, of a new opaque origin, and of no policy its
+        # response sets — no Content-Security-Policy, Referrer-Policy, Refresh or opener policy (a new policy container) but
+        # the one a blob's inherits; the response recorded as it came.
+        when 'inline'
+          self.page_url = url
+          hop ? record_response(hop.status, hop.headers) : record_response(200, {'content-type' => type})
+          boot_response_into_ctx('', opaque_origin: true, coop_switch: fetch.coop_switch?, inherited_coop: payload, inline: true, client_id: hop&.client_id)
+        # A URL that matches about:blank names an empty, network-less document (HTML "navigate": about:blank's navigation
+        # params made with no fetch): its origin its initiator's (`type`), an opaque one for none (a visit's — HTML
+        # "determine the origin", Chrome measured — or an opaque initiator's: a sandboxed document's), and its base URL that
+        # document's: the page's own where the page navigates itself, else the initiator's URL (its base URL not known
+        # here — a gap); its referrer the request's, under the initiator's policy — the initiator's, though the window be at
+        # its initial about:blank still (that one made with the window, its creator's: `open_initial_document`).
+        when 'about_blank'
+          inherit_creator(origin: type, base: initiator == page_url ? @runtime.realm_direct_call(0, '__csimBaseURL').to_s : initiator.to_s) if type
+          self.page_url = url
+          record_response(*ABOUT_BLANK_RESPONSE)
+          boot_response_into_ctx('', inherited_coop: payload)
+        when 'blob_document'
+          boot_blob_document(url, blob[:bytes], type, flushed: true, inherited_coop: payload)
+        # Full-reload navigation rebuilds the JS Context from the warm
+        # snapshot. Per-visit fresh VM avoids partial-reset drift
+        # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
+        # `$(document).on(...)` delegates) — snapshot warmup keeps the
+        # rebuild itself cheap; app-bundle re-eval dominates.
+        # (…a `data:` URL's its own response, of a new opaque origin: navigation_fetch.rs `data_navigation`)
+        when 'document'
+          self.page_url = url
+          if hop
+            record_response(hop.status, hop.headers)
+            boot_response_into_ctx(document, coop_switch: fetch.coop_switch?, content_type: hop.document_type, client_id: hop.client_id)
+          else
+            record_response(200, {'content-type' => type})
+            boot_response_into_ctx(payload, opaque_origin: true)
+          end
+        end
+      end
       # What says a navigation of the top-level document of realm `realm` began as a response was awaited, against the mark
       # taken before it: its number (`ongoing_navigation`), and what is planned that no number records yet (a reload, a form's:
       # navigation_plan.rs `navigationAwaited`), which the driver's own visit found planned or not as it began.
       private def navigation_mark(history, realm)
         [history.ongoing_navigation(0), @runtime.realm_call(realm, '__csimNavigationAwaited')]
       end
-      # The origin of the page's document a navigation leaves — a window's of no entry yet its initial about:blank's, its
-      # creator's (`inherit_creator`; one it does not know, a `noopener` window's, kept: `clear_navigable_name`) — none
-      # for one of an opaque origin (never the same as another).
-      private def leaving_document_origin
-        return @creator&.fetch(:origin) || :initial unless @session_history.active(0)
-
-        origin = document_origin(0)
-        origin unless origin == 'null'
-      end
+      # The origin of the page's document a navigation leaves, serialized — `null` an opaque one's — a window's of no entry
+      # yet its initial about:blank's, its creator's (`inherit_creator`), none where it does not know one (a `noopener`
+      # window's: navigation_commit.rs `Leaving::Initial`).
+      private def leaving_document_origin = @session_history.active(0) ? document_origin(0) : @creator&.fetch(:origin)
       # The origin of realm `realm`'s document, serialized — `null` an opaque one's: the origin of the client a traversal
       # of its navigable is made by (HTML "apply the history step": its active document's source snapshot params).
       private def document_origin(realm)
         url, _, opaque = request_client(realm)
         opaque ? 'null' : url_origin(url)
       end
-      # HTML "finalize a cross-document navigation": the target name of the document state a top-level navigation made
-      # (`window.name` of its document: session_history.rs) cleared where that document's origin (`origin`, none an opaque
-      # one) is another than the one it leaves — a window a Browser hosts has no opener whose presence keeps it (an
-      # auxiliary browsing context's, a realm's of its opener's isolate: window.js `__csimWindowNameFor`). (…a `noopener`
-      # window's first navigation away from its initial about:blank leaving it as it is — that document's origin its
-      # creator's, which such a window does not keep here — as Chrome and Firefox leave it)
-      private def clear_navigable_name(leaving_origin, origin)
-        return if leaving_origin == :initial || (leaving_origin && leaving_origin == origin)
-
-        @session_history.clear_name
-      end
-      # A navigation's session history entry, pushed (or the current one replaced) as it begins — the history before it
-      # kept, for a response that turns out to make no document (`download_in_place`).
-      # …and the current entry made a redirect's from it (Fetch "HTTP-redirect fetch"): its URL the redirect's, a POST
-      # become a GET where the redirect makes one — so a reload gets the page it was redirected to, not the chain run
-      # again: a Post/Redirect/Get page's not the form submitted again (Chrome).
-      private def redirect_history_entry(url, get:)
-        return unless (id = @session_history.active(0))
-
-        @session_history.set_url(id, url)
-        @session_history.update(id, {body: nil, origin: nil, referer: nil, referrer_policy: nil}) if get
-      end
-      # …the history kept as it stood before — none, for a window at its initial about:blank — for a navigation that makes
-      # no document to leave it as it was.
-      private def save_navigation_history = @session_history.save(0)
-      # …and restored, the entry the page's document was to leave (`leave_page_entry`) left by none: no document unloads.
-      private def restore_navigation_history
-        @page_leaving_entry = nil
-        @session_history.restore(0)
-      end
-      # A navigation's response that downloads makes no document: a window that has one stays at it — its URL and its
-      # session history its document's (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a),
-      # and what its flushed timers planned still stands, the page they ran in being the one that stays. One that has none
-      # yet stays at its initial about:blank (`navigation_made_no_document`).
-      # HTML "create a document for inline content that doesn't have a DOM", a PDF's — its viewer's (mime.rs `Load::Inline`):
-      # an empty `text/html` document at the response's URL, of a new opaque origin, and of no policy its response sets — no
-      # Content-Security-Policy, Referrer-Policy, Refresh or opener policy (a new policy container); the response recorded as
-      # it came. (`commits` the navigation's, which clears the navigable's name by the origin it leaves.)
-      # (…`coop_switch` and `inherited_coop` as `boot_response_into_ctx`'s)
-      private def boot_inline_document(url, status, headers, commits, client_id: nil, coop_switch: false, inherited_coop: nil)
-        commits.(nil)
-        self.page_url = url.to_s
-        record_response(status, headers)
-        boot_response_into_ctx('', opaque_origin: true, coop_switch: coop_switch, inherited_coop: inherited_coop, inline: true, client_id: client_id)
-      end
-      private def download_in_place(url, headers, body)
-        save_downloaded_response(url, headers, body)
-        navigation_made_no_document(url)
-      end
-      # …as a navigation handed off to external software makes none (navigation_fetch.rs `redirect`), and a 204 / 205
-      # (`response`): a window with no document yet — one `window.open` made on such a URL, the session's first before its
-      # first visit — left at the initial about:blank it was made with (`open_initial_document`), which fires no load: its
-      # URL about:blank (Chrome: `about:blank`, from the window and its opener alike) — the URL of its document, which the
-      # driver's `current_url` reports, never the URL of a response that made none — its session history none of the
-      # navigation's. (…one the driver made no initial document for given one now)
-      private def navigation_made_no_document(_url)
-        restore_navigation_history
-        @session_history.forget(0)
+      # A navigation's response that makes no document — a download, a hand-off (navigation_fetch.rs `redirect`), a 204 /
+      # 205 (`response`) — its session history as it stood (navigation_commit.rs): a window that has a document stays at
+      # it — its URL and its session history its document's (Chrome: `location.href = '/dl'` on /a reports /a, and a
+      # reload after reloads /a), and what its flushed timers planned still stands, the page they ran in being the one that
+      # stays. One with no document yet — one `window.open` made on such a URL, the session's first before its first visit
+      # — left at the initial about:blank it was made with (`open_initial_document`), which fires no load: its URL
+      # about:blank (Chrome: `about:blank`, from the window and its opener alike) — the URL of its document, which the
+      # driver's `current_url` reports, never the URL of a response that made none. (…one the driver made no initial
+      # document for given one now)
+      private def navigation_made_no_document
         restore_flushed_nav_intents
         return if window_has_document?
 
@@ -13189,14 +13092,6 @@ module Capybara
         return 'unsafe-none' unless navigated && source
 
         navigated.inherited_opener_policy { [url_origin(source).to_s, document_origin(navigated_realm).to_s] }
-      end
-      # …the one the page's own takes: a replay's the one its entry kept; else that of the document that made the navigation,
-      # which its entry keeps for one (`from_document`, none of the user's).
-      private def page_local_scheme_policy(from_history, referer)
-        id = @session_history.active(0)
-        return @session_history.text(id, :opener_policy) || 'unsafe-none' if from_history
-
-        inherited_opener_policy(@download_source, navigated: @session_history, source: referer).tap {|policy| @session_history.update(id, {opener_policy: policy}) if id }
       end
       # The facts of the document of realm `realm` a navigation of its top-level traversable leaves that its responses'
       # opener policies are enforced against, asked only where a policy but "unsafe-none" is in play: its origin and whether it
@@ -13251,7 +13146,7 @@ module Capybara
       # is to be left: `commit_coop` — `inherited_coop` the opener policy of a document of no headers that takes one, its
       # response's otherwise: session_history.rs `inherited_opener_policy`)
       # (…`content_type` the type its body said where it did — MIME Sniffing's computed one — over the response's)
-      # (…`inline` an inline content document's: `boot_inline_document`)
+      # (…`inline` an inline content document's: `commit_page_navigation`)
       # (…`client_id` the reserved client id of the navigation whose response it is: `run_navigation_fetch`)
       # (…`controlled` false for one no fetch made, which Handle Fetch sets no worker of — and `keep_traversals`, the
       # traversals the document it replaces queued going on after it: `commit_javascript_document`'s)
@@ -13480,7 +13375,7 @@ module Capybara
       #    move the incoming document's URL. Running here reproduces that: the
       #    history updates (pushState, replaceState, a traversal's task, which all take
       #    effect IMMEDIATELY on the page URL and the session history) act on the outgoing
-      #    entry, and this navigation's `record_history` / `self.page_url = url`
+      #    entry, and this navigation's own entry (navigation_commit.rs) and its URL
       #    then commit on top. Flushing AFTER the commit — where this used to
       #    live — let a late SPA redirect rewrite the incoming URL instead:
       #    Mastodon signs in to `/`, whose router schedules a `<Redirect to=

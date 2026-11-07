@@ -45,7 +45,7 @@ const TEXT_FIELDS: [&str; 5] = ["origin", "referer", "referrer_policy", "referre
 pub(crate) type Post = (Arc<[u8]>, Option<String>);
 
 #[derive(Clone, Default)]
-struct Data {
+pub(crate) struct Data {
     post: Option<Post>,
     // (…by `TEXT_FIELDS`)
     texts: [Option<String>; 5],
@@ -58,7 +58,7 @@ struct Data {
 }
 
 impl Data {
-    fn of(ruby: &magnus::Ruby, fields: RHash) -> Result<Self, magnus::Error> {
+    pub(crate) fn of(ruby: &magnus::Ruby, fields: RHash) -> Result<Self, magnus::Error> {
         let mut data = Data::default();
         data.merge(ruby, fields)?;
         Ok(data)
@@ -214,6 +214,10 @@ struct Traversable {
     // page's (0) and a traversal's of its frames (1) — and before a frame's, by the frame's navigable (`save_frame`).
     saved: [Option<State>; 2],
     frames_saved: HashMap<u32, FrameSaved>,
+    // The page's entry a navigation of its document leaves, noted as it begins (`begin_page_navigation`,
+    // `#begin_page_traversal`), which takes that document's controls' state as it unloads (`#take_leaving`) — none once
+    // the navigation makes no document.
+    leaving: Option<u64>,
     // Each navigable's ongoing navigation (HTML "set the ongoing navigation"), by its number — the one record of it, every
     // way a navigation begins writing it: a location, hyperlink or form navigation planned, a `javascript:` URL's
     // (navigation_plan.rs), a frame's `src` (frame_navigation.rs), the host's own (browser.rb, `#begin_navigation`) —
@@ -950,7 +954,7 @@ impl SessionHistory {
         SessionHistory { id, traversable, owned: std::cell::Cell::new(true) }
     }
     // SessionHistory.of(id) -> a handle on the session history numbered `id`, nil where it is gone.
-    fn of(id: u64) -> Option<Self> {
+    pub(crate) fn of(id: u64) -> Option<Self> {
         let traversable = histories().1.get(&id)?.upgrade()?;
         Some(SessionHistory { id, traversable, owned: std::cell::Cell::new(false) })
     }
@@ -971,7 +975,7 @@ impl SessionHistory {
         self.traversable.lock().unwrap_or_else(PoisonError::into_inner)
     }
     // #id -> its number, which its window's realms are told (`setSessionHistory`).
-    fn id(&self) -> u64 {
+    pub(crate) fn id(&self) -> u64 {
         self.id
     }
 
@@ -999,12 +1003,12 @@ impl SessionHistory {
         Ok(rb_self.replace(nav, parent, url, same_document, Data::of(ruby, fields)?))
     }
     // #active(navigable) -> the id of its active entry, or nil.
-    fn active(&self, nav: u32) -> Option<u64> {
+    pub(crate) fn active(&self, nav: u32) -> Option<u64> {
         let t = self.lock();
         t.state.current_entry(nav, t.build).map(|e| e.id)
     }
     // #url(entry) -> its URL, or nil for no such entry.
-    fn url(&self, id: u64) -> Option<String> {
+    pub(crate) fn url(&self, id: u64) -> Option<String> {
         self.lock().state.entry(id).map(|e| e.url.clone())
     }
     // #set_url(entry, url): its URL made `url` (a redirect's, a replaceState's).
@@ -1036,11 +1040,11 @@ impl SessionHistory {
     }
     // #name / #name=(name): the top-level navigable's target name (`State::name`), which a new window is opened with and
     // a navigation to another origin that leaves it no opener clears.
-    fn name(&self) -> String {
+    pub(crate) fn name(&self) -> String {
         let t = self.lock();
         String::from_utf16_lossy(&t.state.name(t.build))
     }
-    fn set_name(&self, name: String) {
+    pub(crate) fn set_name(&self, name: String) {
         let mut t = self.lock();
         let build = t.build;
         t.state.set_name(build, &name.encode_utf16().collect::<Vec<_>>());
@@ -1054,7 +1058,7 @@ impl SessionHistory {
     }
     // #clear_name: the navigable target name of the document state the navigation in flight made (its current entry's)
     // the empty string — HTML "finalize a cross-document navigation", the shown document's left as it is.
-    fn clear_name(&self) {
+    pub(crate) fn clear_name(&self) {
         let mut guard = self.lock();
         let t = &mut *guard;
         let build = t.build;
@@ -1079,7 +1083,7 @@ impl SessionHistory {
         Ok(())
     }
     // #length -> `history.length`: the number of steps used, at least 1.
-    fn length(&self) -> usize {
+    pub(crate) fn length(&self) -> usize {
         self.lock().state.length()
     }
     // #document_url / #document_url=(url): the URL of the document its top-level navigable is at (`Traversable::url`),
@@ -1206,6 +1210,80 @@ impl SessionHistory {
         if let Some(s) = self.lock().saved.get_mut(slot) {
             *s = None;
         }
+    }
+    // A navigation of the page's document begun (navigation_commit.rs): the history as it stands kept, for one that ends
+    // in no document — and, `leaves`, the entry that document is at noted as the one it leaves (`leaving`). The page's
+    // active entry returned, none for a window at its initial about:blank.
+    pub(crate) fn begin_page_navigation(&self, leaves: bool) -> Option<u64> {
+        let mut t = self.lock();
+        t.saved[0] = Some(t.state.clone());
+        let active = t.state.current_entry(TOP, t.build).map(|e| e.id);
+        if leaves {
+            t.leaving = active;
+        }
+        active
+    }
+    // #begin_page_traversal(step): …a traversal's to `step` that makes the page's document again (HTML "apply the history
+    // step"): the history kept, the entry it leaves noted, and the step applied.
+    fn begin_page_traversal(&self, step: i64) {
+        self.begin_page_navigation(true);
+        self.lock().go_to(step);
+    }
+    // …its entry, of the step after the current one or, `replace`, in place of the active one (`#push`, `#replace`).
+    pub(crate) fn record_page_entry(&self, url: String, replace: bool, data: Data) -> Option<u64> {
+        if replace { self.replace(TOP, TOP, url, false, data) } else { self.push(TOP, TOP, url, false, data) }
+    }
+    // …the request entry `id`'s document is reached by now a redirect's (Fetch "HTTP-redirect fetch"): its URL the
+    // redirect's, and — `get`, a redirect that makes the request a GET, or one that was — none of what a re-post sends
+    // again: so a reload gets the page it was redirected to, not the chain run again, a Post/Redirect/Get page's not the
+    // form submitted again (Chrome).
+    pub(crate) fn redirect_entry(&self, id: u64, url: &str, get: bool) {
+        let mut guard = self.lock();
+        let t = &mut *guard;
+        let Some(e) = t.state.entry_mut(id) else { return };
+        url.clone_into(&mut e.url);
+        if get {
+            let data = Arc::make_mut(&mut e.data);
+            data.post = None;
+            for key in ["origin", "referer", "referrer_policy"] {
+                data.texts[TEXT_FIELDS.iter().position(|&k| k == key).unwrap_or_default()] = None;
+            }
+        }
+        t.version += 1;
+    }
+    // …entry `id`'s text field `key` (`TEXT_FIELDS`), and that one made `value`.
+    pub(crate) fn text_of(&self, id: u64, key: &str) -> Option<String> {
+        self.lock().state.entry(id).and_then(|e| e.data.text(key).map(str::to_owned))
+    }
+    pub(crate) fn set_text_of(&self, id: u64, key: &str, value: String) {
+        let mut guard = self.lock();
+        let t = &mut *guard;
+        if let Some(e) = t.state.entry_mut(id) {
+            Arc::make_mut(&mut e.data).set_text(key, value);
+            t.version += 1;
+        }
+    }
+    // …and whether the request it is reached by was cross-site (`cross_site`).
+    pub(crate) fn set_cross_site_of(&self, id: u64, cross: bool) {
+        let mut guard = self.lock();
+        let t = &mut *guard;
+        if let Some(e) = t.state.entry_mut(id) {
+            Arc::make_mut(&mut e.data).cross_site = Some(cross);
+            t.version += 1;
+        }
+    }
+    // …ended: `made` a document, its history as the navigation left it; else none, its history as it stood before and its
+    // page's document leaving no entry.
+    pub(crate) fn end_page_navigation(&self, made: bool) {
+        let mut t = self.lock();
+        if let Some(state) = t.saved[0].take().filter(|_| !made) {
+            t.state = state;
+            t.leaving = None;
+        }
+    }
+    // #take_leaving -> the entry the page's document leaves (`leaving`), taken as it unloads.
+    fn take_leaving(&self) -> Option<u64> {
+        self.lock().leaving.take()
     }
     // #save_frame(navigable) / #restore_frame(navigable) -> whether there was one / #forget_frame(navigable): …kept for
     // a navigation of frame `navigable` — each frame's its own, whichever traversable's history it is of.
@@ -1498,6 +1576,8 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("save", method!(SessionHistory::save, 1))?;
     class.define_method("restore", method!(SessionHistory::restore, 1))?;
     class.define_method("forget", method!(SessionHistory::forget, 1))?;
+    class.define_method("begin_page_traversal", method!(SessionHistory::begin_page_traversal, 1))?;
+    class.define_method("take_leaving", method!(SessionHistory::take_leaving, 0))?;
     class.define_method("save_frame", method!(SessionHistory::save_frame, 1))?;
     class.define_method("restore_frame", method!(SessionHistory::restore_frame, 1))?;
     class.define_method("begin_navigation", method!(SessionHistory::begin_navigation, 1))?;
