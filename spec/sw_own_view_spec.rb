@@ -207,6 +207,41 @@ RSpec.describe "a service worker's own view" do
     expect(answer).to eq('scope' => '/s/', 'states' => %w[installing installed activating activated], 'ok' => true)
   end
 
+  it "moves a controlled worker client to its registration's next version as Activate does" do
+    version = 0
+    scripts['/s/a.js'] = lambda {|_req|
+      version += 1
+      "self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('fetch', e => { if (e.request.url.endsWith('/version')) e.respondWith(new Response('#{version}')); });"
+    }
+    scripts['/s/w.js'] = <<~JS
+      self.onmessage = async () => {
+        const c = navigator.serviceWorker.controller;
+        postMessage({controlled: !!c, version: await (await fetch('/s/version')).text()});
+      };
+      navigator.serviceWorker.addEventListener('controllerchange', () => postMessage({changed: true}));
+    JS
+    session = session_listening
+    register(session, '/s/a.js')
+    wait_activated(session)
+    session.execute_script(<<~JS)
+      const f = document.createElement('iframe');
+      f.src = '/s/page';
+      f.onload = () => {
+        globalThis.__answers = [];
+        const worker = new f.contentWindow.Worker('/s/w.js');
+        worker.onmessage = e => globalThis.__answers.push(e.data);
+        globalThis.__worker = worker;
+        worker.postMessage('ask');
+      };
+      document.body.append(f);
+    JS
+    expect(poll_until { session.evaluate_script('(globalThis.__answers || [])[0]') }).to eq('controlled' => true, 'version' => '1')
+    session.execute_script('__reg.then(r => r.update());')
+    expect(poll_until { session.evaluate_script('__answers.some(a => a.changed)') }).to be(true)
+    session.execute_script('__worker.postMessage("ask");')
+    expect(poll_until { session.evaluate_script('__answers.at(-1)')['version'] == '2' }).to be(true)
+  end
+
   it "gives a message to a client the service worker's origin, whatever that client's location says" do
     scripts['/s/a.js'] = <<~JS
       self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));

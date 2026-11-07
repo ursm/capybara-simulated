@@ -576,8 +576,14 @@ fn installed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         g.installed = true;
     }
 }
-// __dom.swClaims(href, scope, scopes) -> `claims`.
+// __dom.swClaims(href, scope, scopes, site) -> whether the calling realm's document, at `href`, is claimed by the claim of the
+// registration at `scope`, of a storage key whose top-level site is `site`: `claims`, none of another key's clients.
 fn claims_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let site = args.get(3).to_rust_string_lossy(scope);
+    if crate::blob_rules::partition_site(crate::dom::realm(scope, cid), cid) != site {
+        return rv.set_bool(false);
+    }
     let href = args.get(0).to_rust_string_lossy(scope);
     let claiming = args.get(1).to_rust_string_lossy(scope);
     let mut scopes = Vec::new();

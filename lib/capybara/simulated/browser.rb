@@ -6202,6 +6202,18 @@ module Capybara
         sw_run(Native.sw_job_spawned(@sw_partition, id, (handle if handle.positive?)))
       end
 
+      # The client that realm `key` is controlled by the worker `handle` now (sw_registry.rs `controllers_replaced`): a
+      # worker client's a task of its own event loop.
+      private def sw_controller_told(key, handle, intercepts, script_url)
+        browser, realm = sw_window_realm(key)
+        browser&.sw_controller_changed(realm, handle, intercepts, script_url)
+      end
+      def sw_controller_changed(realm, *controller)
+        return realm_told(realm, '__csim_swSetControllerDirect', *controller) unless realm.negative?
+
+        @workers[-realm]&.dig(:inbox)&.push({kind: 'sw_told', fn: '__csim_swSetControllerDirect', args: controller})
+      end
+
       # The realm the host knows as `realm` (0: its window) announced as a client, where it is still alive.
       private def sw_report_client(realm)
         browser, realm = sw_window_realm(realm)
@@ -6239,7 +6251,7 @@ module Capybara
             @workers[args[0]]&.dig(:inbox)&.push({kind: 'sw_install'})
             sw_tell_realms('__csim_swRegistrationUpdateFound', n)
           when 'activate'      then sw_update_worker_state(n, 'activating') { @workers[n]&.dig(:inbox)&.push({kind: 'sw_activate'}) }
-          when 'activated'     then sw_broadcast('__csim_swRegistrationActivated', n, *args)
+          when 'controller'    then sw_controller_told(n, *args)
           when 'queue_step'    then @runtime.call('__csim_swQueueStep', n)
           when 'continue'      then sw_run(Native.sw_continue(@sw_partition, n))
           when 'try_clear'     then try_clear_uninstalls
@@ -6624,32 +6636,11 @@ module Capybara
         _, intercepts, script_url, = sw_controller(handle, live: false)
         has_fetch ||= intercepts == true
         script_url = script_url.to_s
-        # The claim IS the controller assignment: record it host-side for every client
-        # whose MATCHED registration is this scope, so the activation gate
-        # (sw_registry.rs `controls_clients`) and matchAll never depend on the realm
-        # re-report round trip that can race a load-time report (activation.https).
-        # The claim's longest-registration-wins checks (host record below, realm-side
-        # self-check via all_scopes) must see EVERY registration whose lifecycle has an
-        # active worker — active in the registry OR still activating there.
-        # Claims from activating workers broadcast immediately
-        # now, so a LONGER registration that is itself mid-activation is a real
-        # candidate; comparing against the active registrations alone lets a shorter scope's
-        # claim transiently seize a client the longer one matches
-        # (claim-not-using-registration under CI load).
+        # The claim IS the controller assignment: recorded by the registry for every client whose matched registration
+        # this is, its rivals what each realm and worker client then asks of its own document.
+        candidate_scopes = Native.sw_claim(@sw_partition, handle.to_i, scope.to_s)
         # (…of the claiming registration's storage key alone, its top-level site the worker's: sw_registry.rs)
         site = @workers.dig(handle.to_i, :partition).to_s
-        candidate_scopes = sw_regs.filter_map {|s, registered, activating, serving, _, of| s if of == site && (registered || activating || serving) } | [scope.to_s]
-        Native.sw_clients(@sw_partition).each do |id, url, _controller, of|
-          next unless of == site
-
-          matched = candidate_scopes.select {|s| url.start_with?(s) }.max_by(&:length)
-          # A claim from a still-ACTIVATING worker: it isn't its scope's active worker
-          # yet, so the host record must be written here for exactly this path too, or
-          # the controller falls back to the realm re-report race the record exists to
-          # kill. The claim wins a client only when its scope is that client's longest
-          # match among every candidate registration.
-          Native.sw_set_client_controller(@sw_partition, id, handle.to_i) if matched == scope
-        end
         claim = {handle: handle, has_fetch: has_fetch, script_url: script_url, scope: scope, all_scopes: candidate_scopes, site: site}
         sw_browsers.each {|b| b.sw_claim_told(claim) }
         nil
@@ -6879,17 +6870,7 @@ module Capybara
       # filters the clients it sees by; `realm` the realm it is, a worker client's the negative of its handle, which the
       # registry keeps by the session's number for it: what a worker's message to it is delivered by)
       private def note_client(client_id, realm, url, type, frame_type, controller_handle, origin, site)
-        ctrl = controller_handle.to_i
-        ctrl = nil if ctrl.zero?
-        # Within one document a controller is only ever GAINED (a claim / register
-        # install) — never detached. A SAME-URL re-report carrying none is therefore a
-        # stale racer (a load-time report overtaking the claim's install — the
-        # activation.https flake), not a real loss: keep the recorded controller while
-        # its worker lives. A NAVIGATED report (different URL) resets as before.
-        prev_url, prev_ctrl = Native.sw_client_entry(@sw_partition, client_id.to_s)
-        if ctrl.nil? && prev_ctrl && prev_url == url.to_s && sw_live?(prev_ctrl)
-          ctrl = prev_ctrl
-        end
+        ctrl = controller_handle.to_i.nonzero?
         settled = Native.sw_note_client(@sw_partition, client_id.to_s, sw_realm_key(realm), site.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
         # (…a navigation's reserved client execution ready now, its document committed: what `clients.get` of it waits on)
         sw_host.sw_client_settled(client_id) if settled
