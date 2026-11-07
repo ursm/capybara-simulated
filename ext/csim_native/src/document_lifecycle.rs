@@ -96,6 +96,10 @@ impl Lifecycle {
         self.aborted = true;
         true
     }
+    // HTML "abort a document" of a destroyed one: its active parser aborted, whatever its parse had got to.
+    pub(crate) fn abort_active_parser(&mut self) {
+        self.aborted = true;
+    }
     // Whether it is completely loaded: a navigation of its frame's attributes replaces its entry until then.
     pub(crate) fn is_completely_loaded(&self) -> bool {
         self.completely_loaded

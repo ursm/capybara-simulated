@@ -251,8 +251,10 @@ RSpec.describe 'document.write during parsing' do
 
   # A script-created parser never closed goes with its document's realm — a frame navigated away, or removed — and with
   # its document's next load: nothing reaches it from then on, and it held the nodes it built (html_parse.rs
-  # `drop_realm`, `begin_parse`).
-  it 'keeps no script-created parser of a document that is gone' do
+  # `drop_realm`, `begin_parse`). The document destroyed with its realm has its active parser aborted (HTML "destroy a
+  # document" → "abort a document"): a later `write` returns, and `open()` with it, the document as it was (Chrome and
+  # Firefox: `<p>x</p>` both times, measured 2026-11-08) — where dropping the parse alone let the write open it anew.
+  it 'keeps no script-created parser of a destroyed document, and writes nothing more into it' do
     s = session_for('<iframe id=f></iframe><iframe id=g></iframe>')
     got = s.evaluate_async_script(<<~JS)
       const done = arguments[0], counts = [__dom.htmlLiveParses()];
@@ -261,16 +263,23 @@ RSpec.describe 'document.write during parsing' do
         d.open();
         d.write('<p>x');
         counts.push(__dom.htmlLiveParses());
+        return d;
       };
-      open('f');
-      open('g');
+      const after = (d) => {
+        d.write('<p>z');
+        d.open();
+        d.write('<p>q');
+        return d.body.innerHTML;
+      };
+      const df = open('f'), dg = open('g');
       document.getElementById('g').remove();
       counts.push(__dom.htmlLiveParses());
+      const removed = after(dg);
       const f = document.getElementById('f');
-      f.onload = () => setTimeout(() => done(counts.concat(__dom.htmlLiveParses())), 0);
+      f.onload = () => setTimeout(() => done([counts.concat(__dom.htmlLiveParses()), removed, after(df)]), 0);
       f.src = 'data:text/html,<p>b';
     JS
-    expect(got).to eq([0, 1, 2, 1, 0])
+    expect(got).to eq([[0, 1, 2, 1, 0], '<p>x</p>', '<p>x</p>'])
   end
 
   # An `open()` from the connectedCallback of a custom element the parser made: HTML "create an element for a token"

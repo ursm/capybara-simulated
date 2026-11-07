@@ -5920,7 +5920,7 @@ fn reset_arena(
     }
     dom(scope).arena.forget_reactions_of(cid);
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
-    crate::html_parse::drop_realm(scope, cid);   // (…and its parses, a script-created one never closed among them)
+    crate::html_parse::drop_realm(scope, cid, false);   // (…and its parses, a script-created one never closed among them)
     crate::agents::drop_realm(scope, cid);   // (…and the agent it was: its IndexedDB connections closed, its locks let go)
     dom(scope).walk_reuse.remove(&cid);
     dom(scope).caret_moves.remove(&cid);
@@ -5973,7 +5973,7 @@ fn discard_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         // removed frame's script, which its parent may still call, aborts what it made as before)
         dom(scope).forget_realm_objects(cid);
         crate::agents::drop_realm(scope, cid);   // (…and the agent it was: nothing of it can run any more)
-        crate::html_parse::drop_realm(scope, cid);   // (…and its parses, which its document's next load would not reach)
+        crate::html_parse::drop_realm(scope, cid, true);   // (…and its parses, aborted: its document is destroyed)
     }
 }
 fn drop_realm(
@@ -5994,7 +5994,7 @@ fn drop_realm(
         d.forget_realm_objects(id);         // (…and its ports and channels, and its signals)
         d.abort_signals.drop_realm(id);
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
-        crate::html_parse::drop_realm(scope, id);   // (…and its parses)
+        crate::html_parse::drop_realm(scope, id, true);   // (…and its parses, aborted)
         crate::agents::drop_realm(scope, id);   // (…and the agent it was)
     }
 }

@@ -612,10 +612,28 @@ pub(crate) fn begin_script_created(scope: &mut v8::PinScope<'_, '_>, cid: i32, d
     guarded(scope, None, |scope| begin_parse(scope, cid, doc, String::new(), StandIns::default(), start)).unwrap_or(0)
 }
 // The parses of realm `realm` gone with it (its context reset for the next page, or dropped): a script-created one never
-// closed holds its nodes (`held`) for as long as it is kept.
-pub(crate) fn drop_realm(scope: &mut v8::PinScope<'_, '_>, realm: i32) {
-    if let Some(all) = scope.get_slot_mut::<Parses>() {
-        all.live.retain(|_, p| p.realm != realm);
+// closed holds its nodes (`held`) for as long as it is kept. With `destroyed` (its document destroyed: HTML "destroy a
+// document" → "abort a document"), each document whose active parser went has that parser aborted — a later
+// `write` returns, and `open()` with it, where they would open the document anew; a realm reset keeps its Document for
+// the next page, which `begin` numbers anew.
+pub(crate) fn drop_realm(scope: &mut v8::PinScope<'_, '_>, realm: i32, destroyed: bool) {
+    let Some(all) = scope.get_slot_mut::<Parses>() else { return };
+    let mut docs = Vec::new();
+    all.live.retain(|&id, p| {
+        let gone = p.realm == realm;
+        if gone {
+            docs.push((p.doc, id));
+        }
+        !gone
+    });
+    if !destroyed {
+        return;
+    }
+    let states = &mut crate::dom::dom(scope).arena.document_states;
+    for (doc, id) in docs {
+        if states.parser(doc) == id {
+            states.lifecycle_mut(doc).abort_active_parser();
+        }
     }
 }
 // __dom.htmlLiveParses() -> how many parses the isolate keeps — a diagnostic: none is left of a realm that went.
