@@ -54,14 +54,20 @@ RSpec.describe "a service worker's own view" do
 
   def heard(session) = session.evaluate_script('globalThis.__heard')
 
-  # …the first `count` messages, waited for as the page's event loop runs (`evaluate_async_script`), not the wall clock.
+  # …the first `count` messages, as they come: the page's event loop run until they have (`evaluate_async_script`), for as
+  # long as `poll_until` would give them — a worker's install takes wall time of its own, past the 2 s a script is given,
+  # in a loaded machine's parallel run.
   def hear(session, count)
-    session.evaluate_async_script(<<~JS)
-      const done = arguments[0];
-      if (globalThis.__heard.length >= #{count}) done(globalThis.__heard);
-      else globalThis.__hearing.push([#{count}, done]);
-    JS
+    within_wait {
+      session.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        if (globalThis.__heard.length >= #{count}) done(globalThis.__heard);
+        else globalThis.__hearing.push([#{count}, done]);
+      JS
+    }
   end
+
+  def within_wait(&) = Capybara.using_wait_time(10, &)
 
   def register(session, url, scope = '/s/')
     session.execute_script("globalThis.__reg = navigator.serviceWorker.register(#{url.to_json}, {scope: #{scope.to_json}});")
@@ -223,11 +229,13 @@ RSpec.describe "a service worker's own view" do
       new Worker('/w.js').onmessage = e => { globalThis.__answer = e.data; };
     JS
     # (…waited for on the page's event loop, not the wall clock)
-    answer = session.evaluate_async_script(<<~JS)
-      const done = arguments[0];
-      const look = () => (globalThis.__answer ? done(globalThis.__answer) : setTimeout(look, 10));
-      look();
-    JS
+    answer = within_wait {
+      session.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        const look = () => (globalThis.__answer ? done(globalThis.__answer) : setTimeout(look, 10));
+        look();
+      JS
+    }
     expect(answer).to eq('scope' => '/s/', 'states' => %w[installing installed activating activated], 'ok' => true)
   end
 
