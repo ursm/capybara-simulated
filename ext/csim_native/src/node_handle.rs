@@ -479,14 +479,8 @@ pub(crate) fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::
             // (…and the isolate's roots handler, for the droppable references its handles hold their objects by)
             // SAFETY: the isolate is live, and keeps the handler for its life.
             unsafe { csim_install_roots_handler(scope.as_raw_isolate_ptr(), TAG) };
-            let instance = t.instance_template(scope);
-            instance.set_internal_field_count(1);
-            // (…and its own identity, `__csimSelf` — the Proxy a script holds, or itself — there from the start and NOT
-            // ENUMERABLE: a reference back to the node itself, which a page's `JSON.stringify(node)` would otherwise meet
-            // as a cycle and throw on, where a browser's gives `{}`. Only this one: a field declared here costs every node
-            // its instantiation — the bindings' other own fields, declared so, made a node 20% slower to create.)
-            let key = v8::String::new(scope, "__csimSelf")?;
-            instance.set_with_attr(key.into(), v8::undefined(scope).into(), v8::PropertyAttribute::DONT_ENUM);
+            // (…no property of its own: what the bindings keep of a node are private fields, node-identity.js)
+            t.instance_template(scope).set_internal_field_count(1);
             let global = v8::Global::new(scope, t);
             crate::dom::dom(scope).node_template = Some(global);
             t
@@ -525,6 +519,7 @@ pub(crate) fn install_listeners(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<
     crate::dom::register(scope, ns, "noteListenerType", note_listener_type, context_id);
     crate::dom::register(scope, ns, "listenerTypeKnown", listener_type_known, context_id);
     crate::dom::register(scope, ns, "rareData", rare_data, context_id);
+    crate::dom::register(scope, ns, "nidOf", nid_of_op, context_id);
     crate::dom::register(scope, ns, "nodeData", node_data, context_id);
     crate::dom::register(scope, ns, "liveValue", live_value, context_id);
     crate::dom::register(scope, ns, "setLiveValue", set_live_value, context_id);
@@ -644,6 +639,13 @@ pub(crate) fn adopted_sheet_objects<'s>(scope: &mut v8::PinScope<'s, '_>, handle
 
 // `__dom.nodeData(node)` -> a character data node's data (`data`): the string it holds, or one made from the arena's and
 // held.
+// `__dom.nidOf(node)`: the slot of the node `node` is the object of, or undefined where it is none's or has none — what
+// the bindings keep of it (node-identity.js), asked of the engine.
+fn nid_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(id) = nid_of(scope, args.get(0)) {
+        rv.set(v8::Number::new(scope, id.to_f64()).into());
+    }
+}
 fn node_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     if let Some(s) = data_string(scope, args.get(0)) {
         rv.set(s.into());

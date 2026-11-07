@@ -69,7 +69,7 @@ RSpec.describe 'native layout generated content' do
         globalThis.getComputedStyle(d, '::before').color;
         globalThis.getComputedStyle(d, '::before').width;
         d.getBoundingClientRect();
-        return __dom.pseudoBox(d._nid, 0);
+        return __dom.pseudoBox(__dom.nidOf(d), 0);
       })()
     JS
     expect(nid).to be < 0, "a pseudo that renders nothing took an arena slot: #{nid}"

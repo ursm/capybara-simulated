@@ -58,7 +58,7 @@ RSpec.describe 'native arena reclamation (generational)' do
       #{IDX_OF}
       globalThis.__probe = [];
       for (let i = 0; i < 300; i++) __probe.push(document.createElement('div'));
-      Math.max(...__probe.map(el => el._nid % IDX_BITS));
+      Math.max(...__probe.map(el => __dom.nidOf(el) % IDX_BITS));
     JS
 
     session.evaluate_script('globalThis.__probe = null;')
@@ -68,7 +68,7 @@ RSpec.describe 'native arena reclamation (generational)' do
     # high-water. Append-only (no reclamation) would push it strictly higher.
     reused_idx = session.evaluate_script(<<~JS)
       #{IDX_OF}
-      document.createElement('div')._nid % IDX_BITS;
+      __dom.nidOf(document.createElement('div')) % IDX_BITS;
     JS
 
     expect(reused_idx).to be <= high_water

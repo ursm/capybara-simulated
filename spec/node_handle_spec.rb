@@ -25,7 +25,7 @@ RSpec.describe 'node handles' do
       };
       for (const kind in make) {
         __nids[kind] = [];
-        for (let i = 0; i < 500; i++) { const n = make[kind](); if (i % 50 === 0) __nids[kind].push(n._nid); }
+        for (let i = 0; i < 500; i++) { const n = make[kind](); if (i % 50 === 0) __nids[kind].push(__dom.nidOf(n)); }
       }
       window.__kept = document.getElementById('keep');
     JS
@@ -37,7 +37,7 @@ RSpec.describe 'node handles' do
         document.createElement('span');   // (…which frees what was collected)
         const freed = {};
         for (const kind in __nids) freed[kind] = __nids[kind].filter((nid) => __dom.inspectNode(nid) == null).length;
-        return [freed, __dom.inspectNode(__kept._nid) != null];
+        return [freed, __dom.inspectNode(__dom.nidOf(__kept)) != null];
       })()
     JS
     expect(got).to eq([{'text' => 10, 'element' => 10, 'appended' => 10, 'fragment' => 10}, true])
@@ -80,7 +80,7 @@ RSpec.describe 'node handles' do
         made.innerHTML = '<i>m</i>';
         document.body.append(made);
         const nodes = [t, t.content, t.content.firstChild, h, sr, sr.firstChild, made, made.content, made.content.firstChild];
-        return nodes.map((n) => __dom.handleEdgesMismatch(n._nid) ?? null);
+        return nodes.map((n) => __dom.handleEdgesMismatch(__dom.nidOf(n)) ?? null);
       })()
     JS
     expect(got).to eq([nil] * 9)
@@ -121,7 +121,7 @@ RSpec.describe 'node handles' do
     s.execute_script(<<~JS)
       const g = document.getElementById('g');
       g.getBoundingClientRect();   // (…laid out: the box is made as it renders)
-      window.__box = __dom.pseudoBox(g._nid, 0);
+      window.__box = __dom.pseudoBox(__dom.nidOf(g), 0);
       window.__live = __dom.inspectNode(__box) != null;
       g.remove();
     JS
@@ -165,7 +165,7 @@ RSpec.describe 'node handles' do
     s.execute_script(<<~JS)
       const h = document.getElementById('h');
       h.attachShadow({mode: 'open'}).innerHTML = '<p>shadow</p>';
-      window.__nid = h._nid;
+      window.__nid = __dom.nidOf(h);
       h.remove();
     JS
     s.evaluate_script('0')
@@ -211,9 +211,9 @@ RSpec.describe 'node handles' do
       (() => {
         const tree = document.createElement('div');
         tree.innerHTML = '<form><select><option>a</option></select></form><p>x</p>';
-        const found = __dom.query(tree._nid, '*', false);
+        const found = __dom.query(__dom.nidOf(tree), '*', false);
         const parsed = new DOMParser().parseFromString('<p>y</p>', 'text/html');
-        const inParsed = __dom.query(parsed._nid, 'p', false);
+        const inParsed = __dom.query(__dom.nidOf(parsed), 'p', false);
         return [
           Array.isArray(found), found[0] === tree.querySelector('form'), found[1] === tree.querySelector('select'),
           Array.isArray(inParsed), inParsed[0] === parsed.querySelector('p')
@@ -233,11 +233,11 @@ RSpec.describe 'node handles' do
       for (let i = 0; i < 20; i++) {
         const doc = document.implementation.createHTMLDocument('');
         doc.body.innerHTML = '<p><b>x</b></p>';
-        __gone.push(doc.body.firstChild._nid);
+        __gone.push(__dom.nidOf(doc.body.firstChild));
       }
       const box = document.body.appendChild(document.createElement('div'));
       box.innerHTML = '<p>y</p>';
-      __gone.push(box.firstChild._nid);
+      __gone.push(__dom.nidOf(box.firstChild));
       box.textContent = '';
     JS
     s.evaluate_script('0')

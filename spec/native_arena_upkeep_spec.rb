@@ -45,7 +45,7 @@ RSpec.describe 'native arena upkeep' do
       (() => {
         const t = document.body.appendChild(document.createTextNode('a\\uD800b'));
         t.appendData('\\uDC00');
-        return __dom.inspectNode(t._nid)[2] === 'a\\uD800b\\uDC00';
+        return __dom.inspectNode(__dom.nidOf(t))[2] === 'a\\uD800b\\uDC00';
       })()
     JS
     expect(got).to be true
@@ -64,18 +64,18 @@ RSpec.describe 'native arena upkeep' do
       (() => {
         const fd = document.querySelector('iframe').contentDocument, p = fd.getElementById('mv'), nids = new Set();
         for (let i = 0; i < 10; i++) {
-          document.body.appendChild(p); nids.add(p._nid);
-          fd.getElementById('home').appendChild(p); nids.add(p._nid);
+          document.body.appendChild(p); nids.add(__dom.nidOf(p));
+          fd.getElementById('home').appendChild(p); nids.add(__dom.nidOf(p));
         }
         document.body.appendChild(p);
         window.__mv = p;
-        return [nids.size, nids.has(p._nid)];
+        return [nids.size, nids.has(__dom.nidOf(p))];
       })()
     JS
     expect(got).to eq([1, true])
     session.execute_script("document.querySelector('iframe').srcdoc = '<p>reloaded</p>'")
     session.within_frame(0) { session.find('p', text: 'reloaded') }
-    expect(session.evaluate_script("[__dom.inspectNode(__mv._nid) !== null, document.querySelector('#mv b') === __mv.firstChild]")).to eq([true, true])
+    expect(session.evaluate_script("[__dom.inspectNode(__dom.nidOf(__mv)) !== null, document.querySelector('#mv b') === __mv.firstChild]")).to eq([true, true])
     expect(session.find(:css, '#mv').text).to eq('xt')
   end
 
