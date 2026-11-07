@@ -216,17 +216,17 @@ struct State {
     shown_name: Option<Vec<u16>>,
 }
 
-// The history a frame's navigation kept as it began (`save_frame`): as it stood, the `version` it was at, and what the
-// navigation's own entry did to it (`made`, as it is committed).
-struct FrameSaved {
-    state: State,
-    version: u64,
-    made: Option<FrameMade>,
-}
-// …its entry added after the current one, which was `before` — or the one it replaced.
-enum FrameMade {
-    Pushed { id: u64, before: i64 },
-    Replaced(Entry),
+// A frame's navigation under way — HTML "navigate"'s history entry, which only the document it makes puts in the session
+// history ("finalize a cross-document navigation"): the URL it is made at, its navigable's parent, whether it takes the
+// place of the active entry (a `location.replace`, a navigation of a document not completely loaded yet, the first in
+// place of the frame's initial about:blank), what a replay of it sends and restores, and its number
+// (`Traversable::begin_frame_entry`), which the host's fetch of it holds (navigation_commit.rs `Commit`).
+struct FrameNavigation {
+    token: u64,
+    parent: u32,
+    url: String,
+    replace: bool,
+    data: Data,
 }
 
 #[derive(Default)]
@@ -235,9 +235,12 @@ struct Traversable {
     made: u64,
     build: u32,
     // The history as it stood before a traversal of the page's frames that may end in no document (a download, a
-    // hand-off) — and before a frame's navigation, by the frame's navigable (`save_frame`).
+    // hand-off).
     saved: Option<State>,
-    frames_saved: HashMap<u32, FrameSaved>,
+    // Each frame's navigation under way, by its navigable — one at a time, a navigation begun ending the one before it
+    // (HTML "navigate") — and the number the next one is given.
+    navigations: HashMap<u32, FrameNavigation>,
+    navigation_tokens: u64,
     // The page's entry a navigation of its document leaves, noted as it commits another (navigation_commit.rs
     // `set_leaving`), which takes that document's controls' state as it unloads (`#take_leaving`).
     leaving: Option<u64>,
@@ -249,10 +252,6 @@ struct Traversable {
     // activating service worker: browser.rb `await_sw_activation`) are judged by.
     ongoing: HashMap<u32, u64>,
     next_ongoing: u64,
-    // How many times its history has changed — an entry committed, a step gone to or held at, a navigable destroyed, a
-    // document made anew, an entry's URL or fields or the target name written: what a frame's kept history is judged by
-    // as it is restored (`restore_frame`), which gives back the whole of it only where none of these happened since.
-    version: u64,
     // The session history traversal queue (HTML §7.4.1.2): the traversals a page's `history` asked for, each applied as
     // its task runs, in order (`applyTraversal`) — and the token the next one is given.
     queued: Vec<Queued>,
@@ -435,7 +434,7 @@ impl Queued {
 }
 
 // The navigable a list belongs to: 0 the traversable's own.
-const TOP: u32 = 0;
+pub(crate) const TOP: u32 = 0;
 // The steps a session history keeps (`State::trim`).
 const MAX_STEPS: usize = 50;
 // The ongoing navigation "traversal" (`Traversable::begin_traversal`), which no navigation's number is.
@@ -740,7 +739,6 @@ impl Traversable {
                 let at = list.iter().position(|e| e.id == old.id)?;
                 list[at] = Entry { id, step: old.step, url: url.to_owned(), doc, data: Arc::new(data) };
                 self.state.collect_docs();
-                self.made_frame_entry(nav, FrameMade::Replaced(old));
                 return Some(id);
             }
         }
@@ -749,48 +747,46 @@ impl Traversable {
         self.state.current = step;
         self.state.drop_stale_holds(build);
         self.state.trim();
-        self.made_frame_entry(nav, FrameMade::Pushed { id, before: current });
         Some(id)
     }
-    // …the entry a frame's navigation it kept the history of commits (`save_frame`): what undoing it takes, should the
-    // navigation make no document after all.
-    fn made_frame_entry(&mut self, nav: u32, made: FrameMade) {
-        self.version += 1;
-        if let Some(saved) = self.frames_saved.get_mut(&nav).filter(|s| s.made.is_none()) {
-            saved.made = Some(made);
-        }
+    // A navigation of frame `nav` (its parent `parent`) to `url` begun: the entry it makes as its document is — in place of
+    // the active one where `replace` — what a replay of it sends and restores `data`; its number. The frame's navigation
+    // under way before it ended by it, its entry never made.
+    fn begin_frame_entry(&mut self, nav: u32, parent: u32, url: String, replace: bool, data: Data) -> u64 {
+        self.navigation_tokens += 1;
+        let token = self.navigation_tokens;
+        self.navigations.insert(nav, FrameNavigation { token, parent, url, replace, data });
+        token
     }
-    // The history kept for a navigation of frame `nav` as it began, given back, the navigation having made no document
-    // (a 204, a download): as it stood, where nothing else changed it since; else that navigation's own entry alone undone
-    // — the one it added taken out, the step back where it was, or the one it replaced put back — the rest as it is.
-    fn restore_frame(&mut self, nav: u32) -> bool {
-        let Some(saved) = self.frames_saved.remove(&nav) else { return false };
-        let own = u64::from(saved.made.is_some());
-        if self.version == saved.version + own {
-            self.state = saved.state;
-            return true;
-        }
-        let build = self.build;
-        match saved.made {
-            Some(FrameMade::Pushed { id, before }) => {
-                let Some(list) = self.state.list_mut(nav, build) else { return true };
-                let Some(at) = list.iter().position(|e| e.id == id) else { return true };
-                let step = list.remove(at).step;
-                if self.state.current == step && !self.state.used_steps().contains(&step) {
-                    self.state.current = before;
-                }
+    // …its document made: its entry committed (`commit`) — at the URL a redirect took it to, `redirect`, with none of what
+    // a re-post sends again where that made its request a GET — where it is the frame's navigation under way (of number
+    // `token`; any, for none).
+    fn commit_frame_navigation(&mut self, nav: u32, token: Option<u64>, redirect: Option<(&str, bool)>) -> Option<u64> {
+        let FrameNavigation { parent, mut url, replace, mut data, .. } = self.take_frame_navigation(nav, token)?;
+        if let Some((to, get)) = redirect {
+            to.clone_into(&mut url);
+            if get {
+                data.forget_request();
             }
-            Some(FrameMade::Replaced(old)) => {
-                let Some(list) = self.state.list_mut(nav, build) else { return true };
-                if let Some(at) = list.iter().position(|e| e.step == old.step) {
-                    list[at] = old;
-                }
-            }
-            None => {}
         }
-        self.state.collect_docs();
-        self.version += 1;
-        true
+        self.commit(nav, parent, &url, false, replace, data)
+    }
+    // …or none made (a 204, a download, a hand-off, another navigation ending it, a failure of the host's): the history as
+    // it is, its entry let go.
+    fn abandon_frame_navigation(&mut self, nav: u32, token: Option<u64>) {
+        self.take_frame_navigation(nav, token);
+    }
+    fn take_frame_navigation(&mut self, nav: u32, token: Option<u64>) -> Option<FrameNavigation> {
+        let ours = self.navigations.get(&nav).is_some_and(|n| token.is_none_or(|t| t == n.token));
+        if ours { self.navigations.remove(&nav) } else { None }
+    }
+    // The request entry `id`'s document is reached by now a redirect's (`SessionHistory::redirect_entry`).
+    fn redirect_entry(&mut self, id: u64, url: &str, get: bool) {
+        let Some(e) = self.state.entry_mut(id) else { return };
+        url.clone_into(&mut e.url);
+        if get {
+            Arc::make_mut(&mut e.data).forget_request();
+        }
     }
 
     // HTML "traverse the history by a delta": the step `delta` used steps from the current one, and each navigable's
@@ -907,7 +903,6 @@ impl Traversable {
     }
     // The traversal to `step` applied — the step a plan gave.
     fn go_to(&mut self, step: i64) {
-        self.version += 1;
         self.ongoing.clear();
         let build = self.build;
         self.state.release_moved(step, build);
@@ -928,8 +923,8 @@ impl Traversable {
     // (…and a traversal its document planned gone with that document's plan — a flush's let go as the navigation it ran
     // before commits: none of its navigables traversing)
     fn rebuilt(&mut self) {
-        self.version += 1;
         self.build += 1;
+        self.navigations.clear();
         self.state.held.clear();
         self.end_traversal();
     }
@@ -937,10 +932,8 @@ impl Traversable {
     // HTML "destroy a child navigable": navigable `nav`'s nested history removed from its parent's document state — its
     // steps, and its own frames' with it, counted no more.
     fn destroy(&mut self, nav: u32) {
-        self.version += 1;
-        // (…a navigation of it that kept the history, to give it back should it make no document, now nothing to restore;
-        // nor one of it ongoing)
-        self.frames_saved.remove(&nav);
+        // (…its navigation under way, whose entry no document of it makes now, nor one of it ongoing)
+        self.navigations.remove(&nav);
         self.ongoing.remove(&nav);
         let build = self.build;
         let Some(doc) = self.state.parent_doc_of(nav, build) else { return };
@@ -964,7 +957,6 @@ impl Traversable {
         } else if let Some(entry) = self.state.entry_mut(id) {
             entry.url = url.to_owned();
             Arc::make_mut(&mut entry.data).state = state;
-            self.version += 1;
         }
     }
     // Its top-level navigable's document's URL made `url` by those steps — the one it was at noted, while the host notes
@@ -1082,7 +1074,6 @@ impl SessionHistory {
         let t = &mut *guard;
         if let Some(e) = t.state.entry_mut(id) {
             e.url = url;
-            t.version += 1;
         }
     }
     // #entry(entry) -> {url:, body:, content_type:, origin:, referer:, referrer_policy:, referrer:, cross_site:, name:,
@@ -1118,7 +1109,6 @@ impl SessionHistory {
         let mut t = self.lock();
         let build = t.build;
         t.state.set_name(build, &name.encode_utf16().collect::<Vec<_>>());
-        t.version += 1;
     }
     // #show: the top-level navigable's document committed (`State::show`), its current entry's.
     fn show(&self) {
@@ -1136,7 +1126,6 @@ impl SessionHistory {
         for entry in t.state.entries.iter_mut().filter(|e| e.doc == doc) {
             Arc::make_mut(&mut entry.data).name = Some(Vec::new());
         }
-        t.version += 1;
     }
     // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
     // them (`Data::merge`) — a history saved before keeping the ones it had.
@@ -1148,7 +1137,6 @@ impl SessionHistory {
         let t = &mut *guard;
         if let Some(e) = t.state.entry_mut(id) {
             e.data = Arc::new(data);
-            t.version += 1;
         }
         Ok(())
     }
@@ -1258,6 +1246,15 @@ impl SessionHistory {
     pub(crate) fn replace_state_for_test(&self, url: &str) {
         self.lock().update(TOP, TOP, url, None, false);
     }
+    // …and frame `nav` of the page, at `url` (`seed`), and a navigation of it begun to `url` (`begin_frame_entry`).
+    #[cfg(test)]
+    pub(crate) fn seed_frame(&self, nav: u32, url: &str) -> u64 {
+        self.lock().ensure(nav, TOP, url).unwrap_or_default()
+    }
+    #[cfg(test)]
+    pub(crate) fn begin_frame_entry_for_test(&self, nav: u32, url: &str) -> u64 {
+        self.lock().begin_frame_entry(nav, TOP, url.to_owned(), false, Data::default())
+    }
     // …the plan with no step passed over (`Traversable::plan`), which the tests read.
     #[cfg(test)]
     fn plan(&self, delta: i64) -> Option<(i64, Vec<Change>)> {
@@ -1276,7 +1273,6 @@ impl SessionHistory {
     fn hold(&self, nav: u32, id: u64, step: i64) {
         let mut t = self.lock();
         let build = t.build;
-        t.version += 1;
         t.state.held.insert(nav, (id, step));
         t.state.drop_stale_holds(build);
     }
@@ -1309,7 +1305,6 @@ impl SessionHistory {
         let mut t = self.lock();
         if lost || t.same_document != kept.1 {
             t.state = kept.0;
-            t.version += 1;
         }
     }
     // The entry the page's document leaves as a navigation of it commits another (navigation_commit.rs), none where it
@@ -1326,14 +1321,7 @@ impl SessionHistory {
     // again: so a reload gets the page it was redirected to, not the chain run again, a Post/Redirect/Get page's not the
     // form submitted again (Chrome).
     pub(crate) fn redirect_entry(&self, id: u64, url: &str, get: bool) {
-        let mut guard = self.lock();
-        let t = &mut *guard;
-        let Some(e) = t.state.entry_mut(id) else { return };
-        url.clone_into(&mut e.url);
-        if get {
-            Arc::make_mut(&mut e.data).forget_request();
-        }
-        t.version += 1;
+        self.lock().redirect_entry(id, url, get);
     }
     // …entry `id`'s text field `key` (`TEXT_FIELDS`), and that one made `value`.
     pub(crate) fn text_of(&self, id: u64, key: &str) -> Option<String> {
@@ -1344,7 +1332,6 @@ impl SessionHistory {
         let t = &mut *guard;
         if let Some(e) = t.state.entry_mut(id) {
             Arc::make_mut(&mut e.data).set_text(key, value);
-            t.version += 1;
         }
     }
     // …and its classic history API state none (HTML "apply the history step": StructuredSerializeForStorage(null)).
@@ -1353,25 +1340,32 @@ impl SessionHistory {
         let t = &mut *guard;
         if let Some(e) = t.state.entry_mut(id) {
             Arc::make_mut(&mut e.data).state = None;
-            t.version += 1;
         }
     }
     // #take_leaving -> the entry the page's document leaves (`leaving`), taken as it unloads.
     fn take_leaving(&self) -> Option<u64> {
         self.lock().leaving.take()
     }
-    // #save_frame(navigable) / #restore_frame(navigable) -> whether there was one / #forget_frame(navigable): …kept for
-    // a navigation of frame `navigable` — each frame's its own, whichever traversable's history it is of.
-    fn save_frame(&self, nav: u32) {
+    // The navigation of frame `nav` of number `token` — any under way, for none — its document made, or none
+    // (`Traversable::commit_frame_navigation`, `abandon_frame_navigation`): navigation_commit.rs `Commit`'s, as the
+    // host's fetch of it ends. And #commit_frame_navigation(navigable) -> its entry, nil none: the host's of a document
+    // it made of no fetch of its own — a `data:` URL's, about:blank's, a blob's, an error document.
+    pub(crate) fn commit_frame_navigation(&self, nav: u32, token: Option<u64>, redirect: Option<(&str, bool)>) -> Option<u64> {
+        self.lock().commit_frame_navigation(nav, token, redirect)
+    }
+    pub(crate) fn abandon_frame_navigation(&self, nav: u32, token: Option<u64>) {
+        self.lock().abandon_frame_navigation(nav, token);
+    }
+    fn commit_frame_navigation_for_ruby(&self, nav: u32) -> Option<u64> {
+        self.commit_frame_navigation(nav, None, None)
+    }
+    // …and a replay's — a reload's, a traversal's, of the entry frame `nav` is at — its document reached by a redirect
+    // (`redirect_entry`).
+    pub(crate) fn redirect_frame_entry(&self, nav: u32, url: &str, get: bool) {
         let mut t = self.lock();
-        let saved = FrameSaved { state: t.state.clone(), version: t.version, made: None };
-        t.frames_saved.insert(nav, saved);
-    }
-    fn restore_frame(&self, nav: u32) -> bool {
-        self.lock().restore_frame(nav)
-    }
-    fn forget_frame(&self, nav: u32) {
-        self.lock().frames_saved.remove(&nav);
+        if let Some(id) = t.state.current_entry(nav, t.build).map(|e| e.id) {
+            t.redirect_entry(id, url, get);
+        }
     }
     // #begin_navigation(navigable) -> the number of the navigation of `navigable` begun now, its ongoing one — and
     // #navigation_ongoing?(navigable, number): whether it still is, no navigation begun nor traversal applied since.
@@ -1395,7 +1389,7 @@ impl SessionHistory {
         t.passed.clear();
         t.saved = None;
         t.leaving = None;
-        t.frames_saved.clear();
+        t.navigations.clear();
         t.ongoing.clear();
         (t.closed, t.by_web_content, t.popup_sandbox) = (false, false, 0);
         t.opener_policy = crate::coop::Value::UnsafeNone;
@@ -1654,12 +1648,10 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("restore", method!(SessionHistory::restore, 0))?;
     class.define_method("forget", method!(SessionHistory::forget, 0))?;
     class.define_method("take_leaving", method!(SessionHistory::take_leaving, 0))?;
-    class.define_method("save_frame", method!(SessionHistory::save_frame, 1))?;
-    class.define_method("restore_frame", method!(SessionHistory::restore_frame, 1))?;
+    class.define_method("commit_frame_navigation", method!(SessionHistory::commit_frame_navigation_for_ruby, 1))?;
     class.define_method("begin_navigation", method!(SessionHistory::begin_navigation, 1))?;
     class.define_method("navigation_ongoing?", method!(SessionHistory::navigation_ongoing, 2))?;
     class.define_method("ongoing_navigation", method!(SessionHistory::ongoing_navigation, 1))?;
-    class.define_method("forget_frame", method!(SessionHistory::forget_frame, 1))?;
     class.define_method("clear", method!(SessionHistory::clear, 0))?;
     Ok(())
 }
@@ -1944,38 +1936,41 @@ mod tests {
         assert!(!h.restore());
     }
 
-    // A frame's navigation that made no document gives back the history as it was where nothing else changed it — and,
-    // another navigable's entry committed meanwhile, undoes its own entry alone, that one's kept.
+    // A frame's navigation makes its entry as its document is made, and none where it makes none — the one it ended, its
+    // number's, none either; nor once the frame is destroyed.
     #[test]
-    fn a_frame_history_kept_undoes_its_own_entry_alone() {
+    fn a_frame_navigation_makes_its_entry_only_with_its_document() {
         let h = history();
         h.push(TOP, TOP, "/top".into(), false, Data::default());
         let f1 = h.seed(1, TOP, "/f1".into()).unwrap();
-        h.seed(2, TOP, "/g1".into());
-        h.save_frame(1);
-        h.push(1, TOP, "/f204".into(), false, Data::default());
-        assert!(h.restore_frame(1));
+        let begin = |url: &str, replace: bool| h.lock().begin_frame_entry(1, TOP, url.into(), replace, Data::default());
+        let made = begin("/f204", false);
+        assert_eq!(h.length(), 1);
+        h.abandon_frame_navigation(1, Some(made));
+        assert_eq!(h.commit_frame_navigation(1, None, None), None);
         assert_eq!((h.active(1), h.length()), (Some(f1), 1));
 
-        h.save_frame(1);
-        h.push(1, TOP, "/f204".into(), false, Data::default());
-        let g2 = h.push(2, TOP, "/g2".into(), false, Data::default());
-        assert!(h.restore_frame(1));
-        assert_eq!((h.active(1), h.active(2), h.length()), (Some(f1), g2, 2));
-        assert!(!h.restore_frame(1));
+        let first = begin("/slow", false);
+        let second = begin("/f2", false);
+        h.abandon_frame_navigation(1, Some(first));
+        let f2 = h.commit_frame_navigation(1, Some(second), Some(("/f2-redirected", true)));
+        assert_eq!((h.active(1), h.length()), (f2, 2));
+        assert_eq!(h.url(f2.unwrap()).as_deref(), Some("/f2-redirected"));
 
-        // (…and another navigable's entry written meanwhile — a replaceState's URL — keeps what was written)
-        let g1 = h.active(2).unwrap();
-        h.save_frame(1);
-        h.push(1, TOP, "/f204".into(), false, Data::default());
-        h.set_url(g1, "/g-replaced".into());
-        assert!(h.restore_frame(1));
-        assert_eq!((h.active(1), h.url(g1).as_deref()), (Some(f1), Some("/g-replaced")));
+        begin("/f3", true);
+        let f3 = h.commit_frame_navigation(1, None, None);
+        assert_eq!((h.active(1), h.length()), (f3, 2));
 
-        // (…none to give back once the frame is destroyed)
-        h.save_frame(2);
-        h.lock().destroy(2);
-        assert!(!h.restore_frame(2));
+        // (…none of another navigation's number; a replay's redirect its active entry's)
+        let f4 = begin("/f4", false);
+        assert_eq!(h.commit_frame_navigation(1, Some(f4 + 1), None), None);
+        h.abandon_frame_navigation(1, Some(f4));
+        h.redirect_frame_entry(1, "/f3-moved", false);
+        assert_eq!(h.url(f3.unwrap()).as_deref(), Some("/f3-moved"));
+
+        begin("/gone", false);
+        h.lock().destroy(1);
+        assert_eq!(h.commit_frame_navigation(1, None, None), None);
     }
 
     // A navigation begun is the navigable's ongoing one until another is begun or a traversal applied.
@@ -2176,6 +2171,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "historyUpdate", history_update_op, context_id);
     crate::dom::register(scope, ns, "frameNavigable", frame_navigable_op, context_id);
     crate::dom::register(scope, ns, "frameEntry", frame_entry_op, context_id);
+    crate::dom::register(scope, ns, "beginFrameEntry", begin_frame_entry_op, context_id);
 }
 
 // __dom.traversableClosing() -> whether the top-level traversable of the isolate's page is closing or closed (HTML's
@@ -2595,13 +2591,11 @@ fn frame_entry(arena: &crate::dom::RealmArena, realm: i32, create: bool) -> Opti
     let t = &mut *guard;
     if let Some(entry) = t.state.entry_mut(id).filter(|e| e.data.text("referrer").is_none()) {
         Arc::make_mut(&mut entry.data).set_text("referrer", referrer);
-        t.version += 1;
     }
     // (…and the markup of the about:srcdoc document it is at, as its realm's: `frame_document_srcdoc`)
     if let Some(entry) = t.state.entry_mut(id).filter(|e| e.data.srcdoc.is_none()) {
         if let Some(srcdoc) = arena.live_container(realm).and_then(|c| arena.frame_document_srcdoc(c)) {
             Arc::make_mut(&mut entry.data).srcdoc = Some(srcdoc.into());
-            t.version += 1;
         }
     }
     drop(guard);
@@ -2635,6 +2629,34 @@ fn frame_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let cid = crate::dom::realm_id(scope, &args);
     let Some((frame, id)) = frame_entry(crate::dom::realm(scope, cid), realm, create) else { return rv.set_null() };
     let items = [v8::Number::new(scope, frame.traversable_id as f64).into(), v8::Number::new(scope, id as f64).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.beginFrameEntry(realm, url, replace, srcdoc) -> [handling, navigable, token]: a navigation of frame realm `realm`'s
+// navigable to `url` begun (`Traversable::begin_frame_entry`), the entry it makes as its document is — "replace" in place
+// of the active one where `replace`, and where the frame is at its initial about:blank, which no traversal goes back to
+// (HTML "navigate": a navigable whose active document is its initial about:blank replaces it — its first document's,
+// about:blank, of no entry yet); "push" else, the active one made first where the frame has none (`frame_entry`) — of the
+// markup `srcdoc` an about:srcdoc document is made of. Null for no frame, and for a `javascript:` URL, which runs in the
+// document the frame is at (HTML "navigate", its result at most replacing it): no entry is its.
+fn begin_frame_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let url = args.get(1).to_rust_string_lossy(scope);
+    let replace = args.get(2).is_true();
+    let srcdoc = (!args.get(3).is_null_or_undefined()).then(|| args.get(3).to_rust_string_lossy(scope));
+    if url.get(..11).is_some_and(|scheme| scheme.eq_ignore_ascii_case("javascript:")) {
+        return rv.set_null();
+    }
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let initial = frame_entry(arena, realm, false).is_none()
+        && arena.realm_tree(realm).3
+        && arena.realm_state(realm).and_then(|s| ada_url::Url::parse(s.location.href(), None).ok()).is_some_and(|u| crate::url_ops::matches_about_blank(&u));
+    let Some((frame, _)) = frame_entry(arena, realm, true) else { return rv.set_null() };
+    let replace = replace || initial;
+    let data = Data { srcdoc: srcdoc.map(Into::into), ..Data::default() };
+    let token = lock(&frame.traversable).begin_frame_entry(frame.nav, frame.parent_nav, url, replace, data);
+    let Some(handling) = v8::String::new(scope, if replace { "replace" } else { "push" }) else { return };
+    let items = [handling.into(), v8::Integer::new_from_unsigned(scope, frame.nav).into(), v8::Number::new(scope, token as f64).into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 

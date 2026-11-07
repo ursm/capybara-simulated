@@ -45,12 +45,11 @@ module Capybara
           mode, credentials, _, _, destination = Native.subresource_plan_fields(a[4].to_i)
           b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], destination, mode, credentials, binary: a[5] == true, integrity: a[6] || '', referrer_policy: a[7])
         },
-        # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
-        # document) so history.go(-1) can traverse back — and a controlling SW sees
-        # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.
-        '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1], srcdoc: a[2]); nil },
-        # …or the current one replaced by it: the navigation's history handling (frame_navigation.rs `frameAttributesNavigate`).
-        '__csim_replaceFrameEntry'   => ->(b, *a) { b.replace_frame_entry(a[0].to_i, a[1], srcdoc: a[2]); nil },
+        # A frame's navigation by its container (a `src` change, the host's of a URL no fetch here answers) commits: the
+        # session-history entry it makes made now (snapshotting the OUTGOING document), so history.go(-1) can traverse
+        # back — after the active one, or (a[3]) in its place: the navigation's history handling (frame_navigation.rs
+        # `frameAttributesNavigate`). Must run while the outgoing realm (a[0]) is still alive.
+        '__csim_recordFrameNav'      => ->(b, *a) { b.commit_frame_entry(a[0].to_i, a[1], srcdoc: a[2], replace: a[3] == true); nil },
         # …and the outgoing document unloaded (a[0] its realm, alive still): the entry takes its form state as its
         # pagehide / unload handlers left it.
         '__csim_frameUnloaded'       => ->(b, *a) { b.frame_document_unloaded(a[0].to_i); nil },

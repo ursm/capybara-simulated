@@ -279,8 +279,10 @@ impl NavigationFetch {
     // opener policy of its document — session_history.rs `opener_policy_of` — is what its responses' are enforced against:
     // `response`; nil a frame's, none), `commit` (the page's navigation, of that traversable: {handling: 'push', 'replace',
     // 'reload' or 'traverse', traversal: a traversal's [step, entry id], entry: the fields of the entry it makes — session_history.rs `Data` — leaving_origin: the
-    // origin of the document it leaves, serialized, a window's initial about:blank's its creator's, nil none} —
-    // navigation_commit.rs `Commit`, `#begin_commit`; nil any other navigation).
+    // origin of the document it leaves, serialized, a window's initial about:blank's its creator's, nil none} — or a
+    // frame's, {navigable:, traversable: the number of the session history it is of, entry: the number of the navigation
+    // whose entry it makes, session_history.rs `begin_frame_entry`, nil a replay's} — navigation_commit.rs `Commit`,
+    // `#begin_commit`, `#response_commit`; nil any other navigation).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -299,16 +301,28 @@ impl NavigationFetch {
         let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
         let ancestors = ancestors.map(|a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>()).transpose()?;
         let traversable = Option::<u64>::try_convert(get("traversable")?)?;
-        let commit = match (Option::<RHash>::try_convert(get("commit")?)?, traversable.and_then(crate::session_history::SessionHistory::of)) {
-            (Some(commit), Some(history)) => {
+        let commit = match Option::<RHash>::try_convert(get("commit")?)? {
+            Some(commit) => {
                 let field = |key: &str| commit.aref::<_, Value>(ruby.to_symbol(key));
-                let handling = String::try_convert(field("handling")?)?;
-                let traversal = Option::<(i64, u64)>::try_convert(field("traversal")?)?;
-                let handling = Handling::named(&handling, traversal).ok_or_else(|| Error::new(ruby.exception_arg_error(), format!("no history handling {handling}")))?;
-                let entry = Option::<RHash>::try_convert(field("entry")?)?.map(|e| crate::session_history::Data::of(ruby, e)).transpose()?;
-                Some(Commit::new(history, handling, entry, Option::<String>::try_convert(field("leaving_origin")?)?))
+                match Option::<u32>::try_convert(field("navigable")?)? {
+                    // (…a frame's, of the traversable its navigable is of: none of whose responses' opener policies matter)
+                    Some(nav) => Option::<u64>::try_convert(field("traversable")?)?
+                        .and_then(crate::session_history::SessionHistory::of)
+                        .map(|history| Ok::<_, Error>(Commit::of_frame(history, nav, Option::<u64>::try_convert(field("entry")?)?)))
+                        .transpose()?,
+                    None => traversable
+                        .and_then(crate::session_history::SessionHistory::of)
+                        .map(|history| {
+                            let handling = String::try_convert(field("handling")?)?;
+                            let traversal = Option::<(i64, u64)>::try_convert(field("traversal")?)?;
+                            let handling = Handling::named(&handling, traversal).ok_or_else(|| Error::new(ruby.exception_arg_error(), format!("no history handling {handling}")))?;
+                            let entry = Option::<RHash>::try_convert(field("entry")?)?.map(|e| crate::session_history::Data::of(ruby, e)).transpose()?;
+                            Ok::<_, Error>(Commit::new(history, handling, entry, Option::<String>::try_convert(field("leaving_origin")?)?))
+                        })
+                        .transpose()?,
+                }
             }
-            _ => None,
+            None => None,
         };
         let coop = traversable.map(|id| CoopEnforcement {
             coop: crate::session_history::opener_policy_of(id),
