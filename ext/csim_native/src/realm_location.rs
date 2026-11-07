@@ -133,8 +133,8 @@ impl RealmLocation {
     // against: a tuple origin's serialization, an opaque one's a token of the realm `cid` that has it (its own, made
     // the first time it is asked, unless it inherited one), so two unrelated opaque origins never match.
     // …as far as it is known, none made: none for an opaque one no key was made of yet (which no other realm shares).
-    pub(crate) fn known_origin_key(&self) -> Option<String> {
-        self.origin_key.clone().or_else(|| (self.origin() != "null").then(|| self.origin().to_owned()))
+    pub(crate) fn known_origin_key(&self) -> Option<&str> {
+        self.origin_key.as_deref().or_else(|| Some(self.origin()).filter(|&origin| origin != "null"))
     }
     pub(crate) fn origin_key(&mut self, cid: i32) -> String {
         if let Some(key) = &self.origin_key {
@@ -556,12 +556,14 @@ pub(crate) fn realms_same_origin(scope: &mut v8::PinScope<'_, '_>, a: i32, b: i3
 // origin, a document's encoding and `document.open()` ask "same origin" — `realms_same_origin` — which no domain moves.)
 fn same_origin_domain(a: &RealmLocation, b: &RealmLocation) -> bool {
     let (Some(ka), Some(kb)) = (a.known_origin_key(), b.known_origin_key()) else { return false };
-    if is_opaque_origin_key(&ka) || is_opaque_origin_key(&kb) {
+    if is_opaque_origin_key(ka) || is_opaque_origin_key(kb) {
         return ka == kb;
     }
-    let scheme = |key: &str| key.split_once(':').map(|(s, _)| s.to_owned());
+    fn scheme(key: &str) -> Option<&str> {
+        key.split_once(':').map(|(s, _)| s)
+    }
     match (&a.domain, &b.domain) {
-        (Some(da), Some(db)) => da == db && scheme(&ka) == scheme(&kb),
+        (Some(da), Some(db)) => da == db && scheme(ka) == scheme(kb),
         (None, None) => ka == kb,
         _ => false,
     }
@@ -570,8 +572,11 @@ impl RealmArena {
     // Whether realms `a`'s and `b`'s origins are same origin-domain (`same_origin_domain`): false for a realm gone.
     pub(crate) fn realms_same_origin_domain(&self, a: i32, b: i32) -> bool {
         let location = |r: i32| (!self.is_dropped(r)).then(|| self.realm_state(r)).flatten().map(|s| &s.location);
+        if a == b {
+            return location(a).is_some();
+        }
         match (location(a), location(b)) {
-            (Some(x), Some(y)) => a == b || same_origin_domain(x, y),
+            (Some(x), Some(y)) => same_origin_domain(x, y),
             _ => false,
         }
     }
