@@ -231,6 +231,24 @@ RSpec.describe 'document.write during parsing' do
     expect(s.evaluate_async_script('setTimeout(() => arguments[0]([document.readyState, L]), 50)')).to eq(['complete', %w[dcl load]])
   end
 
+  # …a frame's document too, whose build fires its load as it ends: written and not closed, it stays loading, no load at
+  # its container, and its parent's load waits for it — until it is closed (Chrome and Firefox; document_lifecycle.rs
+  # `docLoadSteps`). It was complete, and both loads fired, with nothing closed.
+  it 'holds a frame’s load, and its parent’s, while an open() left its document loading' do
+    pages = {
+      '/' => '<!DOCTYPE html><script>window.L = []; addEventListener("load", () => L.push("top-load"));</script>' \
+             '<iframe id=f src="/c.html" onload="L.push(\'fload\')"></iframe>',
+      '/c.html' => '<!DOCTYPE html><iframe onload="if (!window.done) { window.done = 1; document.open(); ' \
+                   'document.write(\'<p>new</p>\'); parent.L.push(\'opened\'); }"></iframe><p>old</p>'
+    }
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'], '')]] })
+    s.visit '/'
+    probe = 'setTimeout(() => arguments[0]([L.slice(), document.getElementById("f").contentDocument.readyState]), 100)'
+    expect(s.evaluate_async_script(probe)).to eq([['opened'], 'loading'])
+    s.execute_script('document.getElementById("f").contentDocument.close()')
+    expect(s.evaluate_async_script(probe)).to eq([%w[opened fload top-load], 'complete'])
+  end
+
   # A script-created parser never closed goes with its document's realm — a frame navigated away, or removed — and with
   # its document's next load: nothing reaches it from then on, and it held the nodes it built (html_parse.rs
   # `drop_realm`, `begin_parse`).

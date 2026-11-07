@@ -388,6 +388,13 @@ fn load_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         set_load_delay(scope, cid, 0);
         return rv.set_uint32(LOAD_ABORTED);
     }
+    // (…none while its parse has not reached "the end": a document `open()` replaced the parse of is loading until it is
+    // closed, its load that written document's — what its parent's waits for meanwhile, as the frame's build asks here
+    // whatever became of its parse; Chrome and Firefox)
+    if lc.ready == READY_LOADING {
+        hold_load(crate::dom::realm(scope, cid), cid);
+        return rv.set_uint32(LOAD_DELAYED_NOW);
+    }
     if let Ok(run) = v8::Local::<v8::Function>::try_from(args.get(0)) {
         crate::load_gates::flush(scope, cid, run);
     }
@@ -415,12 +422,7 @@ fn load_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         return rv.set_uint32(LOAD_ABORTED);
     }
     if arena.load_delayed_here(cid) {
-        if let Some(state) = arena.realm_state_mut(cid) {
-            // (…a container's load owed stays owed)
-            if state.load_delay == 0 {
-                state.load_delay = LOAD_DELAYED;
-            }
-        }
+        hold_load(arena, cid);
         return rv.set_uint32(LOAD_DELAYED_NOW);
     }
     set_load_delay(scope, cid, 0);
@@ -428,6 +430,12 @@ fn load_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     lc.load_fired = true;
     let changed = lc.update_readiness(READY_COMPLETE);
     rv.set_uint32(LOAD_FIRE | if changed { READY_CHANGED } else { 0 });
+}
+// Realm `cid`'s load delayed: its parent's waits for it (a container's load owed stays owed).
+fn hold_load(arena: &mut crate::dom::RealmArena, cid: i32) {
+    if let Some(state) = arena.realm_state_mut(cid).filter(|s| s.load_delay == 0) {
+        state.load_delay = LOAD_DELAYED;
+    }
 }
 fn set_load_delay(scope: &mut v8::PinScope<'_, '_>, cid: i32, delay: u8) {
     if let Some(state) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
