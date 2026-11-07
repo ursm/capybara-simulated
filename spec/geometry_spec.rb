@@ -16,6 +16,14 @@ RSpec.describe 'geometry interfaces' do
     s
   end
 
+  # A point a DOMQuadInit has none of is a DOMPointInit of the defaults (Chrome and Firefox, measured 2026-11-07).
+  it 'makes a quad of a DOMQuadInit with points absent' do
+    got = session.evaluate_script(<<~JS)
+      [DOMQuad.fromQuad({p1: {x: 5}}), DOMQuad.fromQuad({}), DOMQuad.fromQuad()].map((q) => [q.p1.x, q.p1.w, q.p2.x, q.p2.w, q.p4.y])
+    JS
+    expect(got).to eq([[5, 1, 0, 1, 0], [0, 1, 0, 1, 0], [0, 1, 0, 1, 0]])
+  end
+
   it 'parses a transform list into a matrix' do
     expect(session.evaluate_script("new DOMMatrix('translate(10px, 5px) scale(2) rotate(90deg)').toString()")).to eq('matrix(0, 2, -2, 0, 10, 5)')
   end
