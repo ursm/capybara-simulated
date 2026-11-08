@@ -53,8 +53,8 @@ flex_row_shell:
     rust_passes: 5
     rust_declines: 0
     rust_measures_put_back: 262
-    rust_records_walked: 7815
-    rust_records_spliced: 7200
+    rust_records_walked: 3015
+    rust_records_spliced: 12000
   wall:
     workload_ms: 78.472
     calib_ms: 2.761
