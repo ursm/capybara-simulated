@@ -489,9 +489,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "scriptOnStack", script_on_stack_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
     crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
-    crate::dom::register(scope, ns, "takeParserList", take_parser_list_op, context_id);
+    crate::dom::register(scope, ns, "takeParserNext", take_parser_next_op, context_id);
     crate::dom::register(scope, ns, "takeParserAsync", take_parser_async_op, context_id);
-    crate::dom::register(scope, ns, "parserWaitsOnFetch", parser_waits_on_fetch_op, context_id);
+    crate::dom::register(scope, ns, "forgetParserScripts", forget_parser_scripts_op, context_id);
+    crate::dom::register(scope, ns, "parserWaits", parser_waits_op, context_id);
     crate::dom::register(scope, ns, "takeParserSource", take_parser_source_op, context_id);
     crate::dom::register(scope, ns, "scriptBlocksParser", script_blocks_parser_op, context_id);
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
@@ -669,44 +670,76 @@ fn take_parser_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
 }
 
-// __dom.takeParserList() -> the realm's list of scripts to execute after parsing, in the order their end tags put them
-// on it, as `nodes_value` answers them — taken from what its end tags listed, which leaves the `async` ones
-// (`takeParserAsync`).
-fn take_parser_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.takeParserNext() -> the first of the realm's list of scripts to execute after parsing, in the order their end tags
+// put them on it, taken — or null — from what its end tags listed, which leaves the `async` ones (`takeParserAsync`):
+// those listed before it noted, the ones its fetch lands ahead of it (`ASYNC_AHEAD`).
+fn take_parser_next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let list = take_listed(scope, cid, false, false);
-    rv.set(crate::dom::nodes_value(scope, cid, &list));
+    let arena = crate::dom::realm(scope, cid);
+    let Some(at) = arena.realm_state(cid).and_then(|state| state.parser_list.iter().position(|&id| !listed_async(arena, id))) else { return rv.set_null() };
+    let Some(state) = arena.realm_state_mut(cid) else { return rv.set_null() };
+    state.parser_ahead = at;
+    let next = state.parser_list.remove(at);
+    rv.set(crate::dom::node_value(scope, Some(next)));
 }
-// __dom.takeParserAsync(waited) -> the `async` external scripts its end tags listed: the realm's parser's "set of scripts
-// that will execute as soon as possible" — taken, with `waited` none unless the parser has waited on a fetch
-// (`parserWaitsOnFetch`).
+// What of the `async` external scripts its end tags listed — the realm's parser's "set of scripts that will execute as soon
+// as possible" — `takeParserAsync(which)` takes: every one (`ASYNC_ALL`); every one where its parser has waited on a fetch,
+// none where it has not (`ASYNC_WAITED`: `parserWaits`); those listed before the script `takeParserNext` last took
+// (`ASYNC_AHEAD`). Its fetch takes no time here unless its server's does, so an async one's landing is when the fetches the
+// parser waits on land: with the first, every one of the document's — as a browser's parser waiting has fetched ahead
+// (Chrome and Firefox: one listed after a parser-blocking script still runs before DOMContentLoaded, csim-bench rvfn
+// `y_after_block`); a deferred script's, those whose fetches began before its own, the response it waits on landing first
+// among those due with it (both: `inl d.js dcl a.js` for a deferred then an async one, r13 `p_dfrasy_0_0`) — or every one
+// where its server took time (`ASYNC_ALL` then: `inl a.js d.js dcl`, r13 `q_dfrasy_150_0`).
+const ASYNC_ALL: u32 = 0;
+const ASYNC_WAITED: u32 = 1;
+const ASYNC_AHEAD: u32 = 2;
 fn take_parser_async_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let waited = args.get(0).is_true();
-    let list = take_listed(scope, cid, true, waited);
-    rv.set(crate::dom::nodes_value(scope, cid, &list));
+    let which = args.get(0).uint32_value(scope).unwrap_or(ASYNC_ALL);
+    let arena = crate::dom::realm(scope, cid);
+    let mut taken = Vec::new();
+    if let Some(state) = arena.realm_state(cid).filter(|state| which != ASYNC_WAITED || state.parser_waited) {
+        let ahead = if which == ASYNC_AHEAD { state.parser_ahead } else { state.parser_list.len() };
+        let listed = state.parser_list.clone();
+        let mut left = Vec::with_capacity(listed.len());
+        for (at, id) in listed.into_iter().enumerate() {
+            if at < ahead && listed_async(arena, id) { taken.push(id) } else { left.push(id) }
+        }
+        if let Some(state) = arena.realm_state_mut(cid) {
+            state.parser_list = left;
+            state.parser_ahead = 0;
+        }
+    }
+    rv.set(crate::dom::nodes_value(scope, cid, &taken));
 }
-// __dom.parserWaitsOnFetch() — the realm's parser waits on a fetch: what it lists has the time to land.
-fn parser_waits_on_fetch_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.forgetParserScripts() — none of the realm's listed scripts runs: its parser aborted (HTML "abort a parser").
+fn forget_parser_scripts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     if let Some(state) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
-        state.parser_waited = true;
+        state.parser_list.clear();
+        state.parser_ahead = 0;
     }
 }
-fn take_listed(scope: &mut v8::PinScope<'_, '_>, cid: i32, is_async: bool, waited: bool) -> Vec<NodeId> {
+// …whether a listed script is an `async` external one.
+fn listed_async(arena: &crate::dom::RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| n.plain_attr("async").is_some() && n.plain_attr("src").is_some())
+}
+// __dom.parserWaits(lands) -> the mark the realm's parser spins the event loop by as it waits on a fetch — a pending
+// parsing-blocking script's, a style sheet's that blocks a script, a deferred script's in "the end" — 0 for no spin
+// (timers.rs `spin_mark`): the tasks queued by now run before the fetch lands, as its response is a task queued as it
+// began (Chrome and Firefox: a zero timer set before a parser-blocking script, or before or after a deferred one, runs
+// before it — r13 `p_t0blk_*`, `p_t0dfr_*`, `q_dfrt0_0`, `q_t0css`). `lands`: a wait of the parser's own, with which its
+// async scripts land (`ASYNC_WAITED`).
+fn parser_waits_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let Some(state) = arena.realm_state_mut(cid) else { return Vec::new() };
-    if waited && !state.parser_waited {
-        return Vec::new();
+    if args.get(0).is_true() {
+        if let Some(state) = arena.realm_state_mut(cid) {
+            state.parser_waited = true;
+        }
     }
-    let listed = std::mem::take(&mut state.parser_list);
-    let (taken, left) = listed.into_iter().partition(|&id| {
-        arena.get(id).is_some_and(|n| n.plain_attr("async").is_some() && n.plain_attr("src").is_some()) == is_async
-    });
-    if let Some(state) = arena.realm_state_mut(cid) {
-        state.parser_list = left;
-    }
-    taken
+    rv.set_double(arena.spin_mark().map_or(0.0, |mark| mark as f64));
 }
 
 // __dom.scriptBlocksParser(nid) -> whether the script element blocks the parser (`blocks_parser`).

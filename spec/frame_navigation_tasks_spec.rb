@@ -1313,9 +1313,13 @@ RSpec.describe 'a frame navigation as tasks' do
     end
 
     # DOMContentLoaded waits for the list of scripts to execute after parsing, which an `async` one is not on. Its fetch takes
-    # no time here, so it has landed where its parser has had to wait on a fetch, and not otherwise (`landAsyncScripts`): each
-    # as Chrome and Firefox agree where they do (rvfn `d_*`, `l_*`, `e_mix*`), at Firefox's place where they part.
+    # no time here, so it has landed where its parser has had to wait on a fetch, and not otherwise (script.rs
+    # `takeParserAsync`): each as Chrome and Firefox agree where they do (rvfn `d_*`, `l_*`, `e_mix*`, r13 `p_*`, `q_*`), at
+    # Firefox's place where they part. A deferred script's fetch lands those whose fetches began before its own, every one
+    # where its server took its time.
     {
+      'a deferred script before it'           => ['<script defer src="/slow/0/d.js"></script><script async src="/slow/0/a.js"></script>', 'd.js-ran dcl a.js-ran load rs:complete'],
+      'a slow deferred script before it'      => ['<script defer src="/slow/150/d.js"></script><script async src="/slow/0/a.js"></script>', 'a.js-ran d.js-ran dcl load rs:complete'],
       'alone'                                 => ['<script async src="/slow/0/s.js"></script><p>x</p>', 'dcl s.js-ran load rs:complete'],
       'two of them'                           => ['<script async src="/slow/0/a.js"></script><script async src="/slow/0/b.js"></script>', 'dcl a.js-ran b.js-ran load rs:complete'],
       'an inline script after it'             => ["<script async src=\"/slow/0/s.js\"></script><script>L.push('inl')</script>", 'inl dcl s.js-ran load rs:complete'],
@@ -1333,6 +1337,34 @@ RSpec.describe 'a frame navigation as tasks' do
     }.each do |what, (markup, logged)|
       it "runs an `async` script as Chrome and Firefox do, #{what}" do
         expect(page_log(markup)).to eq(logged)
+      end
+    end
+
+    # HTML "spin the event loop" as the parser waits on a fetch — a pending parsing-blocking script's, a style sheet's that
+    # blocks a script, a deferred script's in "the end": the tasks queued before the wait run first, the response landing
+    # behind them (Chrome and Firefox, csim-bench r13 `p_t0blk_0`, `q_t0css`, `q_dfrt0_0`, `p_t0dfr_0`, `r_t0write*`).
+    {
+      'a parser-blocking script'                => ["<script src=\"/slow/0/b.js\"></script><script>L.push('inl')</script>", 't0 b.js-ran inl dcl load rs:complete'],
+      'a style sheet that blocks a script'      => ["<link rel=\"stylesheet\" href=\"/slow/0/s.css\"><script>L.push('inl')</script>", 't0 inl dcl load rs:complete'],
+      'a deferred script'                       => ["<script defer src=\"/slow/0/d.js\"></script><script>L.push('inl')</script>", 'inl t0 d.js-ran dcl load rs:complete'],
+      'a deferred script, the timer set after'  => ["<script defer src=\"/slow/0/d.js\"></script><script>setTimeout(() => L.push('t1')); L.push('inl')</script>", 'inl t0 t1 d.js-ran dcl load rs:complete']
+    }.each do |what, (markup, logged)|
+      it "runs a zero timer set before the parser waits on #{what} first" do
+        expect(page_log("<script>setTimeout(() => L.push('t0'))</script>#{markup}")).to eq(logged)
+      end
+    end
+
+    # …at script nesting level zero, the insertion point undefined: a `document.write` of a task that runs meanwhile opens the
+    # document, which aborts the parser — and "the end" runs no deferred script after it.
+    {
+      'a parser-blocking script' => '<script src="/slow/0/b.js"></script>',
+      'a deferred script'        => '<script defer src="/slow/0/d.js"></script>'
+    }.each do |what, markup|
+      it "opens the document with a timer's write as the parser waits on #{what}" do
+        log = page_log(<<~HTML)
+          <script>setTimeout(() => { L.push('t0'); document.write('<p>w</p>'); document.close(); })</script>#{markup}<script>L.push('inl')</script>
+        HTML
+        expect(log).to eq(what.include?('deferred') ? 'inl t0 rs:complete' : 't0 rs:complete')
       end
     end
 

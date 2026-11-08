@@ -312,19 +312,28 @@ impl RealmArena {
     // (HTML "apply the history step" step 12 queues its unloading as a global task on the document's window, after those
     // queued on its event loop before it — a `javascript:` URL's, a frame's timer due).
     pub(crate) fn queued_by(&mut self, mark: (u64, f64)) -> Option<u64> {
-        (self.queued_count(mark) > 0).then_some(mark.0)
+        (self.queued_count(mark, false) > 0).then_some(mark.0)
     }
     // …how many of them are left — what a run of them is capped at — and whether the event loop's next task is one of
     // them — where it is one queued after the mark (its turn ahead of theirs: an `AHEAD` one), the run stops, the rest
-    // left to the event loop's own steps.
-    fn queued_count(&mut self, (mark, clock): (u64, f64)) -> u32 {
+    // left to the event loop's own steps. `in_turn` counts none `BEHIND`: what a parser waiting on a fetch runs first
+    // (script.rs `parserWaits`), the response it waits on landing ahead of the others due with it.
+    fn queued_count(&mut self, (mark, clock): (u64, f64), in_turn: bool) -> u32 {
         let mut count = 0;
         for realm in self.event_loop_realms() {
             if let Some(t) = self.timers_of(realm) {
-                count += t.order.iter().take_while(|&&(Due(due), ..)| due <= clock).filter(|&&(_, _, seq, _)| seq <= mark).count() as u32;
+                let queued = |&&(_, turn, seq, _): &&(Due, u8, u64, i64)| seq <= mark && !(in_turn && turn == BEHIND);
+                count += t.order.iter().take_while(|&&(Due(due), ..)| due <= clock).filter(queued).count() as u32;
             }
         }
         count
+    }
+    // The mark a parser waiting on a fetch spins the event loop by (HTML "spin the event loop" until the fetch has landed,
+    // its response a task queued as it began): the tasks queued by now and due, none `BEHIND` — none where none is, or
+    // where a step of the event loop is under way, which no spin nests in.
+    pub(crate) fn spin_mark(&mut self) -> Option<u64> {
+        let mark = self.task_mark();
+        (self.event_loop.steps.is_empty() && self.queued_count(mark, true) > 0).then_some(mark.0)
     }
     // What is left now of realm `cid`'s idle period (`Timers::idle_remaining`), against the event loop's next task.
     // (…"has pending renders": an animation frame callback of any document of the event loop's)
@@ -334,8 +343,8 @@ impl RealmArena {
         let renders = self.event_loop_realms().into_iter().any(|r| self.realm_state(r).is_some_and(|s| !s.timers.frames.is_empty()));
         self.timers_of(cid).map_or(0.0, |t| t.idle_remaining(now, next, renders))
     }
-    fn next_queued_by(&mut self, (mark, clock): (u64, f64)) -> bool {
-        self.agent_first().is_some_and(|((Due(due), _, seq, _), _)| due <= clock && seq <= mark)
+    fn next_queued_by(&mut self, (mark, clock): (u64, f64), in_turn: bool) -> bool {
+        self.agent_first().is_some_and(|((Due(due), turn, seq, _), _)| due <= clock && seq <= mark && !(in_turn && turn == BEHIND))
     }
     // The realms whose tasks the event loop runs: the agent's (navigables.rs `agent_realms_unordered`), and those whose
     // contexts a task of their own disposed during the step under way, which run on to its end (`Timers::in_task`).
@@ -961,19 +970,22 @@ fn timer_once_awaited(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_bool(once > own);
 }
 
-// __dom.timersQueuedBy(mark) -> how many tasks of the event loop's queued by `mark` (`task_mark`'s number) are due now,
-// still to run; __dom.timerNextQueuedBy(mark) -> whether its next task is one of them (`queued_count`).
+// __dom.timersQueuedBy(mark, inTurn) -> how many tasks of the event loop's queued by `mark` (`task_mark`'s number) are due
+// now, still to run — none `BEHIND`, `inTurn`; __dom.timerNextQueuedBy(mark, inTurn) -> whether its next task is one of
+// them (`queued_count`).
 fn timers_queued_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mark = args.get(0).number_value(scope).unwrap_or(0.0) as u64;
+    let in_turn = args.get(1).is_true();
     let arena = &mut dom(scope).arena;
     let clock = arena.event_loop.clock;
-    rv.set_uint32(arena.queued_count((mark, clock)));
+    rv.set_uint32(arena.queued_count((mark, clock), in_turn));
 }
 fn timer_next_queued_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mark = args.get(0).number_value(scope).unwrap_or(0.0) as u64;
+    let in_turn = args.get(1).is_true();
     let arena = &mut dom(scope).arena;
     let clock = arena.event_loop.clock;
-    rv.set_bool(arena.next_queued_by((mark, clock)));
+    rv.set_bool(arena.next_queued_by((mark, clock), in_turn));
 }
 
 // __dom.agentNext(limit) -> the realm whose task the event loop runs next, where one falls due by `limit` — the task due
