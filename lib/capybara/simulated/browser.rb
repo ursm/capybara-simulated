@@ -11664,12 +11664,12 @@ module Capybara
       # A navigation of frame realm `realm_id` to `url` begun — every frame navigation's, a form's, a link's, a location's —
       # and the entry it makes, which only the document it makes puts in the session history (HTML "finalize a
       # cross-document navigation": session_history.rs `begin_frame_entry`, committed by navigation_commit.rs `Commit` as
-      # the host's fetch of it ends, by `frame_navigation_made_document` where the host made its document of no fetch):
-      # after the active entry, the joint history's forward steps dropped as it is made — or in place of the active one
-      # where `replace` (a `location.replace`, a navigation of a document not completely loaded yet) and in place of the
-      # frame's initial about:blank — none of a `javascript:` URL, which runs in the document the frame is at. The
-      # outgoing document snapshotted (URL + form state) into the entry it stays at where the next is one after it.
-      # Returns the navigable and the navigation's number (`Commit`'s), nil for none.
+      # the host's fetch of it ends, or by the host as it makes its document of no fetch: `with_frame_entry`): after the
+      # active entry, the joint history's forward steps dropped as it is made — or in place of the active one where
+      # `replace` (a `location.replace`, a navigation of a document not completely loaded yet) and in place of the frame's
+      # initial about:blank — none of a `javascript:` URL, which runs in the document the frame is at. The outgoing
+      # document snapshotted (URL + form state) into the entry it stays at where the next is one after it. Returns the
+      # navigation's `FrameEntry`, nil for none.
       # (…whatever its URL, so the entry a reload reads is the document's the frame is at: one a traversal cannot make
       # again alone — a data: one's, a srcdoc one's, whose bytes are its document's — passed over by a traversal,
       # session_history.rs `traversal`)
@@ -11680,12 +11680,27 @@ module Capybara
         return unless handling
 
         leave_frame_entry(realm_id) if handling == 'push'
-        [nav, token]
+        FrameEntry.new(document_traversable(realm_id), nav, token)
+      end
+      # The entry a frame's navigation began (`begin_frame_entry`): the session history it is of, its navigable and the
+      # navigation's number — made as its document is, or let go where none is: that navigation's alone, never one another
+      # began since.
+      FrameEntry = Struct.new(:history, :nav, :token) do
+        def commit = history&.commit_frame_navigation(nav, token)
+        def abandon = history&.abandon_frame_navigation(nav, token)
       end
       # …and one its container's own navigation makes as it commits (dom-nodes.js `recordFrameHistory`): its entry made now.
       def commit_frame_entry(realm_id, url, replace: false, srcdoc: nil)
-        nav, = begin_frame_entry(realm_id, url, replace: replace, srcdoc: srcdoc)
-        nav && document_traversable(realm_id)&.commit_frame_navigation(nav)
+        begin_frame_entry(realm_id, url, replace: replace, srcdoc: srcdoc)&.commit
+      end
+      # …and one whose document the host makes of no fetch — a `data:` URL's, about:blank's, a blob's, an error document —
+      # its entry (`handling` :push, :replace; none for a replay) handed to the block that makes it (`commit_frame_document`'s
+      # `began:`), let go where it makes none (the container gone, its unload refused).
+      private def with_frame_entry(realm_id, url, handling)
+        began = begin_frame_entry(realm_id, url, replace: handling == :replace) if handling
+        yield began
+      ensure
+        began&.abandon
       end
       # A frame's navigation made no document — a download, a navigation handed off: neither is a navigation of the frame
       # (HTML, Chrome), its entry never made (`Commit`) — the container's `sandbox` the navigation began with let go
@@ -11693,12 +11708,6 @@ module Capybara
       def frame_navigation_made_no_document(realm_id)
         @runtime.call('__csimReleaseFrameSandbox', realm_id)
         @traversing_frames[:none] << realm_id if @traversing_frames
-      end
-      # …or a document of no fetch of the host's — a `data:` URL's, about:blank's, a blob's, an error document — realm
-      # `realm_id`'s: the entry its navigation began made.
-      def frame_navigation_made_document(realm_id)
-        nav = @runtime.frame_realm_navigable(realm_id)
-        document_traversable(realm_id)&.commit_frame_navigation(nav)
       end
       # The frame's CURRENT history entry (the loaded document), or nil — read by a reload to decide
       # whether to re-POST.
@@ -11950,8 +11959,9 @@ module Capybara
       private def commit_failed_frame_form(frame, url)
         return unless @runtime.frame_realm_alive?(frame) && prompt_to_unload_frame(frame)
 
-        begin_frame_entry(frame, url)
-        commit_frame_error_document(frame, url, entry: @frame_stack.find {|e| e[:realm_id] == frame })
+        with_frame_entry(frame, url, :push) do |began|
+          commit_frame_error_document(frame, url, entry: @frame_stack.find {|e| e[:realm_id] == frame }, began: began)
+        end
       end
       # …into the page: the page's own form navigating it in place — replacing its session history entry where it is not
       # completely loaded yet (`spec['replace']`), with no Referer for `rel=noreferrer` — or a frame's adding the page's
@@ -12173,7 +12183,7 @@ module Capybara
         end
 
         # (…its entry begun as it goes on from here, none of one parked that a later navigation ends)
-        _, began = begin_frame_entry(realm_id, url, replace: handling == :replace) if handling
+        began = begin_frame_entry(realm_id, url, replace: handling == :replace) if handling
         invalidate_find_cache
         # (…a traversal's begun by no document — a user's, as the page's is: `replay_history_entry` — its Sec-Fetch-Site
         # `none`; but its request's client the document the frame is at, HTML "apply the history step" taking that one's
@@ -12216,7 +12226,7 @@ module Capybara
           # (…a service worker may answer its hops where one is registered — an https one's only where the frame may be
           # controlled: `sw_may_control_frame_navigation?` — matched in the frame's top-level site)
           sw:                            ([sw_may_control_frame_navigation?(realm_id), blob_partition_site(realm_id)] if sw_registered?),
-          commit:                        ({navigable: nav, traversable: history.id, entry: began} if history)
+          commit:                        ({navigable: nav, traversable: history.id, entry: began&.token} if history)
         })
         begin
           hop = run_navigation_fetch(
@@ -12295,6 +12305,7 @@ module Capybara
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
       # built from `html`, re-point the iframe at it, and fire the element load.
+      # (…`began` the entry its navigation began where the host made the document of no fetch: `with_frame_entry`)
       def reload_frame_realm_by_id(
         realm_id,
         url,
@@ -12308,7 +12319,8 @@ module Capybara
         referrer_policy: nil,
         refresh: nil,
         doc_origin: nil,
-        origin_agent_cluster: false
+        origin_agent_cluster: false,
+        began: nil
       )
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
@@ -12333,7 +12345,8 @@ module Capybara
           origin_agent_cluster: origin_agent_cluster
         ).to_i
         return if new_id.zero?
-        frame_navigation_made_document(new_id)
+        # (…the entry its navigation began made with it: `with_frame_entry`)
+        began&.commit
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)
           # (…an entered frame's scope following it to its new document, as `reload_current_frame_realm` keeps it)
@@ -12626,28 +12639,31 @@ module Capybara
         # (…an entry of the frame's session history, as a frame its realm navigates makes one: after the active one — or, a
         # location's, in place of it — made as its document is: `begin_frame_entry`)
         handling = (record ? :push : :replace) unless is_reload || is_history
+        # (…a `data:` URL's, about:blank's and a blob's documents made here, of no fetch, each with its entry:
+        # `with_frame_entry`)
+        realm = entry[:realm_id]
         if url.to_s.match?(/\Adata:/i)
           verdict, mime, bytes = Native.data_navigation(url.to_s)
-          return save_downloaded_response(url, {'content-type' => mime}, [bytes], realm: entry[:realm_id]) if verdict == 'download'
+          return save_downloaded_response(url, {'content-type' => mime}, [bytes], realm: realm) if verdict == 'download'
 
-          begin_frame_entry(entry[:realm_id], url, replace: handling == :replace) if handling
-          return commit_frame_error_document(entry[:realm_id], url, entry: entry) if verdict == 'fail'
+          return with_frame_entry(realm, url, handling) do |began|
+            next commit_frame_error_document(realm, url, entry: entry, began: began) if verdict == 'fail'
 
-          return commit_frame_document(entry[:realm_id], entry, url.to_s, verdict == 'inline' ? '' : bytes, verdict == 'inline' ? 'text/html' : mime, doc_origin: 'null')
+            commit_frame_document(realm, entry, url.to_s, verdict == 'inline' ? '' : bytes, verdict == 'inline' ? 'text/html' : mime, doc_origin: 'null', began: began)
+          end
         end
-        # (…about:blank's and a blob's made here, of no fetch: their entries `frame_navigation_made_document`'s)
         if about_blank_url?(url)
-          begin_frame_entry(entry[:realm_id], url, replace: handling == :replace) if handling
-          return reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
+          return with_frame_entry(realm, url, handling) {|began| reload_current_frame_realm('about:blank', '', 'text/html', entry: entry, began: began) }
         end
         # A `blob:` URL, which no server answers: the blob the container has its navigation load (`__csimTakeFrameNavBlob`:
         # the one it began with, a reload's the one the document was loaded of, else the one it names now in this window's
         # registry — no other window's partition) — none a failed load at the URL. (A redirect to one is followed to none:
         # navigation_fetch.rs `redirect`.)
         if url.to_s.match?(/\Ablob:/i)
-          begin_frame_entry(entry[:realm_id], url, replace: handling == :replace) if handling
-          blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, is_reload || is_history))
-          return reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry)
+          return with_frame_entry(realm, url, handling) do |began|
+            blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', realm, url.to_s, is_reload || is_history))
+            reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry, began: began)
+          end
         end
         navigate_realm_self(entry[:realm_id], url.to_s, nil, nil, entry: entry, is_reload: is_reload, is_history: is_history, origin_null: origin_null,
                                                                   referrer: referrer, initiator: initiator, origin_url: nil, user_activated: user_activated, handling: handling)
@@ -12695,6 +12711,7 @@ module Capybara
       # bounded per-test leak, only reachable by re-entering a sibling subframe
       # before an ancestor `_parent` nav; not worth a JS descendant walk on this
       # path's perf budget.
+      # (…`began` as `reload_frame_realm_by_id`'s)
       def reload_current_frame_realm(
         url,
         bytes,
@@ -12706,7 +12723,8 @@ module Capybara
         referrer_policy: nil,
         refresh: nil,
         doc_origin: nil,
-        origin_agent_cluster: false
+        origin_agent_cluster: false,
+        began: nil
       )
         return unless entry
         old_id = entry[:realm_id]
@@ -12733,7 +12751,8 @@ module Capybara
           origin_agent_cluster: origin_agent_cluster
         ).to_i
         return if new_id.zero?
-        frame_navigation_made_document(new_id)
+        # (…the entry its navigation began made with it: `with_frame_entry`)
+        began&.commit
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
         if entry.equal?(@frame_stack.last)
           entry[:realm_id]  = new_id
@@ -13699,8 +13718,8 @@ module Capybara
       # one, as a failed `src` does), not keeping the document it unloaded — one of inline content, made with no reserved
       # client (HTML "create a document for inline content"), so no service worker's client nor one it controls, and of a
       # new opaque origin, as a top-level one's is (`commit_error_document`).
-      def commit_frame_error_document(realm_id, url, entry: nil)
-        commit_frame_document(realm_id, entry, url.to_s, '', 'text/html', doc_origin: 'null')
+      def commit_frame_error_document(realm_id, url, entry: nil, began: nil)
+        commit_frame_document(realm_id, entry, url.to_s, '', 'text/html', doc_origin: 'null', began: began)
       end
       # The document a frame's navigation makes, committed into it — an entered one's (`entry`) through its scope.
       private def commit_frame_document(realm_id, entry, url, bytes, content_type, **response)

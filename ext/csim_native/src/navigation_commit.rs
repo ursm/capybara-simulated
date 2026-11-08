@@ -166,7 +166,9 @@ impl Commit {
     }
 
     // The entry a replay goes to: a reload's the active one, a traversal's the one its step gives.
+    // (…the page's alone: a frame's replay goes to the entry its navigable is at, which no page's step names)
     fn replayed(&self) -> Option<u64> {
+        debug_assert_eq!(self.nav, TOP, "a frame's replay read as the page's");
         match self.handling {
             Handling::Reload => self.history.active(0),
             Handling::Traverse(_, id) => Some(id),
@@ -275,7 +277,7 @@ impl Commit {
         let redirect = self.redirected.then_some((self.url.as_str(), self.to_get));
         match self.token.take() {
             Some(token) => {
-                self.history.commit_frame_navigation(self.nav, Some(token), redirect);
+                self.history.commit_frame_navigation(self.nav, token, redirect);
             }
             None => {
                 if let Some((url, get)) = redirect {
@@ -293,7 +295,7 @@ impl Commit {
             self.history.end_page_traversal(token);
         }
         if let Some(token) = self.token.take() {
-            self.history.abandon_frame_navigation(self.nav, Some(token));
+            self.history.abandon_frame_navigation(self.nav, token);
         }
     }
 }
@@ -437,9 +439,10 @@ mod tests {
         let f3 = history.active(1).unwrap();
         assert_eq!((history.length(), history.url(f3).as_deref()), (2, Some("http://a.test/f3")));
         Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/nc"))).end(&Step::None, false);
-        drop(Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/dropped"))));
+        let dropped = begin("http://a.test/dropped");
+        drop(Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(dropped)));
         assert_eq!((history.length(), history.active(1)), (2, Some(f3)));
-        assert_eq!(history.commit_frame_navigation(1, None, None), None);
+        assert_eq!(history.commit_frame_navigation(1, dropped, None), None);
         let mut replay = Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, None);
         replay.redirected("http://a.test/f4", false);
         replay.end(&Step::Document(None), false);

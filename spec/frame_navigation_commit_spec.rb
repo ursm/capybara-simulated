@@ -20,7 +20,13 @@ RSpec.describe 'a frame navigation’s session history entry' do
       next [204, {}, []] if path == '/nc'
       next [200, {'content-type' => 'application/octet-stream', 'content-disposition' => 'attachment; filename=x.bin'}, ['x']] if path == '/dl'
 
-      body = {'/top' => '<iframe src="/a"></iframe>', '/blank' => '<iframe></iframe>'}.fetch(path) { "<a id=l href='/slow'>slow</a>#{path}" }
+      body = {
+        '/top'   => '<iframe src="/a"></iframe>',
+        '/blank' => '<iframe></iframe>',
+        '/nest'  => '<iframe src="/mid"></iframe>',
+        '/mid'   => '<iframe name=inner></iframe><form id=f method=post target=inner action=/echo><input name=q value=v></form>',
+        '/echo'  => env['REQUEST_METHOD']
+      }.fetch(path) { "<a id=l href='/slow'>slow</a>#{path}" }
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><title>#{path}</title><body>#{body}"]]
     })
   }
@@ -72,6 +78,30 @@ RSpec.describe 'a frame navigation’s session history entry' do
       session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 400))')
       expect([frame_path, length]).to eq(['/b', 1])
     end
+  end
+
+  # (…and a frame's frame's alike, its parent's entry made as it is: a POST's result a reload re-posts — Chrome)
+  it 'is made for a frame two levels down replacing its initial about:blank, a reload re-posting it' do
+    session.visit('/nest')
+    expect(poll_until { session.evaluate_script('frames[0].document.readyState') == 'complete' }).to be(true)
+    session.execute_script("frames[0].document.getElementById('f').submit()")
+    expect(poll_until { session.evaluate_script('frames[0].frames[0].location.pathname') == '/echo' }).to be(true)
+    session.execute_script('frames[0].frames[0].location.reload()')
+    session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 300))')
+    expect(session.evaluate_script('frames[0].frames[0].document.body.textContent')).to eq('POST')
+  end
+
+  # (…and goes on past a traversal that changes another navigable's entry alone — HTML "apply the history step" ends the
+  # ongoing navigations of the navigables whose current entry changes: Chrome 157 and Firefox 159 reach /slow, `history.length`
+  # 2, the hash gone)
+  it 'is made past a traversal of the page within its document as its response is awaited' do
+    session.visit('/top')
+    expect(poll_until { frame_path == '/a' }).to be(true)
+    session.execute_script("history.pushState(null, '', '#x')")
+    session.execute_script("frames[0].location = '/slow'; setTimeout(() => { history.back(); }, 30)")
+    expect(poll_until { frame_path == '/slow' }).to be(true)
+    session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 400))')
+    expect([frame_path, length, session.evaluate_script('location.hash')]).to eq(['/slow', 2, ''])
   end
 
   # (…and none of a navigation handed to another application from an entered frame, which no reload after makes either)
