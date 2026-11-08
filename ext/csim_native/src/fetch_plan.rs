@@ -63,6 +63,9 @@ pub(crate) struct FetchPlan {
     // The headers the user agent set itself where a CORS-preflight would not ask about them (lowercased names): an
     // EventSource reconnection's `Last-Event-ID` (`ua_headers`).
     ua_headers: Vec<String>,
+    // The request's use-CORS-preflight flag (an XHR's whose upload has listeners): a preflight to another origin
+    // whatever its method and headers (Fetch main fetch step 12).
+    preflight: bool,
     // Whether the request's URL list had more than one URL before the network took it: a service worker's redirects
     // before it fell through.
     followed: bool,
@@ -120,7 +123,7 @@ impl FetchPlan {
     // `cache`, `initiator` (a worker re-issuing a navigation: the request's origin whatever its mode), `site_seed`,
     // `origin_null`, `redirect_taint` (the redirect-taint its URL list has so far, a network leg's after a service worker
     // answered a hop with a redirect: referrer.rs `RedirectTaint::name`, nil none), `redirected` (whether that list has
-    // more than one URL), `client_url`, `client_origin`,
+    // more than one URL), `cors_preflight` (its use-CORS-preflight flag), `client_url`, `client_origin`,
     // `ancestors`, `cookie_cross_site`, `navigation_cross_site`, `nav_dest`,
     // `dest`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil
     // for none), `ua_headers` (the names of headers the user agent set itself that no CORS-preflight asks about, nil for
@@ -212,6 +215,7 @@ impl FetchPlan {
             challenge,
             ua_headers,
             followed: flag("redirected")?,
+            preflight: flag("cors_preflight")?,
             preflight_cache: sessions.0,
             auth_entries: sessions.1,
             st: RefCell::new(State {
@@ -289,7 +293,8 @@ impl FetchPlan {
     fn unsafe_request(&self, st: &State) -> Option<Vec<String>> {
         let mut names = crate::cors::unsafe_header_names(&st.chain.headers);
         names.retain(|n| !self.ua_headers.contains(n));
-        (!crate::fetch_rules::cors_safelisted_method(st.chain.method.to_ascii_uppercase().as_bytes()) || !names.is_empty()).then_some(names)
+        let safe = crate::fetch_rules::cors_safelisted_method(st.chain.method.to_ascii_uppercase().as_bytes()) && names.is_empty();
+        (self.preflight || !safe).then_some(names)
     }
 
     // #begin_hop(cache, now) -> the next step of the chain, the stored response for its URL being `cache` ([status,
@@ -371,7 +376,7 @@ impl FetchPlan {
         let origin_sent = st.chain.effective_origin.clone().unwrap_or_default();
         let preflight = if cross_origin {
             plan.unsafe_request(&st)
-                .filter(|names| !crate::cors::covers_request(plan.preflight_cache, origin_sent.clone(), st.chain.target.clone(), plan.credentials == "include", st.chain.method.clone(), names.clone(), now))
+                .filter(|names| !crate::cors::covers_request(plan.preflight_cache, origin_sent.clone(), st.chain.target.clone(), plan.credentials == "include", st.chain.method.clone(), names.clone(), now, plan.preflight))
                 .map(|names| (names, origin_sent))
         } else {
             None

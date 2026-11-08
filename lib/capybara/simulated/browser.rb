@@ -10493,6 +10493,7 @@ module Capybara
           site_seed:             r['siteSeed'],
           redirect_taint:        r['redirectTaint'],
           redirected:            r['redirected'] == true,
+          cors_preflight:        r['corsPreflight'] == true,
           origin_null:           r['originNull'] == true,
           client_url:            r['clientUrl'],
           client_origin:         r['clientOrigin'],
@@ -10518,7 +10519,7 @@ module Capybara
       # (…`transport` what sends each hop where it is not the app's or Net::HTTP's — `dispatch_rack_or_http` — and
       # `stream` whether the response is answered with its body unread, `[status, headers, body, url]`, for a reader that
       # takes it as it comes: an event stream's)
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, redirect_taint: nil, redirected: false, origin_null: false, client_url: nil, cookie_cross_site: false, navigation_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, dest: nil,
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, redirect_taint: nil, redirected: false, cors_preflight: false, origin_null: false, client_url: nil, cookie_cross_site: false, navigation_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, dest: nil,
                      ancestors: nil, ua_headers: nil, transport: nil, stream: false)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
@@ -10557,6 +10558,7 @@ module Capybara
             site_seed:             site_seed,
             redirect_taint:        redirect_taint,
             redirected:            redirected == true,
+            cors_preflight:        cors_preflight == true,
             origin_null:           origin_null == true,
             client_url:            client_url,
             client_origin:         client_origin,

@@ -15,11 +15,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "fetchRequest", fetch_request_op, context_id);
 }
 
-// A record of `fields`, made as an object literal makes one (CreateDataProperty: no setter of the page's runs).
+// A record of `fields`, made as an object literal makes one (CreateDataProperty: no setter of the page's runs), its
+// names internalized, as a literal's are: no string of a name made anew per request.
 fn record<'s>(scope: &mut v8::PinScope<'s, '_>, fields: &[(&str, v8::Local<'s, v8::Value>)]) -> v8::Local<'s, v8::Object> {
     let obj = v8::Object::new(scope);
     for (name, value) in fields {
-        if let Some(name) = v8::String::new(scope, name) {
+        if let Some(name) = v8::String::new_from_one_byte(scope, name.as_bytes(), v8::NewStringType::Internalized) {
             obj.create_data_property(scope, name.into(), *value);
         }
     }
@@ -73,7 +74,8 @@ fn wire_headers(list: &crate::headers::HeaderList, destination: &str, challenge:
 // controlling the calling realm (0 none), `host` the steps of the engine's own fetches (a preload's fetch runs through
 // them): the leg that answers it (`ROUTE_*`); the host's description of it (browser.rb `rack_fetch_request`: its referrer
 // the source, undefined for its client's); the service worker's fetch event's (workers.js `swDispatchFetch`: its referrer
-// the source the host resolves under its policy, the platform's default where neither it nor its container names one);
+// the source the host resolves under its policy, the platform's default where neither it nor its container names one;
+// undefined but for a request a service worker answers);
 // and the response a preload had where one answers it — null for a network error (preload_map.rs `preloaded`).
 fn fetch_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
@@ -131,6 +133,7 @@ fn fetch_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         ("originNull", flag(scope, request.origin_null)),
         ("cookieCrossSite", flag(scope, request.cookie_cross_site)),
         ("navigationCrossSite", flag(scope, request.navigation_cross_site)),
+        ("corsPreflight", flag(scope, request.use_cors_preflight)),
         ("navDest", optional(scope, Some(request.destination.as_str()).filter(|d| !d.is_empty()))),
         ("clientRealm", v8::Integer::new(scope, cid).into()),
         ("clientUrl", text(scope, &client_url)),
@@ -138,21 +141,26 @@ fn fetch_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         ("ancestors", v8::Array::new_with_elements(scope, &ancestors).into()),
     ];
     let described = record(scope, &described);
-    let worker_policy = if policy.is_empty() { crate::url_ops::DEFAULT_POLICY } else { &policy };
-    let worker = [
-        ("redirect", text(scope, &request.redirect)),
-        ("mode", text(scope, &request.mode)),
-        ("credentials", text(scope, &request.credentials)),
-        ("cache", text(scope, &request.cache)),
-        ("keepalive", flag(scope, request.keepalive)),
-        ("headFirst", flag(scope, head_first)),
-        ("integrity", text(scope, &request.integrity)),
-        ("destination", text(scope, &request.destination)),
-        ("referrerPolicy", text(scope, worker_policy)),
-        ("referrerSource", text(scope, referrer.as_deref().unwrap_or_default())),
-    ];
-    let worker = record(scope, &worker);
+    // (…the worker's alone where one answers it)
+    let worker = if route != crate::fetch_rules::ROUTE_SERVICE_WORKER {
+        v8::undefined(scope).into()
+    } else {
+        let worker_policy = if policy.is_empty() { crate::url_ops::DEFAULT_POLICY } else { &policy };
+        let worker = [
+            ("redirect", text(scope, &request.redirect)),
+            ("mode", text(scope, &request.mode)),
+            ("credentials", text(scope, &request.credentials)),
+            ("cache", text(scope, &request.cache)),
+            ("keepalive", flag(scope, request.keepalive)),
+            ("headFirst", flag(scope, head_first)),
+            ("integrity", text(scope, &request.integrity)),
+            ("destination", text(scope, &request.destination)),
+            ("referrerPolicy", text(scope, worker_policy)),
+            ("referrerSource", text(scope, referrer.as_deref().unwrap_or_default())),
+        ];
+        record(scope, &worker).into()
+    };
     let route = v8::Integer::new_from_unsigned(scope, route).into();
     let preloaded = preloaded.unwrap_or_else(|| v8::undefined(scope).into());
-    rv.set(v8::Array::new_with_elements(scope, &[route, described.into(), worker.into(), preloaded]).into());
+    rv.set(v8::Array::new_with_elements(scope, &[route, described.into(), worker, preloaded]).into());
 }

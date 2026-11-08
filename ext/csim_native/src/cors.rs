@@ -63,9 +63,10 @@ fn token_list(value: Option<&str>) -> Option<Vec<String>> {
 
 // Whether a grant's `methods` and header names `headers` cover a request of method `method` (as normalized: compared
 // byte for byte) with CORS-unsafe header names `unsafe_names` — `*` none where `credentialed`, and `Authorization` only by
-// name.
-fn covers(methods: &[String], headers: &[String], method: &str, unsafe_names: &[String], credentialed: bool) -> bool {
-    let method_ok = cors_safelisted_method(method.as_bytes()) || methods.iter().any(|m| m == method || (!credentialed && m == "*"));
+// name; a CORS-safelisted method by none but where `forced` (the request's use-CORS-preflight flag: Fetch "HTTP fetch"
+// step 4.1 asks a method cache entry match of it then too).
+fn covers(methods: &[String], headers: &[String], method: &str, unsafe_names: &[String], credentialed: bool, forced: bool) -> bool {
+    let method_ok = (!forced && cors_safelisted_method(method.as_bytes())) || methods.iter().any(|m| m == method || (!credentialed && m == "*"));
     method_ok && unsafe_names.iter().all(|h| headers.iter().any(|g| g == h || (!credentialed && g == "*" && h != NON_WILDCARD)))
 }
 
@@ -91,7 +92,7 @@ pub(crate) fn preflight(
     }
     let methods = token_list(allow_methods)?;
     let headers: Vec<String> = token_list(allow_headers)?.into_iter().map(|h| h.to_ascii_lowercase()).collect();
-    if !covers(&methods, &headers, method, unsafe_names, credentialed) {
+    if !covers(&methods, &headers, method, unsafe_names, credentialed, false) {
         return None;
     }
     // (…a missing `Access-Control-Allow-Methods` no grant of the request's method: Fetch's step 7.4 makes it one only for a
@@ -139,10 +140,10 @@ impl PreflightCache {
     }
     // Whether a request needs no preflight: a method cache entry match for its method (a safelisted one needs none) and
     // a header-name cache entry match for each of its CORS-unsafe header names (Fetch "main fetch" step 12, §4.9).
-    fn covers(&self, origin: &str, url: &str, credentials: bool, method: &str, unsafe_names: &[String], now: f64) -> bool {
+    fn covers(&self, origin: &str, url: &str, credentials: bool, method: &str, unsafe_names: &[String], now: f64, forced: bool) -> bool {
         let methods: Vec<String> = self.of(origin, url, credentials, now).filter_map(|e| e.method.clone()).collect();
         let headers: Vec<String> = self.of(origin, url, credentials, now).filter_map(|e| e.header.clone()).collect();
-        covers(&methods, &headers, method, unsafe_names, credentials)
+        covers(&methods, &headers, method, unsafe_names, credentials, forced)
     }
     // A grant's entries made — an entry that matches already given its max-age (Fetch "CORS-preflight fetch" step 7.10).
     fn store(&mut self, origin: &str, url: &str, credentials: bool, grant: &Grant, now: f64) {
@@ -183,9 +184,11 @@ pub(crate) fn forget(id: u64, origin: String, url: String) {
         cache.clear_for(&origin, &url);
     }
 }
-// …whether its entries cover a request of `origin` to `url` (`PreflightCache::covers`)…
-pub(crate) fn covers_request(id: u64, origin: String, url: String, credentials: bool, method: String, unsafe_names: Vec<String>, now: f64) -> bool {
-    caches().1.get(&id).is_some_and(|c| c.covers(&origin, &url, credentials, &method, &unsafe_names, now))
+// …whether its entries cover a request of `origin` to `url` (`PreflightCache::covers`, `forced` its use-CORS-preflight
+// flag)…
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn covers_request(id: u64, origin: String, url: String, credentials: bool, method: String, unsafe_names: Vec<String>, now: f64, forced: bool) -> bool {
+    caches().1.get(&id).is_some_and(|c| c.covers(&origin, &url, credentials, &method, &unsafe_names, now, forced))
 }
 // (…[status, acao, acac, methods, headers, max-age] of the preflight's response, [origin, url, credentials, method,
 // unsafe names] of the request)
@@ -290,21 +293,23 @@ mod tests {
         assert!(preflight(200, Some("*"), None, None, Some("*"), None, "GET", &s(&["authorization"]), "o", false).is_none());
         let mut cache = PreflightCache::default();
         cache.store("o", "u", false, &g, 0.0);
-        assert!(cache.covers("o", "u", false, "PUT", &unsafe_names, 4.0));
-        assert!(!cache.covers("o", "u", false, "PUT", &unsafe_names, 5.0));
-        assert!(!cache.covers("o", "u", false, "DELETE", &unsafe_names, 1.0));
+        assert!(cache.covers("o", "u", false, "PUT", &unsafe_names, 4.0, false));
+        assert!(!cache.covers("o", "u", false, "PUT", &unsafe_names, 5.0, false));
+        assert!(!cache.covers("o", "u", false, "DELETE", &unsafe_names, 1.0, false));
         // (…a later grant adds its entries, the earlier's kept)
         let d = preflight(200, Some("*"), None, Some("DELETE"), None, Some("60"), "DELETE", &[], "o", false).unwrap();
         cache.store("o", "u", false, &d, 1.0);
-        assert!(cache.covers("o", "u", false, "PUT", &unsafe_names, 2.0));
-        assert!(cache.covers("o", "u", false, "DELETE", &[], 30.0));
+        assert!(cache.covers("o", "u", false, "PUT", &unsafe_names, 2.0, false));
+        assert!(cache.covers("o", "u", false, "DELETE", &[], 30.0, false));
         // (…a credentialed request's entries serve an uncredentialed one, not the other way round)
         let c = preflight(200, Some("o"), Some("true"), Some("PATCH"), None, None, "PATCH", &[], "o", true).unwrap();
         cache.store("o", "u", true, &c, 1.0);
-        assert!(cache.covers("o", "u", false, "PATCH", &[], 2.0));
-        assert!(!cache.covers("o", "u", true, "PUT", &unsafe_names, 2.0));
+        assert!(cache.covers("o", "u", false, "PATCH", &[], 2.0, false));
+        assert!(!cache.covers("o", "u", true, "PUT", &unsafe_names, 2.0, false));
+        // (…a safelisted method needs no entry, but of a request whose use-CORS-preflight flag is set)
+        assert!(cache.covers("o", "u", false, "POST", &[], 2.0, false) && !cache.covers("o", "u", false, "POST", &[], 2.0, true));
         cache.clear_for("o", "u");
-        assert!(!cache.covers("o", "u", false, "DELETE", &[], 2.0));
+        assert!(!cache.covers("o", "u", false, "DELETE", &[], 2.0, false));
     }
 
     #[test]

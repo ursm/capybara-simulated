@@ -28,6 +28,7 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
       });
     JS
   }
+  let(:log) { [] }
   let(:app) {
     page = <<~HTML
       <!DOCTYPE html><meta charset=utf-8><meta name=referrer content=origin><body>
@@ -46,9 +47,14 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
       </script>
     HTML
     worker_js = worker
+    seen = log
     lambda {|env|
       host, path = env['SERVER_NAME'], env['PATH_INFO']
+      seen << [env['REQUEST_METHOD'], env['QUERY_STRING']] if path == '/cors'
       case path
+      when '/cors'
+        cors = {'access-control-allow-origin' => 'https://www.example.com', 'access-control-allow-methods' => 'POST'}
+        [200, {'content-type' => 'text/plain', **cors}, ['cors']]
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker_js]]
       when '/echo' then [200, {'content-type' => 'text/plain'}, ['echo']]
       when '/end'
@@ -185,5 +191,116 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
         ['load', 200, 'https://b.example.com/end', 'end at b.example.com']
       ]
     )
+  end
+
+  # An abort after the response resolved errors its body (Fetch "abort the fetch() call" step 4): a read begun before
+  # the abort rejects with the abort's reason, as `r.text(); c.abort()` does in Chrome and Firefox — and a read the
+  # response finished first stands.
+  it 'errors a response body its fetch aborted after it resolved' do
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = null;
+      (async () => {
+        const c = new AbortController();
+        const r = await fetch('/echo', { signal: c.signal });
+        const t = r.text();
+        c.abort();
+        const c2 = new AbortController();
+        const r2 = await fetch('/echo', { signal: c2.signal });
+        const read = await r2.text();
+        c2.abort();
+        window.got = [await t.then((x) => 'text ' + x, (e) => e.name), read];
+      })();
+    JS
+    expect(poll_until { s.evaluate_script('window.got') }).to eq(%w[AbortError echo])
+  end
+
+  # A removed frame's document is no longer fully active: a fetch() of its realm a network error at once (its fetch
+  # group terminated — a TypeError in Chrome and Firefox), never a promise left pending on a task that will not run; an
+  # XHR's open() an InvalidStateError (XHR open() step 1 — Chrome throws a NetworkError at send() and Firefox fires
+  # `error`: the spec's text kept).
+  it "settles a removed frame's fetch and refuses its XHR's open()" do
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = null;
+      const i = document.createElement('iframe');
+      i.src = '/frame-page';
+      i.onload = async () => {
+        const w = i.contentWindow, F = w.fetch, XHR = w.XMLHttpRequest;
+        i.remove();
+        const fetched = await Promise.race([F.call(w, '/echo').then(() => 'resolved', (e) => e.name), new Promise((r) => setTimeout(() => r('pending'), 500))]);
+        let opened;
+        try { new XHR().open('GET', '/echo'); opened = 'opened'; } catch (e) { opened = e.name; }
+        window.got = [fetched, opened];
+      };
+      document.body.append(i);
+    JS
+    expect(poll_until { s.evaluate_script('window.got') }).to eq(%w[TypeError InvalidStateError])
+  end
+
+  # XHR send(): an upload object with a listener sets the request's use-CORS-preflight flag — a preflight before a
+  # request to another origin however simple it is; without one, a simple request goes alone.
+  it "preflights an XHR to another origin whose upload is listened to" do
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = null;
+      const post = (q, listen) => new Promise((res) => {
+        const x = new XMLHttpRequest();
+        x.open('POST', 'https://b.example.com/cors?' + q);
+        if (listen) x.upload.onprogress = () => {};
+        x.onloadend = () => res(x.status);
+        x.send('b');
+      });
+      post('listened', true).then(() => post('unheard', false)).then((status) => { window.got = status; });
+    JS
+    expect(poll_until { s.evaluate_script('window.got') }).to eq(200)
+    expect(log).to eq([%w[OPTIONS listened], %w[POST listened], %w[POST unheard]])
+  end
+
+  # A page's own Array.prototype and Set.prototype methods are none of a fetch's or an XHR's steps: replaced by ones that
+  # throw, every request still goes and answers.
+  it "goes whatever a page did to Array.prototype and Set.prototype" do
+    s = simulated_session(app)
+    s.visit '/'
+    # (…the page's methods put back before the script answers: the driver's own reads of an answer are no fetch's steps)
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const evil = () => { throw new Error('evil'); };
+      const names = ['indexOf', 'push', 'splice', 'map', 'slice', 'forEach'];
+      const saved = names.map((m) => Array.prototype[m]);
+      const iterator = Array.prototype[Symbol.iterator], add = Set.prototype.add, del = Set.prototype.delete;
+      const restore = () => {
+        for (let i = 0; i < names.length; i++) Array.prototype[names[i]] = saved[i];
+        Array.prototype[Symbol.iterator] = iterator;
+        Set.prototype.add = add;
+        Set.prototype.delete = del;
+      };
+      for (let i = 0; i < names.length; i++) Array.prototype[names[i]] = evil;
+      Array.prototype[Symbol.iterator] = evil;
+      Set.prototype.add = evil;
+      Set.prototype.delete = evil;
+      (async () => {
+        const out = [];
+        const c = new AbortController();
+        out[0] = await fetch('/echo', { signal: c.signal }).then((r) => r.text(), (e) => e.message);
+        out[1] = await fetch('/echo', { method: 'POST', body: 'x', headers: { 'x-a': 'b' } }).then((r) => r.headers.get('content-type'), (e) => e.message);
+        const p = fetch('/echo', { signal: c.signal });
+        c.abort();
+        out[2] = await p.then(() => 'resolved', (e) => e.name);
+        out[3] = await new Promise((res) => {
+          const x = new XMLHttpRequest();
+          x.open('GET', '/echo');
+          x.setRequestHeader('x-a', 'b');
+          x.onload = () => res(x.responseText + ' ' + x.getResponseHeader('content-type'));
+          x.onerror = () => res('error');
+          x.send();
+        });
+        return out;
+      })().then((out) => { restore(); done(out); }, (e) => { restore(); done('threw ' + e.message); });
+    JS
+    expect(got).to eq(['echo', 'text/plain', 'AbortError', 'echo text/plain'])
   end
 end

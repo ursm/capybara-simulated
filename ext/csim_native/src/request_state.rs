@@ -40,6 +40,8 @@ pub(crate) struct Request {
     pub(crate) origin_null: bool,
     pub(crate) cookie_cross_site: bool,
     pub(crate) navigation_cross_site: bool,
+    // Its use-CORS-preflight flag: an XHR's whose upload had listeners as it was sent (XHR send() step 11).
+    pub(crate) use_cors_preflight: bool,
 }
 
 impl Request {
@@ -64,15 +66,18 @@ impl Request {
             origin_null: false,
             cookie_cross_site: false,
             navigation_cross_site: false,
+            use_cors_preflight: false,
         }
     }
-    // An XMLHttpRequest's request as send() makes it (XHR §3.5.6 step 7): its method and URL, mode "cors", its
-    // credentials mode "include" where withCredentials is set, else "same-origin" — the rest a request's defaults.
-    pub(crate) fn of_xhr(method: String, url: String, with_credentials: bool) -> Self {
+    // An XMLHttpRequest's request as send() makes it (XHR §3.5.6 step 11): its method and URL, mode "cors", its
+    // credentials mode "include" where withCredentials is set, else "same-origin", its use-CORS-preflight flag its
+    // upload listener flag — the rest a request's defaults.
+    pub(crate) fn of_xhr(method: String, url: String, with_credentials: bool, upload_listener: bool) -> Self {
         Request {
             method,
             mode: "cors".into(),
             credentials: if with_credentials { "include" } else { "same-origin" }.into(),
+            use_cors_preflight: upload_listener,
             ..Request::new(url)
         }
     }

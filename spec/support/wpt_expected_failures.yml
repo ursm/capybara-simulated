@@ -68980,12 +68980,8 @@ xhr/event-upload-progress.any.js:
 - Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)
 - "[dedicatedworker] Upload events registered too late (http://www1.www.example.com/xhr/resources/corsenabled.py)"
 - "[dedicatedworker] Upload events registered too late (resources/redirect.py?code=307&location=http://www1.www.example.com/xhr/resources/corsenabled.py)"
-xhr/open-url-multi-window-2.htm:
-- 'XMLHttpRequest: open() resolving URLs (multi-Window; 2; evil)'
 xhr/open-url-multi-window-3.htm:
 - 'XMLHttpRequest: open() resolving URLs (multi-Window; 3; evil)'
-xhr/open-url-multi-window-5.htm:
-- 'XMLHttpRequest: open() resolving URLs (multi-Window; 5)'
 xhr/open-url-multi-window-6.htm:
 - 'XMLHttpRequest: open() in document that is not fully active (but may be active)
   should throw'

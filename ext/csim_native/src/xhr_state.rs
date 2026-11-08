@@ -45,6 +45,9 @@ struct XhrState {
     // opened again since), upload complete flag, and whether the body was reported sent (its progress, load and
     // loadend fired once: a long poll's as it parks, not again with its response).
     upload_listener: bool,
+    // XHR's own "upload listener flag": the upload object had event listeners as send() was called — the request's
+    // use-CORS-preflight flag.
+    upload_listened: bool,
     upload_complete: bool,
     upload_sent: bool,
     upload_total: f64,
@@ -223,7 +226,7 @@ fn state<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
 // The request the XHR `value` holds the state of sends (`Request::of_xhr`), or None for anything that is no XHR's state.
 pub(crate) fn request_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<crate::request_state::Request> {
     let s = state(scope, value)?.borrow();
-    Some(crate::request_state::Request::of_xhr(String::from_utf16_lossy(&s.method), String::from_utf16_lossy(&s.url), s.with_credentials))
+    Some(crate::request_state::Request::of_xhr(String::from_utf16_lossy(&s.method), String::from_utf16_lossy(&s.url), s.with_credentials, s.upload_listened))
 }
 
 // `__dom.XhrBase`: the constructor of the isolate's template, made once per isolate.
@@ -516,8 +519,9 @@ fn final_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     rv.set(v8::Array::new_with_elements(scope, &[mime_value, is_xml, label_value]).into());
 }
 
-// __dom.xhrSend(state) -> the open() this send is of (its count, which `xhrCurrent` checks against), or -1 where the
-// request is not OPENED or is sent already (InvalidStateError): the send flag set.
+// __dom.xhrSend(state, uploadListened) -> the open() this send is of (its count, which `xhrCurrent` checks against), or
+// -1 where the request is not OPENED or is sent already (InvalidStateError): the send flag set, and the upload listener
+// flag as `uploadListened` says (the upload object had listeners).
 fn send_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(-1) };
     let mut s = s.borrow_mut();
@@ -525,6 +529,7 @@ fn send_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         return rv.set_int32(-1);
     }
     s.send = true;
+    s.upload_listened = args.get(1).is_true();
     rv.set_double(f64::from(s.generation));
 }
 
