@@ -1357,8 +1357,9 @@ RSpec.describe 'a frame navigation as tasks' do
     # …at script nesting level zero, the insertion point undefined: a `document.write` of a task that runs meanwhile opens the
     # document, which aborts the parser — and "the end" runs no deferred script after it.
     {
-      'a parser-blocking script' => '<script src="/slow/0/b.js"></script>',
-      'a deferred script'        => '<script defer src="/slow/0/d.js"></script>'
+      'a parser-blocking script'           => '<script src="/slow/0/b.js"></script>',
+      'a style sheet that blocks a script' => '<link rel="stylesheet" href="/slow/0/s.css">',
+      'a deferred script'                  => '<script defer src="/slow/0/d.js"></script>'
     }.each do |what, markup|
       it "opens the document with a timer's write as the parser waits on #{what}" do
         log = page_log(<<~HTML)
