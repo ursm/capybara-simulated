@@ -1125,8 +1125,14 @@ impl PointerMarks {
         self.to = epoch;
         self.ids.push(id);
     }
-    // …and the labeled controls whose state followed it.
+    // …and the labeled controls whose state followed it — past the bound, the run given up: the engine looks at every
+    // element.
     fn mark(&mut self, old: &[NodeId], new: &[NodeId]) {
+        if self.ids.len() + old.len() + new.len() > MAX_POINTER_MARKS {
+            self.from = self.to;
+            self.ids.clear();
+            return;
+        }
         self.ids.extend_from_slice(old);
         self.ids.extend_from_slice(new);
     }
@@ -2080,6 +2086,12 @@ impl RealmArena {
             }
         }
         let moved = had ^ bits;
+        // (…a move of the focus, the hover or the press alone: where it was written, for the style engine to look at what
+        // its state reaches — the element and its ancestors — rather than at every element)
+        let epoch = self.state.state_epoch;
+        if moved & !(STATE_FOCUSED | STATE_HOVERED | STATE_ACTIVE) == 0 {
+            self.state.pointer_marks.note(epoch, id);
+        }
         if moved & STATE_HOVERED != 0 {
             let controls = self.state.hover.map_or_else(Vec::new, |h| self.label_controls(h));
             let old = std::mem::replace(&mut self.state.hover_controls, controls);
@@ -2089,12 +2101,6 @@ impl RealmArena {
             let controls = self.state.active.map_or_else(Vec::new, |a| self.label_controls(a));
             let old = std::mem::replace(&mut self.state.active_controls, controls);
             self.state.pointer_marks.mark(&old, &self.state.active_controls);
-        }
-        // (…a move of the focus, the hover or the press alone: where it was written, for the style engine to look at what
-        // its state reaches — the element and its ancestors — rather than at every element)
-        let epoch = self.state.state_epoch;
-        if moved & !(STATE_FOCUSED | STATE_HOVERED | STATE_ACTIVE) == 0 {
-            self.state.pointer_marks.note(epoch, id);
         }
     }
 

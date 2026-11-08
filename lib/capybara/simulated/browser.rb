@@ -1880,16 +1880,10 @@ module Capybara
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
-        # Set the document's hovered element so `:hover` pseudo-class matches
-        # resolve against this element (Redmine's gantt tooltips +
-        # context-menu submenus rely on CSS `:hover`). The host fn
-        # call into `setHover` does the slot update on the JS
-        # side AND fires the hover events (`mouseover` / `mouseenter`
-        # where the hovered element changed, the moves) — keeping the
-        # state-set and dispatch on the same path avoids the
-        # double-eval recursion the inlined `globalThis.document.
-        # _hoverElement = ...` triggered (the eval string ran inside
-        # a fresh microtask that re-entered the hover listeners).
+        # The pointer moved over the element (`setHover`): the document's
+        # hovered element — what `:hover` matches (Redmine's gantt tooltips
+        # and context-menu submenus rely on it) — and the boundary events and
+        # moves, as the engine sequences them (pointer.rs `MousePointer`).
         dom_call('setHover', handle)
       end
 

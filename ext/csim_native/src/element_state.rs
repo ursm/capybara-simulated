@@ -199,7 +199,6 @@ impl RealmArena {
     pub(crate) fn has_focus_within(&self, id: NodeId) -> bool {
         self.focus.is_some_and(|f| self.shadow_including_ancestor(id, f))
     }
-    // `:hover`: the hovered element or one of its shadow-including ancestors.
     // `:hover`: the hovered element or one of its shadow-including ancestors, and the labeled control of a label among
     // them (HTML §4.16.3).
     pub(crate) fn is_hovered(&self, id: NodeId) -> bool {
@@ -207,8 +206,12 @@ impl RealmArena {
     }
     // `:active`: the element the pointer pressed, any button held (Chrome, Firefox), or one of its shadow-including
     // ancestors, and the labeled control of a label among them (HTML §4.16.3).
+    // (…a button, a button-like input, is "being activated … and it is not disabled": HTML)
     pub(crate) fn is_active(&self, id: NodeId) -> bool {
         self.active.is_some_and(|a| self.shadow_including_ancestor(id, a) || self.active_controls.contains(&id))
+            && !(self.is_actually_disabled(id) && self.get(id).is_some_and(|n| {
+                n.is_html_named("button") || (n.is_html_named("input") && matches!(n.input_type(), "submit" | "image" | "reset" | "button"))
+            }))
     }
     // The labeled controls of the labels `id` is or is in (HTML §4.10.4), shadow-including.
     pub(crate) fn label_controls(&self, id: NodeId) -> Vec<NodeId> {

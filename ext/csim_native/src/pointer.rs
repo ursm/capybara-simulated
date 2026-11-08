@@ -165,10 +165,14 @@ impl MousePointer {
 
     // "Process pending pointer capture" (§10.4), before a pointer event: the override lost where the pending one is not it,
     // the pending one got where it is not the override — the events of the pointer event that runs them (its button, the
-    // buttons held) — and the pending one the override. An override no longer in a document is dropped first, losing
-    // nothing a page can hear. The element that got it, for the boundary events to it to go first (Chrome and Firefox).
+    // buttons held) — and the pending one the override. An override no longer in a document loses it at its document
+    // (§10.5: "lostpointercapture … SHOULD be fired at the document"), a pending one that left is dropped. The element that
+    // got it, for the boundary events to it to go first (Chrome and Firefox).
     fn process_pending_capture(&mut self, arena: &RealmArena, button: i32) -> Option<NodeId> {
-        if self.capture.is_some_and(|c| !arena.is_connected(c)) {
+        if let Some(c) = self.capture.filter(|&c| !arena.is_connected(c)) {
+            if let Some(doc) = arena.get(c).and_then(|n| arena.realm_document(n.realm)) {
+                self.fire("lostpointercapture", doc, None, button, 0, When::Always);
+            }
             self.capture = None;
         }
         if self.pending_capture.is_some_and(|c| !arena.is_connected(c)) {
@@ -188,7 +192,8 @@ impl MousePointer {
     // then the same of the compatibility mouse events (Pointer Events; Chrome, measured). `mouse` false: the pointer's
     // alone, its mouse events catching up later (a capture released: `plan_release`).
     fn boundaries(&mut self, arena: &RealmArena, from: Option<NodeId>, to: NodeId, got: Option<NodeId>, mouse: bool) {
-        let moved = from != Some(to);
+        // (…none onto a node no document holds: nothing is hovered that is not in one)
+        let moved = from != Some(to) && arena.is_connected(to);
         let (leave, enter) = if moved { crate::event_path::hover_chains(arena, from, Some(to)) } else { Default::default() };
         if moved {
             self.steps.push_back(Step::Hover(to));
@@ -230,7 +235,9 @@ impl MousePointer {
     }
 
     // A press of `button` — the `count`th click of it (a double click's second is 2): the element pressed `:active` from
-    // before its `pointerdown` (Chrome, Firefox), its `pointerdown` (whose `detail` is 0: Pointer Events) and `mousedown`
+    // before its `pointerdown` (Chrome, Firefox) — of the primary button alone (Selectors 4 §9.3: "On systems with more
+    // than one mouse button, :active applies only to the primary or primary activation button", where Chrome and Firefox
+    // activate on any) — its `pointerdown` (whose `detail` is 0: Pointer Events) and `mousedown`
     // (its count), the focus — and, of the primary button, the caret, a second press selecting the word — and, of the
     // secondary button, the context menu as on Linux, at the press, whether or not the press was canceled (Chrome,
     // Firefox).
@@ -242,7 +249,9 @@ impl MousePointer {
         self.pressed = Some(target);
         self.press_prevented = false;
         self.buttons |= button_bit(self.button);
-        self.steps.push_back(Step::Active(Some(target)));
+        if self.button == 0 {
+            self.steps.push_back(Step::Active(Some(target)));
+        }
         self.fire("pointerdown", target, None, button, 0, When::Always);
         self.fire("mousedown", target, None, button, self.detail, When::Compat);
         self.steps.push_back(Step::Focus(target));
@@ -295,6 +304,15 @@ impl MousePointer {
             let (leave, enter) = crate::event_path::hover_chains(arena, Some(c), Some(at));
             self.boundary_events(Some(c), at, &leave, &enter, ["mouseout", "mouseleave", "mouseover", "mouseenter"], 0);
         }
+    }
+
+    // The gesture's press let go of with no release: no button held, no flag, no capture.
+    fn abandon(&mut self) {
+        self.buttons = 0;
+        self.pressed = None;
+        self.prevented = false;
+        self.pending_capture = None;
+        self.capture = None;
     }
 
     // The next phase planned, where the steps planned are all taken.
@@ -426,10 +444,14 @@ fn fire_value<'s>(scope: &mut v8::PinScope<'s, '_>, f: Fire) -> v8::Local<'s, v8
 
 // The gesture's next step to the bindings, or — at its end — what it answers (PRESS_PREVENTED).
 fn answer_next(scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::dom(scope).mouse.cid;
     let d = crate::dom::dom(scope);
-    let arena = d.arena.enter(cid);
-    match d.mouse.next(arena) {
+    let cid = d.mouse.cid;
+    // (…none past its realm's end: a frame whose listener removed it)
+    let next = match d.arena.enter_known(cid) {
+        Some(arena) => d.mouse.next(arena),
+        None => None,
+    };
+    match next {
         Some(step) => {
             let value = step_value(scope, step);
             rv.set(value);
@@ -450,9 +472,20 @@ fn gesture_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let button = args.get(2).uint32_value(scope).unwrap_or(0);
     let detail = args.get(3).uint32_value(scope).unwrap_or(1);
     let cid = crate::dom::realm_id(scope, &args);
-    let mouse = &mut crate::dom::dom(scope).mouse;
+    let d = crate::dom::dom(scope);
+    let mouse = &mut d.mouse;
     mouse.steps.clear();
     mouse.last = None;
+    mouse.press_prevented = false;
+    // (…a press no release followed — a gesture the driver abandoned, a delayed click a navigation overtook — is over
+    // before another begins: the driver presses one button at a time)
+    if phases & PRESS != 0 && mouse.buttons != 0 {
+        mouse.abandon();
+        if let Some(arena) = d.arena.enter_known(cid) {
+            set_active(arena, None);
+        }
+    }
+    let mouse = &mut d.mouse;
     mouse.at = at.or(mouse.at);
     (mouse.phases, mouse.button, mouse.detail, mouse.cid) = (phases, button, detail, cid);
     answer_next(scope, rv);
@@ -481,7 +514,9 @@ fn set_capture_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     if !d.arena.is_connected(id) {
         return rv.set_uint32(INVALID_STATE);
     }
-    if d.mouse.buttons != 0 {
+    // (…none where no button is held, nor of an element of a document the pointer's gesture is not in: §10.2 "the
+    // element's node document is not the active document of the pointer")
+    if d.mouse.buttons != 0 && d.arena.get(id).is_some_and(|n| n.realm == d.mouse.cid) {
         d.mouse.pending_capture = Some(id);
     }
     rv.set_uint32(0);

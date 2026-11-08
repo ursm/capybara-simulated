@@ -49,7 +49,8 @@ RSpec.describe 'pointer gestures' do
     "hooks['#{event}'] = (e) => document.getElementById('#{element}').setPointerCapture(e.pointerId)"
   end
 
-  it 'holds the pressed element and its ancestors :active from its pointerdown to its pointerup, any button' do
+  # (…of the primary button alone: Selectors 4 §9.3 says so, where Chrome and Firefox activate on the secondary too)
+  it 'holds the pressed element and its ancestors :active from its pointerdown to its pointerup, the primary button' do
     gesture { '' }
     session.find('#a1').click
     expect(log.grep(/^(pointerdown|mousedown|pointerup|click)/)).to eq([
@@ -60,8 +61,8 @@ RSpec.describe 'pointer gestures' do
     ])
     session.find('#a').right_click
     expect(log.grep(/^(pointerdown|contextmenu|pointerup|auxclick)/)).to eq([
-      'pointerdown a b2 bs2 d0 act:out/a',
-      'contextmenu a b2 bs2 d1 act:out/a',
+      'pointerdown a b2 bs2 d0 act:',
+      'contextmenu a b2 bs2 d1 act:',
       'pointerup a b2 bs0 d0 act:',
       'auxclick a b2 bs0 d1 act:'
     ])
@@ -73,6 +74,28 @@ RSpec.describe 'pointer gestures' do
       'pointerup a1 b0 bs0 d0 act:',
       'click a1 b0 bs0 d1 act:'
     ])
+    # (…a disabled button is never being activated, HTML §4.16.3 — what holds it is)
+    session.execute_script(<<~JS)
+      document.getElementById('b').innerHTML = '<button id=db disabled style="width:50px;height:20px">d</button>';
+      hooks['pointerdown:db'] = () => log.push('pressed ' + states(':active'));
+    JS
+    session.find('#db').click
+    expect(log).to include('pressed out/b')
+  end
+
+  # (…Pointer Events §10.5: a capturing element taken out of the document loses the capture at the document; and a press
+  # whose element a listener re-rendered away releases over what is there, as a real pointer does)
+  it 'loses a capture at the document when its element leaves, and releases where the pointer is' do
+    gesture do
+      capture_in('pointerdown:a1', 'a1') +
+        ";hooks['mousedown:a1'] = (e) => e.preventDefault(); hooks['gotpointercapture:a1'] = (e) => e.target.remove()" \
+        ";document.addEventListener('lostpointercapture', (e) => log.push('lost at ' + name(e.target)))"
+    end
+    session.find('#a1').drag_to(session.find('#b'))
+    expect(log).to include('lost at #document')
+    gesture { "hooks['mousedown:a1'] = (e) => e.target.remove()" }
+    session.find('#a1').click
+    expect(log.grep(/^pointerup|^mouseup|^click/)).to eq(['pointerup a b0 bs0 d0 act:', 'mouseup a b0 bs0 d1 act:'])
   end
 
   it "matches a label's labeled control as the label is :hover and :active (HTML §4.16.3)" do
