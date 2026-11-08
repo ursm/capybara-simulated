@@ -3926,6 +3926,7 @@ fn insertion_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, nodes: &[NodeId])
     let arena = realm(scope, cid);
     arena.radio_insertion_steps(nodes);
     let released = arena.registry_insertion_steps(nodes);
+    arena.scoped_document_steps(nodes);
     if !released.is_empty() {
         crate::ce_reactions::release_registries(scope, released);
     }

@@ -2072,15 +2072,6 @@ custom-elements/registries/scoped-custom-element-registry-customelementregistry-
   is set
 - XHTML parser should create a defined custom element with null registry if customelementregistry
   is set
-custom-elements/registries/scoped-registry-define-upgrade-criteria.html:
-- Adding definition to scoped registry affects associated shadow roots in all iframes
-- Adding definition to scoped registry affects associated shadow roots in other frame
-  trees
-custom-elements/registries/scoped-registry-define-upgrade-order.html:
-- Elements in the "owner" window of a scoped registry are not always upgraded first
-- Upgrade in association order across documents, then tree order in each document
-- Upgrade order is affected by shadow tree adoption across documents
-- Upgrade order is not affected by DOM order between child frames
 dom/events/EventListener-invoke-legacy.html:
 - Legacy listener of animationstart
 - Legacy listener of transitionend

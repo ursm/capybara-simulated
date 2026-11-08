@@ -25,9 +25,6 @@ enum Filter {
     SheetOwners,
     // An element with any of these state bits (`STATE_*`).
     State(u32),
-    // An element a custom element definition could be for: an HTML element with a valid custom element name's
-    // hyphen, or an `is` value.
-    CustomCandidates,
 }
 
 use crate::validity::is_ascii_ws_unit as ascii_whitespace;
@@ -70,7 +67,6 @@ impl Filter {
                 n.ns == ns!(html) && names.contains(&&*n.local_name) && attr.is_none_or(|a| n.plain_attr(a).is_some())
             }
             Filter::State(mask) => n.state & mask != 0,
-            Filter::CustomCandidates => n.is_html() && (n.local_name.contains('-') || n.is_value.is_some()),
             Filter::SheetOwners => crate::sheet_owners::is_sheet_owner(n),
         }
     }
@@ -563,7 +559,6 @@ const EMBEDS: u32 = 8;
 const NAME: u32 = 9;
 const SHEET_OWNERS: u32 = 10;
 const STATE: u32 = 12;
-const CUSTOM_CANDIDATES: u32 = 13;
 const SHADOW_INCLUDING_ELEMENTS: u32 = 14;
 const CHILD_ELEMENTS: u32 = 15;
 const IMAGE_ELEMENTS: u32 = 16;
@@ -578,8 +573,8 @@ fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Op
 // class names (`kind` 0: `a` the list, `b` the nid of the document whose mode they match in), a namespace and local
 // name (1: `a` the namespace, null for none, `b` the local name; "*" any), a qualified name (2: `a`, "*" any; `b` an
 // HTML document), a legacy document collection (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds), a `name`
-// (9: `a`), the stylesheets' owners (10) — or those with a state bit of a mask (12: `a`), those a custom element
-// definition could be for (13), or every element of its shadow-including inclusive descendants (14: in shadow-including
+// (9: `a`), the stylesheets' owners (10) — or those with a state bit of a mask (12: `a`), or every element of its
+// shadow-including inclusive descendants (14: in shadow-including
 // tree order, a host before its shadow tree's own, the scope itself first where it is one) — or its children that are
 // elements (15: what its
 // `children` holds) — or the image elements of its shadow-including inclusive descendants, in that order (16: an HTML
@@ -625,7 +620,6 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         NAME => Filter::Name(utf16_arg(scope, a)),
         SHEET_OWNERS => Filter::SheetOwners,
         STATE => Filter::State(a.uint32_value(scope).unwrap_or(0)),
-        CUSTOM_CANDIDATES => Filter::CustomCandidates,
         SHADOW_INCLUDING_ELEMENTS | IMAGE_ELEMENTS => {
             let cid = realm_id(scope, &args);
             let pick = |n: &crate::dom::NodeData| match kind {

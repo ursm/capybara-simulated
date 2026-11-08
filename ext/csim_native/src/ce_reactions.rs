@@ -12,8 +12,16 @@
 //
 // What a reaction calls is its element's custom element definition's: the callbacks the definition captured as it was
 // defined (HTML "define" step 14, a later write to the prototype changing nothing it calls) and the attributes it
-// observes, which a custom element is given as it becomes one (`ceSetDefinition`). So a tree change enqueues what it
-// owes the custom elements it moved with no walk of the bindings' (`ceSubtreeHook`).
+// observes, which a custom element is given as its upgrade begins or its constructor makes it (`ceUpgrade`,
+// `ceMakeCustom`). So a tree change enqueues what it owes the custom elements it moved with no walk of the bindings'
+// (`ceSubtreeHook`).
+//
+// The definitions are the engine's too, and what is decided of them: what refuses one (`ceDefineCheck`), the record of
+// it and what finds it — by name, local name and is value, constructor — its upgrade candidates (`ceDefine`, and the
+// scoped document sets an insertion adds to: `scoped_document_steps`), what upgrade() and initialize() try
+// (`ceTryUpgrades`), an element's custom element state through its upgrade (`ceUpgrade`, `ceUpgradeEnd`) and the
+// construction stacks its constructor's `super()` finds it on (`ceConstructionTop`). The bindings read a page's values
+// (a constructor's callbacks, observed attributes, disabled features) and call its code.
 //
 // A node's custom element registry (HTML: an element's, a shadow root's, a document's) is its handle's, coded: none set
 // (`UNSET`: it tracks its node document's), the template contents' null (`TRACKING`: its tree's document has none, but
@@ -68,14 +76,19 @@ pub(crate) const NULL: u32 = 2;
 pub(crate) const FIRST_REGISTRY: u32 = 3;
 
 // A CustomElementRegistry: its object — held weakly: it lives while a script holds it or a node is associated with it
-// (node_handle.rs) — and whether it is scoped (every one a page constructs, not a window's), and its definitions, by name
-// and, for a customized built-in, by the local name it extends and its name (HTML "look up a custom element definition").
+// (node_handle.rs) — the realm that made it, whether it is scoped (every one a page constructs, not a window's), and its
+// definitions, by name and, for a customized built-in, by the local name it extends and its name (HTML "look up a custom
+// element definition"); its "element definition is running" flag; and, scoped, its scoped document set, in the order the
+// documents were associated with it. (Its when-defined promise map is the bindings': promises a page holds.)
 struct Registry {
     object: v8::Weak<v8::Value>,
+    realm: i32,
     scoped: bool,
     named: HashMap<String, u32>,
     builtins: HashMap<String, HashMap<String, u32>>,
     // (…keyed by `name_key`)
+    running: bool,
+    documents: Vec<NodeId>,
 }
 
 // One callback a custom element is owed: the callback, and its arguments.
@@ -111,6 +124,12 @@ pub(crate) struct Reactions {
     // in one realm constructs by another's HTML element constructor: what that constructor looks its NewTarget up in
     // (`ceStack[3]` how many, which every element construction reads before it asks).
     constructing: Vec<u32>,
+    // The definitions by their constructor's identity hash (a constructor may be several registries' definitions'): what
+    // "the item with constructor" finds — define()'s, getName()'s, and the HTML element constructor's.
+    by_constructor: HashMap<i32, Vec<u32>>,
+    // Whether a scoped registry was made: an insertion owes the scoped document sets nothing before
+    // (`scoped_document_steps`).
+    any_scoped: bool,
 }
 
 impl Reactions {
@@ -129,7 +148,11 @@ const DEPTH: usize = 0;
 const DEEPEST: usize = 1;
 const BACKUP: usize = 2;
 const CONSTRUCTING: usize = 3;
-const VIEW_LEN: usize = 4;
+// …and how many definitions there are, and how many of them are form-associated: the gates of the walks only a
+// definition makes owed (a clone's upgrades, a form's custom elements) — the agent's, any realm's definition counting.
+const DEFINITIONS: usize = 4;
+const FORM_ASSOCIATED_DEFINITIONS: usize = 5;
+const VIEW_LEN: usize = 6;
 
 impl Reactions {
     fn get(&self, at: usize) -> i32 {
@@ -179,6 +202,9 @@ impl Reactions {
             *found = None;
         }
         self.queues.retain(|&id, _| !gone(id));
+        for registry in self.registries.iter_mut().flatten() {
+            registry.documents.retain(|&d| !gone(d));
+        }
         self.backup.retain(|&(id, _)| !gone(id));
         for level in &mut self.levels {
             level.retain(|&(id, _)| !gone(id));
@@ -210,6 +236,11 @@ impl Reactions {
             self.custom.retain(|_, d| !gone.contains(d));
             self.constructing.retain(|d| !gone.contains(d));
             self.set(CONSTRUCTING, self.constructing.len() as i32);
+            self.by_constructor.retain(|_, ids| {
+                ids.retain(|d| !gone.contains(d));
+                !ids.is_empty()
+            });
+            self.count_definitions();
         }
         for registry in &mut self.registries {
             if registry.as_ref().is_some_and(|r| r.object.is_empty()) {
@@ -224,6 +255,12 @@ impl Reactions {
             }
         }
         self.window_registries.retain(|_, &mut code| code.checked_sub(FIRST_REGISTRY).and_then(|i| self.registries.get(i as usize)).is_some_and(Option::is_some));
+    }
+    // The definitions counted into the view (`DEFINITIONS`, `FORM_ASSOCIATED_DEFINITIONS`).
+    fn count_definitions(&self) {
+        let live = self.definitions.iter().flatten();
+        self.set(DEFINITIONS, live.clone().count() as i32);
+        self.set(FORM_ASSOCIATED_DEFINITIONS, live.filter(|d| d.flags & DEFINE_FORM_ASSOCIATED != 0).count() as i32);
     }
     // The weak handles the definitions and registries hold, let go of with no reset: the isolate is gone (`Dom`'s drop).
     pub(crate) fn leak_weak_handles(&mut self) {
@@ -310,6 +347,25 @@ impl Reactions {
         }
         self.set(CONSTRUCTING, self.constructing.len() as i32);
     }
+    // The registry `code` names, to change.
+    fn registry_mut(&mut self, code: u32) -> Option<&mut Registry> {
+        code.checked_sub(FIRST_REGISTRY).and_then(|i| self.registries.get_mut(i as usize)).and_then(Option::as_mut)
+    }
+    // Document `doc` appended to scoped registry `code`'s scoped document set, where it is not in it.
+    fn associate_document(&mut self, code: u32, doc: NodeId) {
+        if let Some(r) = self.registry_mut(code).filter(|r| r.scoped && !r.documents.contains(&doc)) {
+            r.documents.push(doc);
+        }
+    }
+    // The definitions whose constructor is `ctor`, the latest made last.
+    fn defined_by<'a>(&'a self, ctor: v8::Local<'a, v8::Value>, hash: i32) -> impl Iterator<Item = u32> + 'a {
+        self.by_constructor.get(&hash).into_iter().flatten().copied().filter(move |&d| self.definitions.get(d as usize).and_then(Option::as_ref).is_some_and(|def| def.ctor == ctor))
+    }
+    // …registry `code`'s, where it has one.
+    fn registry_defined_by(&self, code: u32, ctor: v8::Local<'_, v8::Value>, hash: i32) -> Option<u32> {
+        let registry = self.registry(code)?;
+        self.defined_by(ctor, hash).find(|d| registry.named.values().any(|n| n == d))
+    }
     // The definition of custom element `id`.
     fn definition_of(&self, id: NodeId) -> Option<&Definition> {
         self.custom.get(&id).and_then(|&d| self.definitions.get(d as usize)).and_then(Option::as_ref)
@@ -343,6 +399,34 @@ impl crate::dom::RealmArena {
         }
         released
     }
+    // DOM "insert" step 7.7's scoped document sets: the node document of each connected element and shadow root of the
+    // inserted nodes' shadow-including inclusive descendants whose registry is scoped (the document they are connected to,
+    // their shadow-including root) appended to its set — none to look for before a page makes a scoped registry.
+    pub(crate) fn scoped_document_steps(&mut self, nodes: &[NodeId]) {
+        if !self.ce_reactions.any_scoped {
+            return;
+        }
+        let mut found = Vec::new();
+        for &node in nodes {
+            let doc = self.shadow_including_root(node);
+            if !self.is_document(doc) {
+                continue;
+            }
+            let mut stack = vec![node];
+            while let Some(id) = stack.pop() {
+                let Some(n) = self.get(id) else { continue };
+                let code = self.registry_of(id);
+                if code >= FIRST_REGISTRY {
+                    found.push((code, doc));
+                }
+                stack.extend(n.children.iter().rev());
+                stack.extend(n.shadow_root);
+            }
+        }
+        for (code, doc) in found {
+            self.ce_reactions.associate_document(code, doc);
+        }
+    }
     // The registry association of `root` and each node of its tree under it (not a shadow tree's, nor a template's
     // contents), where `change` gives it another.
     // (…`released` gets the handles whose registry that took away)
@@ -367,11 +451,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceTakeQueue", ce_take_queue, context_id);
     register(scope, ns, "ceTakeBackup", ce_take_backup, context_id);
     register(scope, ns, "ceTakeReaction", ce_take_reaction, context_id);
-    register(scope, ns, "ceClear", ce_clear, context_id);
     register(scope, ns, "ceDefine", ce_define, context_id);
-    register(scope, ns, "ceSetDefinition", ce_set_definition, context_id);
-    register(scope, ns, "ceDefinitionLive", ce_definition_live, context_id);
-    register(scope, ns, "ceHasCallback", ce_has_callback, context_id);
     register(scope, ns, "ceHook", ce_hook, context_id);
     register(scope, ns, "ceEnqueueUpgrade", ce_enqueue_upgrade, context_id);
     register(scope, ns, "ceSubtreeHook", ce_subtree_hook, context_id);
@@ -395,6 +475,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceConstructionTop", ce_construction_top, context_id);
     register(scope, ns, "ceMarkConstructed", ce_mark_constructed, context_id);
     register(scope, ns, "ceMakeCustom", ce_make_custom, context_id);
+    register(scope, ns, "ceDefineCheck", ce_define_check, context_id);
+    register(scope, ns, "ceDefineEnd", ce_define_end, context_id);
+    register(scope, ns, "ceConstructorDefinition", ce_constructor_definition, context_id);
+    register(scope, ns, "ceTryUpgrades", ce_try_upgrades, context_id);
     // (…and the stack's depth and deepest queue, and how many upgrades construct, a view on the isolate's one buffer)
     let store = {
         let reactions = &mut dom(scope).arena.ce_reactions;
@@ -453,14 +537,6 @@ fn ce_take_reaction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     rv.set(v8::Array::new_with_elements(scope, &[callback, list.into()]).into());
 }
 
-// __dom.ceClear(nid) — the element's reaction queue emptied (HTML "upgrade an element": a constructor that failed leaves
-// it none of the reactions its upgrade enqueued).
-fn ce_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    if let Some(id) = nid_arg(scope, &args, 0) {
-        dom(scope).arena.ce_reactions.queues.remove(&id);
-    }
-}
-
 // The scope's object of a weak handle in the engine's tables (`definition_object`, `callback_of`), where it is alive.
 fn weak_local<'s>(scope: &mut v8::PinScope<'s, '_>, weak: Option<*const v8::Weak<v8::Value>>) -> Option<v8::Local<'s, v8::Value>> {
     // SAFETY: the tables are the isolate's, which `to_local` reads nothing of, and the entry outlives this call (nothing in
@@ -500,10 +576,12 @@ fn held_list(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
     }
 }
 
-// __dom.ceDefine(registry, name, localName, definition, callbacks, observed, constructor, flags) -> the definition's id: a
-// custom element definition made in the calling realm, in registry `registry` (its code) — `definition` the bindings'
-// object for it, `callbacks` its callbacks in `CALLBACKS` order (undefined for one it has not), `observed` the local
-// names of the attributes it observes, `flags` its `DEFINE_*`.
+// __dom.ceDefine(registry, name, localName, definition, callbacks, observed, constructor, flags, upgrade) -> `[id, queue]`:
+// HTML define() from its step 15 — a custom element definition made in the calling realm, in registry `registry` (its
+// code) — `definition` the bindings' object for it, `callbacks` its callbacks in `CALLBACKS` order (undefined for one it
+// has not), `observed` the local names of the attributes it observes, `flags` its `DEFINE_*` — and its upgrade candidates
+// given upgrade reactions (`upgrade_particular_elements`, `upgrade` the bindings' steps of one): its id, and whether the
+// backup element queue's microtask is to be queued. (Its when-defined promise the bindings resolve, as it returns.)
 fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
     let realm = realm_id(scope, &args);
@@ -525,6 +603,7 @@ fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         Err(_) => HashSet::new(),
     };
     let ctor = v8::Weak::new(scope, args.get(6));
+    let hash = constructor_hash(args.get(6));
     let flags = args.get(7).uint32_value(scope).unwrap_or(0);
     let reactions = &mut dom(scope).arena.ce_reactions;
     let autonomous = local_name == name;
@@ -540,13 +619,265 @@ fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
             reactions.definitions.len() as u32 - 1
         }
     };
+    if let Some(hash) = hash {
+        reactions.by_constructor.entry(hash).or_default().push(id);
+    }
+    reactions.count_definitions();
+    let is = (!autonomous).then(|| name.clone());
     if let Some(registry) = code.checked_sub(FIRST_REGISTRY).and_then(|i| reactions.registries.get_mut(i as usize)).and_then(Option::as_mut) {
         if !autonomous {
-            registry.builtins.entry(local_name).or_default().insert(name.clone(), id);
+            registry.builtins.entry(local_name.clone()).or_default().insert(name.clone(), id);
         }
         registry.named.insert(name, id);
     }
-    rv.set_uint32(id);
+    let queue = upgrade_particular_elements(scope, code, id, &local_name, is.as_deref(), args.get(8));
+    let answer = [v8::Integer::new_from_unsigned(scope, id).into(), v8::Boolean::new(scope, queue).into()];
+    rv.set(v8::Array::new_with_elements(scope, &answer).into());
+}
+
+// A constructor's identity hash, which `by_constructor` keys its definitions by — none for a value no object.
+fn constructor_hash(ctor: v8::Local<'_, v8::Value>) -> Option<i32> {
+    v8::Local::<v8::Object>::try_from(ctor).ok().map(|o| o.get_identity_hash().get())
+}
+
+// HTML define() step 18: for a scoped registry, "upgrade particular elements within a document" for each document of its
+// scoped document set, in the order they were associated with it; for a window's, within its realm's document. Whether
+// the backup element queue's microtask is to be queued.
+fn upgrade_particular_elements(scope: &mut v8::PinScope<'_, '_>, code: u32, def: u32, local_name: &str, is: Option<&str>, step: v8::Local<'_, v8::Value>) -> bool {
+    let documents = {
+        let arena = &dom(scope).arena;
+        match arena.ce_reactions.registry(code) {
+            Some(r) if r.scoped => r.documents.clone(),
+            Some(r) => arena.realm_document(r.realm).into_iter().collect(),
+            None => Vec::new(),
+        }
+    };
+    let mut queue = false;
+    for doc in documents {
+        // (…all elements that are shadow-including descendants of the document whose registry is this one, in the HTML
+        // namespace, of the definition's local name — and is value, for a customized built-in — in shadow-including tree
+        // order)
+        let candidates: Vec<NodeId> = {
+            let arena = &dom(scope).arena;
+            let Some(default) = arena.get(doc).filter(|n| n.kind == crate::dom::NodeKind::Document).and_then(|n| n.link.handle()).map(|h| window_code(h.window_registry())) else { continue };
+            arena.shadow_including_elements(doc, |n| {
+                n.is_html()
+                    && exact_local_name(n) == local_name
+                    && is.is_none_or(|is| n.is_value.as_deref().is_some_and(|v| name_key(v) == is))
+                    && resolved_registry(n, default) == code
+            })
+        };
+        for id in candidates {
+            queue |= enqueue_upgrade(scope, id, def, step);
+        }
+    }
+    queue
+}
+
+// An element's local name as definitions key it (`name_key`): the arena's, but exactly where it carries a lone surrogate.
+fn exact_local_name(n: &crate::dom::NodeData) -> std::borrow::Cow<'_, str> {
+    match &n.name_u16 {
+        Some(exact) => std::borrow::Cow::Owned(name_key(&exact.local)),
+        None => std::borrow::Cow::Borrowed(&n.local_name),
+    }
+}
+// The registry of a node of a tree whose node document's window registry is `default` (`registry_for`, for a node of a
+// known document): its own where one is set, none for the null registry or the tracking null.
+fn resolved_registry(n: &crate::dom::NodeData, default: u32) -> u32 {
+    match n.link.handle().map_or(UNSET, |h| h.registry()) {
+        UNSET => default,
+        TRACKING | NULL => NULL,
+        code => code,
+    }
+}
+// HTML "enqueue a custom element upgrade reaction" of element `id` by definition `def`: `step`, the bindings' steps of
+// an upgrade, called on the element with the definition's object. Whether the backup element queue's microtask is to be
+// queued.
+fn enqueue_upgrade(scope: &mut v8::PinScope<'_, '_>, id: NodeId, def: u32, step: v8::Local<'_, v8::Value>) -> bool {
+    let weak = dom(scope).arena.ce_reactions.definition_object(def);
+    let Some(definition) = weak_global(scope, weak) else { return false };
+    let element = crate::dom::node_value(scope, Some(id));
+    if crate::dom::factory_threw(scope) || element.is_null_or_undefined() {
+        return false;
+    }
+    let element = v8::Global::new(scope, element);
+    let step = v8::Global::new(scope, step);
+    dom(scope).arena.ce_reactions.enqueue(id, element, step, vec![definition])
+}
+
+// What define()'s checks refuse (`ceDefineCheck`), in its order: an invalid name; a name, or a constructor, the
+// registry has a definition of already; `extends` in a scoped registry, naming a valid custom element name, or naming
+// an element whose interface is HTMLUnknownElement; and a definition already running in the registry.
+const DEFINE_INVALID_NAME: u32 = 1;
+const DEFINE_NAME_USED: u32 = 2;
+const DEFINE_CONSTRUCTOR_USED: u32 = 3;
+const DEFINE_SCOPED_EXTENDS: u32 = 4;
+const DEFINE_EXTENDS_CUSTOM: u32 = 5;
+const DEFINE_EXTENDS_UNKNOWN: u32 = 6;
+const DEFINE_RUNNING: u32 = 7;
+
+// __dom.ceDefineCheck(registry, name, constructor, extends, extendsKnown) -> 0, the registry's "element definition is
+// running" flag set — or what refuses the definition (`DEFINE_*` above): HTML define() steps 2-10, for registry
+// `registry` (its code), `extends` null for none, `extendsKnown` whether its element interface is other than
+// HTMLUnknownElement (the bindings' table, generated from the IDL). IsConstructor (step 1) is the bindings'.
+fn ce_define_check(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
+    let name = name_key_arg(scope, args.get(1));
+    let ctor = args.get(2);
+    let extends = (!args.get(3).is_null_or_undefined()).then(|| args.get(3).to_rust_string_lossy(scope));
+    let known = args.get(4).is_true();
+    let hash = constructor_hash(ctor);
+    // (…valid by its characters, a lone surrogate the U+FFFD it stands for — the key keeps it apart only to look it up)
+    let valid = crate::element_state::is_valid_custom_element_name(&args.get(1).to_rust_string_lossy(scope));
+    let reactions = &mut dom(scope).arena.ce_reactions;
+    let refusal = if !valid {
+        DEFINE_INVALID_NAME
+    } else if reactions.registry(code).is_some_and(|r| r.named.contains_key(&name)) {
+        DEFINE_NAME_USED
+    } else if hash.is_some_and(|h| reactions.registry_defined_by(code, ctor, h).is_some()) {
+        DEFINE_CONSTRUCTOR_USED
+    } else if extends.is_some() && reactions.is_scoped_registry(code) {
+        DEFINE_SCOPED_EXTENDS
+    } else if extends.as_deref().is_some_and(crate::element_state::is_valid_custom_element_name) {
+        DEFINE_EXTENDS_CUSTOM
+    } else if extends.is_some() && !known {
+        DEFINE_EXTENDS_UNKNOWN
+    } else if reactions.registry(code).is_some_and(|r| r.running) {
+        DEFINE_RUNNING
+    } else {
+        0
+    };
+    if refusal == 0 {
+        if let Some(r) = reactions.registry_mut(code) {
+            r.running = true;
+        }
+    }
+    rv.set_uint32(refusal);
+}
+// __dom.ceDefineEnd(registry) — its "element definition is running" flag unset (define() step 14's "then").
+fn ce_define_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
+    if let Some(r) = dom(scope).arena.ce_reactions.registry_mut(code) {
+        r.running = false;
+    }
+}
+
+// __dom.ceConstructorDefinition(constructor, registry) -> the bindings' object for registry `registry`'s definition whose
+// constructor is `constructor` (getName(); the HTML element constructor's, in the window registry) — of any registry's,
+// the latest made, where `registry` is undefined — or undefined.
+fn ce_constructor_definition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let ctor = args.get(0);
+    let Some(hash) = constructor_hash(ctor) else { return };
+    let code = (!args.get(1).is_undefined()).then(|| args.get(1).uint32_value(scope).unwrap_or(UNSET));
+    let reactions = &dom(scope).arena.ce_reactions;
+    let found = match code {
+        None => reactions.defined_by(ctor, hash).last(),
+        Some(code) => reactions.registry_defined_by(code, ctor, hash),
+    };
+    let weak = found.and_then(|d| reactions.definition_object(d));
+    if let Some(object) = weak_local(scope, weak) {
+        rv.set(object);
+    }
+}
+
+// What `ceTryUpgrades` tries: the custom element candidates of a tree a clone, an import or a fragment parse made, each
+// by its own registry (HTML "create an element" with the synchronous custom elements flag unset); the shadow-including
+// inclusive descendants of a root whose registry is the one given (HTML `upgrade()`); or HTML `initialize()`'s.
+const TRY_MADE: u32 = 0;
+const TRY_REGISTRY: u32 = 1;
+const TRY_INITIALIZE: u32 = 2;
+
+// __dom.ceTryUpgrades(root, which, registry, upgrade) -> whether the backup element queue's microtask is to be queued:
+// HTML "try to upgrade an element" — an upgrade reaction enqueued where its registry has a definition for it (`upgrade`
+// the bindings' steps of one) — for each element `which` names under `root`, in their order; for `TRY_INITIALIZE`, after
+// each element of `root`'s inclusive descendants (tree order) whose registry is null is given registry `registry` (its
+// code; its document joining a scoped one's scoped document set), those whose registry it then is.
+fn ce_try_upgrades(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_bool(false) };
+    let which = args.get(1).uint32_value(scope).unwrap_or(TRY_MADE);
+    let code = args.get(2).uint32_value(scope).unwrap_or(UNSET);
+    let step = args.get(3);
+    let cid = realm_id(scope, &args);
+    // (…what a node of the root's tree with no registry set has: its node document's window registry)
+    let default = document_window_registry(scope, cid, args.get(0));
+    if which == TRY_INITIALIZE {
+        initialize_registries(scope, root, code, default);
+    }
+    let elements: Vec<(NodeId, u32)> = {
+        let arena = &dom(scope).arena;
+        let reactions = &arena.ce_reactions;
+        let look_up = |n: &crate::dom::NodeData| {
+            let is = n.is_value.as_deref().map(name_key);
+            reactions.look_up(resolved_registry(n, default), &exact_local_name(n), is.as_deref())
+        };
+        let picked: Vec<NodeId> = match which {
+            TRY_REGISTRY => arena.shadow_including_elements(root, |n| resolved_registry(n, default) == code),
+            TRY_INITIALIZE => arena.inclusive_elements(root, |n| resolved_registry(n, default) == code),
+            _ => arena.shadow_including_elements(root, |n| n.is_html() && (n.local_name.contains('-') || n.is_value.is_some())),
+        };
+        picked.into_iter().filter_map(|id| arena.get(id).filter(|n| n.is_html()).and_then(look_up).map(|d| (id, d))).collect()
+    };
+    let mut queue = false;
+    for (id, def) in elements {
+        queue |= enqueue_upgrade(scope, id, def, step);
+    }
+    rv.set_bool(queue);
+}
+// The window registry of the node document of the node `value` is (a document's own) — `NULL` for one without a
+// browsing context.
+fn document_window_registry(scope: &mut v8::PinScope<'_, '_>, cid: i32, value: v8::Local<'_, v8::Value>) -> u32 {
+    let Some(handle) = crate::node_handle::handle_of(scope, value) else { return NULL };
+    // SAFETY: the handle lives while its object, an argument, does.
+    let handle = unsafe { handle.as_ref() };
+    let code = if let Some(doc) = handle.document(scope) {
+        // SAFETY: as above — the document is held by the node's handle.
+        crate::node_handle::handle_of(scope, doc.into()).map_or(UNSET, |d| unsafe { d.as_ref() }.window_registry())
+    } else if handle.nid().and_then(|id| dom(scope).arena.get(id)).is_some_and(|n| n.kind == crate::dom::NodeKind::Document) {
+        handle.window_registry()
+    } else {
+        dom(scope).arena.ce_reactions.window_registries.get(&cid).copied().unwrap_or(UNSET)
+    };
+    window_code(code)
+}
+// A document's window registry as a node's resolves: `NULL` for none (`UNSET`, a document without a browsing context).
+fn window_code(code: u32) -> u32 {
+    if code == UNSET { NULL } else { code }
+}
+// HTML initialize() step 4: each element of `root`'s inclusive descendants whose registry is null given `code`'s — its
+// node document joining the scoped document set of a scoped one.
+fn initialize_registries(scope: &mut v8::PinScope<'_, '_>, root: NodeId, code: u32, default: u32) {
+    let ids = dom(scope).arena.inclusive_elements(root, |n| resolved_registry(n, default) == NULL);
+    if ids.is_empty() {
+        return;
+    }
+    // (…the association a handle's: each element's object made, where the parser made it none yet)
+    for &id in &ids {
+        crate::dom::node_value(scope, Some(id));
+    }
+    let handles: Vec<*const crate::node_handle::NodeHandle> = {
+        let arena = &dom(scope).arena;
+        ids.into_iter().filter_map(|id| arena.get(id).and_then(|n| n.link.handle()).map(|h| h as *const _)).collect()
+    };
+    let object = registry_value(scope, code);
+    let object = v8::Local::<v8::Object>::try_from(object).ok();
+    for &h in &handles {
+        // SAFETY: the handles of the root's tree, which the arena holds; nothing in between runs script.
+        unsafe { &*h }.set_registry(scope, code, object);
+    }
+    if dom(scope).arena.ce_reactions.is_scoped_registry(code) {
+        let doc = dom(scope).arena.shadow_including_root(root);
+        let doc = Some(doc).filter(|&d| dom(scope).arena.is_document(d));
+        // (…a root no document's tree: its node document's, which its handle holds)
+        let doc = doc.or_else(|| {
+            let h = handles[0];
+            // SAFETY: as above.
+            let object = unsafe { &*h }.document(scope)?;
+            crate::node_handle::nid_of(scope, object.into())
+        });
+        if let Some(doc) = doc {
+            dom(scope).arena.ce_reactions.associate_document(code, doc);
+        }
+    }
 }
 
 // __dom.ceNamed(registry, name) -> the bindings' object for registry `registry`'s definition named `name`, or undefined.
@@ -573,25 +904,6 @@ fn ce_look_up(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.ceSetDefinition(nid, id, definition) — the element custom by `definition` (the bindings' object for it, `id` its: HTML
-// "upgrade an element" step 3, an element constructed custom), where it is still the engine's — its realm not gone, its
-// slot not another's since; none for null (a failed upgrade takes it back).
-fn ce_set_definition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    let def = definition_id(scope, args.get(1), args.get(2));
-    let custom = &mut dom(scope).arena.ce_reactions.custom;
-    match def {
-        Some(def) => custom.insert(id, def),
-        None => custom.remove(&id),
-    };
-}
-
-// __dom.ceDefinitionLive(id, definition) -> whether the bindings' object `definition` is still definition `id` of the engine's:
-// one whose realm went is no more (HTML's element constructor finds none for its NewTarget then).
-fn ce_definition_live(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(definition_id(scope, args.get(0), args.get(1)).is_some());
-}
-
 // `id`, where that slot still holds the bindings' object `value` (a definition object keeps the id it was given, which a
 // slot a realm freed may be another's by now).
 fn definition_id(scope: &mut v8::PinScope<'_, '_>, id: v8::Local<'_, v8::Value>, value: v8::Local<'_, v8::Value>) -> Option<u32> {
@@ -599,13 +911,6 @@ fn definition_id(scope: &mut v8::PinScope<'_, '_>, id: v8::Local<'_, v8::Value>,
     let held = dom(scope).arena.ce_reactions.definition_object(id)?;
     // SAFETY: as `weak_local`'s.
     (unsafe { &*held } == &value).then_some(id)
-}
-
-// __dom.ceHasCallback(nid, which) -> whether the element's definition has its `which` callback.
-fn ce_has_callback(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let which = args.get(1).int32_value(scope).unwrap_or(-1).max(0) as usize;
-    rv.set_bool(dom(scope).arena.ce_reactions.callback_of(id, which).is_some());
 }
 
 // __dom.ceHook(nid, element, which, args) -> whether the backup element queue's microtask is to be queued: the element's
@@ -700,11 +1005,14 @@ fn ce_make_registry(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let realm = realm_id(scope, &args);
     let object = v8::Weak::new(scope, args.get(0));
     let scoped = args.get(1).is_true();
-    let registries = &mut dom(scope).arena.ce_reactions.registries;
-    registries.push(Some(Registry { object, scoped, named: HashMap::new(), builtins: HashMap::new() }));
-    let code = FIRST_REGISTRY + registries.len() as u32 - 1;
-    if !scoped {
-        dom(scope).arena.ce_reactions.window_registries.insert(realm, code);
+    let reactions = &mut dom(scope).arena.ce_reactions;
+    let registry = Registry { object, realm, scoped, named: HashMap::new(), builtins: HashMap::new(), running: false, documents: Vec::new() };
+    reactions.registries.push(Some(registry));
+    let code = FIRST_REGISTRY + reactions.registries.len() as u32 - 1;
+    if scoped {
+        reactions.any_scoped = true;
+    } else {
+        reactions.window_registries.insert(realm, code);
     }
     rv.set_uint32(code);
 }
@@ -807,21 +1115,20 @@ fn ce_registry_for(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(registry_value(scope, code));
 }
 
-// __dom.ceDefinitionFor(element, isValue) -> the bindings' object for the definition HTML "look up a custom element
-// definition" finds for the element in its registry — an HTML element, by its local name and is value — or undefined.
+// __dom.ceDefinitionFor(element) -> the bindings' object for the definition HTML "look up a custom element definition"
+// finds for the element in its registry — an HTML element, by its local name and is value — or undefined.
 fn ce_definition_for(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some(handle) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
     // SAFETY: as above.
     let Some(id) = unsafe { handle.as_ref() }.nid() else { return };
     let Some(code) = registry_for(scope, cid, args.get(0)) else { return };
-    let is = (!args.get(1).is_null_or_undefined()).then(|| name_key_arg(scope, args.get(1)));
     let d = dom(scope);
     let Some(n) = d.arena.get(id).filter(|n| n.kind == crate::dom::NodeKind::Element && n.is_html()) else { return };
     // (…its local name as the arena has it, with no copy — but exactly where it carries a lone surrogate)
-    let exact = n.name_u16.as_ref().map(|e| name_key(&e.local));
+    let is = n.is_value.as_deref().map(name_key);
     let reactions = &d.arena.ce_reactions;
-    let found = reactions.look_up(code, exact.as_deref().unwrap_or(&n.local_name), is.as_deref()).and_then(|d| reactions.definition_object(d));
+    let found = reactions.look_up(code, &exact_local_name(n), is.as_deref()).and_then(|d| reactions.definition_object(d));
     if let Some(object) = weak_local(scope, found) {
         rv.set(object);
     }
