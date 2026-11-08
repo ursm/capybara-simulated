@@ -283,6 +283,12 @@ impl Reactions {
                 level.retain(|&(n, _)| n != id);
             }
         }
+        // (…a document freed out of the scoped document sets it was in)
+        if self.any_scoped {
+            for registry in self.registries.iter_mut().flatten() {
+                registry.documents.retain(|&d| d != id);
+            }
+        }
     }
     // HTML "enqueue a custom element callback reaction" of `callback` with `args` for the element `id` (`element`, its
     // object), and "enqueue an element on the appropriate element queue" — the current call's, or the backup one: whether
@@ -869,7 +875,7 @@ fn initialize_registries(scope: &mut v8::PinScope<'_, '_>, root: NodeId, code: u
         let doc = Some(doc).filter(|&d| dom(scope).arena.is_document(d));
         // (…a root no document's tree: its node document's, which its handle holds)
         let doc = doc.or_else(|| {
-            let h = handles[0];
+            let h = *handles.first()?;
             // SAFETY: as above.
             let object = unsafe { &*h }.document(scope)?;
             crate::node_handle::nid_of(scope, object.into())

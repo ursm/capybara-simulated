@@ -58,6 +58,30 @@ RSpec.describe 'a custom element state' do
     JS
   end
 
+  # …but a customized built-in it makes the built-in element and upgrades (DOM "create an element" step 5.2):
+  # "precustomized" in its constructor, and where that throws the same element, "failed", the class's prototype kept.
+  # Chrome and Firefox: `[false, true, true, false]`, and `false` in a constructor that returns.
+  it 'upgrades the customized built-in createElement makes' do
+    expect(session.evaluate_script(<<~JS)).to eq([false, true, true, false, false, true])
+      (() => {
+        let made, inThrowing, inReturning;
+        customElements.define('x-thrower', class Thrower extends HTMLButtonElement {
+          constructor() { super(); made = this; inThrowing = this.matches(':defined'); throw new Error('no'); }
+        }, {extends: 'button'});
+        customElements.define('x-fine', class extends HTMLButtonElement {
+          constructor() { super(); inReturning = this.matches(':defined'); }
+        }, {extends: 'button'});
+        const onerror = (e) => e.preventDefault();
+        window.addEventListener('error', onerror);
+        const failed = document.createElement('button', {is: 'x-thrower'});
+        window.removeEventListener('error', onerror);
+        const fine = document.createElement('button', {is: 'x-fine'});
+        return [inThrowing, failed === made, failed instanceof customElements.get('x-thrower'), failed.matches(':defined'),
+          inReturning, fine.matches(':defined')];
+      })()
+    JS
+  end
+
   # attachInternals step 6: a NotSupportedError for an element neither "precustomized" nor "custom" — one made before
   # its definition and never upgraded ("undefined"), or the one a failed construction made in its stead ("failed").
   it 'attaches no internals to an undefined element, nor a failed one' do
