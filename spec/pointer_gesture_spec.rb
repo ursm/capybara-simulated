@@ -122,6 +122,24 @@ RSpec.describe 'pointer gestures' do
     expect(log).to include('pressed c/host/lc/wrap/sl rgb(0, 9, 0)')
   end
 
+  # (…Selectors 4: :focus-within matches "an element … whose descendant in the flat tree … matches :focus" — the slot a
+  # focused control is assigned to, and what holds it in its shadow tree: Chrome, r19/p page6. Headless Firefox's window
+  # never has the system focus, so no `:focus` matches there to compare.)
+  it 'matches :focus-within up the flat tree, through the slot a focused control is assigned to' do
+    gesture { <<~JS }
+      document.getElementById('c').innerHTML = '<div id=host><input id=fi style="width:80px;height:30px"></div>';
+      const sr = document.getElementById('host').attachShadow({mode: 'open'});
+      sr.innerHTML = '<style>#wrap:focus-within { color: rgb(7, 0, 0) }</style><div id=wrap><slot id=sl></slot></div>';
+      window.flat = (sel) => ['c', 'host', 'fi'].map((i) => document.getElementById(i)).concat(['wrap', 'sl'].map((i) => sr.getElementById(i)))
+        .filter((e) => e.matches(sel)).map((e) => e.id).join('/');
+    JS
+    session.find('#fi').click
+    expect(session.evaluate_script("[flat(':focus-within'), flat(':focus'), getComputedStyle(document.getElementById('host').shadowRoot.getElementById('wrap')).color]"))
+      .to eq(['c/host/fi/wrap/sl', 'fi', 'rgb(7, 0, 0)'])
+    session.execute_script("document.getElementById('fi').blur()")
+    expect(session.evaluate_script("[flat(':focus-within'), getComputedStyle(document.getElementById('host').shadowRoot.getElementById('wrap')).color]")).to eq(['', 'rgb(0, 0, 0)'])
+  end
+
   it "matches a label's labeled control as the label is :hover and :active (HTML §4.16.3)" do
     gesture { "hooks['mousedown:lab2'] = () => log.push('pressed ' + states(':active') + ' over ' + states(':hover'))" }
     session.find('#lab2').click
