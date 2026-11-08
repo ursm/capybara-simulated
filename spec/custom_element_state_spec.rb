@@ -82,6 +82,43 @@ RSpec.describe 'a custom element state' do
     JS
   end
 
+  # HTML "create an element for the token": a customized built-in the parser makes is constructed as it is made, by its
+  # `is` attribute's definition — empty, no parent — its attributes appended after (their reactions then). Chrome and
+  # Firefox: `ctor 0 false`, then the attribute's change, then the connection.
+  it 'constructs the customized built-in the parser makes as it makes it' do
+    page = <<~HTML
+      <!doctype html><meta charset="utf-8"><body><script>
+        window.log = [];
+        customElements.define('x-pbtn', class extends HTMLButtonElement {
+          static observedAttributes = ['t'];
+          constructor() { super(); log.push('ctor ' + this.attributes.length + ' ' + !!this.parentNode); }
+          attributeChangedCallback(n, o, v) { log.push('attr ' + v); }
+          connectedCallback() { log.push('connected'); }
+        }, {extends: 'button'});
+      </script><button is="x-pbtn" t="1">b</button>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    expect(s.evaluate_script('log')).to eq(['ctor 0 false', 'attr 1', 'connected'])
+  end
+
+  # HTML's HTML element constructor finds its NewTarget's definition in the registry its construction is of (the active
+  # custom element constructor map's — an upgrade's, "create an element"'s — else the window's), not the latest
+  # definition of the constructor anywhere: a class a scoped registry also defines, autonomously, still constructs the
+  # customized built-in the window registry defines it as. Chrome and Firefox: all `true`.
+  it "constructs by the definition of the registry its construction is of" do
+    expect(session.evaluate_script(<<~JS)).to eq([true, true, true])
+      (() => {
+        class Shared extends HTMLButtonElement {}
+        customElements.define('x-shared', Shared, {extends: 'button'});
+        new CustomElementRegistry().define('x-scoped-auto', Shared);
+        host.insertAdjacentHTML('beforeend', '<button is="x-shared"></button>');
+        return [document.createElement('button', {is: 'x-shared'}) instanceof Shared, new Shared() instanceof Shared,
+          host.lastChild instanceof Shared];
+      })()
+    JS
+  end
+
   # attachInternals step 6: a NotSupportedError for an element neither "precustomized" nor "custom" — one made before
   # its definition and never upgraded ("undefined"), or the one a failed construction made in its stead ("failed").
   it 'attaches no internals to an undefined element, nor a failed one' do

@@ -709,6 +709,10 @@ const FRAME_INSERTED: i32 = -5;
 fn names_null_registry(attrs: &[(String, i32, String, String)]) -> bool {
     attrs.iter().any(|(prefix, ns, local, _)| prefix.is_empty() && *ns == 0 && local == "customelementregistry")
 }
+// …and the value of its `is` attribute, where it has one: HTML "create an element for the token" step 3's is value.
+fn is_attribute(attrs: &[(String, i32, String, String)]) -> Option<&str> {
+    attrs.iter().find(|(prefix, ns, local, _)| prefix.is_empty() && *ns == 0 && local == "is").map(|(_, _, _, v)| v.as_str())
+}
 
 // Where the step of `ops` at `i` ends: the index of the next one's code.
 fn op_end(ops: &[Operand], i: usize) -> Option<usize> {
@@ -1119,17 +1123,20 @@ impl<'s> Build<'s> {
         id
     }
     // HTML "create an element for the token" where it will execute script — a live document's, whose window registry
-    // defines a custom element of the token's name: its constructor run now, as the parser makes it (a page's hook,
+    // defines a custom element of the token's name, or a customized built-in of its name and `is` value: its
+    // constructor run now, as the parser makes it (a page's hook,
     // which holds the document's throw-on-dynamic-markup-insertion counter while it runs) — not where the element goes
     // into template contents, or under a node of the null registry. The element, and whether it is custom (a constructor
     // that failed leaves an HTMLUnknownElement); None where no constructor runs. `rest` the steps after the token's.
-    fn construct(&mut self, scope: &mut v8::PinScope<'s, '_>, ns: i32, local: &str, handle: i32, rest: &[Operand]) -> Option<(crate::dom::NodeId, bool)> {
-        if !self.live.as_ref().is_some_and(|l| l.ce_defined) || namespace_of(ns) != html5ever::ns!(html) || !local.contains('-') {
+    fn construct(&mut self, scope: &mut v8::PinScope<'s, '_>, ns: i32, local: &str, is: Option<&str>, handle: i32, rest: &[Operand]) -> Option<(crate::dom::NodeId, bool)> {
+        if !self.live.as_ref().is_some_and(|l| l.ce_defined) || namespace_of(ns) != html5ever::ns!(html) {
             return None;
         }
         // (…a name holding a stand-in of a lone surrogate looked up exactly, as the registry keys it)
         let exact = self.standins.in_text(local).then(|| crate::ce_reactions::name_key(&self.standins.units(local)));
-        if !crate::dom::dom(scope).arena.ce_reactions.defines(self.cid, exact.as_deref().unwrap_or(local)) {
+        let reactions = &crate::dom::dom(scope).arena.ce_reactions;
+        let autonomous = local.contains('-') && reactions.defines(self.cid, exact.as_deref().unwrap_or(local));
+        if !autonomous && !is.is_some_and(|is| reactions.defines_builtin(self.cid, local, is)) {
             return None;
         }
         let (parent, based) = insertion_parent(rest, handle)?;
@@ -1151,7 +1158,11 @@ impl<'s> Build<'s> {
         let hook = v8::Local::<v8::Function>::try_from(global.get(scope, hook.into())?).ok()?;
         let name = page_string(scope, local, &self.standins)?;
         let doc: v8::Local<'_, v8::Value> = self.doc.map_or_else(|| v8::null(scope).into(), Into::into);
-        let made = hook.call(scope, global.into(), &[name.into(), doc])?;
+        let is: v8::Local<'_, v8::Value> = match is.filter(|_| !autonomous) {
+            Some(is) => page_string(scope, is, &self.standins)?.into(),
+            None => v8::null(scope).into(),
+        };
+        let made = hook.call(scope, global.into(), &[name.into(), doc, is])?;
         let made = v8::Local::<v8::Array>::try_from(made).ok()?;
         let element = made.get_index(scope, 0)?;
         let custom = made.get_index(scope, 1).is_some_and(|c| c.is_true());
@@ -1481,7 +1492,7 @@ impl<'s> Build<'s> {
                     let contents = int(ops.next())?;
                     let reused = self.live.as_mut().and_then(|l| l.reuse(ns, &local));
                     let constructed = match reused {
-                        None if !names_null_registry(&list) => self.construct(scope, ns, &local, handle, ops.as_slice()),
+                        None if !names_null_registry(&list) => self.construct(scope, ns, &local, is_attribute(&list), handle, ops.as_slice()),
                         _ => None,
                     };
                     let el = match (reused, constructed) {

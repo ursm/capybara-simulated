@@ -92,9 +92,12 @@ struct Registry {
 }
 
 // One callback a custom element is owed: the callback, and its arguments.
+// (…and the realm of the definition it is its element's by, where it is one: a callback of a realm gone runs no more —
+// Web IDL "check if we can run script", its document not fully active)
 struct Reaction {
     callback: v8::Global<v8::Value>,
     args: Vec<v8::Global<v8::Value>>,
+    realm: Option<i32>,
 }
 
 #[derive(Default)]
@@ -124,6 +127,8 @@ pub(crate) struct Reactions {
     // in one realm constructs by another's HTML element constructor: what that constructor looks its NewTarget up in
     // (`ceStack[3]` how many, which every element construction reads before it asks).
     constructing: Vec<u32>,
+    // The elements an upgrade is constructing, innermost last (`ceUpgrade` to `ceUpgradeEnd`).
+    upgrading: Vec<NodeId>,
     // The definitions by their constructor's identity hash (a constructor may be several registries' definitions'): what
     // "the item with constructor" finds — define()'s, getName()'s, and the HTML element constructor's.
     by_constructor: HashMap<i32, Vec<u32>>,
@@ -141,6 +146,11 @@ impl Reactions {
             .and_then(|i| self.registries.get(i as usize))
             .and_then(Option::as_ref)
             .is_some_and(|r| r.named.contains_key(name))
+    }
+    // …or a customized built-in extending `local_name` named `is`.
+    pub(crate) fn defines_builtin(&self, realm: i32, local_name: &str, is: &str) -> bool {
+        let Some(&code) = self.window_registries.get(&realm) else { return false };
+        self.look_up(code, local_name, Some(is)).is_some_and(|d| self.definitions.get(d as usize).and_then(Option::as_ref).is_some_and(|d| !d.autonomous))
     }
 }
 
@@ -178,6 +188,7 @@ impl Reactions {
         self.set(DEEPEST, 0);
         self.microtask_lost();
         // (…and no upgrade constructs: a terminated one left its element on its definition's construction stack)
+        self.upgrading.clear();
         for id in std::mem::take(&mut self.constructing) {
             if let Some(d) = self.definitions.get_mut(id as usize).and_then(Option::as_mut) {
                 d.construction.clear();
@@ -212,8 +223,11 @@ impl Reactions {
         self.microtask_lost();
     }
     // The elements of the backup element queue `of` names, taken — all of them its microtask no longer queued.
+    // An element an upgrade is constructing stays: its reactions are its upgrade's, run as that ends — never under its
+    // constructor, which a realm going in it (a frame it removed) would have them run in.
     pub(crate) fn take_backup(&mut self, of: impl Fn(NodeId) -> bool) -> Vec<(NodeId, v8::Global<v8::Value>)> {
-        let (taken, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.backup).into_iter().partition(|&(id, _)| of(id));
+        let upgrading = &self.upgrading;
+        let (taken, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.backup).into_iter().partition(|&(id, _)| of(id) && !upgrading.contains(&id));
         self.backup = kept;
         if self.backup.is_empty() {
             self.backup_queued = false;
@@ -231,7 +245,11 @@ impl Reactions {
                 *def = None;
             }
         }
-        // (…an element custom by one names it no more: its slot is another's next)
+        // (…an element custom by one names it no more: its slot is another's next — and a callback of the realm is owed
+        // nothing more)
+        for queue in self.queues.values_mut() {
+            queue.retain(|r| r.realm != Some(cid));
+        }
         if !gone.is_empty() {
             self.custom.retain(|_, d| !gone.contains(d));
             self.constructing.retain(|d| !gone.contains(d));
@@ -294,7 +312,8 @@ impl Reactions {
     // object), and "enqueue an element on the appropriate element queue" — the current call's, or the backup one: whether
     // the backup element queue's microtask is to be queued.
     fn enqueue(&mut self, id: NodeId, element: v8::Global<v8::Value>, callback: v8::Global<v8::Value>, args: Vec<v8::Global<v8::Value>>) -> bool {
-        self.queues.entry(id).or_default().push_back(Reaction { callback, args });
+        let realm = self.definition_of(id).map(|d| d.realm);
+        self.queues.entry(id).or_default().push_back(Reaction { callback, args, realm });
         let depth = self.get(DEPTH).max(0) as usize;
         if depth == 0 {
             self.backup.push((id, element));
@@ -479,6 +498,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceUpgrade", ce_upgrade, context_id);
     register(scope, ns, "ceUpgradeEnd", ce_upgrade_end, context_id);
     register(scope, ns, "ceConstructionTop", ce_construction_top, context_id);
+    register(scope, ns, "ceConstructingDefinition", ce_constructing_definition, context_id);
     register(scope, ns, "ceMarkConstructed", ce_mark_constructed, context_id);
     register(scope, ns, "ceMakeCustom", ce_make_custom, context_id);
     register(scope, ns, "ceDefineCheck", ce_define_check, context_id);
@@ -1269,6 +1289,7 @@ fn ce_upgrade(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     definition.construction.push(Some(held));
     let refused = definition.flags & DEFINE_DISABLE_SHADOW != 0 && has_shadow;
     reactions.constructing.push(def);
+    reactions.upgrading.push(id);
     reactions.set(CONSTRUCTING, reactions.constructing.len() as i32);
     if !refused {
         set_custom_state(scope, id, home, STATE_UPGRADED | STATE_PRECUSTOMIZED);
@@ -1284,8 +1305,18 @@ fn ce_upgrade(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 fn ce_upgrade_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     use crate::dom::{STATE_CUSTOM, STATE_FORM_ASSOCIATED, STATE_UPGRADED};
     let Some((id, home, _)) = element_of(scope, args.get(0)) else { return };
-    let Some(def) = definition_id(scope, args.get(1), args.get(2)) else { return };
+    let def = definition_id(scope, args.get(1), args.get(2));
     let reactions = &mut dom(scope).arena.ce_reactions;
+    if let Some(at) = reactions.upgrading.iter().rposition(|&e| e == id) {
+        reactions.upgrading.remove(at);
+    }
+    // (…a definition whose realm went as its constructor ran — a frame it removed — made it nothing: taken back, as a
+    // failure's is, the element left "precustomized")
+    let Some(def) = def else {
+        reactions.custom.remove(&id);
+        reactions.queues.remove(&id);
+        return;
+    };
     reactions.pop_construction(def);
     if !args.get(3).is_true() {
         reactions.custom.remove(&id);
@@ -1307,6 +1338,17 @@ fn ce_make_custom(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     reactions.custom.insert(id, def);
     let associated = reactions.definitions.get(def as usize).and_then(Option::as_ref).is_some_and(|d| d.flags & DEFINE_FORM_ASSOCIATED != 0);
     set_custom_state(scope, id, home, STATE_UPGRADED | STATE_CUSTOM | if associated { STATE_FORM_ASSOCIATED } else { 0 });
+}
+
+// __dom.ceConstructingDefinition(newTarget) -> the bindings' object for the definition an upgrade constructs by
+// `newTarget`, or undefined: HTML's "active custom element constructor map"[NewTarget], as "upgrade an element" sets it —
+// the definition of the element's registry, whatever realm's HTML element constructor its `super()` reaches.
+fn ce_constructing_definition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let reactions = &dom(scope).arena.ce_reactions;
+    let weak = reactions.constructing_by(args.get(0)).and_then(|d| reactions.definition_object(d));
+    if let Some(object) = weak_local(scope, weak) {
+        rv.set(object);
+    }
 }
 
 // __dom.ceConstructionTop(newTarget) -> the last entry of the construction stack of the definition an upgrade constructs

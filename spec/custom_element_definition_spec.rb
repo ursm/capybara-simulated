@@ -60,6 +60,59 @@ RSpec.describe 'a custom element definition' do
     expect(got).to eq(%w[e0 e1])
   end
 
+  # An upgrade's constructor that removes its own frame: the reactions its upgrade enqueued are its upgrade's, never run
+  # under the constructor (the frame's realm going ran its backup element queue there), and its definition's realm is
+  # gone by the time they would — none runs. Chrome: `ctor 1`, `after removing`, nothing more.
+  it 'runs no reaction of an element under its own upgrade constructor, which removes its frame' do
+    frame = <<~HTML
+      <!doctype html><meta charset=utf-8><body><x-g t=1></x-g><script>
+        const P = parent;
+        window.defineG = () => customElements.define('x-g', class extends HTMLElement {
+          constructor() { super(); P.__log.push('ctor ' + this.getAttribute('t')); P.document.getElementById('fr').remove(); P.__log.push('after removing'); }
+          connectedCallback() { P.__log.push('connected'); }
+        });
+      </script>
+    HTML
+    s = session_for('/' => '<!doctype html><meta charset=utf-8><body><iframe id=fr src="/frame"></iframe>', '/frame' => frame)
+    s.within_frame('fr') { s.has_css?('x-g') }
+    s.execute_script("window.__log = []; document.getElementById('fr').contentWindow.defineG();")
+    expect(s.evaluate_script('__log')).to eq(['ctor 1', 'after removing'])
+  end
+
+  # Web IDL "check if we can run script": a callback whose realm's document is no longer fully active runs nothing — a
+  # frame's definition's disconnectedCallback still queued when an earlier reaction of the same run removed the frame,
+  # and its callbacks later. Chrome and Firefox: no `disconnected`, `connected` nor `attribute` after the removal.
+  it "runs no callback of a frame's definition once an earlier reaction removed the frame" do
+    s = session_for(
+      '/' => '<!doctype html><meta charset=utf-8><body><div id=w></div><iframe id=fr src="/frame"></iframe>',
+      '/frame' => '<!doctype html><meta charset=utf-8><body>'
+    )
+    s.within_frame('fr') { s.has_css?('body') }
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const log = [];
+        const fr = document.getElementById('fr');
+        fr.contentWindow.__log = log;
+        fr.contentWindow.eval(`customElements.define('x-q', class extends HTMLElement {
+          static observedAttributes = ['a'];
+          connectedCallback() { __log.push('connected'); }
+          disconnectedCallback() { __log.push('disconnected'); }
+          attributeChangedCallback() { __log.push('attribute'); }
+        })`);
+        customElements.define('x-remover', class extends HTMLElement { disconnectedCallback() { fr.remove(); log.push('removed'); } });
+        const w = document.getElementById('w');
+        w.append(document.createElement('x-remover'));
+        const q = fr.contentDocument.createElement('x-q');
+        w.append(q);
+        w.innerHTML = '';
+        w.append(q);
+        q.setAttribute('a', '1');
+        return log;
+      })()
+    JS
+    expect(got).to eq(%w[connected removed])
+  end
+
   # define() step 4: a constructor another registry defines is one this one may define too; its name is this one's.
   it "names a constructor by each registry's own definition" do
     s = session_for('/' => '<!doctype html><meta charset=utf-8><body>')
