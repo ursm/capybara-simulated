@@ -47,6 +47,29 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
           x.onerror = () => res(['error']);
           x.send();
         });
+        // (…barriers on what the page sees, not on task order: a platform task and a page's timer are of no fixed order —
+        // a page timer falls due by the script time its realm ran ahead, so on a loaded machine a handover queued later
+        // can run first. Whether a read settles within its turn's microtasks — a hundred of them — or only past them;
+        // and an abort from a task that found the read still pending, tried until one did.)
+        window.inTurn = (p) => new Promise((res) => {
+          let settled = false;
+          p.then(() => { settled = true; }, () => { settled = true; });
+          let n = 0;
+          const step = () => (++n < 100 ? Promise.resolve().then(step) : res(settled ? 'in turn' : 'past it'));
+          step();
+        });
+        window.abortWhilePending = async (fetchIt, read) => {
+          for (let attempt = 0; attempt < 10; attempt++) {
+            const c = new AbortController();
+            const r = await fetchIt(c.signal);
+            let settled = false;
+            const t = read(r).finally(() => { settled = true; });
+            const pending = await new Promise((res) => setTimeout(() => { res(!settled); c.abort(); }, 0));
+            const outcome = await t.then(() => 'ok', (e) => e.name);
+            if (pending) return outcome;
+          }
+          return 'never pending';
+        };
         window.tryFetch = (url, init) => fetch(url, init).then((r) => r.text().then((t) => [r.type, r.status, r.redirected, r.url, t]), (e) => ['error', e.name]);
       </script>
     HTML
@@ -329,8 +352,8 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
     expect(log).to eq([%w[OPTIONS noacam], %w[POST noacam], %w[POST noacam]])
   end
 
-  # A fetched response's body is handed over on tasks as Fetch's steps queue its chunks: its read settles after a task
-  # its reader's turn queued, whether or not its fetch was given a signal (the microtasks queued with it before it) — and
+  # A fetched response's body is handed over on tasks as Fetch's steps queue its chunks: its read settles past its
+  # reader's turn, whether or not its fetch was given a signal (the microtasks queued with it before it) — and
   # an abort before then, at once, a microtask, two or a task later, errors it, a pending reader's read too. A Response
   # a script made reads at once. (Chrome's and Firefox's figures, rvfx probe cb.html.)
   it "hands a fetched response's body over on tasks, an abort before then erroring it" do
@@ -343,27 +366,23 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
         const c = new AbortController();
         return [await fetch('/echo', signal ? { signal: c.signal } : {}), c];
       };
-      const beforeTask = (p) => new Promise((res) => {
-        p.then(() => res('read first'));
-        setTimeout(() => res('task first'), 0);
-      });
       (async () => {
         const out = {};
         { const [r, c] = await get(); const t = r.text(); c.abort(); out.sync = await st(t); }
         { const [r, c] = await get(); const t = r.text(); queueMicrotask(() => c.abort()); out.micro = await st(t); }
         { const [r, c] = await get(); const t = r.text(); Promise.resolve().then(() => 0).then(() => c.abort()); out.twoTicks = await st(t); }
-        { const [r, c] = await get(); const t = r.text(); setTimeout(() => c.abort(), 0); out.task = await st(t); }
+        out.task = await abortWhilePending((signal) => fetch('/echo', { signal }), (r) => r.text());
         { const [r, c] = await get(); const p = r.body.getReader().read(); c.abort(); out.reader = await st(p); }
-        { const [r] = await get(true); out.signal = await beforeTask(r.text()); }
-        { const [r] = await get(false); out.noSignal = await beforeTask(r.json().catch(() => 0)); }
-        out.made = await beforeTask(new Response('x').text());
+        { const [r] = await get(true); out.signal = await inTurn(r.text()); }
+        { const [r] = await get(false); out.noSignal = await inTurn(r.json().catch(() => 0)); }
+        out.made = await inTurn(new Response('x').text());
         { const [r] = await get(true); const log = []; r.text().then(() => log.push('text')); Promise.resolve().then(() => log.push('m1')); queueMicrotask(() => log.push('m2')); await new Promise((r2) => setTimeout(r2, 10)); out.order = log.join(); }
         return out;
       })().then(done, (e) => done('threw ' + e));
     JS
     expect(got).to eq(
       'sync' => 'AbortError', 'micro' => 'AbortError', 'twoTicks' => 'AbortError', 'task' => 'AbortError',
-      'reader' => 'AbortError', 'signal' => 'task first', 'noSignal' => 'task first', 'made' => 'read first',
+      'reader' => 'AbortError', 'signal' => 'past it', 'noSignal' => 'past it', 'made' => 'in turn',
       'order' => 'm1,m2,text'
     )
   end
@@ -388,8 +407,8 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
     expect(got).to eq('get' => 'answered', 'set' => 'answered', 'delete' => 'answered', 'has' => 'answered')
   end
 
-  # …a service worker's streamed answer too, however soon its stream finished: read after a task its reader's turn
-  # queued, and an abort a task later errors it (Chrome and Firefox; rvfx probe cb2.html).
+  # …a service worker's streamed answer too, however soon its stream finished: read past its turn, and an abort a task
+  # later errors it (Chrome and Firefox; rvfx probe cb2.html).
   it "hands a service worker's finished stream over as a fetched body" do
     s = simulated_session(app)
     s.visit '/'
@@ -397,14 +416,9 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
       const done = arguments[0];
       controlled().then(async () => {
         const r = await fetch('/stream');
-        const read = await new Promise((res) => { r.text().then(() => res('read first')); setTimeout(() => res('task first'), 0); });
-        const c = new AbortController();
-        const r2 = await fetch('/stream', { signal: c.signal });
-        const t = r2.text();
-        setTimeout(() => c.abort(), 0);
-        done([read, await t.then(() => 'ok', (e) => e.name)]);
+        done([await inTurn(r.text()), await abortWhilePending((signal) => fetch('/stream', { signal }), (r2) => r2.text())]);
       });
     JS
-    expect(got).to eq(['task first', 'AbortError'])
+    expect(got).to eq(['past it', 'AbortError'])
   end
 end
