@@ -1103,6 +1103,35 @@ pub(crate) struct RealmArena {
     layouts: u64,
 }
 
+// The state epochs (`RealmState::state_epoch`) `from` (exclusive) to `to` (inclusive) were all moves of the focus, the
+// hover or the press (STATE_FOCUSED / STATE_HOVERED / STATE_ACTIVE) — whose state reaches an element and its
+// shadow-including ancestors, and a label's labeled control — and `ids` the elements they were written on: what the style
+// engine looks at for the states that moved instead of every element (style.rs `snapshot_moved_states`). Bounded: past
+// `MAX_POINTER_MARKS` a run starts afresh, and the engine looks at every element once.
+#[derive(Default)]
+pub(crate) struct PointerMarks {
+    pub(crate) from: u64,
+    pub(crate) to: u64,
+    pub(crate) ids: Vec<NodeId>,
+}
+const MAX_POINTER_MARKS: usize = 256;
+impl PointerMarks {
+    // A pointer move made `epoch`, written on `id`.
+    fn note(&mut self, epoch: u64, id: NodeId) {
+        if self.to + 1 != epoch || self.ids.len() >= MAX_POINTER_MARKS {
+            self.from = epoch - 1;
+            self.ids.clear();
+        }
+        self.to = epoch;
+        self.ids.push(id);
+    }
+    // …and the labeled controls whose state followed it.
+    fn mark(&mut self, old: &[NodeId], new: &[NodeId]) {
+        self.ids.extend_from_slice(old);
+        self.ids.extend_from_slice(new);
+    }
+}
+
 // A realm's own state (`RealmArena`): its document's.
 #[derive(Default)]
 pub(crate) struct RealmState {
@@ -1152,6 +1181,8 @@ pub(crate) struct RealmState {
     // Moves with every write to the realm's nodes that can change an element's STATE (`:checked`, `:focus`, `:valid`, `:default`, …): a
     // state write, a value, a tree change (form owners, radio groups, fieldsets), an attribute a state reads.
     pub(crate) state_epoch: u64,
+    // …and, where its last moves were the pointer's and the focus's alone, the elements they were written on (`PointerMarks`).
+    pub(crate) pointer_marks: PointerMarks,
     // The realm document's focused and hovered element — the one carrying STATE_FOCUSED / STATE_HOVERED — from which
     // `:focus-within` and `:hover` walk up.
     pub(crate) focus: Option<NodeId>,
@@ -2048,11 +2079,22 @@ impl RealmArena {
                 state.modals.push(id);
             }
         }
-        if (had ^ bits) & STATE_HOVERED != 0 {
-            self.state.hover_controls = self.state.hover.map_or_else(Vec::new, |h| self.label_controls(h));
+        let moved = had ^ bits;
+        if moved & STATE_HOVERED != 0 {
+            let controls = self.state.hover.map_or_else(Vec::new, |h| self.label_controls(h));
+            let old = std::mem::replace(&mut self.state.hover_controls, controls);
+            self.state.pointer_marks.mark(&old, &self.state.hover_controls);
         }
-        if (had ^ bits) & STATE_ACTIVE != 0 {
-            self.state.active_controls = self.state.active.map_or_else(Vec::new, |a| self.label_controls(a));
+        if moved & STATE_ACTIVE != 0 {
+            let controls = self.state.active.map_or_else(Vec::new, |a| self.label_controls(a));
+            let old = std::mem::replace(&mut self.state.active_controls, controls);
+            self.state.pointer_marks.mark(&old, &self.state.active_controls);
+        }
+        // (…a move of the focus, the hover or the press alone: where it was written, for the style engine to look at what
+        // its state reaches — the element and its ancestors — rather than at every element)
+        let epoch = self.state.state_epoch;
+        if moved & !(STATE_FOCUSED | STATE_HOVERED | STATE_ACTIVE) == 0 {
+            self.state.pointer_marks.note(epoch, id);
         }
     }
 

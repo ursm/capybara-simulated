@@ -147,6 +147,23 @@ RSpec.describe 'pointer gestures' do
     JS
   end
 
+  # (…the style engine looks at the elements a pointer move reaches, not at every element: style.rs
+  # `snapshot_moved_states`, dom.rs `PointerMarks` — the ancestors and a label's control restyled as their state moves)
+  it 'restyles what the press, the hover and the focus reach' do
+    gesture { <<~JS }
+      document.head.insertAdjacentHTML('beforeend', '<style>#out:active{color:rgb(1,0,0)} #out:hover{outline-color:rgb(2,0,0)} #li2:hover{color:rgb(3,0,0)} #out:focus-within{background-color:rgb(4,0,0)}</style>');
+      window.style = (id, p) => getComputedStyle(document.getElementById(id))[p];
+      hooks['mousedown:a1'] = () => log.push('down ' + style('out', 'color') + ' ' + style('out', 'outlineColor'));
+      document.getElementById('a1').tabIndex = 0;
+    JS
+    expect(session.evaluate_script("[style('out', 'color'), style('out', 'outlineColor')]")).to eq(['rgb(0, 0, 0)', 'rgb(0, 0, 0)'])
+    session.find('#a1').click
+    expect(log).to include('down rgb(1, 0, 0) rgb(2, 0, 0)')
+    expect(session.evaluate_script("[style('out', 'color'), style('out', 'outlineColor'), style('out', 'backgroundColor')]")).to eq(['rgb(0, 0, 0)', 'rgb(2, 0, 0)', 'rgb(4, 0, 0)'])
+    session.find('#lab2').hover
+    expect(session.evaluate_script("[style('out', 'outlineColor'), style('li2', 'color')]")).to eq(['rgb(0, 0, 0)', 'rgb(3, 0, 0)'])
+  end
+
   # (…Chrome's: Firefox counts the clicks of a WebDriver BiDi action itself, and the probe's two made no double click)
   it "selects the word at a double click's second press, before its mouseup and dblclick" do
     gesture { "for (const t of ['mousedown', 'mouseup', 'dblclick']) document.getElementById('ed').addEventListener(t, (e) => log.push(t + e.detail + ':' + getSelection())); ''" }

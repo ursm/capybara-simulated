@@ -237,8 +237,10 @@ pub(crate) struct StyleEngine {
     shadow_styles: std::collections::HashMap<NodeId, ShadowStyles>,
     // Whether any sheet (a shadow root's included) has a `:has()`, as of the last flush.
     has_relative: bool,
-    // The arena's `state_epoch` when the element states were last compared.
+    // The arena's `state_epoch` when the element states were last compared — and its pointer marks' run (`PointerMarks`)
+    // as it was then: where it began, and how many of its elements were looked at.
     scanned_epoch: u64,
+    scanned_marks: (u64, usize),
     // The user-agent sheet's quirks-mode half (`StyleLock::ua_sheets`), and whether the stylist has it: while the
     // document is in quirks mode.
     quirks_sheet: DocumentStyleSheet,
@@ -599,6 +601,7 @@ impl StyleEngine {
             shadow_styles: Default::default(),
             has_relative: false,
             scanned_epoch: u64::MAX,
+            scanned_marks: (0, 0),
             quirks_sheet: ua.quirks,
             quirks_sheet_in: false,
             hint_blocks: Default::default(),
@@ -1135,17 +1138,36 @@ impl StyleEngine {
     }
 
     // A styled element whose state bits moved since its style was matched is held against its old bits — looked for
-    // only when something a state reads was written since the last look (`state_epoch`).
+    // only when something a state reads was written since the last look (`state_epoch`): where all that was written
+    // since is the focus's, the hover's and the press's, among the elements they were written on, their ancestors and
+    // the labeled controls that followed them (`PointerMarks`) — a click's or a hover's look at a 2000-element page is a
+    // look at a dozen — and among every element otherwise.
     fn snapshot_moved_states(&mut self, arena: &RealmArena) {
         if self.scanned_epoch == arena.state_epoch {
             return;
         }
+        let marks = &arena.pointer_marks;
+        let targeted = self.scanned_epoch != u64::MAX && marks.from <= self.scanned_epoch && marks.to == arena.state_epoch;
+        let looked = if marks.from == self.scanned_marks.0 { self.scanned_marks.1.min(marks.ids.len()) } else { 0 };
+        let candidates: Vec<NodeId> = if targeted {
+            let mut chains: Vec<NodeId> = marks.ids[looked..]
+                .iter()
+                .flat_map(|&id| std::iter::successors(Some(id), |&n| arena.shadow_including_parent(n)))
+                .filter(|&n| arena.is_element(n))
+                .collect();
+            chains.sort_unstable_by_key(|n| (n.idx, n.generation));
+            chains.dedup();
+            chains
+        } else {
+            arena.element_ids().collect()
+        };
         self.scanned_epoch = arena.state_epoch;
+        self.scanned_marks = (marks.from, marks.ids.len());
         let this: *const StyleEngine = self;
         let snapshots = &mut self.snapshots;
         let mut moved = false;
         in_arena(arena, this, || {
-            for id in arena.element_ids() {
+            for id in candidates {
                 let Some(slot) = arena.existing_style_slot(id) else { continue };
                 if unsafe { &*slot.data.get() }.is_none() {
                     continue;
