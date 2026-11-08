@@ -107,9 +107,9 @@ pub(crate) fn sw_subresource_usable(destination: &str, mode: &str, response_type
     }
 }
 
-// What answers a request of the bindings' fetch() / XHR — Fetch "main fetch" (§4.1) and "HTTP fetch" (§4.3) as they take
-// them, for `url` (absolute, the request's) made by a client of document origin `here` (serialized: an opaque one's
-// "null"), `flags` its `FETCH_*` facts: a `data:` URL's processor; a `blob:` URL's entry; for an http(s) URL a
+// What answers a request — Fetch "main fetch" (§4.1) and "HTTP fetch" (§4.3) as the bindings take them (a fetch()'s or an
+// XHR's by its mode too: `request_route`), for `url` (absolute, the request's) made by a client of document origin `here`
+// (serialized: an opaque one's "null"), `flags` its `FETCH_*` facts: a `data:` URL's processor; a `blob:` URL's entry; for an http(s) URL a
 // navigation's chain (outside a worker: a service worker's re-fetch of one is a plain fetch), else a network error where
 // its mode is `same-origin` and the URL of another origin (step 12, before any service worker), else the controlling
 // service worker (Handle Fetch, a synchronous request's too: its caller waits for the answer), else a keepalive request's
@@ -121,6 +121,8 @@ pub(crate) const ROUTE_BLOB: u32 = 2;
 pub(crate) const ROUTE_REFUSED: u32 = 4;
 pub(crate) const ROUTE_SERVICE_WORKER: u32 = 5;
 pub(crate) const ROUTE_KEEPALIVE: u32 = 6;
+// (…and a fetch()'s or an XHR's a preload its document has: fetch_request.rs)
+pub(crate) const ROUTE_PRELOADED: u32 = 7;
 pub(crate) const FETCH_CONTROLLED: u32 = 1;
 pub(crate) const FETCH_KEEPALIVE: u32 = 4;
 pub(crate) const FETCH_SAME_ORIGIN: u32 = 32;

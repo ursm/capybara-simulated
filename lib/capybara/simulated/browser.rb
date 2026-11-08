@@ -10538,7 +10538,7 @@ module Capybara
         # goes to (no HTTP(S) one; a blocked port, Fetch "port blocking" — request-bad-port). A SW re-fetch seeds
         # Sec-Fetch-Site with the site the network hops accumulated BEFORE the SW intercepted the final hop, and starts
         # tainted where they had (`origin_null`) — redirected where they followed one (`redirected`: a service worker's
-        # redirects before its fall-through). The method's case AS GIVEN: the JS callers normalized it already
+        # redirects before its fall-through). The method's case AS GIVEN: the engine normalized it already
         # (open-method-case-sensitive).
         worker = Thread.current[:csim_worker_record]
         plan   = Native::FetchPlan.new(
@@ -14180,7 +14180,7 @@ module Capybara
       # A response `plan`'s chain of hops ended in, as its host reads it: marked tainted where the chain left its client's
       # origin though its mode makes it no CORS one — what a mode-less load's resource is not CORS-same-origin by (a sheet's
       # origin-clean flag unset, sheet_fetch.rs `fetch`) — and carrying the URLs its redirects went through to it (its URL
-      # list, where it holds more than the final one).
+      # list, where it was redirected: the network's hops alone where a service worker's redirects came before them).
       def chain_response(out, plan, tainted)
         return out unless out
 

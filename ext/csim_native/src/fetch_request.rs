@@ -11,9 +11,6 @@
 use crate::dom::{dom, realm_id, register};
 use crate::request_state::Request;
 
-// The leg a preload answers (fetch_rules.rs' `ROUTE_*` the others).
-const ROUTE_PRELOADED: u32 = 7;
-
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "fetchRequest", fetch_request_op, context_id);
 }
@@ -104,7 +101,7 @@ fn fetch_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let ancestors = crate::referrer::request_ancestors(arena, cid);
     let preloaded = host.and_then(|host| crate::preload_map::preloaded(scope, cid, &request, authored, host));
     let route = if preloaded.is_some() {
-        ROUTE_PRELOADED
+        crate::fetch_rules::ROUTE_PRELOADED
     } else {
         crate::fetch_rules::request_route(&request.url, &request.mode, &here, controlled, request.keepalive)
     };

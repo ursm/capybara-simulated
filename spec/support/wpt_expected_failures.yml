@@ -64399,19 +64399,13 @@ fetch/api/basic/request-upload.any.js:
 fetch/api/basic/request-upload.h2.any.js:
 - Fetch with POST with ReadableStream on 421 response should return the response and
   not retry.
-- ReadbleStream should be closed on signal.abort
 - Streaming upload should fail on a 401 response
 - "[dedicatedworker] Fetch with POST with ReadableStream on 421 response should return
   the response and not retry."
-- "[dedicatedworker] ReadbleStream should be closed on signal.abort"
 - "[dedicatedworker] Streaming upload should fail on a 401 response"
-- "[dedicatedworker] [harness] TIMEOUT"
-- "[harness] TIMEOUT"
 - "[serviceworker] Fetch with POST with ReadableStream on 421 response should return
   the response and not retry."
-- "[serviceworker] ReadbleStream should be closed on signal.abort"
 - "[serviceworker] Streaming upload should fail on a 401 response"
-- "[serviceworker] [harness] TIMEOUT"
 fetch/api/basic/stream-response.any.js:
 - Stream response's body when content-type is not present
 - Stream response's body when content-type is present
