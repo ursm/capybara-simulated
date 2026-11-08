@@ -899,7 +899,8 @@ fn link_scheme(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Functio
 // __dom.fetchClassicScript(el, doc, src, parser, host, plan, integrity) -> `[ok, body, entry]`: HTML "fetch a classic
 // script" for the script element `el` (of its preparation-time document `doc`) whose src is `src` (resolved; null where
 // it does not resolve, the raw attribute its URL then), its request as it was prepared — its `plan` (subresource_plan.rs)
-// and its `integrity` metadata, a later change of the element's attributes no part of it: whether its response is one to run (`judge`: none for a network error, a status not ok, a
+// and its `integrity` metadata, a later change of the element's attributes no part of it; none given, the element's now,
+// a parser's script fetched as it is prepared: whether its response is one to run (`judge`: none for a network error, a status not ok, a
 // refused response, a body its `integrity` does not match), its source text — decoded as its Content-Type's charset or
 // else the document's says (script.rs `classic_script_encoding`), the host's own text where that is its UTF-8 — and the
 // description of its Resource Timing entry for the bindings to file once the load completes, null where it files none
@@ -912,9 +913,14 @@ fn fetch_classic_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
     let src = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
     let parser = args.get(3).is_true();
-    let plan = args.get(5).uint32_value(scope).unwrap_or(0);
-    let integrity = args.get(6).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
+    let (plan, integrity) = if args.get(5).is_number() {
+        (args.get(5).uint32_value(scope).unwrap_or(0), args.get(6).to_rust_string_lossy(scope))
+    } else {
+        let arena = realm(scope, cid);
+        let integrity = arena.get(el).and_then(|n| n.plain_attr("integrity")).unwrap_or("").to_owned();
+        (plan_in(arena, crate::subresource_judge::J_CLASSIC_SCRIPT, Some(el), Some(doc), None), integrity)
+    };
     let Ok((ok, body, entry)) = classic_script(scope, cid, host, (el, doc, plan, integrity), src, parser) else { return };
     let body = match body {
         ScriptText::Host(host_text) => v8::Local::new(scope, host_text),
