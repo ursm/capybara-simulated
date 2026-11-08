@@ -520,11 +520,15 @@ module Capybara
       def find_xpath(query, **_) = nodes_of(current_browser.find_xpath(query))
       def find_css(query, **_)   = nodes_of(current_browser.find_css(query))
 
-      # The nodes of a find's results — the driver's and a node's scoped one (`Node#find_css`) — each made knowing whether
-      # it is alive, asked of `browser` for them all (`Browser#alive_among`), not by a lookup of its own.
+      # The nodes of a find's results — the driver's and a node's scoped one (`Node#find_css`), of `browser` — each looking
+      # itself up for a few, made knowing whether it is alive for more, asked of `browser` for them all at once
+      # (`Browser#alive_among`, `ALIVE_BATCH_MIN`).
       def nodes_of(handles, browser = current_browser)
+        return handles.map { Node.new(self, _1, browser: browser) } if handles.size < Browser::ALIVE_BATCH_MIN
+
         alive = browser.alive_among(handles)
-        handles.each_with_index.map {|id, i| Node.new(self, id, browser: browser, alive: alive[i]) }
+        i = -1
+        handles.map { Node.new(self, _1, browser: browser, alive: alive[i += 1]) }
       end
 
       # Capybara `within_frame` / `switch_to_frame`. `frame` is the iframe

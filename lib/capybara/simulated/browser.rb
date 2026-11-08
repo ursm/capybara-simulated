@@ -1418,15 +1418,12 @@ module Capybara
       def lookup_node(handle)
         handle if dom_call('alive', handle)
       end
-      # …whether each of `handles` is alive: a find's results as Capybara makes its nodes of them — asked one by one for
-      # a few, at once for more (`V8Runtime.packed`: no array crosses into the page's realm), from where one call for them
-      # all costs less than a call each: 2 handles 4.4 µs a call each against 4.5 µs packed, 3 handles 6.4 against 4.5
+      # …whether each of `handles` is alive, asked at once (`V8Runtime.packed`: no array crosses into the page's realm): a
+      # find's results as Capybara makes its nodes of them (Driver#nodes_of) — for as many as one call for them all costs
+      # less than a call each, a node's own lookup: 2 handles 4.4 µs a call each against 4.5 µs packed, 3 handles 6.4
+      # against 4.5
       ALIVE_BATCH_MIN = 3
-      def alive_among(handles)
-        return handles.map { dom_call('alive', _1) } if handles.size < ALIVE_BATCH_MIN
-
-        dom_call('aliveAmong', V8Runtime.packed(handles))
-      end
+      def alive_among(handles) = dom_call('aliveAmong', V8Runtime.packed(handles))
 
       def check_stale(handle, initial, gen = nil)
         return if initial && (gen.nil? || gen == @context_gen) && dom_call('alive', handle)
