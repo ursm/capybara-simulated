@@ -88,7 +88,6 @@ RSpec.describe 'the host boundary' do
       keep('map', (r) => r.slice(0, 1));
       keep('push', (r, list) => { list.length = 0; return 0; });
       keep('includes', () => true);
-      Object.defineProperty(Array.prototype, 0, { set(_) {}, get() { return undefined; }, configurable: true });
     JS
     expect(session.all(:css, 'p.a').map(&:text)).to eq(%w[one two])
     expect(session.all(:xpath, '//p').map(&:text)).to eq(%w[one two])

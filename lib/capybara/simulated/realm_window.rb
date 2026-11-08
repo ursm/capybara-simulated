@@ -15,13 +15,14 @@ module Capybara
       # The host's commands that act on the document addressed — Capybara's finds, node operations, scripts, paint, keys
       # and modals (Driver, Node).
       SCOPED = %i[
-        active_element_handle all_text async_io_pending? attr check_stale click computed_style context_gen
-        current_realm_id disabled? dispatch_event double_click drag_to drop evaluate_async_script evaluate_script
+        active_element_handle alive_among all_text all_text_if_alive async_io_pending? attr check_stale click
+        computed_style context_gen current_realm_id disabled? dispatch_event double_click drag_to drop
+        evaluate_async_script evaluate_script
         execute_script find_css find_xpath hover html inner_html lookup_node node_path obscured? option_selected?
         outer_html peek_script rect right_click screenshot_png scroll_by scroll_to select_option send_keys
         send_session_keys set_geolocation set_header set_value_with_events shadow_root_handle submit_form
         switch_to_frame tag_name tick_for_read tick_real_time timer_wait_elapsed? trace_screenshot unselect_option value
-        visible? visible_text polling?
+        visible? visible_text visible_text_if_alive polling?
       ].freeze
 
       attr_reader :host, :key

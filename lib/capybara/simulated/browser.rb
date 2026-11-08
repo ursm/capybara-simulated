@@ -1387,6 +1387,9 @@ module Capybara
       # before each read, and that advances the virtual clock.
       def all_text(handle)     = text(handle)
       def visible_text(handle) = dom_call('visibleText', handle).to_s
+      # …each of a node still alive, nil of one that is not, whose stale check is then the caller's (`Node#read_alive`)
+      def all_text_if_alive(handle)     = dom_call('textIfAlive', handle)
+      def visible_text_if_alive(handle) = dom_call('visibleTextIfAlive', handle)
       def tag_name(handle)     = tag(handle)
       def value(handle)        = dom_call('value', handle)
       def disabled?(handle)    = dom_call('disabled', handle)
@@ -1415,6 +1418,8 @@ module Capybara
       def lookup_node(handle)
         handle if dom_call('alive', handle)
       end
+      # …whether each of `handles` is alive, asked at once: a find's results as Capybara makes its nodes of them
+      def alive_among(handles) = handles.empty? ? [] : dom_call('aliveAmong', handles)
 
       def check_stale(handle, initial, gen = nil)
         return if initial && (gen.nil? || gen == @context_gen) && dom_call('alive', handle)
@@ -3153,11 +3158,16 @@ module Capybara
       # it posted, a navigation or a close of one it asked for.
       def drain_task_intents
         drain_pending_navigation
-        consume_pending_navigation
-        consume_pending_form_submit
-        consume_pending_download
+        if takes_planned?
+          consume_pending_navigation
+          consume_pending_form_submit
+          consume_pending_download
+        end
         deliver_asked_tasks
       end
+      # Whether anything those takes take may be planned (navigation_plan.rs `takesPlanned`): one host call where nothing
+      # is — the drain after every script the driver runs — for the ten its takes would make.
+      private def takes_planned? = @runtime.call('takesPlanned') == true
 
       # Backstop on the per-frame quiescence loop — caps the event-loop turns
       # processed at a single instant so a `setInterval(0)` (always-due) busy loop
@@ -12468,13 +12478,15 @@ module Capybara
         consume_planned_traversal
         consume_pending_sw_client_nav
         consume_sw_deferred_navigations
-        consume_pending_location
-        consume_pending_frame_submit
-        consume_pending_frame_nav
-        consume_pending_page_submission
-        consume_pending_frame_reload
-        consume_pending_reload
-        consume_pending_aux_window
+        if takes_planned?
+          consume_pending_location
+          consume_pending_frame_submit
+          consume_pending_frame_nav
+          consume_pending_page_submission
+          consume_pending_frame_reload
+          consume_pending_reload
+          consume_pending_aux_window
+        end
         # (…and what the windows `window.open` made in this isolate planned meanwhile — a traversal a frame of one queued
         # as its document loaded above — taken in the same pass, as the page's frames' traversal is just before)
         consume_pending_window_nav if windows_planned?

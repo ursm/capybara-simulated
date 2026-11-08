@@ -517,12 +517,14 @@ module Capybara
       def response_headers     = current_browser.response_headers
       def header(name, value)  = current_browser.set_header(name, value)
 
-      def find_xpath(query, **_)
-        current_browser.find_xpath(query).map {|id| Node.new(self, id) }
-      end
+      def find_xpath(query, **_) = nodes_of(current_browser.find_xpath(query))
+      def find_css(query, **_)   = nodes_of(current_browser.find_css(query))
 
-      def find_css(query, **_)
-        current_browser.find_css(query).map {|id| Node.new(self, id) }
+      # The nodes of a find's results, whether each is alive asked in one call for them all (Node's own lookup is one a
+      # node).
+      private def nodes_of(handles)
+        alive = current_browser.alive_among(handles)
+        handles.each_with_index.map {|id, i| Node.new(self, id, alive: alive[i]) }
       end
 
       # Capybara `within_frame` / `switch_to_frame`. `frame` is the iframe

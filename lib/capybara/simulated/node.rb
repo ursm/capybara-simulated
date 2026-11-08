@@ -9,13 +9,14 @@ module Capybara
     class Node < Capybara::Driver::Node
       include WhitespaceNormalizer
 
-      def initialize(driver, handle)
+      # (…`alive`: whether the handle's node is alive, where the caller asked already — a find's results, asked at once)
+      def initialize(driver, handle, alive: nil)
         super(driver, self)
         @handle_id    = handle
         # Pin the Browser at construction so nodes from one window
         # stay valid even after `switch_to_window` flips to another.
         @browser      = driver.current_browser
-        @initial_node = @browser.lookup_node(handle)
+        @initial_node = alive.nil? ? @browser.lookup_node(handle) : (handle if alive)
         @context_gen  = @browser.context_gen
         # The frame realm this handle belongs to (nil = main document). Handle
         # integers are per-realm, so a main-document node and a frame node can
@@ -35,14 +36,12 @@ module Capybara
       # a walk over one query's results can't be stranded mid-way.
       def all_text
         browser.tick_for_read(handle_id)
-        check_stale
-        normalize_spacing(browser.all_text(handle_id))
+        normalize_spacing(read_alive(:all_text_if_alive, :all_text))
       end
 
       def visible_text
         browser.tick_for_read(handle_id)
-        check_stale
-        normalize_visible_spacing(browser.visible_text(handle_id))
+        normalize_visible_spacing(read_alive(:visible_text_if_alive, :visible_text))
       end
 
       def value
@@ -256,6 +255,18 @@ module Capybara
             'element belongs to a different browsing context than the active frame'
         end
         browser.check_stale(handle_id, @initial_node, @context_gen)
+      end
+
+      # A read of the node: where `check_stale` would pass without a step of the clock — this frame's node, found alive in
+      # this context — the check and the read in one host call (`if_alive`, nil of a node no longer alive), else the check
+      # and then the read (`reader`).
+      private def read_alive(if_alive, reader)
+        if @initial_node && @realm_id == browser.current_realm_id && @context_gen == browser.context_gen
+          value = browser.public_send(if_alive, handle_id)
+          return value unless value.nil?
+        end
+        check_stale
+        browser.public_send(reader, handle_id)
       end
     end
   end

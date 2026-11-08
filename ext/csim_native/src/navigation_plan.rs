@@ -310,6 +310,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "submissionRoute", submission_route, context_id);
     register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
+    register(scope, ns, "takesPlanned", takes_planned, context_id);
     register(scope, ns, "navigationAwaited", navigation_awaited, context_id);
     register(scope, ns, "flushedLocation", flushed_location, context_id);
     register(scope, ns, "stopOwnLoading", stop_own_loading, context_id);
@@ -1047,6 +1048,23 @@ fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         | (u32::from(document) << 5)
         | (u32::from(plan.traversal_waiting()) << 6);
     rv.set_uint32(bits | frames);
+}
+// __dom.takesPlanned() -> whether anything the host's drain of what a task planned takes may be there (browser.rb
+// `takes_planned?`): the calling realm's navigation, submission, location navigation, reload or a frame's submission to
+// it, a download any realm of the isolate planned (`takeDownload`'s realms), a frame's navigation or reload the host
+// plans that is due, or a form's submission it routes that is. No take when it says none: one host call where the drain
+// made ten (the event loop's step after every script the driver runs among them).
+fn takes_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let own = realm_id(scope, &args);
+    let arena = &crate::dom::dom(scope).arena;
+    let frames = arena.frame_navigations.hosted() || arena.routed_submissions.first_planned().is_some_and(|at| arena.frame_navigations.due(at));
+    let others: Vec<i32> = arena.linked_frame_realms().into_iter().chain(arena.stepped_windows()).filter(|&r| r != own).collect();
+    let downloads = std::iter::once(own).chain(others).any(|cid| !realm(scope, cid).navigation_plan.download.is_empty());
+    let plan = plan(scope, &args);
+    let own = &plan.own;
+    rv.set_bool(
+        frames || downloads || plan.navigation.is_some() || plan.submission.is_some() || own.location.is_some() || own.reload.is_some() || own.submission.is_some()
+    );
 }
 // __dom.navigationAwaited() -> whether the calling realm's document has planned what will navigate it once the host takes it, which
 // no ongoing navigation of its records yet: a reload (HTML "apply the reload history step" sets it to "traversal"), a form's
