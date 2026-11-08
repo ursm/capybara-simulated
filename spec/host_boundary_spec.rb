@@ -24,8 +24,8 @@ RSpec.describe 'the host boundary' do
         <!DOCTYPE html><meta charset=utf-8><body><input id=t><input id=f type=file><button id=c>c</button>
         <script>document.getElementById('c').addEventListener('click', (e) => { window.shifted = e.shiftKey; });</script>
       HTML
-      '/arrays' =>'<!DOCTYPE html><body><p class=a>one</p><p class=a>two</p><select id=s multiple><option selected>x</option><option selected>y</option></select>',
-      '/tick'   =>'<!DOCTYPE html><script>window.ticks = 0; setInterval(() => ticks++, 10);</script>',
+      '/arrays' => '<!DOCTYPE html><body><p class=a>one</p><p class=a>two</p><select id=s multiple><option selected>x</option><option selected>y</option></select>',
+      '/tick'   => '<!DOCTYPE html><script>window.ticks = 0; setInterval(() => ticks++, 10);</script>',
       '/ad'     => <<~HTML,
         <!DOCTYPE html><script>
           window.kill = () => {
@@ -123,7 +123,7 @@ RSpec.describe 'the host boundary' do
       [document.getElementById('t').value, document.getElementById('f').files.item(0).size, window.shifted]
     JS
   ensure
-    File.unlink(file.path)
+    File.unlink(file.path) if file
   end
 
   # …nor of the event loop's: the rendering update's resize steps over the frames, a frame's task run in its realm

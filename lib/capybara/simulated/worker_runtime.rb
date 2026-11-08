@@ -13,7 +13,7 @@ module Capybara
       end
 
       def eval_void(src, **kw) = @ctx.eval_void(src.to_s, **kw)
-      def call(step, *args) = @ctx.step(step).call(*args)
+      def call(step, *args) = @ctx.step(step.to_s).call(*args)
       # (…one that publishes the worker's steps again: `V8Runtime::Ctx#publishing`)
       def publishing(step, *args) = @ctx.publishing(step, *args)
       # (…the bridge's checkpoint, with the steps HTML runs after it: V8Runtime#drain_microtasks)
