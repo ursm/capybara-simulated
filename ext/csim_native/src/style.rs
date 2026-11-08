@@ -1139,9 +1139,9 @@ impl StyleEngine {
 
     // A styled element whose state bits moved since its style was matched is held against its old bits — looked for
     // only when something a state reads was written since the last look (`state_epoch`): where all that was written
-    // since is the focus's, the hover's and the press's, among the elements they were written on, their ancestors and
-    // the labeled controls that followed them (`PointerMarks`) — a click's or a hover's look at a 2000-element page is a
-    // look at a dozen — and among every element otherwise.
+    // since is the focus's, the hover's and the press's, among the elements they were written on, their ancestors (flat
+    // and shadow-including) and the labeled controls that followed them (`PointerMarks`) — a click's or a hover's look at
+    // a 2000-element page is a look at a dozen — and among every element otherwise.
     fn snapshot_moved_states(&mut self, arena: &RealmArena) {
         if self.scanned_epoch == arena.state_epoch {
             return;
@@ -1150,9 +1150,14 @@ impl StyleEngine {
         let targeted = self.scanned_epoch != u64::MAX && marks.from <= self.scanned_epoch && marks.to == arena.state_epoch;
         let looked = if marks.from == self.scanned_marks.0 { self.scanned_marks.1.min(marks.ids.len()) } else { 0 };
         let candidates: Vec<NodeId> = if targeted {
+            // (…up the flat tree, which `:hover` and `:active` match along, and the shadow-including one, which the
+            // focus's pseudo-classes do)
             let mut chains: Vec<NodeId> = marks.ids[looked..]
                 .iter()
-                .flat_map(|&id| std::iter::successors(Some(id), |&n| arena.shadow_including_parent(n)))
+                .flat_map(|&id| {
+                    std::iter::successors(Some(id), |&n| crate::geometry::flat_parent(arena, n))
+                        .chain(std::iter::successors(arena.shadow_including_parent(id), |&n| arena.shadow_including_parent(n)))
+                })
                 .filter(|&n| arena.is_element(n))
                 .collect();
             chains.sort_unstable_by_key(|n| (n.idx, n.generation));

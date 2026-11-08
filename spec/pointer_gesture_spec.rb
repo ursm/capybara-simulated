@@ -105,6 +105,23 @@ RSpec.describe 'pointer gestures' do
     expect(session.evaluate_script("states(':hover')")).to eq('out/a')
   end
 
+  # (…HTML §4.16.3: ":hover also matches flat tree ancestors of elements that are designated", :active likewise — a slot
+  # and what holds it in its shadow tree, its assigned content hovered or pressed: Chrome and Firefox, r19/p page5)
+  it 'matches :hover and :active up the flat tree, through the slot a node is assigned to' do
+    gesture { <<~JS }
+      document.getElementById('c').innerHTML = '<div id=host><span id=lc style="display:inline-block;width:80px;height:40px">light</span></div>';
+      const sr = document.getElementById('host').attachShadow({mode: 'open'});
+      sr.innerHTML = '<style>#wrap:hover { color: rgb(9, 0, 0) } #wrap:active { background-color: rgb(0, 9, 0) }</style><div id=wrap><slot id=sl></slot></div>';
+      window.flat = (sel) => ['c', 'host', 'lc'].map((i) => document.getElementById(i)).concat(['wrap', 'sl'].map((i) => sr.getElementById(i)))
+        .filter((e) => e.matches(sel)).map((e) => e.id).join('/');
+      hooks['mousedown:lc'] = () => log.push('pressed ' + flat(':active') + ' ' + getComputedStyle(sr.getElementById('wrap')).backgroundColor);
+    JS
+    session.find('#lc').hover
+    expect(session.evaluate_script("[flat(':hover'), getComputedStyle(document.getElementById('host').shadowRoot.getElementById('wrap')).color]")).to eq(['c/host/lc/wrap/sl', 'rgb(9, 0, 0)'])
+    session.find('#lc').click
+    expect(log).to include('pressed c/host/lc/wrap/sl rgb(0, 9, 0)')
+  end
+
   it "matches a label's labeled control as the label is :hover and :active (HTML §4.16.3)" do
     gesture { "hooks['mousedown:lab2'] = () => log.push('pressed ' + states(':active') + ' over ' + states(':hover'))" }
     session.find('#lab2').click

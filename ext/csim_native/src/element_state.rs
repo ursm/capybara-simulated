@@ -199,21 +199,22 @@ impl RealmArena {
     pub(crate) fn has_focus_within(&self, id: NodeId) -> bool {
         self.focus.is_some_and(|f| self.shadow_including_ancestor(id, f))
     }
-    // `:hover`: the hovered element or one of its shadow-including ancestors, and the labeled control of a label among
-    // them (HTML §4.16.3).
+    // `:hover`: the hovered element and its FLAT-TREE ancestors (HTML §4.16.3, "Per the definition in Selectors, :hover also
+    // matches flat tree ancestors of elements that are designated" — a slot and what holds it in its shadow tree, its
+    // assigned content hovered: Chrome, Firefox), and the labeled control of a label among them.
     pub(crate) fn is_hovered(&self, id: NodeId) -> bool {
-        self.hover.is_some_and(|h| self.shadow_including_ancestor(id, h) || self.hover_controls.contains(&id))
+        self.hover.is_some_and(|h| crate::geometry::flat_inclusive_ancestor(self, id, h) || self.hover_controls.contains(&id))
     }
     // `:active` (HTML §4.16.3): the element the pointer pressed — any button, a disabled button too ("being activated if
-    // it is in a formal activation state"; Chrome, Firefox) — and every element with a descendant (shadow-including) that
-    // matches; and the labeled control of a label that matches, which "does not count as being activated", so nothing above
-    // it matches through it.
+    // it is in a formal activation state"; Chrome, Firefox) — and its flat-tree ancestors, as `:hover`'s; and the labeled
+    // control of a label that matches, which "does not count as being activated", so nothing above it matches through it.
     pub(crate) fn is_active(&self, id: NodeId) -> bool {
-        self.active.is_some_and(|a| self.shadow_including_ancestor(id, a) || self.active_controls.contains(&id))
+        self.active.is_some_and(|a| crate::geometry::flat_inclusive_ancestor(self, id, a) || self.active_controls.contains(&id))
     }
-    // The labeled controls of the labels `id` is or is in (HTML §4.10.4), shadow-including.
+    // The labeled controls of the labels `id` is or is among the flat-tree ancestors of (HTML §4.10.4): those that match
+    // as it does.
     pub(crate) fn label_controls(&self, id: NodeId) -> Vec<NodeId> {
-        std::iter::successors(Some(id), |&n| self.shadow_including_parent(n))
+        std::iter::successors(Some(id), |&n| crate::geometry::flat_parent(self, n))
             .filter(|&n| self.get(n).is_some_and(|d| d.is_html_named("label")))
             .filter_map(|label| self.labeled_control(label))
             .collect()

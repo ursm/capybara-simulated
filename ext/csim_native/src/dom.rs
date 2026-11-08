@@ -1104,8 +1104,9 @@ pub(crate) struct RealmArena {
 }
 
 // The state epochs (`RealmState::state_epoch`) `from` (exclusive) to `to` (inclusive) were all moves of the focus, the
-// hover or the press (STATE_FOCUSED / STATE_HOVERED / STATE_ACTIVE) — whose state reaches an element and its
-// shadow-including ancestors, and a label's labeled control — and `ids` the elements they were written on: what the style
+// hover or the press (STATE_FOCUSED / STATE_HOVERED / STATE_ACTIVE) — whose state reaches an element and its ancestors
+// (the flat tree's for `:hover` / `:active`, the shadow-including tree's for the focus's), and a label's labeled control —
+// and `ids` the elements they were written on: what the style
 // engine looks at for the states that moved instead of every element (style.rs `snapshot_moved_states`). Bounded: past
 // `MAX_POINTER_MARKS` a run starts afresh, and the engine looks at every element once.
 #[derive(Default)]
