@@ -74,13 +74,19 @@ RSpec.describe 'pointer gestures' do
       'pointerup a1 b0 bs0 d0 act:',
       'click a1 b0 bs0 d1 act:'
     ])
-    # (…a disabled button is never being activated, HTML §4.16.3 — what holds it is)
+    # (…HTML §4.16.3: a disabled button pressed is not being activated, nor is anything through it — what holds it has
+    # no descendant that matches; one with a pressed descendant matches through that; and a label's labeled control
+    # matches, and its ancestors with it. Chrome and Firefox activate a pressed disabled button and its ancestors.)
     session.execute_script(<<~JS)
-      document.getElementById('b').innerHTML = '<button id=db disabled style="width:50px;height:20px">d</button>';
-      hooks['pointerdown:db'] = () => log.push('pressed ' + states(':active'));
+      document.getElementById('b').innerHTML = '<button id=db disabled style="width:50px;height:20px">d</button><button id=dd disabled style="width:50px;height:20px"><span id=ds style="display:inline-block;width:40px;height:16px">s</span></button>';
+      document.getElementById('c').innerHTML = '<span id=wrap><input id=li3></span>';
+      document.body.insertAdjacentHTML('beforeend', '<label id=lab3 for=li3 style="position:absolute;left:600px;top:300px;width:80px;height:30px">L3</label>');
+      for (const id of ['db', 'ds', 'lab3']) hooks['pointerdown:' + id] = () => log.push(id + ' pressed ' + states(':active'));
     JS
     session.find('#db').click
-    expect(log).to include('pressed out/b')
+    session.find('#ds').click
+    session.find('#lab3').click
+    expect(log.grep(/pressed/)).to eq(['db pressed ', 'ds pressed out/b/dd/ds', 'lab3 pressed c/wrap/li3/lab3'])
   end
 
   # (…Pointer Events §10.5: a capturing element taken out of the document loses the capture at the document; and a press
@@ -95,7 +101,9 @@ RSpec.describe 'pointer gestures' do
     expect(log).to include('lost at #document')
     gesture { "hooks['mousedown:a1'] = (e) => e.target.remove()" }
     session.find('#a1').click
-    expect(log.grep(/^pointerup|^mouseup|^click/)).to eq(['pointerup a b0 bs0 d0 act:', 'mouseup a b0 bs0 d1 act:'])
+    # (…over what held it, still hovered: no boundary event, its ancestors `:hover` all along)
+    expect(log.drop_while {|l| !l.start_with?('mousedown') }.drop(1)).to eq(['pointerup a b0 bs0 d0 act:', 'mouseup a b0 bs0 d1 act:'])
+    expect(session.evaluate_script("states(':hover')")).to eq('out/a')
   end
 
   it "matches a label's labeled control as the label is :hover and :active (HTML §4.16.3)" do

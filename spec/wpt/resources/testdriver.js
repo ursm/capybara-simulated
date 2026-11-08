@@ -527,16 +527,14 @@
     Actions: Actions,
     action_sequence: function (actions) { return action_sequence(actions); },
     click: function (element) {
-      // A WebDriver click is real input injection: a full pointer sequence
-      // (pointerdown/mousedown, pointerup/mouseup) then a TRUSTED click. We
-      // dispatch all of them through `dispatch()` (trusted), and the engine's
-      // activation behaviour (checkbox toggle, form submit, anchor navigation,
-      // <summary> toggle, …) runs inside the click's dispatch. We deliberately
-      // do NOT call element.click(): that IDL method fires an UNtrusted click
-      // (per spec), which would defeat the injection's trusted semantics.
+      // A WebDriver element click: the pointer moved to the element's centre, pressed and released there — the
+      // driver's own gesture (`mouseAction`), trusted, its activation the click's dispatch's. (testdriver-vendor.js
+      // replaces this with the driver's `clickResolve`, which scrolls the element into view first.)
       var t = element || (D() && D().body);
-      mouseAction(2, t, 0, 0, 0);
-      mouseAction(4, t, 0, 0, 0);
+      var box = t.getBoundingClientRect(), x = box.left + box.width / 2, y = box.top + box.height / 2;
+      mouseAction(1, t, x, y, 0);
+      mouseAction(2, t, x, y, 0);
+      mouseAction(4, t, x, y, 0);
       return settled();
     },
     send_keys: function (element, keys) {

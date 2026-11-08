@@ -84,7 +84,9 @@ impl RealmArena {
     // viewport's (the "focus fixup rule": no event, as Firefox and WebKit — Chrome's `blur` on a removal is a Blink
     // behavior its own intent is retiring) and what a focused text control armed for its blur is gone (change_on_blur.rs).
     // Whether they changed an element's state.
-    pub(crate) fn removing_steps(&mut self, root: NodeId) -> bool {
+    // …and the hovered element, where it left `parent`, that parent: the pointer is over what is left there, and the
+    // ancestors it was over stay `:hover` (Chrome, Firefox).
+    pub(crate) fn removing_steps(&mut self, root: NodeId, parent: Option<NodeId>) -> bool {
         const LEAVING: u32 = STATE_POPOVER_OPEN | STATE_MODAL | STATE_FOCUSED | STATE_HOVERED | STATE_ACTIVE;
         let mut stack = vec![root];
         let (mut leave, mut dialogs) = (Vec::new(), Vec::new());
@@ -105,9 +107,14 @@ impl RealmArena {
             self.dialog_closed(dialog);
         }
         let changed = !leave.is_empty();
+        let hovered = self.hover;
         for (id, bits) in leave {
             self.change_baselines.remove(&id);
             self.set_state(id, bits);
+        }
+        if let Some(parent) = parent.filter(|&p| hovered.is_some() && self.hover.is_none() && self.is_element(p) && self.is_connected(p)) {
+            let bits = self.get(parent).map_or(0, |n| n.state);
+            self.set_state(parent, bits | STATE_HOVERED);
         }
         changed
     }
@@ -162,7 +169,7 @@ fn removing_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     // (…in the realm whose tree it left, whose document's modal stack its dialogs leave, whichever realm's code removed it)
     let caller = realm_id(scope, &args);
     let cid = crate::dom::dom(scope).arena.get(root).map_or(caller, |n| n.realm);
-    realm(scope, cid).removing_steps(root);
+    realm(scope, cid).removing_steps(root, None);
 }
 
 // A dialog's `closedby` attribute's state (HTML §4.11.4): `any`, `closerequest` or `none`, ASCII case-insensitively; a
