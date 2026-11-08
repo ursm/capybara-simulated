@@ -329,13 +329,14 @@ impl RealmArena {
         count
     }
     // The mark a parser waiting on a fetch spins the event loop by (HTML "spin the event loop" until the fetch has landed,
-    // its response a task queued as it began): the tasks queued by now and due, none `BEHIND` — none where none is, or
-    // where a step of the event loop is under way, which no spin nests in.
+    // its response a task queued as it began): the tasks queued by now and due, none `BEHIND` — none where none is. A step
+    // under way — a frame's document committed by a task of it — spins all the same, a step nested in it (Chrome and
+    // Firefox: a frame's zero timer before its parser-blocking script runs first, csim-bench r13 `s_frame_src*`).
     // (…the event loop's next task one of them: none `BEHIND` is due now where its next is one, as those sort behind the
     // rest due with them — the event loop's first task, kept found)
     pub(crate) fn spin_mark(&mut self) -> Option<u64> {
         let mark = self.task_mark();
-        (self.event_loop.steps.is_empty() && self.next_queued_by(mark, true)).then_some(mark.0)
+        self.next_queued_by(mark, true).then_some(mark.0)
     }
     // What is left now of realm `cid`'s idle period (`Timers::idle_remaining`), against the event loop's next task.
     // (…"has pending renders": an animation frame callback of any document of the event loop's)

@@ -1354,6 +1354,12 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # …a frame's parser too, its document committed by a task of the event loop's (Chrome and Firefox: r13 `s_frame_src`).
+    it "runs a frame's zero timer before its parser-blocking script" do
+      child = "<script>setTimeout(() => top.L.push('ft0'))</script><script src=\"/slow/0/fb.js\"></script>"
+      expect(page_log('<iframe src="/c"></iframe>', pages: {'/c' => child})).to eq('dcl ft0 fb.js-ran load rs:complete')
+    end
+
     # …at script nesting level zero, the insertion point undefined: a `document.write` of a task that runs meanwhile opens the
     # document, which aborts the parser — and "the end" runs no deferred script after it.
     {
