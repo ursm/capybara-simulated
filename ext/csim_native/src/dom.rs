@@ -2042,7 +2042,8 @@ impl RealmArena {
         self.generations.bump(GEN_DIRTY);
     }
     // …those of `retargeted`, the elements whose animations' properties a style flush changed (a CSS animation made or
-    // let go, an effect moved): each one in a tree a document roots — its own or a shadow tree of it — with its subtree.
+    // let go, an effect moved) in something a layout reads: each one in a tree a document roots — its own or a shadow tree
+    // of it — with its subtree.
     fn mark_retargeted(&self, retargeted: &[NodeId]) {
         let shown = retargeted.iter().filter(|&&n| self.get(self.shadow_including_root(n)).is_some_and(|r| r.kind == NodeKind::Document)).count();
         if shown > 0 {
@@ -5929,10 +5930,11 @@ fn style_flush(
         let failures = engine.take_verify_failures();
         let retargeted = engine.web_animations.take_retargeted();
         // (…what the retargeted elements' animations set looked at again, here: the engine keeps it)
-        if engine.reconcile_animated(arena, &retargeted) {
+        let (rekeyed, laid_out) = engine.reconcile_animated(arena, &retargeted);
+        if rekeyed {
             arena.generations.bump(GEN_CASCADE);
         }
-        arena.mark_retargeted(&retargeted);
+        arena.mark_retargeted(&laid_out);
         threw_verify_failures(scope, failures);
     });
 }
@@ -5965,10 +5967,11 @@ fn style_tick_unguarded(
     engine.remove_replaced_animations(arena);
     let failures = engine.take_verify_failures();
     let retargeted = engine.web_animations.take_retargeted();
-    if engine.reconcile_animated(arena, &retargeted) {
+    let (rekeyed, laid_out) = engine.reconcile_animated(arena, &retargeted);
+    if rekeyed {
         arena.generations.bump(GEN_CASCADE);
     }
-    arena.mark_retargeted(&retargeted);
+    arena.mark_retargeted(&laid_out);
     threw_verify_failures(scope, failures);
 }
 
@@ -5999,10 +6002,11 @@ fn style_commit_pending(
         engine.flush(arena, now);
         let failures = engine.take_verify_failures();
         let retargeted = engine.web_animations.take_retargeted();
-        if engine.reconcile_animated(arena, &retargeted) {
+        let (rekeyed, laid_out) = engine.reconcile_animated(arena, &retargeted);
+        if rekeyed {
             arena.generations.bump(GEN_CASCADE);
         }
-        arena.mark_retargeted(&retargeted);
+        arena.mark_retargeted(&laid_out);
         threw_verify_failures(scope, failures);
     });
 }

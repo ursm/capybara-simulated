@@ -807,7 +807,7 @@ fn anim_reconcile(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let nids = crate::dom::f64_arg(args.get(0)).to_vec();
     with_engine(scope, &args, |_scope, engine, arena| {
         let ids: Vec<crate::dom::NodeId> = nids.iter().filter_map(|&n| crate::dom::NodeId::from_i64(n as i64).filter(|_| n >= 0.0)).collect();
-        if engine.reconcile_animated(arena, &ids) {
+        if engine.reconcile_animated(arena, &ids).0 {
             arena.generations.bump(crate::dom::GEN_CASCADE);
         }
     });

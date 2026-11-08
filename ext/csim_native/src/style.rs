@@ -1552,13 +1552,21 @@ impl StyleEngine {
     // custom property, `display` or `visibility`: what reaches what is keyed on the whole rule set (a `var()` a
     // descendant reads; the rendered text). (…the entries of elements freed since let go of as they double, not at every
     // look: a page animating its elements one by one would pay for all of them each time)
-    pub(crate) fn reconcile_animated(&mut self, arena: &RealmArena, ids: &[NodeId]) -> bool {
+    // …and, of `ids`, those whose animations set — or set until now — something a layout reads: an element whose
+    // animations only paint (a button's colour transition) moves no box (`paint_only_property`).
+    pub(crate) fn reconcile_animated(&mut self, arena: &RealmArena, ids: &[NodeId]) -> (bool, Vec<NodeId>) {
         let rekeys = |p: &String| p.starts_with("--") || p == "display" || p == "visibility";
         let mut moved = false;
+        let mut laid_out = Vec::new();
         for &id in ids {
             let now = self.animated_properties(id);
             let was = self.animated.get(&id);
             moved |= now.iter().any(|p| rekeys(p) && !was.is_some_and(|w| w.contains(p)));
+            // (…by their longhands: a shorthand is among the names only for a longhand of it that is)
+            let longhand = |p: &&String| PropertyId::parse_enabled_for_all_content(p).map_or(true, |id| id.as_shorthand().is_err());
+            if now.iter().chain(was.into_iter().flatten()).filter(longhand).any(|p| !paint_only_property(p)) {
+                laid_out.push(id);
+            }
             if now.is_empty() {
                 self.animated.remove(&id);
             } else {
@@ -1569,7 +1577,7 @@ impl StyleEngine {
             self.animated.retain(|&id, _| arena.get(id).is_some());
             self.animated_pruned = self.animated.len();
         }
-        moved
+        (moved, laid_out)
     }
 
     // Whether an animation on `element` itself that sets one of `properties` is relevant (current, or in effect), and
@@ -2799,6 +2807,78 @@ impl RegisteredSpeculativePainters for NoPainters {
     }
 }
 
+// Whether `new` differs from `old` in anything a layout, a hit test or a rendered-ness read can see: anything but the
+// values that only paint — the background and the outline whole, and the colours, shadows and caret / scrollbar / cursor
+// looks of the rest. Every style struct is compared (a struct added to the engine is compared whole until it is listed
+// here), and the value flags are not: no layout code reads them. A restyle that moved none of it leaves every box where it
+// was (`Recalc::process_preorder`).
+fn layout_relevant_change(old: &ComputedValues, new: &ComputedValues) -> bool {
+    // (…a struct equal to `new`'s once its paint-only fields are `new`'s)
+    macro_rules! same_but {
+        ($get:ident $(, $field:ident)*) => {{
+            let (o, n) = (old.$get(), new.$get());
+            std::ptr::eq(o, n) || o == n || {
+                let mut o = o.clone();
+                $( o.$field = n.$field.clone(); )*
+                o == *n
+            }
+        }};
+    }
+    // (…and the background and the outline, which no layout reads at all, by nothing)
+    !(old.writing_mode == new.writing_mode
+        && old.effective_zoom == new.effective_zoom
+        && same_but!(get_box)
+        && same_but!(get_column)
+        && same_but!(get_counters)
+        && same_but!(get_font)
+        && same_but!(get_inherited_box)
+        && same_but!(get_inherited_svg)
+        && same_but!(get_inherited_table)
+        && same_but!(get_list)
+        && same_but!(get_margin)
+        && same_but!(get_padding)
+        && same_but!(get_page)
+        && same_but!(get_position)
+        && same_but!(get_svg)
+        && same_but!(get_table)
+        && same_but!(get_ui)
+        && same_but!(get_border, border_top_color, border_right_color, border_bottom_color, border_left_color)
+        && same_but!(get_effects, box_shadow)
+        && same_but!(get_inherited_text, color, text_shadow, text_emphasis_color, _webkit_text_fill_color, _webkit_text_stroke_color)
+        && same_but!(get_inherited_ui, accent_color, caret_color, cursor, scrollbar_color)
+        && same_but!(get_text, text_decoration_color, text_decoration_style))
+}
+
+// …and the longhands of those values, by the names an animation sets them under (`animated_properties`): an animation
+// of them alone moves no box (`reconcile_animated`).
+fn paint_only_property(name: &str) -> bool {
+    name.starts_with("background")
+        || name.starts_with("outline")
+        || matches!(
+            name,
+            "color"
+                | "border-top-color"
+                | "border-right-color"
+                | "border-bottom-color"
+                | "border-left-color"
+                | "border-block-start-color"
+                | "border-block-end-color"
+                | "border-inline-start-color"
+                | "border-inline-end-color"
+                | "box-shadow"
+                | "text-shadow"
+                | "text-emphasis-color"
+                | "-webkit-text-fill-color"
+                | "-webkit-text-stroke-color"
+                | "accent-color"
+                | "caret-color"
+                | "cursor"
+                | "scrollbar-color"
+                | "text-decoration-color"
+                | "text-decoration-style"
+        )
+}
+
 struct Recalc<'a> {
     context: SharedStyleContext<'a>,
 }
@@ -2816,16 +2896,30 @@ impl<'dom> DomTraversal<StyleNode<'dom>> for Recalc<'_> {
     ) {
         if let Some(el) = node.as_element() {
             let mut data = unsafe { el.ensure_data() };
-            // (…an element whose values the restyle REPLACED — its own, or its `::before` / `::after` box's — is a change a
-            // layout walk reads, stamped as a DOM write is, and one the JS side's memos hear of: `note_restyled`)
+            // (…an element whose values the restyle REPLACED — its own, or its `::before` / `::after` box's — in more than
+            // what only paints is a change a layout walk reads, stamped as a DOM write is, and one the JS side's memos hear
+            // of: `note_restyled`. A `:hover` that only recolours lays nothing out again: `layout_relevant_change`)
             let styles_of = |data: &style::data::ElementData| {
                 [data.styles.get_primary(), data.styles.pseudos.get(&PSEUDOS_GENERATED[0]), data.styles.pseudos.get(&PSEUDOS_GENERATED[1])]
-                    .map(|v| v.map(Arc::raw_ptr))
+                    .map(|v| v.cloned())
             };
             let before = styles_of(&data);
             recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
-            if styles_of(&data) != before {
-                el.arena().note_restyled(el.id);
+            let after = styles_of(&data);
+            let replaced = |o: &Option<Arc<ComputedValues>>, n: &Option<Arc<ComputedValues>>| match (o, n) {
+                (Some(o), Some(n)) => !Arc::ptr_eq(o, n),
+                (None, None) => false,
+                _ => true,
+            };
+            if before.iter().zip(&after).any(|(o, n)| replaced(o, n)) {
+                let laid_out = before.iter().zip(&after).any(|(o, n)| match (o, n) {
+                    (Some(o), Some(n)) => !Arc::ptr_eq(o, n) && layout_relevant_change(o, n),
+                    (None, None) => false,
+                    _ => true,
+                });
+                if laid_out {
+                    el.arena().note_restyled(el.id);
+                }
                 // (…and the images its values use are owed a fetch at the rendering update)
                 // (…a `display: none` element's pseudo-elements generate no box either, though their values are computed)
                 if let Some(style) = data.styles.get_primary().filter(|s| !s.get_box().clone_display().is_none()) {
