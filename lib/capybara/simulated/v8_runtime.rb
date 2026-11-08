@@ -1192,7 +1192,8 @@ module Capybara
       # whose `parent`/`top` point at the realm `parentId` identifies. This
       # runs re-entrantly inside the main ctx's eval — rusty services nested
       # requests while a host callback is in flight. Returns the realm's context
-      # id (or nil on failure — then the bridge keeps its same-realm fallback).
+      # id, or nil on failure: the frame then has no window, as one past the
+      # nesting limit has none (navigables.rs `MAX_FRAME_DEPTH`).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
         c.attach('__csim_createFrameRealm', ->(
