@@ -896,9 +896,10 @@ fn link_scheme(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Functio
     Ok(link_verdict_of(scope, r, &scheme_facts(content_type), crate::subresource_judge::SRC_SCHEME, &body, "no-cors", destinations))
 }
 
-// __dom.fetchClassicScript(el, doc, src, parser, host) -> `[ok, body, entry]`: HTML "fetch a classic script" for the
-// script element `el` (of document `doc`) whose src is `src` (resolved; null where it does not resolve, the raw
-// attribute its URL then): whether its response is one to run (`judge`: none for a network error, a status not ok, a
+// __dom.fetchClassicScript(el, doc, src, parser, host, plan, integrity) -> `[ok, body, entry]`: HTML "fetch a classic
+// script" for the script element `el` (of its preparation-time document `doc`) whose src is `src` (resolved; null where
+// it does not resolve, the raw attribute its URL then), its request as it was prepared — its `plan` (subresource_plan.rs)
+// and its `integrity` metadata, a later change of the element's attributes no part of it: whether its response is one to run (`judge`: none for a network error, a status not ok, a
 // refused response, a body its `integrity` does not match), its source text — decoded as its Content-Type's charset or
 // else the document's says (script.rs `classic_script_encoding`), the host's own text where that is its UTF-8 — and the
 // description of its Resource Timing entry for the bindings to file once the load completes, null where it files none
@@ -911,8 +912,10 @@ fn fetch_classic_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
     let src = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
     let parser = args.get(3).is_true();
+    let plan = args.get(5).uint32_value(scope).unwrap_or(0);
+    let integrity = args.get(6).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    let Ok((ok, body, entry)) = classic_script(scope, cid, host, el, doc, src, parser) else { return };
+    let Ok((ok, body, entry)) = classic_script(scope, cid, host, (el, doc, plan, integrity), src, parser) else { return };
     let body = match body {
         ScriptText::Host(host_text) => v8::Local::new(scope, host_text),
         ScriptText::Decoded(decoded) => text(scope, &decoded),
@@ -951,11 +954,10 @@ pub(crate) fn scheme_facts(content_type: String) -> crate::subresource_judge::Fa
 }
 
 #[allow(clippy::type_complexity)]
-fn classic_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId, doc: NodeId, src: Option<String>, parser: bool) -> Result<(bool, ScriptText, Option<v8::Global<v8::Value>>), Terminated> {
+fn classic_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, (el, doc, plan, integrity): (NodeId, NodeId, u32, String), src: Option<String>, parser: bool) -> Result<(bool, ScriptText, Option<v8::Global<v8::Value>>), Terminated> {
     use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_DATA};
     use crate::subresource_judge::{facts_of, judge, Consumer, Facts, J_CLASSIC_SCRIPT, SRC_ASSET, SRC_NETWORK, SRC_SCHEME, SRC_SW_SYNC, S_NO_BODY, V_CROSS_ORIGIN, V_OK};
     let none = || ScriptText::Decoded(String::new());
-    let integrity = realm(scope, cid).get(el).and_then(|n| n.plain_attr("integrity")).unwrap_or("").to_owned();
     let charset = call(scope, host, H_CHARSET, &[])?;
     let charset = text_of(scope, charset).unwrap_or_default();
     // (…`bytes` its body's, asked for where it has integrity metadata alone)
@@ -985,7 +987,6 @@ fn classic_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_
     };
     let started = now(scope, host)?;
     let arena = realm(scope, cid);
-    let plan = plan_in(arena, J_CLASSIC_SCRIPT, Some(el), Some(doc), None);
     let client = arena.get(el).map(|n| n.realm);
     let r = Request { cid, kind: J_CLASSIC_SCRIPT, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: integrity.clone(), preload: None, load: 0, holds: None, initiator: "script", started };
     // What answered: its verdict, its Content-Type, its entry's facts, and its body — served bytes (a preload's, a

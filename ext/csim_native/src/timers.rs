@@ -88,19 +88,20 @@ pub(crate) struct Timers {
 // The source of a platform task the event loop treats apart (`timerAdd`'s `source`): a crossing queue's turn (timers.js
 // `runCrossings`), which another realm's turn does not wait behind; a request's (xhr.js), which runs on with the step
 // its own realm's task disposed its context in — a message it posted to itself does not, its document no longer fully
-// active (Chrome and Firefox: a frame posting to itself and removing itself hears nothing); or a navigation's (`BEHIND`).
+// active (Chrome and Firefox: a frame posting to itself and removing itself hears nothing); or what goes on once a
+// response is in (`BEHIND`): a navigation's, an inserted script's fetch's.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Source {
     Turn,
     Network,
-    Navigation,
+    Response,
 }
 impl Source {
     fn of(code: i32) -> Option<Source> {
         match code {
             1 => Some(Source::Turn),
             2 => Some(Source::Network),
-            3 => Some(Source::Navigation),
+            3 => Some(Source::Response),
             _ => None,
         }
     }
@@ -198,7 +199,9 @@ impl Ord for Due {
 // a frame's navigation goes on with once the steps HTML "navigate" runs at once are done — its document asked and left,
 // the response in — which HTML runs in parallel with the event loop, a network's time away from the task that began it.
 // A zero timer queued after the `src` set comes first, and the chain it starts, until its nesting clamp moves it past
-// this instant (`old-t30 P0 old-pagehide`; Chrome `c0 … c4` before the pagehide, Firefox `c0 c1 c2`). The clock moving on
+// this instant (`old-t30 P0 old-pagehide`; Chrome `c0 … c4` before the pagehide, Firefox `c0 c1 c2`). So does a script a
+// script inserted, its fetch the network's: a zero timer set after the insertion runs before it (Chrome and Firefox
+// `ins inl dcl t0 dy`, csim-bench r13 `p_dyn_t0_0`). The clock moving on
 // ends the wait, a task due earlier running first; so does the event loop running `BEHIND_WAITS` tasks past it, due, at the
 // same instant, as real time would have let the response in by then: an `await new Promise(r => setTimeout(r))` loop polling
 // for the frame's next document nests in no timer and moves the clock no further, here (`step_past_behind`). Each task's
@@ -760,7 +763,7 @@ fn clock_followed(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 // timeout — an XHR's `timeout`, an AbortSignal's — falls due later the first time by what the realm's `Date` stands ahead
 // of this clock by (agent_clock.rs `Read::lead`), which its timeout is counted from, and runs no earlier on its realm's
 // clock than its timeout after it was set (`Timer::not_early`). A platform task of a source the event loop treats apart
-// is kept as one (`source`: 1 a crossing queue's turn, which neither, 2 a request's, 3 a navigation's, `BEHIND` those due
+// is kept as one (`source`: 1 a crossing queue's turn, which neither, 2 a request's, 3 a response's, `BEHIND` those due
 // with it — `Source`).
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
@@ -771,7 +774,7 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let task = args.get(4).is_true();
     let source = if task { args.get(6).int32_value(scope).and_then(Source::of) } else { None };
     let turn = match source {
-        Some(Source::Navigation) => BEHIND,
+        Some(Source::Response) => BEHIND,
         _ if task && args.get(5).is_true() => AHEAD,
         _ => IN_TURN,
     };

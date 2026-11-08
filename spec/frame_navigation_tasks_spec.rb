@@ -1266,7 +1266,9 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(log).to eq('stopped rs:complete')
     end
 
-    it 'runs no script a script inserted, stop() in the same task (Chrome its `error`, Firefox none)' do
+    # Its fetch begun as it was prepared, a stop() cancels it: a network error, its `error` — Chrome's; Firefox fires none
+    # here, both do where the stop() comes a task later (rvfn `z3_dyn_sync`, `z3_dyn_t0`).
+    it 'runs no script a script inserted, stop() in the same task, and fires its error' do
       log = page_log(<<~HTML)
         <script>
           const s = document.createElement('script');
@@ -1277,7 +1279,37 @@ RSpec.describe 'a frame navigation as tasks' do
           stop();
         </script>
       HTML
-      expect(log).to eq('rs:complete')
+      expect(log).to eq('se rs:complete')
+    end
+
+    # An inserted script's fetch lands in a task of its own, behind those due with it, the event loop going on as its server
+    # takes its time — not inside the script that inserted it (Chrome and Firefox, csim-bench r13 `p_dyn_t0_0`, `q_dyn*`).
+    INSERT = "{ const s = document.createElement('script'); s.src = '/slow/%d/%s.js'; %s document.head.append(s); }"
+    {
+      'a stop() a task later cancels'               => [
+        format(INSERT, 120, 'x', "s.onerror = () => L.push('se');") + "setTimeout(() => { stop(); L.push('stopped'); }, 0);",
+        'dcl stopped se rs:complete'
+      ],
+      'a zero timer set after it runs ahead of'     => [
+        format(INSERT, 0, 'x', '') + "setTimeout(() => L.push('t0'));",
+        'dcl t0 x.js-ran load rs:complete'
+      ],
+      'a timer runs inside, as its server sleeps,'  => [
+        format(INSERT, 150, 'x', '') + "setTimeout(() => L.push('t100'), 100);",
+        'dcl t100 x.js-ran load rs:complete'
+      ],
+      'a faster one inserted after it runs before'  => [
+        format(INSERT, 150, 's1', '') + format(INSERT, 0, 's2', ''),
+        'dcl s2.js-ran s1.js-ran load rs:complete'
+      ],
+      'of `async` false, a faster force-async one runs before' => [
+        format(INSERT, 150, 'o1', 's.async = false;') + format(INSERT, 0, 'o2', 's.async = false;') + format(INSERT, 0, 'fa', ''),
+        'dcl fa.js-ran o1.js-ran o2.js-ran load rs:complete'
+      ]
+    }.each do |what, (script, logged)|
+      it "runs a script a script inserted as its fetch lands: #{what} it" do
+        expect(page_log("<script>#{script}</script>")).to eq(logged)
+      end
     end
 
     # DOMContentLoaded waits for the list of scripts to execute after parsing, which an `async` one is not on. Its fetch takes
