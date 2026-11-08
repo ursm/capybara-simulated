@@ -17,7 +17,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError, Weak};
 
-use magnus::{value::ReprValue, RHash, RString, Symbol, TryConvert};
+use magnus::{value::ReprValue, RArray, RHash, RString, Symbol, TryConvert};
 
 use crate::navigation_plan::Traversal;
 
@@ -228,6 +228,16 @@ struct State {
     shown_name: Option<Vec<u16>>,
 }
 
+// A step applied that keeps the top-level navigable's document (`Traversable::begin_step`): the history as it stood, each
+// navigable whose document the step makes again with the entry it was at, the step it was at, and whether the step moves
+// a navigable within its document — what the step comes to once the host has made those documents or none (`end_step`).
+struct Stepping {
+    state: State,
+    at: HashMap<u32, u64>,
+    before: i64,
+    within: bool,
+}
+
 // A frame's navigation under way — HTML "navigate"'s history entry, which only the document it makes puts in the session
 // history ("finalize a cross-document navigation"): the URL it is made at, its navigable's parent, whether it takes the
 // place of the active entry (a `location.replace`, a navigation of a document not completely loaded yet, the first in
@@ -262,9 +272,9 @@ struct Traversable {
     state: State,
     made: u64,
     build: u32,
-    // The history as it stood before a traversal of the page's frames that may end in no document (a download, a
-    // hand-off).
-    saved: Option<State>,
+    // A traversal's step applied that keeps its top-level navigable's document (`begin_step`), until the host has made
+    // the documents of the frames it moves, or none (`end_step`).
+    stepping: Option<Stepping>,
     // Each frame's navigation under way, by its navigable — one at a time, a navigation begun ending the one before it
     // (HTML "navigate") — and the number the next one is given.
     navigations: HashMap<u32, FrameNavigation>,
@@ -980,6 +990,48 @@ impl Traversable {
         }
         self.end_traversal();
     }
+    // A traversal's step `step` applied that keeps its top-level navigable's document — `changes`, the navigables it
+    // moves (`plan`), each moved within its document or made the document of its entry again (HTML "apply the history
+    // step"): the history as it stood kept for `end_step`; the moves within a document returned, each navigable's with
+    // its entry's URL and classic history API state and whether its fragment changed (HTML "update document for history
+    // step application": the location the URL, `popstate` with the state, then a `hashchange`, the host's).
+    fn begin_step(&mut self, step: i64, changes: &[Change]) -> Vec<(u32, String, Option<Arc<[u8]>>, bool)> {
+        let build = self.build;
+        let at = changes.iter().filter(|c| !c.2).filter_map(|&(nav, ..)| self.state.current_entry(nav, build).map(|e| (nav, e.id))).collect();
+        let from: HashMap<u32, String> = changes.iter().filter(|c| c.2).filter_map(|&(nav, ..)| self.state.current_entry(nav, build).map(|e| (nav, e.url.clone()))).collect();
+        let within = changes.iter().any(|c| c.2);
+        self.stepping = Some(Stepping { state: self.state.clone(), at, before: self.state.current, within });
+        self.go_to(step);
+        let entry = |id| self.state.entry(id);
+        changes
+            .iter()
+            .filter(|c| c.2)
+            .filter_map(|&(nav, id, _)| entry(id).map(|e| (nav, e.url.clone(), e.data.state.clone(), from.get(&nav).is_none_or(|f| fragment(f) != fragment(&e.url)))))
+            .collect()
+    }
+    // …and its frames' documents made but those of `none` — of the navigables `attempted` it was to make them of: the step
+    // stands, a navigable whose document was not made held at the entry it was at (HTML "apply the history step": its
+    // update-only, the navigable not updated) — but one none of whose documents was made, moving nothing within a
+    // document, leaves the history as it stood (Chrome and Firefox stay where they were).
+    fn end_step(&mut self, attempted: usize, none: &[u32]) {
+        let Some(Stepping { state, at, before, within }) = self.stepping.take() else { return };
+        if !within && none.len() == attempted {
+            self.state = state;
+            return;
+        }
+        for nav in none {
+            if let Some(&id) = at.get(nav) {
+                self.hold(*nav, id, before);
+            }
+        }
+    }
+    // Navigable `nav` left at `entry` — the one it was at at `step` — by the step just applied, its target entry's
+    // document not made.
+    fn hold(&mut self, nav: u32, id: u64, step: i64) {
+        let build = self.build;
+        self.state.held.insert(nav, (id, step));
+        self.state.drop_stale_holds(build);
+    }
     // How many tasks asked of it wait (`Asked`).
     fn pending(&self) -> usize {
         usize::from(self.asked.planned.is_some()) + usize::from(self.asked.close_due)
@@ -1332,36 +1384,32 @@ impl SessionHistory {
     pub(crate) fn go_to(&self, step: i64) {
         self.lock().go_to(step);
     }
-    // #step -> the current step.
+    // #begin_step(step, changes) -> [[navigable, url, state, hashchange], …] / #end_step(attempted, none): a traversal's
+    // step that keeps the top-level navigable's document applied, and its frames' documents made but those of navigables
+    // `none` of the `attempted` ones (`Traversable::begin_step`, `end_step`; browser.rb `traverse_navigables`).
+    fn begin_step(ruby: &magnus::Ruby, rb_self: &Self, step: i64, changes: Vec<Change>) -> Result<RArray, magnus::Error> {
+        let moves = rb_self.lock().begin_step(step, &changes);
+        let out = ruby.ary_new();
+        for (nav, url, state, hashchange) in moves {
+            let state = state.map(|s| ruby.str_from_slice(&s));
+            out.push((nav, url, state, hashchange))?;
+        }
+        Ok(out)
+    }
+    fn end_step(&self, attempted: usize, none: Vec<u32>) {
+        self.lock().end_step(attempted, &none);
+    }
+    #[cfg(test)]
+    fn hold(&self, nav: u32, id: u64, step: i64) {
+        self.lock().hold(nav, id, step);
+    }
+    #[cfg(test)]
     fn step(&self) -> i64 {
         self.lock().state.current
-    }
-    // #hold(navigable, entry, step): the navigable left at `entry` — the one it was at at `step` — by the traversal just
-    // applied, its target entry's document not made (HTML "apply the history step").
-    fn hold(&self, nav: u32, id: u64, step: i64) {
-        let mut t = self.lock();
-        let build = t.build;
-        t.state.held.insert(nav, (id, step));
-        t.state.drop_stale_holds(build);
     }
     // #rebuilt: the page's document made anew — its frames' navigables new ones (`Traversable::rebuilt`).
     fn rebuilt(&self) {
         self.lock().rebuilt();
-    }
-    // #save / #restore -> whether there was one / #forget: the history as it stands, kept for a traversal of its frames
-    // whose documents may all be made of none (browser.rb `traverse_navigables`).
-    fn save(&self) {
-        let mut t = self.lock();
-        t.saved = Some(t.state.clone());
-    }
-    fn restore(&self) -> bool {
-        let mut t = self.lock();
-        let Some(state) = t.saved.take() else { return false };
-        t.state = state;
-        true
-    }
-    fn forget(&self) {
-        self.lock().saved = None;
     }
     // The history as it stands, kept (`Kept`) — and put back (navigation_commit.rs: a traversal's, as it began).
     pub(crate) fn keep(&self) -> Kept {
@@ -1448,7 +1496,7 @@ impl SessionHistory {
         t.state = State::new();
         t.url = None;
         t.passed.clear();
-        t.saved = None;
+        t.stepping = None;
         t.leaving = None;
         t.navigations.clear();
         t.ongoing.clear();
@@ -1701,12 +1749,9 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
     class.define_method("clear_queued", method!(SessionHistory::clear_queued, 0))?;
     class.define_method("go_to", method!(SessionHistory::go_to, 1))?;
-    class.define_method("hold", method!(SessionHistory::hold, 3))?;
-    class.define_method("step", method!(SessionHistory::step, 0))?;
+    class.define_method("begin_step", method!(SessionHistory::begin_step, 2))?;
+    class.define_method("end_step", method!(SessionHistory::end_step, 2))?;
     class.define_method("rebuilt", method!(SessionHistory::rebuilt, 0))?;
-    class.define_method("save", method!(SessionHistory::save, 0))?;
-    class.define_method("restore", method!(SessionHistory::restore, 0))?;
-    class.define_method("forget", method!(SessionHistory::forget, 0))?;
     class.define_method("take_leaving", method!(SessionHistory::take_leaving, 0))?;
     class.define_method("commit_frame_navigation", method!(SessionHistory::commit_frame_navigation_for_ruby, 2))?;
     class.define_method("abandon_frame_navigation", method!(SessionHistory::abandon_frame_navigation, 2))?;
@@ -2002,16 +2047,43 @@ mod tests {
         assert_eq!(h.active(3), Some(cz));
     }
 
+    // A step none of whose documents is made, moving nothing within a document, leaves the history as it stood; one that
+    // makes some holds the navigables of the others at their entries.
     #[test]
-    fn a_saved_history_is_restored() {
+    fn a_step_none_of_whose_documents_is_made_is_no_step() {
         let h = history();
-        let a = h.push(TOP, TOP, "/a".into(), false, Data::default()).unwrap();
-        h.save();
-        h.push(TOP, TOP, "/dl".into(), false, Data::default());
-        assert!(h.restore());
-        assert_eq!(h.active(TOP), Some(a));
-        assert_eq!(h.length(), 1);
-        assert!(!h.restore());
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
+        let f1 = h.seed(1, TOP, "/f1".into()).unwrap();
+        let g1 = h.seed(2, TOP, "/g1".into()).unwrap();
+        let f2 = h.push(1, TOP, "/f2".into(), false, Data::default()).unwrap();
+        let g2 = h.push(2, TOP, "/g2".into(), false, Data::default()).unwrap();
+        let before = h.step();
+        let (step, changes) = h.plan(-1).unwrap();
+        assert!(h.lock().begin_step(step, &changes).is_empty());
+        h.lock().end_step(1, &[2]);
+        assert_eq!((h.step(), h.active(1), h.active(2)), (before, Some(f2), Some(g2)));
+        let (step, changes) = h.plan(-2).unwrap();
+        h.lock().begin_step(step, &changes);
+        h.lock().end_step(2, &[1]);
+        assert_eq!((h.active(1), h.active(2)), (Some(f2), Some(g1)));
+        assert_ne!(h.step(), before);
+        assert_ne!(f1, g1);
+    }
+
+    // …and the moves within a document it makes are returned, with their entries' URLs and states and whether the
+    // fragment changed.
+    #[test]
+    fn a_step_returns_its_moves_within_a_document() {
+        let h = history();
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
+        h.push(TOP, TOP, "/a#x".into(), true, Data { state: Some(Arc::from(&b"s"[..])), ..Data::default() });
+        h.push(TOP, TOP, "/a?q#x".into(), true, Data::default());
+        let (step, changes) = h.plan(-1).unwrap();
+        let moves = h.lock().begin_step(step, &changes);
+        assert_eq!(moves, vec![(TOP, "/a#x".to_owned(), Some(Arc::from(&b"s"[..])), false)]);
+        let (step, changes) = h.plan(-1).unwrap();
+        assert!(h.lock().begin_step(step, &changes)[0].3);
+        h.lock().end_step(0, &[]);
     }
 
     // A frame's navigation makes its entry as its document is made, and none where it makes none — the one it ended, its
@@ -2187,12 +2259,15 @@ mod tests {
     }
 
     #[test]
-    fn a_saved_history_keeps_the_data_it_had() {
+    fn a_step_left_keeps_the_data_it_had() {
         let h = history();
-        let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None, None, None], ..Default::default() }).unwrap();
-        h.save();
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
+        h.seed(1, TOP, "/f1".into());
+        let a = h.push(1, TOP, "/f2".into(), false, Data { texts: [None, Some("/r".into()), None, None, None, None], ..Default::default() }).unwrap();
+        let (step, changes) = h.plan(-1).unwrap();
+        h.lock().begin_step(step, &changes);
         Arc::make_mut(&mut h.lock().state.entry_mut(a).unwrap().data).texts[1] = Some("/changed".into());
-        assert!(h.restore());
+        h.lock().end_step(1, &[1]);
         assert_eq!(h.lock().state.entry(a).unwrap().data.text("referer"), Some("/r"));
     }
 }

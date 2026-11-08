@@ -2527,7 +2527,10 @@ module Capybara
       # A traversal of session history `history` to `step` that keeps its top-level navigable's document — the page's, or
       # that of a window `window.open` made in this isolate, realm `top` — applied: `changes` (session_history.rs
       # `Change`) each navigable whose active entry it moves, one moved within its document by its location, a `popstate`
-      # and a `hashchange` (`traverse_same_document`), a frame's made again of its entry.
+      # and a `hashchange` (`traverse_same_document`), a frame's made again of its entry. What the step does to the
+      # session history is the engine's (session_history.rs `begin_step`, `end_step`): applied as it begins, and — once the
+      # frames' documents are made, or none — left standing, a frame whose document was not made held at its own entry, or
+      # taken back where none was (HTML "apply the history step").
       private def traverse_navigables(history, step, changes, top: 0)
         outer = [@traversing_frames, @prompted_frames]
         # (…its frames' entries, each frame's document made again — the one it leaves snapshotted first, so a traversal
@@ -2541,23 +2544,11 @@ module Capybara
         frames.select! {|_, _, realm| realm.nil? || (prompt_to_unload_frame(realm, traversal: true) && @runtime.frame_realm_alive?(realm)) }
         @prompted_frames = frames.filter_map {|_, _, realm| realm }.to_set
         frames.each {|_, _, realm| leave_frame_entry(realm, urls[realm]) if realm }
-        # (…the history as it stood kept, for a step none of whose documents is made after all — every frame's entry's
-        # response making none, a 204's, a download's: `frame_navigation_made_no_document` — which then leaves the frames
-        # and the step where they were; one whose others' are made applies, the frame whose is not staying at its own
-        # document, as HTML "apply the history step" has it)
-        history.save
+        # (…a frame whose entry's response makes none — a 204's, a download's — told: `frame_navigation_made_no_document`)
         @traversing_frames = {none: []}
-        at     = frames.to_h {|nav, _, _| [nav, history.active(nav)] }
-        before = history.step
-        history.go_to(step)
-        changes.each {|nav, id, same_document| traverse_same_document(history, nav, id, top: top) if same_document }
+        history.begin_step(step, changes).each {|nav, url, state, hashchange| traverse_same_document(nav, url, state, hashchange, top: top) }
         frames.each {|_, id, realm| reload_frame_to_entry(realm, history.entry(id)) if realm && @runtime.frame_realm_alive?(realm) }
-        if changes.all? {|_, _, same_document| !same_document } && @traversing_frames[:none].size == frames.size
-          history.restore
-        else
-          history.forget
-          frames.each {|nav, _, realm| history.hold(nav, at[nav], before) if at[nav] && @traversing_frames[:none].include?(realm) }
-        end
+        history.end_step(frames.size, frames.filter_map {|nav, _, realm| nav if @traversing_frames[:none].include?(realm) })
       ensure
         # (…those of a traversal it ran within — a frame's load taking another window's — as that one left them)
         @traversing_frames, @prompted_frames = outer
@@ -2576,19 +2567,18 @@ module Capybara
         @runtime.realm_call(realm, '__csimApplyOwnTraversals', true) if realm.zero? || @runtime.frame_realm_alive?(realm)
       end
 
-      # Navigable `nav` of session history `history` (0 its top-level one: the page's, or window realm `top`'s) traversed
-      # to its entry `id` of the document it is at: its location the entry's URL, a `popstate` with its state, and a
-      # `hashchange` queued where the fragment moved.
-      private def traverse_same_document(history, nav, id, top: 0)
+      # Navigable `nav` (0 its top-level one: the page's, or window realm `top`'s) moved within the document it is at to an
+      # entry at `url` of classic history API state `state` (HTML "update document for history step application"): its
+      # location the URL, a `popstate` with the state, and — `hashchange`, its fragment moved — a `hashchange` queued.
+      private def traverse_same_document(nav, url, state, hashchange, top: 0)
         realm = nav.zero? ? top : navigable_realm(nav)
         return unless realm && (realm.zero? || @runtime.frame_realm_alive?(realm))
 
-        entry   = history.entry(id)
         old_url = realm.zero? ? page_url : frame_realm_url(realm)
-        self.page_url = entry[:url] if realm.zero?
-        @runtime.realm_call(realm, '__csimUpdateLocation', entry[:url])
-        @runtime.realm_call(realm, '__csimDispatchPopState', entry[:state])
-        @runtime.realm_call(realm, '__csimQueueHashChange', old_url, entry[:url]) if fragment_of(old_url) != fragment_of(entry[:url])
+        self.page_url = url if realm.zero?
+        @runtime.realm_call(realm, '__csimUpdateLocation', url)
+        @runtime.realm_call(realm, '__csimDispatchPopState', state)
+        @runtime.realm_call(realm, '__csimQueueHashChange', old_url, url) if hashchange
       end
 
       # The history entry the page's document leaves — noted by the engine as a navigation of it begins, before its entry is
@@ -2609,11 +2599,6 @@ module Capybara
       def restore_form_state(id)
         return unless (state = @session_history.entry(id)[:form_state])
         @runtime.call('__csimRestoreFormState', state)
-      end
-
-      # A URL's fragment — nil where it has none, which an empty one is not.
-      def fragment_of(url)
-        url.to_s.include?('#') ? url.to_s.split('#', 2)[1] : nil
       end
 
       # `is_reload` distinguishes a RELOAD of the current entry (`refresh`) from a
@@ -7303,12 +7288,12 @@ module Capybara
           from_document(download_realm.to_i) { save_downloaded_response(url, {'content-type' => mime}, [bytes], sandbox: sandbox) } if mime && download_realm
           return {'no_document' => true}
         end
-        navigation_site = blob_partition_site(container_realm.to_i)
-        if defer_ok && sw_registered? && sw_activating_controller_for(url, navigation_site)
+        navigation_site = blob_partition_site(container_realm.to_i) if sw_registered?
+        if defer_ok && navigation_site && sw_activating_controller_for(url, navigation_site)
           Native.sw_defer_navigation(@sw_partition)
           return {'deferred' => true}
         end
-        await_sw_activation(url, navigation_site) if !defer_ok && sw_registered?
+        await_sw_activation(url, navigation_site) if !defer_ok && navigation_site
         initiator = referrer_source
         # (…referred by the document that holds the container — a srcdoc one's its own container's — under the policy the
         # container's `referrerpolicy` attribute sets, else that document's: `realm_referrer_initiator`)
@@ -7316,8 +7301,9 @@ module Capybara
           initiator, document_policy = realm_referrer_initiator(container_realm.to_i)
           referrer_policy = document_policy if referrer_policy.to_s.empty?
         end
-        # (…a navigation another document begins — a reload by the document reloading — by that one, under the policy it navigates under (a link's `rel` / `referrerpolicy`: `link_policy`), else
-        # its own: Chrome — the container's attribute none of its)
+        # (…a navigation another document begins — a reload by the document reloading — by that one, under the policy it
+        # navigates under (a link's `rel` / `referrerpolicy`: `link_policy`), else its own: Chrome — the container's
+        # attribute none of its)
         source_realm = container_realm
         if initiator_realm && (initiator_realm.to_i.zero? || @runtime.frame_realm_present?(initiator_realm.to_i))
           initiator, referrer_policy = realm_referrer_initiator(initiator_realm.to_i)
@@ -8335,7 +8321,7 @@ module Capybara
         history
       end
       # …and the document that response makes, made by this window — a Browser of its own, its first — at `url`: the
-      # response's status and headers, its body, and what the navigation made of it (`made`, navigate_window_realm's: the
+      # response's status and headers, its body, and what the navigation made of it (`made`, commit_window_navigation's: the
       # Referer its request sent, and its origin, `null` an error document's — a new opaque one — its
       # Content-Security-Policy and Refresh the response headers' own, as the page's commit reads them). Its entry is in
       # the window's session history already, as the navigation committed it (navigation_commit.rs).
@@ -11202,7 +11188,19 @@ module Capybara
               next from_document(source) { submit_routed_form(source, spec, {to: source == realm_id ? :self : :window, window: realm_id, referrer: referrer}) }
             end
 
-            navigate_window_realm(realm_id, kind, plan)
+            history, key = window_history(realm_id), @runtime.window_realm_meta.dig(realm_id, :window_key) if kind == 'traverse'
+            begin
+              navigate_window_realm(realm_id, kind, plan)
+            ensure
+              # (…a traversal's navigable traversing no more, whichever became of it — its entry gone since, its document
+              # made of none — and those queued behind it, which waited for it, applied from the step it went to, as the
+              # page's are: `consume_planned_traversal`)
+              if history
+                history.end_traversal
+                window = window_realm_made(key)
+                @runtime.realm_call(window, '__csimApplyOwnTraversals', true) if window && @runtime.frame_realm_alive?(window)
+              end
+            end
           rescue StandardError => e
             log_console('warn', "window realm self-navigation failed: #{e.message}")
           end
@@ -11322,8 +11320,12 @@ module Capybara
       private def window_navigation_fetch(realm_id, history, url, post, handling, traversal, replayed, initiator, source, policy, activated)
         replay = REPLAYS.include?(handling)
         if initiator && (initiator.to_i.zero? || @runtime.frame_realm_present?(initiator.to_i))
-          own_source, own_policy = realm_referrer_initiator(initiator.to_i)
-          source, policy = handling == 'traverse' ? replayed.values_at(:referer, :referrer_policy) : [own_source, policy.to_s.empty? ? own_policy : policy]
+          if handling == 'traverse'
+            source, policy = replayed.values_at(:referer, :referrer_policy)
+          else
+            source, own = realm_referrer_initiator(initiator.to_i)
+            policy      = own if policy.to_s.empty?
+          end
           origin_url = initiating_url(initiator)
           initiating = initiating_document(initiator)
         elsif replay
@@ -11353,7 +11355,8 @@ module Capybara
           sw:                            ([true, nil] if sw_registered?),
           reloaded_cross_site:           (replayed&.fetch(:cross_site, nil) if traversed),
           client_origin:                 (document_origin(realm_id) if traversed),
-          traversed_initiator:           (origin if traversed),
+          # (…a traversal's cookies judged by the initiator origin its entry's document state keeps)
+          traversed_initiator:           (traversed ? origin : (replayed[:origin] if handling == 'traverse')),
           traversable:                   history.id,
           commit:                        {
             handling:       handling,

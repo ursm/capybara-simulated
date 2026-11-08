@@ -96,13 +96,15 @@ impl Nav {
     // 2026-10-31: a popup a's frame under b's page opens to a gets the Strict cookie in both); same-site for a navigation
     // no document began (a request of no client). A frame's navigation is cross-site by the documents above the frame
     // as well (`Nav::cookies`).
-    // A traversal's, begun by no document, by the initiator origin its entry's document state keeps (HTML "create
-    // navigation params by fetching": "set request's top-level navigation initiator origin to entry's document state's
-    // initiator origin").
+    // A traversal's by the initiator origin its entry's document state keeps, not the document it is made by (HTML
+    // "create navigation params by fetching": "set request's top-level navigation initiator origin to entry's document
+    // state's initiator origin").
     fn initiator_cross_site(&self, target: &str) -> bool {
         self.initiator_opaque
-            || fetch_site(self.initiator.as_deref().unwrap_or(""), target) == "cross-site"
-            || self.traversed_initiator.as_deref().is_some_and(|origin| cross_site_for_cookies(Some(origin), target))
+            || match self.traversed_initiator.as_deref() {
+                Some(origin) => cross_site_for_cookies(Some(origin), target),
+                None => fetch_site(self.initiator.as_deref().unwrap_or(""), target) == "cross-site",
+            }
     }
 }
 
