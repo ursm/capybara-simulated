@@ -424,7 +424,9 @@ fn script_on_stack_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallb
     if scope.get_current_context().get_microtask_queue().is_running_microtasks() {
         return rv.set_bool(true);
     }
-    // (…asked of as many frames as the bindings' own go beneath a callback, and of more where they all were)
+    // (…asked of as many frames as the bindings' own go beneath a callback, and of more where they all were: a trace is
+    // taken of the frames there are, so a limit above the stack costs nothing, one below it a second trace — the parser's
+    // script run at its end tag is some twenty frames down, its `load`'s checkpoint asking from there)
     let mut limit = STACK_FRAMES;
     loop {
         let Some(trace) = v8::StackTrace::current_stack_trace(scope, limit) else { return rv.set_bool(true) };
@@ -441,7 +443,7 @@ fn script_on_stack_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallb
         limit *= 4;
     }
 }
-const STACK_FRAMES: usize = 16;
+const STACK_FRAMES: usize = 32;
 // Whether `frame` is the driver's own code: the snapshot's (`<snapshot>`), the host's script runners' (`<eval>`), or of
 // no script name — never code evaluated, which is the page's. Any other name is a page's script, whatever it holds (a
 // `data:` URL's spaces: `page_script` reads names out of a stack's text, which these come from V8 apart from).
