@@ -220,6 +220,12 @@ fn state<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
     Some(unsafe { &(*(handle.as_ref() as *const XhrHandle)).state })
 }
 
+// The request the XHR `value` holds the state of sends (`Request::of_xhr`), or None for anything that is no XHR's state.
+pub(crate) fn request_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<crate::request_state::Request> {
+    let s = state(scope, value)?.borrow();
+    Some(crate::request_state::Request::of_xhr(String::from_utf16_lossy(&s.method), String::from_utf16_lossy(&s.url), s.with_credentials))
+}
+
 // `__dom.XhrBase`: the constructor of the isolate's template, made once per isolate.
 fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Function>> {
     scope.get_cpp_heap()?;

@@ -63,6 +63,9 @@ pub(crate) struct FetchPlan {
     // The headers the user agent set itself where a CORS-preflight would not ask about them (lowercased names): an
     // EventSource reconnection's `Last-Event-ID` (`ua_headers`).
     ua_headers: Vec<String>,
+    // Whether the request's URL list had more than one URL before the network took it: a service worker's redirects
+    // before it fell through.
+    followed: bool,
     // The session's CORS-preflight cache and authentication entries (cors.rs, http_auth.rs).
     preflight_cache: u64,
     auth_entries: u64,
@@ -116,7 +119,8 @@ impl FetchPlan {
     // (nil a mode-less internal load's), `credentials`, `referrer_policy`, `referrer` (nil its client's URL, '' none),
     // `cache`, `initiator` (a worker re-issuing a navigation: the request's origin whatever its mode), `site_seed`,
     // `origin_null`, `redirect_taint` (the redirect-taint its URL list has so far, a network leg's after a service worker
-    // answered a hop with a redirect: referrer.rs `RedirectTaint::name`, nil none), `client_url`, `client_origin`,
+    // answered a hop with a redirect: referrer.rs `RedirectTaint::name`, nil none), `redirected` (whether that list has
+    // more than one URL), `client_url`, `client_origin`,
     // `ancestors`, `cookie_cross_site`, `navigation_cross_site`, `nav_dest`,
     // `dest`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil
     // for none), `ua_headers` (the names of headers the user agent set itself that no CORS-preflight asks about, nil for
@@ -207,6 +211,7 @@ impl FetchPlan {
             conditional,
             challenge,
             ua_headers,
+            followed: flag("redirected")?,
             preflight_cache: sessions.0,
             auth_entries: sessions.1,
             st: RefCell::new(State {
@@ -242,7 +247,7 @@ impl FetchPlan {
         self.st.borrow().chain.method.clone()
     }
     fn redirected(&self) -> bool {
-        self.st.borrow().chain.redirected()
+        self.followed || self.st.borrow().chain.redirected()
     }
     fn url_list(&self) -> Vec<String> {
         self.st.borrow().chain.url_list()

@@ -175,7 +175,7 @@ impl HeaderList {
         pairs
     }
     // The list as it goes on the wire: each header a field of its own, in the order appended, by the name it goes by.
-    fn wire(&self) -> Vec<(&[u8], &[u8])> {
+    pub(crate) fn wire(&self) -> Vec<(&[u8], &[u8])> {
         self.headers.iter().map(|h| (&h.name[..], &h.value[..])).collect()
     }
     // A copy of `from`'s list into this one — "filled" through this one's guard where `refill` (a non-empty RequestInit
@@ -256,7 +256,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 
 // The list `value` wraps, or None for anything that is no header list's object (the brand first: `unwrap` reads garbage
 // from an object it never wrapped).
-fn list<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'h RefCell<HeaderList>> {
+pub(crate) fn list<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'h RefCell<HeaderList>> {
     let obj = v8::Local::<v8::Object>::try_from(value).ok().filter(|o| o.internal_field_count() == 1)?;
     let field = obj.get_internal_field(scope, 0)?;
     let brand = v8::Local::<v8::Value>::try_from(field).ok().and_then(|v| v8::Local::<v8::External>::try_from(v).ok())?;

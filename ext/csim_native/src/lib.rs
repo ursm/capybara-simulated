@@ -87,6 +87,7 @@ mod html_parse;
 mod data_url;
 mod declarative_refresh;
 mod event_stream;
+mod fetch_request;
 mod fetch_rules;
 mod headers;
 mod idb;

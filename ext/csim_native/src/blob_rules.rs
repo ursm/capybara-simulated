@@ -21,12 +21,24 @@ pub(crate) fn slice_range(size: f64, start: Option<f64>, end: Option<f64>) -> (f
     (from, (to - from).max(0.0))
 }
 
-// Whether a realm of origin `here` may revoke or resolve `url`: where the URL names an opaque origin — or none, a URL
-// that does not parse — and else where it is the realm's own (an opaque one's, a sandboxed frame's, is never another
-// origin's: Chrome refuses it the page's).
-pub(crate) fn usable(url: &str, here: &str) -> bool {
+// Whether a realm of origin `here` may revoke or resolve `url` (File API "check for same-partition blob URL usage": the
+// storage keys of the environment that made it and of the realm, whose origins the URL and `here` serialize): where the
+// URL names no origin — a URL that does not parse — and else where it names the realm's own; an opaque one, which
+// serializes every opaque origin alike, where `same_opaque` says the realm's is the one that made it. (Chrome and Firefox
+// refuse a page a sandboxed frame's `blob:null/…` URL, and the frame its page's, in every request mode.)
+pub(crate) fn usable(url: &str, here: &str, same_opaque: impl FnOnce() -> bool) -> bool {
     let theirs = ada_url::Url::parse(url, None).ok().map(|u| u.origin().to_owned()).unwrap_or_default();
-    theirs.is_empty() || theirs == "null" || theirs == here
+    theirs.is_empty() || (theirs == here && (theirs != "null" || same_opaque()))
+}
+// …realm `cid`, of the URL `key` (`entry_key`) as this isolate's store knows its maker: an opaque origin the realm's
+// where the realm that made it has the same key (realm_location.rs `origin_key`: a document that inherited it shares
+// it) — or, for one another context made (a worker's), where the realm's is opaque too.
+pub(crate) fn usable_by(arena: &mut crate::dom::RealmArena, cid: i32, key: &str) -> bool {
+    let maker = arena.blob_urls.maker(key);
+    let here = arena.enter(cid).location.origin().to_owned();
+    let usable = usable(key, &here, || maker.is_none_or(|m| crate::referrer::known_origin_key(arena, m) == crate::referrer::known_origin_key(arena, cid)));
+    arena.enter(cid);
+    usable
 }
 
 // A string part of a Blob's (§3.1 "process blob parts"), as its bytes: UTF-8 encoded — a lone surrogate U+FFFD, the
@@ -124,10 +136,10 @@ fn usable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let url = args.get(0).to_rust_string_lossy(scope);
     let cid = crate::dom::realm_id(scope, &args);
     let window = args.get(1).integer_value(scope).and_then(|w| u64::try_from(w).ok());
-    let arena = crate::dom::realm(scope, cid);
-    let here = arena.location.origin().to_owned();
-    let site = window.and_then(|w| crate::blob_registry::site_of(w, &crate::blob_urls::entry_key(&url)));
-    rv.set_bool(usable(&url, &here) && same_partition(arena, cid, site.as_deref()));
+    let key = crate::blob_urls::entry_key(&url);
+    let site = window.and_then(|w| crate::blob_registry::site_of(w, &key));
+    let usable = usable_by(&mut crate::dom::dom(scope).arena, cid, &key) && same_partition(crate::dom::realm(scope, cid), cid, site.as_deref());
+    rv.set_bool(usable);
 }
 
 #[cfg(test)]
@@ -144,10 +156,13 @@ mod tests {
         assert_eq!(slice_range(10.0, Some(-3.0), None), (7.0, 3.0));
         assert_eq!(slice_range(10.0, Some(8.0), Some(2.0)), (8.0, 0.0));
         assert_eq!(slice_range(10.0, Some(-20.0), Some(20.0)), (0.0, 10.0));
-        assert!(usable("blob:http://a.test/x", "http://a.test"));
-        assert!(!usable("blob:http://a.test/x", "http://b.test"));
-        assert!(usable("blob:null/x", "http://b.test"));
-        assert!(!usable("blob:http://a.test/x", "null"));
+        let anyone = || true;
+        assert!(usable("blob:http://a.test/x", "http://a.test", anyone));
+        assert!(!usable("blob:http://a.test/x", "http://b.test", anyone));
+        assert!(!usable("blob:null/x", "http://b.test", anyone));
+        assert!(!usable("blob:http://a.test/x", "null", anyone));
+        assert!(usable("blob:null/x", "null", anyone) && !usable("blob:null/x", "null", || false));
+        assert!(usable("not a url", "http://a.test", anyone));
     }
 
     #[test]

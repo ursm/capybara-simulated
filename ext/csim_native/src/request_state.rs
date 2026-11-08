@@ -16,30 +16,30 @@ static BRAND: u8 = 0;
 
 #[derive(Clone)]
 pub(crate) struct Request {
-    url: String,
-    method: String,
-    mode: String,
-    credentials: String,
-    cache: String,
-    redirect: String,
+    pub(crate) url: String,
+    pub(crate) method: String,
+    pub(crate) mode: String,
+    pub(crate) credentials: String,
+    pub(crate) cache: String,
+    pub(crate) redirect: String,
     // "about:client", the empty string for no referrer, or a URL.
-    referrer: String,
-    referrer_policy: String,
-    integrity: String,
-    keepalive: bool,
-    destination: String,
-    reload_navigation: bool,
-    history_navigation: bool,
+    pub(crate) referrer: String,
+    pub(crate) referrer_policy: String,
+    pub(crate) integrity: String,
+    pub(crate) keepalive: bool,
+    pub(crate) destination: String,
+    pub(crate) reload_navigation: bool,
+    pub(crate) history_navigation: bool,
     // A navigation's: the navigating document's origin (none for an opaque one), the redirect chain's latched
     // Sec-Fetch-Site seed and Origin taint, the cookie verdict of the frame it commits into (RFC 6265bis
     // site-for-cookies) — a property of the TARGET frame, which a non-empty init does not reset — and whether the hop it
     // intercepted is cross-site for cookies (navigation_fetch.rs `Nav::cookies`), which a re-issue of it is and a
     // non-empty init resets: the request is then the worker's own.
-    initiator: Option<String>,
-    site_seed: Option<String>,
-    origin_null: bool,
-    cookie_cross_site: bool,
-    navigation_cross_site: bool,
+    pub(crate) initiator: Option<String>,
+    pub(crate) site_seed: Option<String>,
+    pub(crate) origin_null: bool,
+    pub(crate) cookie_cross_site: bool,
+    pub(crate) navigation_cross_site: bool,
 }
 
 impl Request {
@@ -64,6 +64,16 @@ impl Request {
             origin_null: false,
             cookie_cross_site: false,
             navigation_cross_site: false,
+        }
+    }
+    // An XMLHttpRequest's request as send() makes it (XHR §3.5.6 step 7): its method and URL, mode "cors", its
+    // credentials mode "include" where withCredentials is set, else "same-origin" — the rest a request's defaults.
+    pub(crate) fn of_xhr(method: String, url: String, with_credentials: bool) -> Self {
+        Request {
+            method,
+            mode: "cors".into(),
+            credentials: if with_credentials { "include" } else { "same-origin" }.into(),
+            ..Request::new(url)
         }
     }
 }
@@ -247,7 +257,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 
 // The request `value` wraps, or None for anything that is no request's object (the brand first: `unwrap` reads garbage
 // from an object it never wrapped).
-fn request<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'h RefCell<Request>> {
+pub(crate) fn request<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'h RefCell<Request>> {
     let obj = v8::Local::<v8::Object>::try_from(value).ok().filter(|o| o.internal_field_count() == 1)?;
     let field = obj.get_internal_field(scope, 0)?;
     let brand = v8::Local::<v8::Value>::try_from(field).ok().and_then(|v| v8::Local::<v8::External>::try_from(v).ok())?;

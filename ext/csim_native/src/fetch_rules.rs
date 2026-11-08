@@ -135,6 +135,19 @@ pub(crate) fn fetch_route(url: &str, flags: u32, here: &str) -> u32 {
         _ => ROUTE_NETWORK,
     }
 }
+// …a fetch()'s or an XHR's request, of `mode`, its client's document origin `here`, `controlled` where a service worker
+// controls it: a `blob:` URL of another origin than `here` refused too but in mode `no-cors` — main fetch scheme-fetches
+// a same-origin URL as it is, a no-cors one opaquely (and "obtain a blob object" refuses another storage key's then), and
+// any other mode's is a network error, a URL of no HTTP(S) scheme.
+pub(crate) fn request_route(url: &str, mode: &str, here: &str, controlled: bool, keepalive: bool) -> u32 {
+    let flags = (if controlled { FETCH_CONTROLLED } else { 0 })
+        | (if keepalive { FETCH_KEEPALIVE } else { 0 })
+        | (if mode == "same-origin" { FETCH_SAME_ORIGIN } else { 0 });
+    match fetch_route(url, flags, here) {
+        ROUTE_BLOB if mode != "no-cors" && !ada_url::Url::parse(url, None).is_ok_and(|u| u.origin() == here) => ROUTE_REFUSED,
+        route => route,
+    }
+}
 
 // Fetch "HTTP-redirect fetch" (§4.4) step 12: whether a redirect of `status` makes a request of `method` a bodyless GET —
 // a 301 or 302 of a POST, a 303 of anything but a GET or HEAD.
@@ -440,11 +453,12 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
         .any(|h| h.as_bytes().eq_ignore_ascii_case(name))
 }
 
-// ── For the bindings ──
-// The headers a fetch's request has where its author set none of the name (Fetch §4 "fetching", its steps 12-13): its
-// destination's `Accept` (`default_accept`) — `*/*` for one of none, which XHR's and fetch()'s are, a document's for a
-// frame's navigation — and the user agent's `Accept-Language`.
-const ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
+// The headers a fetch's request has where its author set none of the name (Fetch "fetch" steps 12-13, before main fetch
+// and so before a service worker's fetch event): its destination's `Accept` (`default_accept`) — `*/*` for one of none,
+// which XHR's and fetch()'s are — and the user agent's `Accept-Language` (fetch_request.rs).
+pub(crate) fn default_request_headers(destination: &str) -> [(&'static str, &'static str); 2] {
+    [("Accept", default_accept(destination)), ("Accept-Language", "en-US,en;q=0.9")]
+}
 // Fetch "fetch" step 12: the `Accept` a request of `destination` carries where its header list has none (a prefetch's,
 // whose initiator says so before its destination does, a document's: subresource_obtain.rs `dispatch`).
 pub(crate) fn default_accept(destination: &str) -> &'static str {
@@ -461,30 +475,16 @@ pub(crate) fn default_accept_for_ruby(destination: String) -> String {
     default_accept(&destination).to_owned()
 }
 
-// __dom.defaultRequestHeaders([destination]) -> [name, value, …]: those a request of `destination` (none: the empty one)
-// has where its author set none of the name.
-fn default_request_headers_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let destination = if args.get(0).is_string() { args.get(0).to_rust_string_lossy(scope) } else { String::new() };
-    let headers = [("Accept", default_accept(&destination)), ("Accept-Language", ACCEPT_LANGUAGE)];
-    let items: Vec<v8::Local<v8::Value>> =
-        headers.iter().flat_map(|(n, v)| [n, v]).filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-
+// ── For the bindings ──
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
     crate::dom::register(scope, ns, "beaconCors", beacon_cors_op, context_id);
-    crate::dom::register(scope, ns, "defaultRequestHeaders", default_request_headers_op, context_id);
     crate::dom::register(scope, ns, "blobResponse", blob_response_op, context_id);
-    crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "responseHeader", response_header_op, context_id);
     crate::dom::register(scope, ns, "fetchRoute", fetch_route_op, context_id);
-    crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
-    crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
-    crate::dom::register(scope, ns, "normalizedMethod", normalized_method_op, context_id);
 }
 pub(crate) fn byte_string(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<u8> {
     let Some(s) = value.to_string(scope) else { return Vec::new() };
@@ -496,11 +496,6 @@ pub(crate) fn byte_string(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_,
 fn bad_port_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let port = args.get(0).uint32_value(scope).unwrap_or(0);
     rv.set_bool(bad_port(port));
-}
-// __dom.corsSafelistedMethod(method) -> whether it is a CORS-safelisted method.
-fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let method = byte_string(scope, args.get(0));
-    rv.set_bool(cors_safelisted_method(&method));
 }
 // __dom.interceptedHop(mode, redirectMode, url, method, requestOrigin, crossed, hops, status, type, responseUrl, redirected,
 // location, taint, seed) -> `intercepted_hop`: 0 to answer, 1 for an opaque redirect, [nextUrl, bits, taint, site] to
@@ -585,11 +580,6 @@ fn blob_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.forbiddenMethod(method) -> whether it is a forbidden method.
-fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let method = byte_string(scope, args.get(0));
-    rv.set_bool(forbidden_method(&method));
-}
 // The value of the header `name` (lowercase) among a response's headers as the host gives them — an object keyed by
 // name, in any case, a list of values joined with ", " — or None for none.
 pub(crate) fn response_header(scope: &mut v8::PinScope<'_, '_>, headers: v8::Local<'_, v8::Object>, name: &str) -> Option<String> {
@@ -624,25 +614,11 @@ fn response_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         rv.set(text.into());
     }
 }
-// (…these take a ByteString the bindings converted already: `byte_string` reads a unit past U+00FF as 0xFF, which is
-// obs-text to them)
-// __dom.headerValue(s) -> whether `s` is a header value (`is_header_value`).
+// __dom.headerValue(s) -> whether `s` is a header value (`is_header_value`) — a ByteString the bindings converted
+// already: `byte_string` reads a unit past U+00FF as 0xFF, which is obs-text to it.
 fn header_value_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let s = byte_string(scope, args.get(0));
     rv.set_bool(is_header_value(&s));
-}
-// __dom.httpToken(s) -> whether `s` is an HTTP token (`is_token`).
-fn http_token_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let s = byte_string(scope, args.get(0));
-    rv.set_bool(is_token(&s));
-}
-// __dom.normalizedMethod(method) -> `normalized_method`: the uppercase method, or null for one that keeps its case.
-fn normalized_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let method = byte_string(scope, args.get(0));
-    match normalized_method(&method).and_then(|m| v8::String::new(scope, m)) {
-        Some(m) => rv.set(m.into()),
-        None => rv.set_null(),
-    }
 }
 // ── For the host ──
 // (…a Ruby string's bytes, whatever its encoding)
@@ -746,6 +722,23 @@ mod tests {
         assert_eq!(fetch_route("https://a.test/x", FETCH_SAME_ORIGIN, here), ROUTE_REFUSED);
         assert_eq!(fetch_route("http://a.test/x", flags, "null"), ROUTE_REFUSED);
         assert_eq!(fetch_route("about:blank", flags, here), ROUTE_NETWORK);
+    }
+
+    // A fetch()'s or an XHR's request of a `blob:` URL of another origin than its client's is a network error but in
+    // mode `no-cors`, which the blob URL store then judges; a same-origin one, or an opaque origin's from an opaque one,
+    // goes to the store whatever the mode.
+    #[test]
+    fn a_request_refuses_a_blob_url_of_another_origin_but_in_no_cors() {
+        let (here, theirs) = ("http://a.test", "blob:http://b.test/u");
+        assert_eq!(request_route(theirs, "cors", here, true, false), ROUTE_REFUSED);
+        assert_eq!(request_route(theirs, "same-origin", here, false, false), ROUTE_REFUSED);
+        assert_eq!(request_route(theirs, "no-cors", here, false, false), ROUTE_BLOB);
+        assert_eq!(request_route("blob:http://a.test/u", "cors", here, true, false), ROUTE_BLOB);
+        assert_eq!(request_route("blob:null/u", "cors", here, false, false), ROUTE_REFUSED);
+        assert_eq!(request_route("blob:null/u", "cors", "null", false, false), ROUTE_BLOB);
+        assert_eq!(request_route("http://a.test/x", "cors", here, true, true), ROUTE_SERVICE_WORKER);
+        assert_eq!(request_route("http://a.test/x", "cors", here, false, true), ROUTE_KEEPALIVE);
+        assert_eq!(request_route("http://b.test/x", "same-origin", here, true, false), ROUTE_REFUSED);
     }
 
     #[test]

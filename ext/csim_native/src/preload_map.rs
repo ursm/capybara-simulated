@@ -151,7 +151,6 @@ fn integrity_matches(consumer: &str, preload: &str) -> bool {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "fetchPreload", fetch_preload_op, context_id);
     crate::dom::register(scope, ns, "preloadsForget", forget_op, context_id);
 }
 
@@ -226,36 +225,34 @@ fn forget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     arena.link_preloads.retain(|_, plan| plan.doc() != doc);
 }
 
-// __dom.fetchPreload(url, method, mode, credentials, destination, integrity, authored, host) -> what a `fetch()`'s or an
-// XHR's request takes first (Fetch "fetch": "consume a preloaded resource"): the preload of it the calling realm's
-// document has — a window's, for a GET that is no navigation and has no header of its author's (`authored`: none an XHR's
-// `open()` credentials gave it either) — the response the preload had (`consume`), its fetch run first where it was yet
-// to, through the bindings' `host` (subresource-host.js); none for a request that takes none.
-fn fetch_preload_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(7)) else { return };
-    let [url, method, mode, credentials, destination, integrity] = [0, 1, 2, 3, 4, 5].map(|i| args.get(i).to_rust_string_lossy(scope));
-    if method != "GET" || mode == "navigate" || args.get(6).is_true() {
-        return;
+// What a `fetch()`'s or an XHR's request takes first (Fetch "fetch": "consume a preloaded resource"), `request` as the
+// engine describes it (fetch_request.rs) and `authored` whether it has a header of its author's (none an XHR's `open()`
+// credentials gave it either): the preload of it the calling realm's document has — a window's, for a GET that is no
+// navigation and has no header of its author's — the response the preload had (`consume`), its fetch run first where it
+// was yet to, through the bindings' `host` (subresource-host.js): `{status, statusText, type, url, redirected, tainted,
+// headers, body_bytes}`, null for a network error; None for a request that takes none.
+pub(crate) fn preloaded<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    cid: i32,
+    request: &crate::request_state::Request,
+    authored: bool,
+    host: v8::Local<'_, v8::Function>,
+) -> Option<v8::Local<'s, v8::Value>> {
+    if request.method != "GET" || request.mode == "navigate" || authored {
+        return None;
     }
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(doc) = crate::dom::realm(scope, cid).realm_document(cid) else { return };
-    let plan = crate::subresource_plan::request_bits(&mode, &credentials);
-    let consumed = consume(scope, cid, (doc, &url, &destination, plan), &integrity, host);
-    set_consumed(scope, &mut rv, consumed);
-}
-// …its answer: the response — `{status, statusText, type, url, redirected, tainted, headers, body_bytes}` — null for a
-// network error, undefined for none.
-fn set_consumed(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Value>, consumed: Result<Option<Option<Response>>, crate::font_files::Terminated>) {
-    let r = match consumed {
-        Ok(None) | Err(_) => return,
-        Ok(Some(None)) => return rv.set_null(),
+    let doc = crate::dom::realm(scope, cid).realm_document(cid)?;
+    let plan = crate::subresource_plan::request_bits(&request.mode, &request.credentials);
+    let r = match consume(scope, cid, (doc, &request.url, &request.destination, plan), &request.integrity, host) {
+        Ok(None) | Err(_) => return None,
+        Ok(Some(None)) => return Some(v8::null(scope).into()),
         Ok(Some(Some(r))) => r,
     };
     let obj = v8::Object::new(scope);
     let headers = v8::Object::new(scope);
     for (name, value) in &r.headers {
         let (Some(name), Some(value)) = (v8::String::new(scope, name), v8::String::new(scope, value)) else { continue };
-        headers.set(scope, name.into(), value.into());
+        headers.create_data_property(scope, name.into(), value.into());
     }
     let fields: [(&str, v8::Local<'_, v8::Value>); 8] = [
         ("status", v8::Integer::new_from_unsigned(scope, r.status).into()),
@@ -269,9 +266,9 @@ fn set_consumed(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v
     ];
     for (name, value) in fields {
         let Some(name) = v8::String::new(scope, name) else { continue };
-        obj.set(scope, name.into(), value);
+        obj.create_data_property(scope, name.into(), value);
     }
-    rv.set(obj.into());
+    Some(obj.into())
 }
 
 #[cfg(test)]

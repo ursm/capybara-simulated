@@ -296,6 +296,25 @@ fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
+// The referrer source of a request realm `r` makes whose referrer is `client` (Referrer Policy "determine request's
+// referrer" step 2): its document's (`referrer_source`) — none ('') for one of an opaque origin — or, a worker's, its
+// script's URL; None for a worker of no URL, whose request then refers by its client's.
+pub(crate) fn client_referrer_source(arena: &mut RealmArena, r: i32) -> Option<String> {
+    if arena.enter(r).realm_document(r).is_none() {
+        return Some(arena.location.href().to_owned()).filter(|url| !url.is_empty());
+    }
+    let doc = document(arena, r);
+    Some(if doc.opaque { String::new() } else { referrer_source(arena, doc.realm).0 })
+}
+// …and the origins of its document's ancestors' documents (`document_chain`, none of a worker's or the page's), which its
+// cookies are judged by.
+pub(crate) fn request_ancestors(arena: &mut RealmArena, r: i32) -> Vec<Option<String>> {
+    if r == 0 || arena.enter(r).realm_document(r).is_none() {
+        return Vec::new();
+    }
+    document_chain(arena, r, false, known_document)
+}
+
 // HTML "has cross-site ancestor" of a document whose origin key is the first of `documents` and its ancestors' the rest
 // (`document_chain` of `known_origin_key`): one of them is not same site with the one below it — an opaque origin same
 // site with itself alone (HTML "same site": two opaque origins are where they are the same origin), which a document

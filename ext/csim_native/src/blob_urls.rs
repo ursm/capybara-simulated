@@ -13,7 +13,11 @@ pub(crate) struct BlobUrls(HashMap<String, (i32, v8::Global<v8::Object>)>);
 impl BlobUrls {
     // Whether realm `cid` made the blob URL `url` — the entry it resolves to (`entry_key`).
     pub(crate) fn made_by(&self, url: &str, cid: i32) -> bool {
-        self.0.get(&entry_key(url)).is_some_and(|(realm, _)| *realm == cid)
+        self.maker(&entry_key(url)) == Some(cid)
+    }
+    // …the realm that made the URL `key` (`entry_key`), None where none of the isolate's did.
+    pub(crate) fn maker(&self, key: &str) -> Option<i32> {
+        self.0.get(key).map(|(realm, _)| *realm)
     }
     // …of realm `cid` no more: its document went (a frame removed or navigated, its page torn down, a new one begun in
     // its context), and the URLs it made with it (url-lifetime: "Removing an iframe").
@@ -59,7 +63,7 @@ fn blob_resolve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     if args.get(2).is_true() {
         let arena = crate::dom::realm(scope, cid);
         let site = crate::blob_registry::site_of(window, &key);
-        if !crate::blob_rules::usable(&key, arena.location.origin()) || !crate::blob_rules::same_partition(arena, cid, site.as_deref()) {
+        if !crate::blob_rules::usable_by(arena, cid, &key) || !crate::blob_rules::same_partition(arena, cid, site.as_deref()) {
             return rv.set_null();
         }
     }
