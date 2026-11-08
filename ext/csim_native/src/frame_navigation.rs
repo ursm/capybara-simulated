@@ -1505,6 +1505,11 @@ fn frame_load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     if arena.frame_navigations.0.get(&container).is_some_and(|n| n.aborted_document && n.host.is_some()) {
         return rv.set_uint32(DUE_PAID);
     }
+    // (…nor in a document a navigation of its navigable aborted, which unloads — or has unloaded, its realm's document
+    // gone: Chrome fires none of its frames' loads — rv-sf-probe `u_nested`)
+    if arena.realm_document(cid).is_none_or(|doc| arena.document_states.lifecycle(doc).is_replaced()) {
+        return rv.set_uint32(DUE_PAID);
+    }
     // (…nor for a document `stop()` aborted as it parsed: Chrome and Firefox fire neither its load nor this one)
     if arena.frame_realm(container).and_then(|frame| arena.realm_document(frame)).is_some_and(|doc| arena.document_states.lifecycle(doc).is_aborted()) {
         return rv.set_uint32(DUE_PAID);

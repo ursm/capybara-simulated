@@ -43,6 +43,9 @@ pub(crate) struct Lifecycle {
     // Aborted while its parser was active (HTML "navigate" → "abort a document and its descendants" → "abort a parser"):
     // "the end" runs for it no more — no DOMContentLoaded, no load of its own, none at its container.
     aborted: bool,
+    // Aborted by a navigation of its navigable, which replaces it: it unloads, and no load is owed for it, nor any its
+    // frames' containers would fire (`frameLoadDue`).
+    replaced: bool,
 }
 
 // A document no parse loads (a `createHTMLDocument` one, a DOMParser's) is complete as it is made (DOM "create a
@@ -63,6 +66,7 @@ impl Default for Lifecycle {
             aborts: 0,
             module_fetches: None,
             aborted: false,
+            replaced: false,
         }
     }
 }
@@ -107,6 +111,9 @@ impl Lifecycle {
     // Whether its parser was aborted: its load never fires.
     pub(crate) fn is_aborted(&self) -> bool {
         self.aborted
+    }
+    pub(crate) fn is_replaced(&self) -> bool {
+        self.replaced
     }
     // HTML document open steps: a document of its own written into it from here, numbered `generation` — "the end" of its
     // parse owed nothing of what the last one had (a task of that one's still queued, for its number, fires nothing) —
@@ -470,21 +477,24 @@ fn finish_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     lifecycle_of(scope, doc).completely_loaded = true;
 }
 
-// __dom.docAbortParser(docNid, imagesCancelled) -> whether the document's parser was active, aborted now
+// __dom.docAbortParser(docNid, imagesCancelled, replaced) -> whether the document's parser was active, aborted now
 // (`Lifecycle::abort_parser`): HTML "abort a document", `stop()`'s, `imagesCancelled` whether it cancelled an image of the
 // document's. Past its DOMContentLoaded, a fetch of its own cancelled means no load, a frame's does not: one with frames
 // and none of its own has its load fire all the same. This follows Chrome and Firefox, as measured (rvfn
 // `a_*`, `kk_pstop`, `k_pstop_t0`, `h_t0_img`, 2026-11-06), and is not derived from the text, which leaves a parse that is
-// over no active parser to abort.
+// over no active parser to abort. (…but for a document a navigation of its navigable `replaced`, which unloads: no load
+// of its fires, nor its frames' containers' — Chrome, rv-sf-probe `u_nested`)
 fn abort_parser_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let images = args.get(1).is_true();
+    let replaced = args.get(2).is_true();
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let own = images || arena.realm_state(cid).is_some_and(|s| s.load_gates.own_fetches());
+    let own = images || replaced || arena.realm_state(cid).is_some_and(|s| s.load_gates.own_fetches());
     let frames_only = !own && arena.document_states.lifecycle(doc).content_loaded_over && arena.has_frames(cid);
     let lc = lifecycle_of(scope, doc);
     lc.aborts = lc.aborts.wrapping_add(1);
+    lc.replaced |= replaced;
     rv.set_bool(!frames_only && lc.abort_parser(true));
 }
 // __dom.docAborts(docNid) -> how many aborts have come to the document.

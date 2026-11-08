@@ -1389,6 +1389,15 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # …and a frame of the frame, waiting on a slow script, its container in the document replaced: no load at that
+    # container, whose document unloads (Chrome, rv-sf-probe `u_nested`).
+    it "fires no load at a container in a frame's document a navigation aborted" do
+      outer = "<iframe src=\"/c2\" onload=\"top.L.push('gl')\"></iframe><script>top.L.push('outer')</script>"
+      inner = "<script src=\"/slow/150/fb.js\"></script><script>top.L.push('finl')</script>"
+      page = "<iframe src=\"/c\"></iframe><script>setTimeout(() => { document.querySelector('iframe').src = '/slow/0/x.html'; L.push('resrc'); }, 80)</script>"
+      expect(page_log(page, at: 700, pages: {'/c' => outer, '/c2' => inner})).to eq('dcl outer resrc sf-script sf-load load rs:complete')
+    end
+
     # …a frame's parser too, its document committed by a task of the event loop's (Chrome and Firefox: r13 `s_frame_src`).
     it "runs a frame's zero timer before its parser-blocking script" do
       child = "<script>setTimeout(() => top.L.push('ft0'))</script><script src=\"/slow/0/fb.js\"></script>"
