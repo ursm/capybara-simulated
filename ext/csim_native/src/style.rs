@@ -2809,9 +2809,13 @@ impl RegisteredSpeculativePainters for NoPainters {
 
 // Whether `new` differs from `old` in anything a layout, a hit test or a rendered-ness read can see: anything but the
 // values that only paint — the background and the outline whole, and the colours, shadows and caret / scrollbar / cursor
-// looks of the rest. Every style struct is compared (a struct added to the engine is compared whole until it is listed
-// here), and the value flags are not: no layout code reads them. A restyle that moved none of it leaves every box where it
-// was (`Recalc::process_preorder`).
+// looks of the rest. Every one of the style engine's 22 style structs is listed below, and the value flags are not: no
+// layout code reads them. A restyle that moved none of it leaves every box where it was (`Recalc::process_preorder`).
+// A struct the engine adds would go unlisted — so unseen — here: `ComputedValues`' size, the structs' Arcs among it, is
+// held to what it is with these 22 (`COMPUTED_VALUES_SIZE`), and a stylo that changes it fails the build until this list
+// is checked against its `ComputedValuesInner`.
+const COMPUTED_VALUES_SIZE: usize = 248;
+const _: () = assert!(std::mem::size_of::<ComputedValues>() == COMPUTED_VALUES_SIZE, "stylo's ComputedValues changed: check `layout_relevant_change` lists every style struct");
 fn layout_relevant_change(old: &ComputedValues, new: &ComputedValues) -> bool {
     // (…a struct equal to `new`'s once its paint-only fields are `new`'s)
     macro_rules! same_but {
@@ -3801,5 +3805,3 @@ fn font_face_src(src: &style::font_face::SourceList) -> String {
         Source::Local(name) => format!("local({})", name.to_css_string()),
     }).collect::<Vec<_>>().join(", ")
 }
-
-

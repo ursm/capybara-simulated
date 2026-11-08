@@ -49,8 +49,7 @@ RSpec.describe 'pointer gestures' do
     "hooks['#{event}'] = (e) => document.getElementById('#{element}').setPointerCapture(e.pointerId)"
   end
 
-  # (…of the primary button alone: Selectors 4 §9.3 says so, where Chrome and Firefox activate on the secondary too)
-  it 'holds the pressed element and its ancestors :active from its pointerdown to its pointerup, the primary button' do
+  it 'holds the pressed element and its ancestors :active from its pointerdown to its pointerup, any button' do
     gesture { '' }
     session.find('#a1').click
     expect(log.grep(/^(pointerdown|mousedown|pointerup|click)/)).to eq([
@@ -61,8 +60,8 @@ RSpec.describe 'pointer gestures' do
     ])
     session.find('#a').right_click
     expect(log.grep(/^(pointerdown|contextmenu|pointerup|auxclick)/)).to eq([
-      'pointerdown a b2 bs2 d0 act:',
-      'contextmenu a b2 bs2 d1 act:',
+      'pointerdown a b2 bs2 d0 act:out/a',
+      'contextmenu a b2 bs2 d1 act:out/a',
       'pointerup a b2 bs0 d0 act:',
       'auxclick a b2 bs0 d1 act:'
     ])
@@ -74,9 +73,9 @@ RSpec.describe 'pointer gestures' do
       'pointerup a1 b0 bs0 d0 act:',
       'click a1 b0 bs0 d1 act:'
     ])
-    # (…HTML §4.16.3: a disabled button pressed is not being activated, nor is anything through it — what holds it has
-    # no descendant that matches; one with a pressed descendant matches through that; and a label's labeled control
-    # matches, and its ancestors with it. Chrome and Firefox activate a pressed disabled button and its ancestors.)
+    # (…a disabled button pressed is being activated, as Chrome and Firefox activate it, and what holds it with it — HTML
+    # §4.16.3 now reads "being activated if it is in a formal activation state", its "and it is not disabled" gone; and a
+    # label's labeled control matches, but "does not count as being activated": nothing above it matches through it)
     session.execute_script(<<~JS)
       document.getElementById('b').innerHTML = '<button id=db disabled style="width:50px;height:20px">d</button><button id=dd disabled style="width:50px;height:20px"><span id=ds style="display:inline-block;width:40px;height:16px">s</span></button>';
       document.getElementById('c').innerHTML = '<span id=wrap><input id=li3></span>';
@@ -86,7 +85,7 @@ RSpec.describe 'pointer gestures' do
     session.find('#db').click
     session.find('#ds').click
     session.find('#lab3').click
-    expect(log.grep(/pressed/)).to eq(['db pressed ', 'ds pressed out/b/dd/ds', 'lab3 pressed c/wrap/li3/lab3'])
+    expect(log.grep(/pressed/)).to eq(['db pressed out/b/db', 'ds pressed out/b/dd/ds', 'lab3 pressed li3/lab3'])
   end
 
   # (…Pointer Events §10.5: a capturing element taken out of the document loses the capture at the document; and a press

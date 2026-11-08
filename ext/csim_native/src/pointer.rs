@@ -235,9 +235,8 @@ impl MousePointer {
     }
 
     // A press of `button` — the `count`th click of it (a double click's second is 2): the element pressed `:active` from
-    // before its `pointerdown` (Chrome, Firefox) — of the primary button alone (Selectors 4 §9.3: "On systems with more
-    // than one mouse button, :active applies only to the primary or primary activation button", where Chrome and Firefox
-    // activate on any) — its `pointerdown` (whose `detail` is 0: Pointer Events) and `mousedown`
+    // before its `pointerdown`, whichever button (Chrome, Firefox; Selectors 4's current draft names the primary button
+    // as an example only) — its `pointerdown` (whose `detail` is 0: Pointer Events) and `mousedown`
     // (its count), the focus — and, of the primary button, the caret, a second press selecting the word — and, of the
     // secondary button, the context menu as on Linux, at the press, whether or not the press was canceled (Chrome,
     // Firefox).
@@ -249,9 +248,7 @@ impl MousePointer {
         self.pressed = Some(target);
         self.press_prevented = false;
         self.buttons |= button_bit(self.button);
-        if self.button == 0 {
-            self.steps.push_back(Step::Active(Some(target)));
-        }
+        self.steps.push_back(Step::Active(Some(target)));
         self.fire("pointerdown", target, None, button, 0, When::Always);
         self.fire("mousedown", target, None, button, self.detail, When::Compat);
         self.steps.push_back(Step::Focus(target));

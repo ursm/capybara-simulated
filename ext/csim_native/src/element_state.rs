@@ -204,18 +204,12 @@ impl RealmArena {
     pub(crate) fn is_hovered(&self, id: NodeId) -> bool {
         self.hover.is_some_and(|h| self.shadow_including_ancestor(id, h) || self.hover_controls.contains(&id))
     }
-    // `:active` (HTML §4.16.3, the first relevant entry): the element the pointer pressed with the primary button — but a
-    // button or a button-like input "is being activated if it is in a formal activation state and it is not disabled",
-    // so a disabled one pressed is not, nor is anything through it — then every element with a descendant (shadow-
-    // including) that matches, and the labeled control of a label that matches, and so its ancestors.
+    // `:active` (HTML §4.16.3): the element the pointer pressed — any button, a disabled button too ("being activated if
+    // it is in a formal activation state"; Chrome, Firefox) — and every element with a descendant (shadow-including) that
+    // matches; and the labeled control of a label that matches, which "does not count as being activated", so nothing above
+    // it matches through it.
     pub(crate) fn is_active(&self, id: NodeId) -> bool {
-        let Some(pressed) = self.active.filter(|&a| !self.is_disabled_button_like(a)) else { return false };
-        self.shadow_including_ancestor(id, pressed) || self.active_controls.iter().any(|&c| self.shadow_including_ancestor(id, c))
-    }
-    fn is_disabled_button_like(&self, id: NodeId) -> bool {
-        self.get(id).is_some_and(|n| {
-            n.is_html_named("button") || (n.is_html_named("input") && matches!(n.input_type(), "submit" | "image" | "reset" | "button"))
-        }) && self.is_actually_disabled(id)
+        self.active.is_some_and(|a| self.shadow_including_ancestor(id, a) || self.active_controls.contains(&id))
     }
     // The labeled controls of the labels `id` is or is in (HTML §4.10.4), shadow-including.
     pub(crate) fn label_controls(&self, id: NodeId) -> Vec<NodeId> {
