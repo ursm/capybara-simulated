@@ -1398,6 +1398,15 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(page_log(page, at: 700, pages: {'/c' => outer, '/c2' => inner})).to eq('dcl outer resrc sf-script sf-load load rs:complete')
     end
 
+    # …but one the navigation aborted that makes no document — a 204 — stays the frame's: a frame it inserts later fires its
+    # load (Chrome, rv-sf-probe `t_204_late`).
+    it 'fires the load of a frame inserted later by a frame document a 204 navigation aborted' do
+      child = "<script>setTimeout(() => { const f = document.createElement('iframe'); f.src = '/c2'; f.onload = () => top.L.push('late-fl'); document.documentElement.append(f); top.L.push('late-ins'); }, 300)</script>" \
+              "<script src=\"/slow/150/fb.js\"></script><script>top.L.push('finl')</script>"
+      page = "<iframe src=\"/c\"></iframe><script>setTimeout(() => { document.querySelector('iframe').src = '/nothing'; L.push('resrc'); }, 60)</script>"
+      expect(page_log(page, at: 700, pages: {'/c' => child, '/c2' => '<title>c2</title>'})).to eq('dcl resrc load late-ins late-fl rs:complete')
+    end
+
     # …and a `javascript:` URL whose result is a string, its document replacing the one still parsing (Chrome and
     # Firefox, rv-sf-probe `u_js_str`).
     it "aborts a frame's parse as a javascript: URL's string replaces its document" do

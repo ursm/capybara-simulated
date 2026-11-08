@@ -1505,9 +1505,10 @@ fn frame_load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     if arena.frame_navigations.0.get(&container).is_some_and(|n| n.aborted_document && n.host.is_some()) {
         return rv.set_uint32(DUE_PAID);
     }
-    // (…nor in a document a navigation of its navigable aborted, which unloads — or has unloaded, its realm's document
-    // gone: Chrome fires none of its frames' loads — rv-sf-probe `u_nested`)
-    if arena.realm_document(cid).is_none_or(|doc| arena.document_states.lifecycle(doc).is_replaced()) {
+    // (…nor in a document that has unloaded, its realm's document gone — a navigation of its navigable replaced it: Chrome
+    // fires none of its frames' loads, rv-sf-probe `u_nested`. One the navigation aborted that is still active — a 204, a
+    // download, a navigation stopped, which make no document — fires them still: `t_204_late`)
+    if arena.realm_document(cid).is_none() {
         return rv.set_uint32(DUE_PAID);
     }
     // (…nor for a document `stop()` aborted as it parsed: Chrome and Firefox fire neither its load nor this one)
