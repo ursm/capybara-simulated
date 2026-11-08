@@ -2,9 +2,8 @@
 // and read (element-flags.js names them): a `<select>`'s "has a `<selectedcontent>`" it keeps mirroring its
 // selection; a select's and a selectedcontent's "connected before" (a re-insertion re-snapshots); a select's "update
 // running", which an update it causes waits out; a `<form>`'s "constructing entry list", "firing submission events"
-// and "locked for reset" (HTML §4.10.21.3, §4.10.21.4, §4.10.22); a `<style>`'s queued `load`; custom element state
-// "failed", and the element a failed construction made in its stead, an HTMLUnknownElement; a `<script>`'s resource
-// timing entry filed. A clone starts without any.
+// and "locked for reset" (HTML §4.10.21.3, §4.10.21.4, §4.10.22); a `<style>`'s queued `load`; a `<script>`'s resource
+// timing entry filed. A clone starts without any. (A custom element state is a state's: dom.rs `STATE_PRECUSTOMIZED`.)
 
 use crate::dom::nid_arg;
 

@@ -2000,14 +2000,6 @@ css/cssom/serialize-values.html:
 - 'outline-color: invert'
 - 'widows: 101'
 - 'widows: inherit'
-custom-elements/custom-element-reaction-queue.html:
-- Upgrading a custom element must not invoke disconnectedCallback if the element is
-  disconnected during upgrading
-- Upgrading a disconnected custom element must not invoke connectedCallback if the
-  element is connected during upgrading
-custom-elements/element-internals-shadowroot.html:
-- ElementInternals *can* be called after constructor, upgrade case
-- ElementInternals cannot be called before constructor, upgrade case
 custom-elements/form-associated/ElementInternals-reportValidity-bubble.html:
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-bubble-notref.html"
 custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.html:
@@ -2089,9 +2081,6 @@ custom-elements/registries/scoped-registry-define-upgrade-order.html:
 - Upgrade in association order across documents, then tree order in each document
 - Upgrade order is affected by shadow tree adoption across documents
 - Upgrade order is not affected by DOM order between child frames
-custom-elements/upgrading.html:
-- If definition's disable shadow is true and element's shadow root is non-null, then
-  throw a "NotSupportedError" DOMException.
 dom/events/EventListener-invoke-legacy.html:
 - Legacy listener of animationstart
 - Legacy listener of transitionend

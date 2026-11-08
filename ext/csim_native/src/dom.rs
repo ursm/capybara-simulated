@@ -315,8 +315,13 @@ pub(crate) const STATE_HAS_FILES: u32 = 1 << 15;
 // attribute no longer drives it — and initialised from that attribute once.
 pub(crate) const STATE_SELECTED_DIRTY: u32 = 1 << 16;
 pub(crate) const STATE_SELECTED_INIT: u32 = 1 << 17;
-// …and an element an upgrade has been tried on, or made custom by its constructor: its custom element reactions run
-// from then on, whatever its registry resolves to after (adopted into an inert document) — custom_elements.rs.
+// …and its custom element state (HTML §4.13), past "undefined" and "uncustomized" (which of those, its name says) once
+// an upgrade begins or a constructor makes it (`STATE_UPGRADED`): "custom" with `STATE_CUSTOM`, "precustomized" with
+// this as its upgrade's constructor runs, "failed" with neither — an upgrade that threw before its constructor ran, or
+// a construction that failed (ce_reactions.rs `ceUpgrade`). One whose constructor threw stays "precustomized", as HTML
+// has it. Its custom element reactions run once it is "custom" (custom_elements.rs `custom_elements_in`), whatever its
+// registry resolves to after (adopted into an inert document).
+pub(crate) const STATE_PRECUSTOMIZED: u32 = 1 << 13;
 pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 // …and, on a document, that it is an XML document — not an HTML one, whose HTML elements' names are ASCII-lowercased
 // (DOM "HTML document").

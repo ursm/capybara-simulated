@@ -1,8 +1,8 @@
 // Custom elements (HTML §4.13): which elements of a subtree a tree change owes reactions to — the connected, disconnected,
-// adopted and move callbacks — in shadow-including tree order: those an upgrade has been tried on (`STATE_UPGRADED`).
-// The bindings run the callbacks.
+// adopted and move callbacks — in shadow-including tree order: those that are custom (`STATE_CUSTOM`; one an upgrade is
+// constructing is not yet, nor is a failed one). The bindings run the callbacks.
 
-use crate::dom::{nid_arg, realm_id, NodeData, NodeId, NodeKind, RealmArena, STATE_UPGRADED};
+use crate::dom::{nid_arg, realm_id, NodeData, NodeId, NodeKind, RealmArena, STATE_CUSTOM};
 
 impl RealmArena {
     // The elements among `root`'s shadow-including inclusive descendants that `pick` takes, in shadow-including tree
@@ -22,9 +22,9 @@ impl RealmArena {
         }
         out
     }
-    // …those an upgrade has been tried on.
-    pub(crate) fn upgraded_elements_in(&self, root: NodeId) -> Vec<NodeId> {
-        self.shadow_including_elements(root, |n| n.state & STATE_UPGRADED != 0)
+    // …those that are custom.
+    pub(crate) fn custom_elements_in(&self, root: NodeId) -> Vec<NodeId> {
+        self.shadow_including_elements(root, |n| n.state & STATE_CUSTOM != 0)
     }
     // …and HTML "upgrade candidates" for a definition just made: HTML elements of its local name and, for a customized
     // built-in, its `is` value (`is`, its name) — whatever theirs for an autonomous one, whose name is its local name.
@@ -38,7 +38,7 @@ impl RealmArena {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "validCustomElementName", valid_custom_element_name, context_id);
-    crate::dom::register(scope, ns, "upgradedElementsIn", upgraded_elements_in, context_id);
+    crate::dom::register(scope, ns, "customElementsIn", custom_elements_in, context_id);
     crate::dom::register(scope, ns, "upgradeCandidates", upgrade_candidates, context_id);
     crate::dom::register(scope, ns, "shadowHostKind", shadow_host_kind_op, context_id);
 }
@@ -71,12 +71,11 @@ fn shadow_host_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set_uint32(crate::dom::dom(scope).arena.get(id).map_or(0, shadow_host_kind));
 }
 
-// __dom.upgradedElementsIn(rootNid) -> the elements of its subtree an upgrade has been tried on (`upgraded_elements_in`),
-// as `nodes_value` answers.
-fn upgraded_elements_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.customElementsIn(rootNid) -> the custom elements of its subtree (`custom_elements_in`), as `nodes_value` answers.
+fn custom_elements_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    let ids = crate::dom::realm(scope, cid).upgraded_elements_in(root);
+    let ids = crate::dom::realm(scope, cid).custom_elements_in(root);
     rv.set(crate::dom::nodes_value(scope, cid, &ids));
 }
 
@@ -93,14 +92,14 @@ fn upgrade_candidates(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 
 #[cfg(test)]
 mod tests {
-    use crate::dom::{NodeData, NodeId, NodeKind, RealmArena, STATE_UPGRADED};
+    use crate::dom::{NodeData, NodeId, NodeKind, RealmArena, STATE_CUSTOM};
     use web_atoms::ns;
 
-    fn element(arena: &mut RealmArena, parent: Option<NodeId>, upgraded: bool) -> NodeId {
+    fn element(arena: &mut RealmArena, parent: Option<NodeId>, custom: bool) -> NodeId {
         let mut n = NodeData::of_kind(NodeKind::Element, Vec::new());
         n.local_name = "x-a".into();
         n.ns = ns!(html);
-        n.state = if upgraded { STATE_UPGRADED } else { 0 };
+        n.state = if custom { STATE_CUSTOM } else { 0 };
         arena.create(n, parent)
     }
 
@@ -116,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn upgraded_elements_in_shadow_including_order() {
+    fn custom_elements_in_shadow_including_order() {
         let mut arena = RealmArena::default();
         let host = element(&mut arena, None, true);
         let shadow = arena.create(NodeData::of_kind(NodeKind::Fragment, Vec::new()), None);
@@ -124,7 +123,7 @@ mod tests {
         let inner = element(&mut arena, Some(shadow), true);
         let child = element(&mut arena, Some(host), true);
         element(&mut arena, Some(child), false);
-        assert_eq!(arena.upgraded_elements_in(host), vec![host, inner, child]);
+        assert_eq!(arena.custom_elements_in(host), vec![host, inner, child]);
     }
 }
 

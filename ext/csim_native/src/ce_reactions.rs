@@ -44,11 +44,22 @@ struct Definition {
     // (…the realm that made it, which takes it with it: its callbacks run in no realm a page left)
     realm: i32,
     object: v8::Weak<v8::Value>,
+    // (…and its constructor, which an HTML element constructor finds the definition it constructs by)
+    ctor: v8::Weak<v8::Value>,
     // (…an autonomous custom element's: its local name its name, where a customized built-in's extends another)
     autonomous: bool,
     callbacks: Vec<Option<v8::Weak<v8::Value>>>,
     observed: HashSet<Vec<u16>>,
+    // (…whether it is form-associated, and whether it disables a shadow root: `DEFINE_*`)
+    flags: u32,
+    // Its construction stack (HTML): the elements its upgrades are constructing, the last its constructor's `super()`
+    // returns — `None` the "already constructed" marker that call leaves in its place.
+    construction: Vec<Option<v8::Global<v8::Value>>>,
 }
+
+// What a definition is, beside its callbacks (custom-elements.js `define`): form-associated, its shadow root disabled.
+const DEFINE_FORM_ASSOCIATED: u32 = 1;
+const DEFINE_DISABLE_SHADOW: u32 = 2;
 
 // The codes of a node's registry association.
 pub(crate) const UNSET: u32 = 0;
@@ -96,6 +107,10 @@ pub(crate) struct Reactions {
     // Each realm's window registry (its `customElements`, the latest context's of a realm id): the registry of a node with
     // neither a registry set nor a node document.
     window_registries: HashMap<i32, u32>,
+    // The definitions whose construction stacks an upgrade pushed onto, in the order it did — the agent's, as an upgrade
+    // in one realm constructs by another's HTML element constructor: what that constructor looks its NewTarget up in
+    // (`ceStack[3]` how many, which every element construction reads before it asks).
+    constructing: Vec<u32>,
 }
 
 impl Reactions {
@@ -113,6 +128,8 @@ impl Reactions {
 const DEPTH: usize = 0;
 const DEEPEST: usize = 1;
 const BACKUP: usize = 2;
+const CONSTRUCTING: usize = 3;
+const VIEW_LEN: usize = 4;
 
 impl Reactions {
     fn get(&self, at: usize) -> i32 {
@@ -137,6 +154,13 @@ impl Reactions {
         self.set(DEPTH, 0);
         self.set(DEEPEST, 0);
         self.microtask_lost();
+        // (…and no upgrade constructs: a terminated one left its element on its definition's construction stack)
+        for id in std::mem::take(&mut self.constructing) {
+            if let Some(d) = self.definitions.get_mut(id as usize).and_then(Option::as_mut) {
+                d.construction.clear();
+            }
+        }
+        self.set(CONSTRUCTING, 0);
     }
     // The backup element queue's microtask taken as lost: a checkpoint runs the queue where it holds an element
     // (`ceStack[2]`).
@@ -184,6 +208,8 @@ impl Reactions {
         // (…an element custom by one names it no more: its slot is another's next)
         if !gone.is_empty() {
             self.custom.retain(|_, d| !gone.contains(d));
+            self.constructing.retain(|d| !gone.contains(d));
+            self.set(CONSTRUCTING, self.constructing.len() as i32);
         }
         for registry in &mut self.registries {
             if registry.as_ref().is_some_and(|r| r.object.is_empty()) {
@@ -269,6 +295,21 @@ impl Reactions {
         }
         registry.builtins.get(local_name).and_then(|m| m.get(is?)).copied()
     }
+    // The definition an upgrade constructs by `ctor` — the latest that pushed onto its construction stack (HTML's HTML
+    // element constructor: the definition with constructor NewTarget).
+    fn constructing_by(&self, ctor: v8::Local<'_, v8::Value>) -> Option<u32> {
+        self.constructing.iter().rev().copied().find(|&d| self.definitions.get(d as usize).and_then(Option::as_ref).is_some_and(|def| def.ctor == ctor))
+    }
+    // The last entry of definition `def`'s construction stack, removed (HTML "upgrade an element" step 9's "then").
+    fn pop_construction(&mut self, def: u32) {
+        if let Some(at) = self.constructing.iter().rposition(|&d| d == def) {
+            self.constructing.remove(at);
+            if let Some(d) = self.definitions.get_mut(def as usize).and_then(Option::as_mut) {
+                d.construction.pop();
+            }
+        }
+        self.set(CONSTRUCTING, self.constructing.len() as i32);
+    }
     // The definition of custom element `id`.
     fn definition_of(&self, id: NodeId) -> Option<&Definition> {
         self.custom.get(&id).and_then(|&d| self.definitions.get(d as usize)).and_then(Option::as_ref)
@@ -349,13 +390,18 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceFormStateReset", ce_form_state_reset, context_id);
     register(scope, ns, "ceFormOwnersReset", ce_form_owners_reset, context_id);
     register(scope, ns, "ceSetKeepNull", ce_set_keep_null, context_id);
-    // (…and the stack's depth and deepest queue, a view on the isolate's one buffer)
+    register(scope, ns, "ceUpgrade", ce_upgrade, context_id);
+    register(scope, ns, "ceUpgradeEnd", ce_upgrade_end, context_id);
+    register(scope, ns, "ceConstructionTop", ce_construction_top, context_id);
+    register(scope, ns, "ceMarkConstructed", ce_mark_constructed, context_id);
+    register(scope, ns, "ceMakeCustom", ce_make_custom, context_id);
+    // (…and the stack's depth and deepest queue, and how many upgrades construct, a view on the isolate's one buffer)
     let store = {
         let reactions = &mut dom(scope).arena.ce_reactions;
-        reactions.view.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(vec![0u8; 12]).make_shared()).clone()
+        reactions.view.get_or_insert_with(|| v8::ArrayBuffer::new_backing_store_from_vec(vec![0u8; VIEW_LEN * 4]).make_shared()).clone()
     };
     let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    if let (Some(view), Some(key)) = (v8::Int32Array::new(scope, buffer, 0, 3), v8::String::new(scope, "ceStack")) {
+    if let (Some(view), Some(key)) = (v8::Int32Array::new(scope, buffer, 0, VIEW_LEN), v8::String::new(scope, "ceStack")) {
         ns.set(scope, key.into(), view.into());
     }
 }
@@ -454,10 +500,10 @@ fn held_list(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
     }
 }
 
-// __dom.ceDefine(registry, name, localName, definition, callbacks, observed) -> the definition's id: a custom element
-// definition made in the calling realm, in registry `registry` (its code) — `definition` the bindings' object for it,
-// `callbacks` its callbacks in `CALLBACKS` order (undefined for one it has not), `observed` the local names of the
-// attributes it observes.
+// __dom.ceDefine(registry, name, localName, definition, callbacks, observed, constructor, flags) -> the definition's id: a
+// custom element definition made in the calling realm, in registry `registry` (its code) — `definition` the bindings'
+// object for it, `callbacks` its callbacks in `CALLBACKS` order (undefined for one it has not), `observed` the local
+// names of the attributes it observes, `flags` its `DEFINE_*`.
 fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let code = args.get(0).uint32_value(scope).unwrap_or(UNSET);
     let realm = realm_id(scope, &args);
@@ -478,9 +524,11 @@ fn ce_define(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         }
         Err(_) => HashSet::new(),
     };
+    let ctor = v8::Weak::new(scope, args.get(6));
+    let flags = args.get(7).uint32_value(scope).unwrap_or(0);
     let reactions = &mut dom(scope).arena.ce_reactions;
     let autonomous = local_name == name;
-    let definition = Some(Definition { realm, object, autonomous, callbacks, observed });
+    let definition = Some(Definition { realm, object, ctor, autonomous, callbacks, observed, flags, construction: Vec::new() });
     // (…in a slot one a realm took left, which nothing names any more: `forget_definitions_of`)
     let id = match reactions.definitions.iter().position(Option::is_none) {
         Some(free) => {
@@ -595,9 +643,7 @@ fn ce_subtree_hook(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let Some(root) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let which = args.get(1).int32_value(scope).unwrap_or(-1).max(0) as usize;
     let cid = realm_id(scope, &args);
-    let upgraded = realm(scope, cid).upgraded_elements_in(root);
-    let custom = &dom(scope).arena.ce_reactions.custom;
-    let elements: Vec<NodeId> = upgraded.into_iter().filter(|id| custom.contains_key(id)).collect();
+    let elements = realm(scope, cid).custom_elements_in(root);
     if elements.is_empty() {
         return rv.set_bool(false);
     }
@@ -833,6 +879,142 @@ fn ce_restamp(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     for h in handles {
         // SAFETY: the handles of the root's tree, which the arena holds; nothing in between runs script.
         unsafe { &*h }.set_registry(scope, code, object);
+    }
+}
+
+// What "upgrade an element" asks of the bindings (`ceUpgrade`): its constructor constructed, or a NotSupportedError
+// thrown in its stead (its definition disables a shadow root it has); and the backup element queue's microtask queued.
+const UPGRADE_CONSTRUCT: u32 = 1;
+const UPGRADE_SHADOW_REFUSED: u32 = 2;
+const UPGRADE_BACKUP: u32 = 4;
+
+// The element `value` is the object of, and its realm's state bits.
+fn element_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<(NodeId, i32, u32)> {
+    let id = crate::node_handle::nid_of(scope, value)?;
+    let n = dom(scope).arena.get(id).filter(|n| n.kind == crate::dom::NodeKind::Element)?;
+    Some((id, n.realm, n.state))
+}
+// …its custom element state bits under `STATE_UPGRADED | STATE_PRECUSTOMIZED | STATE_CUSTOM | STATE_FORM_ASSOCIATED`
+// written, in the realm whose node it is: a `:defined` it changes restyles that realm's tree.
+fn set_custom_state(scope: &mut v8::PinScope<'_, '_>, id: NodeId, home: i32, bits: u32) {
+    use crate::dom::{STATE_CUSTOM, STATE_FORM_ASSOCIATED, STATE_PRECUSTOMIZED, STATE_UPGRADED};
+    let mask = STATE_UPGRADED | STATE_PRECUSTOMIZED | STATE_CUSTOM | STATE_FORM_ASSOCIATED;
+    let arena = realm(scope, home);
+    if let Some(had) = arena.get(id).map(|n| n.state).filter(|had| had & mask != bits) {
+        arena.set_state(id, (had & !mask) | bits);
+    }
+}
+
+// __dom.ceUpgrade(element, id, definition) -> what is left to the bindings (`UPGRADE_*`; 0 for nothing): HTML "upgrade
+// an element" up to its constructor — for an element in state "undefined" or "uncustomized" (one any other returns at
+// once), its definition the bindings' object `definition` (`id`): its definition set and its state "failed" (what a
+// re-entrant upgrade returns on), an attributeChanged reaction enqueued for each attribute in its attribute list, in
+// order, where the definition observes it, and a connected one where it is connected; the element pushed onto the
+// definition's construction stack; and, where the definition disables a shadow root the element has, a NotSupportedError
+// to throw, else its state "precustomized" and its constructor to construct. Its `ceUpgradeEnd` ends it, either way.
+fn ce_upgrade(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    use crate::dom::{STATE_PRECUSTOMIZED, STATE_UPGRADED};
+    let element = args.get(0);
+    let Some((id, home, state)) = element_of(scope, element) else { return rv.set_uint32(0) };
+    if state & STATE_UPGRADED != 0 {
+        return rv.set_uint32(0);
+    }
+    let Some(def) = definition_id(scope, args.get(1), args.get(2)) else { return rv.set_uint32(0) };
+    dom(scope).arena.ce_reactions.custom.insert(id, def);
+    set_custom_state(scope, id, home, STATE_UPGRADED);
+    let (attributes, connected, has_shadow) = {
+        let arena = realm(scope, home);
+        let Some(n) = arena.get(id) else { return rv.set_uint32(0) };
+        let attributes: Vec<(String, Vec<u16>, Vec<u16>)> = n
+            .attributes
+            .iter()
+            .map(|(key, _)| {
+                let (ns, local) = n.attribute_name(key);
+                (ns.to_owned(), local.encode_utf16().collect(), n.attr_units(key).map(|v| v.into_owned()).unwrap_or_default())
+            })
+            .collect();
+        let has_shadow = n.shadow_root.is_some();
+        (attributes, arena.is_connected(id), has_shadow)
+    };
+    let mut queue = false;
+    for (ns, local, value) in attributes {
+        let ns: v8::Local<'_, v8::Value> = if ns.is_empty() { v8::null(scope).into() } else { v8::String::new(scope, &ns).map_or_else(|| v8::null(scope).into(), Into::into) };
+        let value = crate::dom::utf16_value(scope, &value);
+        let null = v8::null(scope).into();
+        queue |= enqueue_attribute_changed(scope, id, element, &local, [null, value, ns]);
+    }
+    if connected {
+        let weak = dom(scope).arena.ce_reactions.callback_of(id, CONNECTED);
+        if let Some(callback) = weak_global(scope, weak) {
+            let element = v8::Global::new(scope, element);
+            queue |= dom(scope).arena.ce_reactions.enqueue(id, element, callback, Vec::new());
+        }
+    }
+    let held = v8::Global::new(scope, element);
+    let reactions = &mut dom(scope).arena.ce_reactions;
+    let Some(definition) = reactions.definitions.get_mut(def as usize).and_then(Option::as_mut) else { return rv.set_uint32(0) };
+    definition.construction.push(Some(held));
+    let refused = definition.flags & DEFINE_DISABLE_SHADOW != 0 && has_shadow;
+    reactions.constructing.push(def);
+    reactions.set(CONSTRUCTING, reactions.constructing.len() as i32);
+    if !refused {
+        set_custom_state(scope, id, home, STATE_UPGRADED | STATE_PRECUSTOMIZED);
+    }
+    let backup = if queue { UPGRADE_BACKUP } else { 0 };
+    rv.set_uint32(backup | if refused { UPGRADE_SHADOW_REFUSED } else { UPGRADE_CONSTRUCT });
+}
+
+// __dom.ceUpgradeEnd(element, id, definition, constructed) — the upgrade `ceUpgrade` began, ended: the last entry of its
+// definition's construction stack removed, and then — its constructor having `constructed` the element — its state
+// "custom" (a form-associated custom element where the definition is form-associated); else its definition taken back
+// and its reaction queue emptied, its state left "failed" or "precustomized" as it was.
+fn ce_upgrade_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    use crate::dom::{STATE_CUSTOM, STATE_FORM_ASSOCIATED, STATE_UPGRADED};
+    let Some((id, home, _)) = element_of(scope, args.get(0)) else { return };
+    let Some(def) = definition_id(scope, args.get(1), args.get(2)) else { return };
+    let reactions = &mut dom(scope).arena.ce_reactions;
+    reactions.pop_construction(def);
+    if !args.get(3).is_true() {
+        reactions.custom.remove(&id);
+        reactions.queues.remove(&id);
+        return;
+    }
+    let associated = reactions.definitions.get(def as usize).and_then(Option::as_ref).is_some_and(|d| d.flags & DEFINE_FORM_ASSOCIATED != 0);
+    set_custom_state(scope, id, home, STATE_UPGRADED | STATE_CUSTOM | if associated { STATE_FORM_ASSOCIATED } else { 0 });
+}
+
+// __dom.ceMakeCustom(element, id, definition) — an element its constructor makes custom (HTML's HTML element
+// constructor, its definition's construction stack empty: a direct `new`, or "create an element" constructing
+// synchronously): its definition the bindings' object `definition` (`id`), its state "custom".
+fn ce_make_custom(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    use crate::dom::{STATE_CUSTOM, STATE_FORM_ASSOCIATED, STATE_UPGRADED};
+    let Some((id, home, _)) = element_of(scope, args.get(0)) else { return };
+    let Some(def) = definition_id(scope, args.get(1), args.get(2)) else { return };
+    let reactions = &mut dom(scope).arena.ce_reactions;
+    reactions.custom.insert(id, def);
+    let associated = reactions.definitions.get(def as usize).and_then(Option::as_ref).is_some_and(|d| d.flags & DEFINE_FORM_ASSOCIATED != 0);
+    set_custom_state(scope, id, home, STATE_UPGRADED | STATE_CUSTOM | if associated { STATE_FORM_ASSOCIATED } else { 0 });
+}
+
+// __dom.ceConstructionTop(newTarget) -> the last entry of the construction stack of the definition an upgrade constructs
+// by `newTarget` (HTML's HTML element constructor, step 11): the element, null for the "already constructed" marker — or
+// undefined where no upgrade constructs by it (the stack empty: a direct `new`, or "create an element"'s).
+fn ce_construction_top(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let reactions = &dom(scope).arena.ce_reactions;
+    let Some(def) = reactions.constructing_by(args.get(0)) else { return };
+    let top = reactions.definitions[def as usize].as_ref().and_then(|d| d.construction.last().cloned());
+    match top {
+        Some(Some(element)) => rv.set(v8::Local::new(scope, element)),
+        _ => rv.set_null(),
+    }
+}
+// __dom.ceMarkConstructed(newTarget) — that entry replaced with the "already constructed" marker (step 14): a second
+// `super()` of the same constructor throws.
+fn ce_mark_constructed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let reactions = &mut dom(scope).arena.ce_reactions;
+    let Some(def) = reactions.constructing_by(args.get(0)) else { return };
+    if let Some(top) = reactions.definitions[def as usize].as_mut().and_then(|d| d.construction.last_mut()) {
+        *top = None;
     }
 }
 
