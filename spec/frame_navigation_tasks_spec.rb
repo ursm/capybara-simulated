@@ -1398,6 +1398,14 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(page_log(page, at: 700, pages: {'/c' => outer, '/c2' => inner})).to eq('dcl outer resrc sf-script sf-load load rs:complete')
     end
 
+    # …and a `javascript:` URL whose result is a string, its document replacing the one still parsing (Chrome and
+    # Firefox, rv-sf-probe `u_js_str`).
+    it "aborts a frame's parse as a javascript: URL's string replaces its document" do
+      child = "<script src=\"/slow/150/fb.js\"></script><script>top.L.push('finl')</script>"
+      page = "<iframe src=\"/c\" onload=\"L.push('fl')\"></iframe><script>setTimeout(() => { document.querySelector('iframe').src = 'javascript:\"<p>js-doc\"'; L.push('js'); }, 60)</script>"
+      expect(page_log(page, at: 700, pages: {'/c' => child})).to eq('dcl js fl load rs:complete')
+    end
+
     # …a frame's parser too, its document committed by a task of the event loop's (Chrome and Firefox: r13 `s_frame_src`).
     it "runs a frame's zero timer before its parser-blocking script" do
       child = "<script>setTimeout(() => top.L.push('ft0'))</script><script src=\"/slow/0/fb.js\"></script>"
