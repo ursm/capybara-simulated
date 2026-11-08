@@ -214,8 +214,9 @@ impl Commit {
         }
     }
     // Whether it sends no POST again: a traversal's (HTML "apply the history step": allowPOST its entry's reload pending,
-    // false — no fetch, an error document; Chrome 157 and Firefox 159, measured 2026-11-08, re-POST none, an error page
-    // where no cache has the response) — a reload's re-posts.
+    // false — no fetch, an error document; Chrome 157 and Firefox 159, measured 2026-11-08 with no service worker, re-POST
+    // none, an error page where no cache has the response) — a reload's re-posts. (…the reload's by the text's evident
+    // intent, not its literal order: the step sets reload pending to false before allowPOST reads it, whatwg/html#12760)
     pub(crate) fn posts_none(&self) -> bool {
         matches!(self.handling, Handling::Traverse(..)) || self.traverses
     }
