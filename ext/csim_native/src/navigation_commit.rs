@@ -80,9 +80,9 @@ impl Step {
 
 pub(crate) struct Commit {
     history: SessionHistory,
-    // The navigable it is of — the page's, `TOP`, or a frame's — and, a frame's that makes an entry, the number of the
-    // navigation that began it (session_history.rs `begin_frame_entry`): what its document commits, and what it lets go of
-    // where it makes none.
+    // The navigable it is of — a top-level traversable's, `TOP`, or a frame's — and, a frame's that makes an entry, the
+    // number of the navigation that began it (session_history.rs `begin_frame_entry`): what its document commits, and
+    // what it lets go of where it makes none.
     nav: u32,
     token: Option<u64>,
     handling: Handling,
@@ -136,11 +136,11 @@ impl Commit {
         }
     }
 
-    // A frame's: navigable `nav`'s, of history `history`, making the entry its navigation of number `token` began — a
-    // replay of the active one, of none.
-    pub(crate) fn of_frame(history: SessionHistory, nav: u32, token: Option<u64>) -> Self {
+    // A frame's: navigable `nav`'s, of history `history`, making the entry its navigation of number `token` began, of
+    // `data` beside what that one holds — a replay of the active one, of none.
+    pub(crate) fn of_frame(history: SessionHistory, nav: u32, token: Option<u64>, data: Option<Data>) -> Self {
         let handling = if token.is_some() { Handling::Push } else { Handling::Reload };
-        let mut commit = Commit::new(history, handling, None, None, false);
+        let mut commit = Commit::new(history, handling, data, None, false);
         (commit.nav, commit.token) = (nav, token);
         commit
     }
@@ -162,20 +162,20 @@ impl Commit {
     }
 
     // A redirect followed to `url`, the request now a GET or not (`get`): its entry's URL the redirect's, and — `get` —
-    // none of what a re-post sends again: so a reload gets the page it was redirected to, not the chain run again, a
-    // Post/Redirect/Get page's not the form submitted again (Chrome).
+    // no POST of its to send again: so a reload gets the page it was redirected to, not the chain run again, a
+    // Post/Redirect/Get page's not the form submitted again (Chrome) — referred all the same (`Data::forget_resource`).
     pub(crate) fn redirected(&mut self, url: &str, get: bool) {
         url.clone_into(&mut self.url);
         self.redirected = true;
         self.to_get |= get;
     }
 
-    // The entry a replay goes to: a reload's the active one, a traversal's the one its step gives.
-    // (…the page's alone: a frame's replay goes to the entry its navigable is at, which no page's step names)
+    // The entry a replay goes to: a reload's the active one of its navigable — a frame's replay is one, whose
+    // traversal the host applied the step of before it made the frame's document again — a traversal's the one its step
+    // gives.
     fn replayed(&self) -> Option<u64> {
-        debug_assert_eq!(self.nav, TOP, "a frame's replay read as the page's");
         match self.handling {
-            Handling::Reload => self.history.active(0),
+            Handling::Reload => self.history.active(self.nav),
             Handling::Traverse(_, id) => Some(id),
             Handling::Push | Handling::Replace => None,
         }
@@ -194,6 +194,13 @@ impl Commit {
     pub(crate) fn keep_blob(&mut self, bytes: std::sync::Arc<[u8]>, given: &str) {
         self.data.set_blob(bytes, given);
     }
+    // …and the Referer its request sent, its last hop's: the referrer of the document it makes, which the entry it makes
+    // keeps (a frame's reload makes its document with it again: browser.rb `reload_frame_to_entry`).
+    pub(crate) fn sent(&mut self, referrer: Option<String>) {
+        if let Some(referrer) = referrer {
+            self.data.set_text("referrer", referrer);
+        }
+    }
 
     // …ended, at `url`, in `step`, its document's origin a new opaque one where `sandboxed` (its response's
     // Content-Security-Policy `sandbox`): a document's committed to the session history (`commit`), no document's
@@ -207,10 +214,6 @@ impl Commit {
             return;
         }
         self.ended = true;
-        if self.nav != TOP {
-            return self.commit_frame();
-        }
-        self.let_go();
         let origin = match step {
             _ if sandboxed => None,
             Step::AboutBlank(origin, _) => origin.clone(),
@@ -218,20 +221,20 @@ impl Commit {
             Step::Document(None) => http_origin(&self.url),
             _ => None,
         };
-        self.commit(origin);
+        if self.nav != TOP {
+            return self.commit_frame(origin.as_deref());
+        }
+        self.let_go();
+        self.commit(origin.as_deref());
     }
 
     // The document it made, of origin `origin` (none an opaque one): its entry pushed or put in place of the active one
-    // — the first of a window of none — or the one a replay goes to the step's (HTML "apply the history
-    // step"), its URL a redirect's; the entry the page's document leaves noted (a reload's none: its document is the
-    // entry's own); the origin its document state is of kept; and a replay's classic history API state — and the
-    // navigable's target name, but an opened window's — cleared where that origin is not the one before it: the document
-    // it leaves, for an entry made (HTML "finalize a cross-document navigation"), the one its entry's document was of, for
-    // a replay (HTML "apply the history step", afterDocumentPopulated, `oldOrigin`).
-    fn commit(&mut self, origin: Option<String>) {
+    // — the first of a window of none — or the one a replay goes to the step's (HTML "apply the history step":
+    // `made_again`); the entry the leaving document is at noted (a reload's none: its document is the entry's own); the
+    // origin its document state is of kept; and the navigable's target name, but an opened window's, cleared where that
+    // origin is not the one of the document it leaves (HTML "finalize a cross-document navigation").
+    fn commit(&mut self, origin: Option<&str>) {
         let active = self.history.active(0);
-        let doc_origin = origin.clone().unwrap_or_else(|| "null".to_owned());
-        let same = |before: Option<&str>| before.is_some_and(|b| b != "null" && origin.as_deref() == Some(b));
         if self.handling.replays() {
             let Some(id) = self.replayed() else { return };
             if let Handling::Traverse(step, _) = self.handling {
@@ -244,49 +247,61 @@ impl Commit {
             } else {
                 self.history.set_leaving(None);
             }
-            if self.redirected {
-                self.history.redirect_entry(id, &self.url, self.to_get);
-            }
-            let before = self.history.text_of(id, "document_origin");
-            if before.is_some() && !same(before.as_deref()) {
-                if !self.opened {
-                    self.history.clear_name();
-                }
-                self.history.forget_state_of(id);
-            }
-            self.history.set_text_of(id, "document_origin", doc_origin);
-            return;
+            return self.made_again(id, origin);
         }
         self.history.set_leaving(active);
         let initial = active.is_none();
         let kept = match self.leaving_origin.as_deref() {
             None if initial => true,
-            before => same(before),
+            before => same_origin(before, origin),
         };
         let mut data = std::mem::take(&mut self.data);
         if self.to_get {
-            data.forget_request();
+            data.forget_resource();
         }
-        data.set_text("document_origin", doc_origin);
+        data.set_text("document_origin", serialized(origin));
         self.history.record_page_entry(self.url.clone(), self.handling == Handling::Replace, data);
         if !kept && !self.opened {
             self.history.clear_name();
         }
     }
+
+    // …a replay's: the entry it goes to, `id`, made the document of again — its URL a redirect's, and its classic history
+    // API state none (HTML "create navigation params by fetching": a redirect sets it to null); its classic history API
+    // state — and a top-level navigable's target name, but an opened window's — cleared where the document's origin is
+    // not the one the entry's document was of (HTML "apply the history step", afterDocumentPopulated, `oldOrigin`); the
+    // origin its document state is of kept.
+    fn made_again(&self, id: u64, origin: Option<&str>) {
+        if self.redirected {
+            self.history.redirect_entry(id, &self.url, self.to_get);
+            self.history.forget_state_of(id);
+        }
+        let before = self.history.text_of(id, "document_origin");
+        if before.is_some() && !same_origin(before.as_deref(), origin) {
+            if self.nav == TOP && !self.opened {
+                self.history.clear_name();
+            }
+            self.history.forget_state_of(id);
+        }
+        self.history.set_text_of(id, "document_origin", serialized(origin));
+    }
 }
 
 impl Commit {
-    // A frame's document made: the entry its navigation began committed, at the URL a redirect took it to — a replay's
-    // active one at it.
-    fn commit_frame(&mut self) {
+    // A frame's document made, of origin `origin`: the entry its navigation began committed — at the URL a redirect took
+    // it to, of what the host gave it (`data`) beside what the navigation began it with, the origin its document state is
+    // of kept — or a replay's active one made again (`made_again`).
+    fn commit_frame(&mut self, origin: Option<&str>) {
         let redirect = self.redirected.then_some((self.url.as_str(), self.to_get));
         match self.token.take() {
             Some(token) => {
-                self.history.commit_frame_navigation(self.nav, token, redirect);
+                let mut data = std::mem::take(&mut self.data);
+                data.set_text("document_origin", serialized(origin));
+                self.history.commit_frame_navigation(self.nav, token, redirect, data);
             }
             None => {
-                if let Some((url, get)) = redirect {
-                    self.history.redirect_frame_entry(self.nav, url, get);
+                if let Some(id) = self.replayed() {
+                    self.made_again(id, origin);
                 }
             }
         }
@@ -309,6 +324,16 @@ impl Drop for Commit {
     fn drop(&mut self) {
         self.let_go();
     }
+}
+
+// Whether a document of origin `origin` (none an opaque one) is of the origin one before it was of, `before`, serialized —
+// `null` an opaque one's, never the same as another's.
+fn same_origin(before: Option<&str>, origin: Option<&str>) -> bool {
+    before.is_some_and(|b| b != "null" && origin == Some(b))
+}
+// …and an origin as its document state keeps it, serialized.
+fn serialized(origin: Option<&str>) -> String {
+    origin.unwrap_or("null").to_owned()
 }
 
 // The origin a `blob:` URL's document is judged by: its URL's, the one inside (an HTTP(S) one's).
@@ -455,18 +480,18 @@ mod tests {
         let history = page();
         let f1 = history.seed_frame(1, "http://a.test/f1");
         let begin = |url: &str| history.begin_frame_entry_for_test(1, url);
-        let mut c = Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/f2")));
+        let mut c = Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/f2")), None);
         c.redirected("http://a.test/f3", true);
         assert_eq!(history.length(), 1);
         c.end(&Step::Document(None), false);
         let f3 = history.active(1).unwrap();
         assert_eq!((history.length(), history.url(f3).as_deref()), (2, Some("http://a.test/f3")));
-        Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/nc"))).end(&Step::None, false);
+        Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/nc")), None).end(&Step::None, false);
         let dropped = begin("http://a.test/dropped");
-        drop(Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(dropped)));
+        drop(Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(dropped), None));
         assert_eq!((history.length(), history.active(1)), (2, Some(f3)));
-        assert_eq!(history.commit_frame_navigation(1, dropped, None), None);
-        let mut replay = Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, None);
+        assert_eq!(history.commit_frame_navigation(1, dropped, None, Data::default()), None);
+        let mut replay = Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, None, None);
         replay.redirected("http://a.test/f4", false);
         replay.end(&Step::Document(None), false);
         assert_eq!((history.length(), history.url(f3).as_deref()), (2, Some("http://a.test/f4")));

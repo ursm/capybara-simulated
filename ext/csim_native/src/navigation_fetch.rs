@@ -283,8 +283,9 @@ impl NavigationFetch {
     // [step, entry id], entry: the fields of the entry it makes — session_history.rs `Data` — leaving_origin: the origin of
     // the document it leaves, serialized, a window's initial about:blank's its creator's, nil none, opened: whether its
     // navigable is an auxiliary browsing context's whose opener is there} — or a
-    // frame's, {navigable:, traversable: the number of the session history it is of, entry: the number of the navigation
-    // whose entry it makes, session_history.rs `begin_frame_entry`, nil a replay's} — navigation_commit.rs `Commit`,
+    // frame's, {navigable:, traversable: the number of the session history it is of, navigation: the number of the
+    // navigation whose entry it makes, session_history.rs `begin_frame_entry`, nil a replay's, entry: the fields of that
+    // entry the host gives} — navigation_commit.rs `Commit`,
     // `#begin_commit`, `#response_commit`; nil any other navigation).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
@@ -307,11 +308,12 @@ impl NavigationFetch {
         let commit = match Option::<RHash>::try_convert(get("commit")?)? {
             Some(commit) => {
                 let field = |key: &str| commit.aref::<_, Value>(ruby.to_symbol(key));
+                let entry = Option::<RHash>::try_convert(field("entry")?)?.map(|e| crate::session_history::Data::of(ruby, e)).transpose()?;
                 match Option::<u32>::try_convert(field("navigable")?)? {
                     // (…a frame's, of the traversable its navigable is of: none of whose responses' opener policies matter)
                     Some(nav) => Option::<u64>::try_convert(field("traversable")?)?
                         .and_then(crate::session_history::SessionHistory::of)
-                        .map(|history| Ok::<_, Error>(Commit::of_frame(history, nav, Option::<u64>::try_convert(field("entry")?)?)))
+                        .map(|history| Ok::<_, Error>(Commit::of_frame(history, nav, Option::<u64>::try_convert(field("navigation")?)?, entry)))
                         .transpose()?,
                     None => traversable
                         .and_then(crate::session_history::SessionHistory::of)
@@ -319,7 +321,6 @@ impl NavigationFetch {
                             let handling = String::try_convert(field("handling")?)?;
                             let traversal = Option::<(i64, u64)>::try_convert(field("traversal")?)?;
                             let handling = Handling::named(&handling, traversal).ok_or_else(|| Error::new(ruby.exception_arg_error(), format!("no history handling {handling}")))?;
-                            let entry = Option::<RHash>::try_convert(field("entry")?)?.map(|e| crate::session_history::Data::of(ruby, e)).transpose()?;
                             let leaving_origin = Option::<String>::try_convert(field("leaving_origin")?)?;
                             Ok::<_, Error>(Commit::new(history, handling, entry, leaving_origin, field("opened")?.to_bool()))
                         })
@@ -676,7 +677,11 @@ impl NavigationFetch {
     }
     fn ended(&self, ruby: &Ruby, step: Step) -> Result<RArray, Error> {
         let sandboxed = self.sandboxed.get() && matches!(step, Step::Document(None));
-        self.commit_with(|c| c.end(&step, sandboxed));
+        let sent = self.referrer();
+        self.commit_with(|c| {
+            c.sent(sent);
+            c.end(&step, sandboxed);
+        });
         Ok(step_for_ruby(ruby, step))
     }
 }

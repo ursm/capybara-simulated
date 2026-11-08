@@ -11293,9 +11293,11 @@ module Capybara
               ready:              ->(target) { await_sw_activation(target, Native.site(target).to_s) if sw_registered? }
             )
             document = hop.document || read_rack_body(hop.rack_body) if hop.command == 'document'
-            # (…none where a navigation begun as the response was awaited ended it: `navigate_top_level`)
+            # (…none where a navigation begun as the response was awaited ended it, its reserved client discarded:
+            # `navigate_top_level`)
             unless navigation_mark(history, realm_id) == awaited
               close_rack_body(hop.rack_body) unless document
+              discard_reserved_client(hop.client_id) if hop.client_id
               return
             end
 
@@ -11888,12 +11890,12 @@ module Capybara
 
           return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, nil, true, srcdoc)
         end
-        # A history TRAVERSAL restores the entry's persisted form state (bfcache) and its classic history API state, which
-        # the document made starts with (as the page's: `replay_history_entry`), as `[state]`, its request referred as the
-        # entry's document's was (HTML's document state); a RELOAD gives a fresh document, so it must NOT restore the
-        # (possibly stale) snapshot the entry was left with, its referrer the document reloading (Chrome). A re-post's
-        # origin either's the one it was first sent with.
-        commit   = is_reload ? {} : {restore_state: entry[:form_state], history_state: [entry[:state]]}
+        # A history TRAVERSAL restores the entry's persisted form state (bfcache), its request referred as the entry's
+        # document's was (HTML's document state); a RELOAD gives a fresh document, so it must NOT restore the (possibly
+        # stale) snapshot the entry was left with, its referrer the document reloading (Chrome). Either's document starts
+        # with the entry's classic history API state, as the page's (`replay_history_entry`): `navigate_realm_self`'s once
+        # its commit is in, a blob's as it is. A re-post's origin either's the one it was first sent with.
+        restored = is_reload ? {} : {restore_state: entry[:form_state]}
         referrer = if is_reload then realm_referrer_initiator(realm_id)
                    elsif entry.key?(:referer) then [entry[:referer], entry[:referrer_policy].to_s]
                    # (…an entry of a document the container loaded, its referrer as it was determined, sent as it is)
@@ -11907,12 +11909,12 @@ module Capybara
         # one it names now in this window's registry (`__csimTakeFrameNavBlob`) — none a failed load at the URL.
         if url.match?(/\Ablob:/i)
           blob = host_blob(frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimTakeFrameNavBlob', realm_id, url, is_reload, is_reload))
-          return reload_frame_realm_by_id(realm_id, url, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', **commit)
+          return reload_frame_realm_by_id(realm_id, url, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', **restored, history_state: [entry[:state]])
         end
         navigate_realm_self(realm_id, url, entry.key?(:body) ? entry[:body].to_s : nil, entry[:content_type], is_reload: is_reload, is_history: is_history,
                                                                                                    origin_null: origin == 'null', referrer: referrer,
                                                                                                    initiator: is_reload ? realm_id : nil, origin_url: (origin unless origin == 'null'),
-                                                                                                   user_activated: false, commit: commit)
+                                                                                                   user_activated: false, restored: restored)
       end
       # A form submitted in realm `realm_id`'s document — the page's, an entered frame's, one a frame's script submitted —
       # its request as it was submitted (`spec`, serialized in that realm: its shadow trees' controls left out, its action
@@ -12176,8 +12178,10 @@ module Capybara
       # realm. What it comes to and what it does to the frame's session history are the engine's (navigation_commit.rs,
       # through its NavigationFetch): the entry it begins — `handling` :push, or :replace the active one; none of a reload
       # or a traversal, which replays the active one — made as its document is, at the URL its redirects took it to, none
-      # where it makes none. The POST method and body tagged onto the entry once a POST's response makes the document — a
-      # Post/Redirect/Get one's entry stays a GET's (`tag_frame_entry_post`).
+      # where it makes none, of the request it is reached by: its referrer before its policy applied and that policy, a
+      # POST's body and initiator origin — which a traversal to it refers by and a reload or a traversal re-posts (HTML's
+      # document state: a Post/Redirect/Get one's entry a GET's) — and the Referer it sent, its document's referrer.
+      # (…`restored` the form state a traversal's document is given: `reload_frame_to_entry`)
       private def navigate_realm_self(
         realm_id,
         url,
@@ -12191,7 +12195,7 @@ module Capybara
         origin_url:,
         user_activated:,
         entry: nil,
-        commit: {},
+        restored: {},
         handling: nil
       )
         # (…its navigation begun, the frame's ongoing one: session_history.rs `begin_navigation`)
@@ -12213,7 +12217,7 @@ module Capybara
               origin_url:,
               user_activated:,
               entry:,
-              commit:,
+              restored:,
               handling:
             )
           end
@@ -12244,6 +12248,8 @@ module Capybara
         # every URL)
         origin_url ||= initiating_url(initiator || realm_id) || source
         req_body = body.to_s.b
+        made = {referer: source, referrer_policy: referrer_policy.to_s, origin: origin_null ? 'null' : url_origin(origin_url)}
+        made.update(body: req_body, content_type: content_type) if body
         fetch = Native::NavigationFetch.new({
           method:                        body ? 'POST' : 'GET',
           url:                           url,
@@ -12264,7 +12270,7 @@ module Capybara
           # (…a service worker may answer its hops where one is registered — an https one's only where the frame may be
           # controlled: `sw_may_control_frame_navigation?` — matched in the frame's top-level site)
           sw:                            ([sw_may_control_frame_navigation?(realm_id), blob_partition_site(realm_id)] if sw_registered?),
-          commit:                        ({navigable: nav, traversable: history.id, entry: began&.token} if history)
+          commit:                        ({navigable: nav, traversable: history.id, navigation: began&.token, entry: made} if history)
         })
         begin
           hop = run_navigation_fetch(
@@ -12287,7 +12293,7 @@ module Capybara
             discard_reserved_client(hop.client_id) if hop.client_id
             return frame_navigation_made_no_document(realm_id)
           end
-          commit_frame_navigation(realm_id, entry, fetch, hop, req_body, content_type, origin_null ? 'null' : url_origin(origin_url), commit)
+          commit_frame_navigation(realm_id, entry, fetch, hop, restored, replay: is_reload || is_history)
         ensure
           # (…what it began let go however it ended: another navigation ending it, a failure of this host's)
           fetch.close
@@ -12295,9 +12301,9 @@ module Capybara
       end
       # The frame realm `realm_id`'s navigation `fetch` ended in its last hop `hop` (navigation_commit.rs `Step`, its entry
       # done with as that says): the document it makes committed — an error document, a viewer's for inline content (a
-      # PDF's: `commit_page_navigation`), its response's — or none, a download saved. A POST's request — `body`,
-      # `content_type`, `origin` its initiator origin — and its referrer kept by its entry.
-      private def commit_frame_navigation(realm_id, entry, fetch, hop, body, content_type, origin, restored)
+      # PDF's: `commit_page_navigation`), its response's — or none, a download saved.
+      # (…`replay` a reload's or a traversal's, of the entry its navigable is at)
+      private def commit_frame_navigation(realm_id, entry, fetch, hop, restored, replay:)
         target = fetch.target
         step, = fetch.response_commit(hop.command)
         case step
@@ -12311,14 +12317,10 @@ module Capybara
           return commit_frame_document(realm_id, entry, target, '', 'text/html', doc_origin: 'null', client_id: hop.client_id)
         end
 
-        # (…its entry's document state the request's — its referrer before its policy applied and that policy, a POST's
-        # body and initiator origin — which a traversal to it refers by and a reload or a traversal re-posts: HTML's
-        # document state; the document's referrer beside them)
-        history, id = frame_entry(realm_id)
-        history&.update(id, {referrer: fetch.referrer.to_s, referer: hop.referrer_source.to_s, referrer_policy: hop.referrer_policy.to_s})
-        tag_frame_entry_post(realm_id, body, content_type, origin) if fetch.request_method == 'POST'
-        # (…and what the caller's document state gives it — `restored`, a traversal's form state and history state — none
-        # where a redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
+        # (…and what the caller's document state gives it — `restored`, a traversal's form state — none where a redirect
+        # made the request anew; a replay's its entry's classic history API state, as the step left it: none where a
+        # redirect or another origin made it anew — HTML "create navigation params by fetching", navigation_commit.rs
+        # `made_again`)
         ctype, csp, document_policy, refresh, _, origin_agent_cluster = Native.document_params(hop.headers, '', false)
         ctype = hop.document_type || ctype
         response = {
@@ -12330,15 +12332,10 @@ module Capybara
           origin_agent_cluster: origin_agent_cluster
         }
         response.update(restored) unless fetch.redirected?
+        if replay && (history, id = frame_entry(realm_id))
+          response[:history_state] = [history.entry(id)[:state]]
+        end
         commit_frame_document(realm_id, entry, target, hop.document || read_rack_body(hop.rack_body), ctype || 'text/html', **response)
-      end
-      # Tag the frame's current history entry as reached by a POST (with its body), so a later
-      # reload / history traversal re-POSTS it — once a POST's response makes the document (a 307 /
-      # 308's re-POST's too), so a Post/Redirect/Get entry stays a GET.
-      # (…`origin` the request's, serialized: what a re-post sends again — HTML's document state initiator origin)
-      def tag_frame_entry_post(realm_id, body, content_type, origin)
-        history, id = frame_entry(realm_id)
-        history&.update(id, {body: body.to_s, content_type: content_type, origin: origin})
       end
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
@@ -13037,9 +13034,11 @@ module Capybara
             # (…its body read first, which an app may take its time over)
             document = hop.document || read_rack_body(hop.rack_body) if hop.command == 'document'
             # (…none where a navigation begun as the response was awaited ended it, whose own plan the page then takes: HTML
-            # "navigate", "this will abort other ongoing navigations" — a timer's `location` with the app taking its time)
+            # "navigate", "this will abort other ongoing navigations" — a timer's `location` with the app taking its time —
+            # its reserved client discarded, as one of no document is)
             unless navigation_mark(@session_history, 0) == awaited
               close_rack_body(hop.rack_body) unless document
+              discard_reserved_client(hop.client_id) if hop.client_id
               superseded = true
               return
             end

@@ -144,13 +144,25 @@ impl Data {
     pub(crate) fn set_cross_site(&mut self, cross: bool) {
         self.cross_site = Some(cross);
     }
-    // …none of what a re-post sends again — its body, the origin, Referer and referrer policy it was sent with — its request
-    // a GET from a redirect on (Fetch "HTTP-redirect fetch").
-    pub(crate) fn forget_request(&mut self) {
+    // …no POST of its to send again, its request a GET from a redirect on (Fetch "HTTP-redirect fetch": the body null,
+    // the referrer as it was) — referred as it was, by the request referrer and policy and of the initiator origin its
+    // document state keeps (HTML), which a traversal back to it sends: Chrome 157's frame and Firefox 159's page and frame,
+    // measured 2026-11-08, refer a Post/Redirect/Get page's by the form's page.
+    pub(crate) fn forget_resource(&mut self) {
         self.post = None;
-        for key in ["origin", "referer", "referrer_policy"] {
-            self.texts[TEXT_FIELDS.iter().position(|&k| k == key).unwrap_or_default()] = None;
+    }
+    // …and what `reached` names of how it was reached — its request, its referrer, whether its cookies were cross-site —
+    // in place of what it had.
+    fn reached_by(&mut self, reached: Data) {
+        if reached.post.is_some() {
+            self.post = reached.post;
         }
+        for (field, given) in self.texts.iter_mut().zip(reached.texts) {
+            if given.is_some() {
+                *field = given;
+            }
+        }
+        self.cross_site = reached.cross_site.or(self.cross_site);
     }
 
     // …and as a hash of the ones it has.
@@ -792,15 +804,16 @@ impl Traversable {
         self.navigations.insert(nav, FrameNavigation { token, parent, url, replace, data, ancestors });
         token
     }
-    // …its document made: its entry committed (`commit`) — at the URL a redirect took it to, `redirect`, with none of what
-    // a re-post sends again where that made its request a GET — where it is the frame's navigation under way, of number
-    // `token`.
-    fn commit_frame_navigation(&mut self, nav: u32, token: u64, redirect: Option<(&str, bool)>) -> Option<u64> {
+    // …its document made: its entry committed (`commit`) — at the URL a redirect took it to, `redirect`, with no POST to
+    // send again where that made its request a GET; of `reached` beside what it began with — where it is the frame's
+    // navigation under way, of number `token`.
+    fn commit_frame_navigation(&mut self, nav: u32, token: u64, redirect: Option<(&str, bool)>, reached: Data) -> Option<u64> {
         let FrameNavigation { parent, mut url, replace, mut data, ancestors, .. } = self.take_frame_navigation(nav, token)?;
+        data.reached_by(reached);
         if let Some((to, get)) = redirect {
             to.clone_into(&mut url);
             if get {
-                data.forget_request();
+                data.forget_resource();
             }
         }
         for seed in &ancestors {
@@ -828,7 +841,7 @@ impl Traversable {
         let Some(e) = self.state.entry_mut(id) else { return };
         url.clone_into(&mut e.url);
         if get {
-            Arc::make_mut(&mut e.data).forget_request();
+            Arc::make_mut(&mut e.data).forget_resource();
         }
     }
 
@@ -1406,22 +1419,14 @@ impl SessionHistory {
     // #commit_frame_navigation(navigable, number) -> its entry, nil none / #abandon_frame_navigation(navigable, number):
     // the host's, of a document it made of no fetch of its own (a `data:` URL's, about:blank's, a blob's, an error
     // document) or none.
-    pub(crate) fn commit_frame_navigation(&self, nav: u32, token: u64, redirect: Option<(&str, bool)>) -> Option<u64> {
-        self.lock().commit_frame_navigation(nav, token, redirect)
+    pub(crate) fn commit_frame_navigation(&self, nav: u32, token: u64, redirect: Option<(&str, bool)>, reached: Data) -> Option<u64> {
+        self.lock().commit_frame_navigation(nav, token, redirect, reached)
     }
     pub(crate) fn abandon_frame_navigation(&self, nav: u32, token: u64) {
         self.lock().abandon_frame_navigation(nav, token);
     }
     fn commit_frame_navigation_for_ruby(&self, nav: u32, token: u64) -> Option<u64> {
-        self.commit_frame_navigation(nav, token, None)
-    }
-    // …and a replay's — a reload's, a traversal's, of the entry frame `nav` is at — its document reached by a redirect
-    // (`redirect_entry`).
-    pub(crate) fn redirect_frame_entry(&self, nav: u32, url: &str, get: bool) {
-        let mut t = self.lock();
-        if let Some(id) = t.state.current_entry(nav, t.build).map(|e| e.id) {
-            t.redirect_entry(id, url, get);
-        }
+        self.commit_frame_navigation(nav, token, None, Data::default())
     }
     // #begin_navigation(navigable) -> the number of the navigation of `navigable` begun now, its ongoing one — and
     // #navigation_ongoing?(navigable, number): whether it still is, no navigation begun nor traversal applied since.
@@ -2020,30 +2025,30 @@ mod tests {
         let made = begin("/f204", false);
         assert_eq!(h.length(), 1);
         h.abandon_frame_navigation(1, made);
-        assert_eq!(h.commit_frame_navigation(1, made, None), None);
+        assert_eq!(h.commit_frame_navigation(1, made, None, Data::default()), None);
         assert_eq!((h.active(1), h.length()), (Some(f1), 1));
 
         let first = begin("/slow", false);
         let second = begin("/f2", false);
         h.abandon_frame_navigation(1, first);
-        let f2 = h.commit_frame_navigation(1, second, Some(("/f2-redirected", true)));
+        let f2 = h.commit_frame_navigation(1, second, Some(("/f2-redirected", true)), Data::default());
         assert_eq!((h.active(1), h.length()), (f2, 2));
         assert_eq!(h.url(f2.unwrap()).as_deref(), Some("/f2-redirected"));
 
         let replacing = begin("/f3", true);
-        let f3 = h.commit_frame_navigation(1, replacing, None);
+        let f3 = h.commit_frame_navigation(1, replacing, None, Data::default());
         assert_eq!((h.active(1), h.length()), (f3, 2));
 
         // (…none of another navigation's number; a replay's redirect its active entry's)
         let f4 = begin("/f4", false);
-        assert_eq!(h.commit_frame_navigation(1, f4 + 1, None), None);
+        assert_eq!(h.commit_frame_navigation(1, f4 + 1, None, Data::default()), None);
         h.abandon_frame_navigation(1, f4);
-        h.redirect_frame_entry(1, "/f3-moved", false);
+        h.redirect_entry(h.active(1).unwrap(), "/f3-moved", false);
         assert_eq!(h.url(f3.unwrap()).as_deref(), Some("/f3-moved"));
 
         let gone = begin("/gone", false);
         h.lock().destroy(1);
-        assert_eq!(h.commit_frame_navigation(1, gone, None), None);
+        assert_eq!(h.commit_frame_navigation(1, gone, None, Data::default()), None);
     }
 
     // A navigation begun is the navigable's ongoing one until another is begun or a traversal applied.
