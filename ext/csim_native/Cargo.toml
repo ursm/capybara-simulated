@@ -26,7 +26,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # magnus init and register the DOM via set_realm_init_hook. The released tag, the
 # same version the gemspec asks for — the gem supplies the Ruby wrappers around
 # exactly this native source.
-rusty_racer = { git = "https://github.com/ursm/rusty_racer", tag = "v0.2.6" }
+rusty_racer = { git = "https://github.com/ursm/rusty_racer", tag = "v0.2.7" }
 magnus = { version = "0.8", features = ["rb-sys"] }
 rb-sys = "0.9"
 # MUST match rusty_racer's v8 exactly (version + features) so Cargo unifies to one

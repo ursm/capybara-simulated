@@ -57,6 +57,7 @@ Gem::Specification.new do |spec|
   # supplies the Ruby API around it — so the two are ONE version, the tag the crate is built from: a gem's
   # wrappers call into the native source of their own release, and another's may name a method this one
   # lacks. (0.2.6: `Context#function`, and a host argument's elements and entries defined, through no setter a
-  # page put on `Array.prototype` / `Object.prototype`.)
-  spec.add_dependency 'rusty_racer', '0.2.6'
+  # page put on `Array.prototype` / `Object.prototype`; 0.2.7: a Ruby fiber's stack bounds looked up once per stack,
+  # not by reading /proc/self/maps for each new fiber.)
+  spec.add_dependency 'rusty_racer', '0.2.7'
 end
