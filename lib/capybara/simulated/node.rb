@@ -198,11 +198,11 @@ module Capybara
       end
 
       def find_xpath(query)
-        browser.find_xpath(query, handle_id).map {|id| self.class.new(driver, id) }
+        driver.nodes_of(browser.find_xpath(query, handle_id), browser)
       end
 
       def find_css(query)
-        browser.find_css(query, handle_id).map {|id| self.class.new(driver, id) }
+        driver.nodes_of(browser.find_css(query, handle_id), browser)
       end
 
       def shadow_root

@@ -1418,8 +1418,15 @@ module Capybara
       def lookup_node(handle)
         handle if dom_call('alive', handle)
       end
-      # …whether each of `handles` is alive, asked at once: a find's results as Capybara makes its nodes of them
-      def alive_among(handles) = handles.empty? ? [] : dom_call('aliveAmong', handles)
+      # …whether each of `handles` is alive: a find's results as Capybara makes its nodes of them — asked one by one for
+      # a few, at once for more (`V8Runtime.packed`: no array crosses into the page's realm), from where one call for them
+      # all costs less than a call each: 2 handles 4.4 µs a call each against 4.5 µs packed, 3 handles 6.4 against 4.5
+      ALIVE_BATCH_MIN = 3
+      def alive_among(handles)
+        return handles.map { dom_call('alive', _1) } if handles.size < ALIVE_BATCH_MIN
+
+        dom_call('aliveAmong', V8Runtime.packed(handles))
+      end
 
       def check_stale(handle, initial, gen = nil)
         return if initial && (gen.nil? || gen == @context_gen) && dom_call('alive', handle)
@@ -8492,7 +8499,7 @@ module Capybara
       # discarded, no task of theirs run again — its timers, its listeners, its observers, its channels (window.js
       # `discardRealms`) — the windows it made stepped by its event loop still.
       def destroy_page
-        @runtime.call('discardRealms', @runtime.page_realm_tree)
+        @runtime.call('discardRealms', V8Runtime.packed(@runtime.page_realm_tree))
         @timers_active = false
       end
       # Whether its close ran, the window to be discarded.
@@ -11122,9 +11129,10 @@ module Capybara
       # began — begun with it, what its document's seed and a download its response is take: frame_navigation.rs
       # `frame_sandbox` — its source's activation. (Applying one re-navigates the owning iframe, which disposes the frame's
       # realm — illegal while its location setter is still on the V8 stack.)
-      def consume_pending_frame_nav
-        # Window-realm self-navs are realm navs too — drain them at every frame-nav drain point.
-        consume_pending_window_nav
+      # (…`windows`: the windows' navigations taken first, as they are at every drain point of the frames' — window-realm
+      # self-navs are realm navs too — where the caller took them already, not)
+      def consume_pending_frame_nav(windows: true)
+        consume_pending_window_nav if windows
         @runtime.call('takeFrameNavigations', 'navigate').each do |realm_id, url, replace, initiator, source, policy, sandbox, activated|
           parent    = @runtime.frame_realm_parent(realm_id)
           container = frame_container_handle(realm_id, parent)
@@ -12478,10 +12486,16 @@ module Capybara
         consume_planned_traversal
         consume_pending_sw_client_nav
         consume_sw_deferred_navigations
-        if takes_planned?
+        planned = takes_planned?
+        if planned
           consume_pending_location
           consume_pending_frame_submit
-          consume_pending_frame_nav
+        end
+        # (…the windows' navigations, whatever the page planned: a window's newly loaded document may plan the page's — its
+        # opener's reload — which the takes after it take in this same pass)
+        consume_pending_window_nav
+        if planned || (!@runtime.window_realm_meta.empty? && takes_planned?)
+          consume_pending_frame_nav(windows: false)
           consume_pending_page_submission
           consume_pending_frame_reload
           consume_pending_reload

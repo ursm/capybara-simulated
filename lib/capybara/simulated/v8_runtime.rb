@@ -122,6 +122,10 @@ module Capybara
       # allocation)
       ENGINE_PATHS = Hash.new {|paths, step| paths[step] = "#{HOST_NAMESPACE_NAME}.#{Native.host_token}#{step}".freeze }
       def self.engine_call(realm, step, *args) = realm.call(ENGINE_PATHS[step], *args)
+      # A list of numbers as the host hands it a step — handles, realms — packed as little-endian doubles into a binary
+      # string (engine.js `numbersOf`): rusty_racer builds an array argument by [[Set]], through any index setter a page
+      # put on the realm's `Array.prototype`, and a binary string as a Uint8Array, through none.
+      def self.packed(numbers) = numbers.pack('E*')
 
       # One isolate + its default context, presented as a single handle — the
       # shape the rest of the runtime (and `ScriptCache`) passes around.
@@ -781,7 +785,8 @@ module Capybara
         nil
       end
       # The realms that may hold a WindowProxy of another's window: every live one.
-      def proxy_holders = [0] + frame_realms.keys + loading_frame_realms.keys
+      # (…packed, as the host hands its integer lists: `V8Runtime.packed`)
+      def proxy_holders = V8Runtime.packed([0] + frame_realms.keys + loading_frame_realms.keys)
 
       # Tear down a single frame realm (e.g. a descendant frame destroyed when an
       # ancestor frame re-navigates). No-op for nil/0/unknown ids. `keep_proxies`: its navigable goes on to another

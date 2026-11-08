@@ -520,10 +520,10 @@ module Capybara
       def find_xpath(query, **_) = nodes_of(current_browser.find_xpath(query))
       def find_css(query, **_)   = nodes_of(current_browser.find_css(query))
 
-      # The nodes of a find's results, whether each is alive asked in one call for them all (Node's own lookup is one a
-      # node).
-      private def nodes_of(handles)
-        alive = current_browser.alive_among(handles)
+      # The nodes of a find's results — the driver's and a node's scoped one (`Node#find_css`) — each made knowing whether
+      # it is alive, asked of `browser` for them all (`Browser#alive_among`), not by a lookup of its own.
+      def nodes_of(handles, browser = current_browser)
+        alive = browser.alive_among(handles)
         handles.each_with_index.map {|id, i| Node.new(self, id, alive: alive[i]) }
       end
 

@@ -241,3 +241,27 @@ RSpec.describe 'meta+Enter on a link the app already handles' do
     expect(session.windows.size).to eq(2)   # main + the synthetic cmd+Enter open
   end
 end
+
+# What a pop-up's newly loaded document plans of its opener is taken in the same pass of the host's drain as the
+# pop-up's navigation that loaded it: the windows' navigations come before the page's takes, whatever the page had
+# planned before (browser.rb `drain_pending_navigation`).
+RSpec.describe 'a pop-up planning its opener' do
+  let(:hits) { [] }
+  let(:app) {
+    hits = self.hits
+    pages = {'/' => '<script>window.w = window.open("/p", "pw")</script>', '/r' => '<script>opener.location.reload()</script>'}
+    lambda do |env|
+      hits << "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{pages.fetch(env['PATH_INFO'], 'p')}"]]
+    end
+  }
+  let(:session) { simulated_session(app) }
+
+  it 'reloads the opener its newly loaded document asked to, within the script that navigated it' do
+    session.visit '/'
+    session.evaluate_script('w.location.pathname')
+    hits.clear
+    session.execute_script("w.location = '/r'")
+    expect(hits).to eq(['GET /r', 'GET /', 'GET /p'])
+  end
+end

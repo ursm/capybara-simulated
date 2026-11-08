@@ -79,8 +79,9 @@ RSpec.describe 'the host boundary' do
   end
 
   # What the driver finds is the document's, whatever a page — an app, a library that patches arrays — made of
-  # `Array.prototype`: the host's steps build and read their lists by index (engine.js `listMap`, `listBuild`), as a
-  # real browser's driver answers from outside the page's script.
+  # `Array.prototype`: the host's steps build and read their lists by index (engine.js `listMap`, `listBuild`), and the
+  # host hands its handles packed, not as an array an index setter there would take (`numbersOf`) — as a real browser's
+  # driver answers from outside the page's script.
   it "finds what the document holds whatever a page made of Array.prototype's methods" do
     session.visit '/arrays'
     session.execute_script(<<~JS)
@@ -88,9 +89,11 @@ RSpec.describe 'the host boundary' do
       keep('map', (r) => r.slice(0, 1));
       keep('push', (r, list) => { list.length = 0; return 0; });
       keep('includes', () => true);
+      Object.defineProperty(Array.prototype, '0', { configurable: true, set(_) {}, get() { return 0; } });
     JS
     expect(session.all(:css, 'p.a').map(&:text)).to eq(%w[one two])
     expect(session.all(:xpath, '//p').map(&:text)).to eq(%w[one two])
+    expect(session.all(:css, 'body *').map(&:tag_name)).to eq(%w[p p select option option])
     expect(session.find(:css, '#s').value).to eq(%w[x y])
   end
 
@@ -121,11 +124,15 @@ RSpec.describe 'the host boundary' do
     session.visit '/'
     names = %w[__csimTakeRoutedSubmission __csimSubmissionRoute __csimFlushRestore __csimApplyWindowTraversals
                __csimDiscardRealms __runLoopStep __csimSetValue __csimActivationNotify __csimDispatchTrusted]
-    expect(session.evaluate_script(<<~JS)).to eq([names.map { 'undefined' }, [], [false, false], 'undefined'])
+    expect(session.evaluate_script(<<~JS)).to eq([names.map { 'undefined' }, [], [false, false, false, true], 'undefined'])
       [
         #{names.to_json}.map((name) => typeof globalThis[name]),
         Reflect.ownKeys(RustyRacer),
-        [Reflect.defineProperty(RustyRacer, 'x', { value: 1 }), 'discardRealms' in RustyRacer],
+        [
+          Reflect.defineProperty(RustyRacer, 'x', { value: 1 }), 'discardRealms' in RustyRacer,
+          Reflect.setPrototypeOf(RustyRacer, new Proxy({}, { get: (_, k) => { window.asked = k; } })),
+          Object.getPrototypeOf(RustyRacer) === null && Object.isExtensible(RustyRacer)
+        ],
         typeof RustyRacer.engine
       ]
     JS
