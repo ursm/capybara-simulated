@@ -1376,12 +1376,16 @@ RSpec.describe 'a frame navigation as tasks' do
     end
 
     # HTML "navigate": once its document is asked whether it may be unloaded, "abort a document and its descendants" — a
-    # frame whose parse waits on a slow script, its parent setting its `src`, runs none of the rest (Firefox's order; Chrome
-    # fires the next document's load before its parent's: rv-sf-probe `y_frame_resrc150`).
-    it "aborts a frame's parse as its parent navigates it" do
-      child = "<script>parent.setTimeout(() => { parent.L.push('resrc'); parent.document.querySelector('iframe').src = '/slow/0/x.html'; }, 20)</script>" \
-              "<script src=\"/slow/150/fb.js\"></script><script>top.L.push('finl')</script>"
-      expect(page_log('<iframe src="/c"></iframe>', at: 700, pages: {'/c' => child})).to eq('dcl resrc load sf-script sf-load rs:complete')
+    # frame whose parse waits on a slow script, its parent setting its `src`, runs none of the rest — its parent's load held
+    # for the next document all the same, which the navigation delays it for (Chrome; Firefox fires the parent's first:
+    # rv-sf-probe `y_frame_resrc150`).
+    RESRC = "<script>parent.setTimeout(() => { parent.L.push('resrc'); parent.document.querySelector('iframe').src = '/slow/0/x.html'; }, 20)</script>"
+    {
+      'parse'     => ["<script src=\"/slow/150/fb.js\"></script><script>top.L.push('finl')</script>", 'dcl resrc sf-script sf-load load rs:complete']
+    }.each do |what, (rest, logged)|
+      it "aborts a frame's #{what} as its parent navigates it, its parent's load held for the next document" do
+        expect(page_log('<iframe src="/c"></iframe>', at: 700, pages: {'/c' => RESRC + rest})).to eq(logged)
+      end
     end
 
     # …a frame's parser too, its document committed by a task of the event loop's (Chrome and Firefox: r13 `s_frame_src`).
