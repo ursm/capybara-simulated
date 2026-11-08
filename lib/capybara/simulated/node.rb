@@ -10,12 +10,13 @@ module Capybara
       include WhitespaceNormalizer
 
       # (…`alive`: whether the handle's node is alive, where the caller asked already — a find's results, asked at once)
-      def initialize(driver, handle, alive: nil)
+      # (…`browser`: the one it was found through — a scoped find's, its node's — the current one's for any other)
+      def initialize(driver, handle, browser: driver.current_browser, alive: nil)
         super(driver, self)
         @handle_id    = handle
         # Pin the Browser at construction so nodes from one window
         # stay valid even after `switch_to_window` flips to another.
-        @browser      = driver.current_browser
+        @browser      = browser
         @initial_node = alive.nil? ? @browser.lookup_node(handle) : (handle if alive)
         @context_gen  = @browser.context_gen
         # The frame realm this handle belongs to (nil = main document). Handle
@@ -197,6 +198,8 @@ module Capybara
         browser.submit_form(handle_id)
       end
 
+      # (…in the document the node is of, through the browser it was found through — another window's block entered
+      # since or not — the nodes it finds of it too)
       def find_xpath(query)
         driver.nodes_of(browser.find_xpath(query, handle_id), browser)
       end

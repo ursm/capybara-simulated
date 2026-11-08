@@ -524,7 +524,7 @@ module Capybara
       # it is alive, asked of `browser` for them all (`Browser#alive_among`), not by a lookup of its own.
       def nodes_of(handles, browser = current_browser)
         alive = browser.alive_among(handles)
-        handles.each_with_index.map {|id, i| Node.new(self, id, alive: alive[i]) }
+        handles.each_with_index.map {|id, i| Node.new(self, id, browser: browser, alive: alive[i]) }
       end
 
       # Capybara `within_frame` / `switch_to_frame`. `frame` is the iframe

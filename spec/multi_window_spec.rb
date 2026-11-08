@@ -242,6 +242,29 @@ RSpec.describe 'meta+Enter on a link the app already handles' do
   end
 end
 
+# A node is of the document it was found in: a scoped find through a node of the page, inside another window's block,
+# searches the page's document under it — not that window's by the node's handle — and so do the nodes it finds.
+RSpec.describe 'a node of another window' do
+  let(:app) {
+    lambda do |env|
+      body = env['PATH_INFO'] == '/o' ? '<div id=d><p>X</p><p>Y</p></div>' : '<div id=d><p id=a>one</p><p>two</p></div>'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    end
+  }
+  let(:session) { simulated_session(app) }
+
+  it "finds in its own document, not the other window's" do
+    session.visit '/'
+    w = session.window_opened_by { session.execute_script('window.open("/o")') }
+    d = session.find('#d')
+    session.within_window(w) do
+      expect(d.all('p').map(&:text)).to eq(%w[one two])
+      expect(d.find(:xpath, './/p', match: :first).all(:xpath, '..').first[:id]).to eq('d')
+      expect(session.all('p').map(&:text)).to eq(%w[X Y])
+    end
+  end
+end
+
 # What a pop-up's newly loaded document plans of its opener is taken in the same pass of the host's drain as the
 # pop-up's navigation that loaded it: the windows' navigations come before the page's takes, whatever the page had
 # planned before (browser.rb `drain_pending_navigation`).
