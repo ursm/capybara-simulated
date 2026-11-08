@@ -128,7 +128,8 @@ pub(crate) struct NavigationFetch {
     st: RefCell<Nav>,
     // A top-level traversable's navigation's opener policy enforcement, none for a frame's.
     coop: RefCell<Option<CoopEnforcement>>,
-    // …and, the page's, what it does to its session history and what it comes to (navigation_commit.rs).
+    // …and, a top-level traversable's or a frame's, what it does to its session history and what it comes to
+    // (navigation_commit.rs).
     commit: RefCell<Option<Commit>>,
     // Whether its last response's Content-Security-Policy sandboxes the document it makes into an opaque origin.
     sandboxed: std::cell::Cell<bool>,
@@ -277,9 +278,11 @@ impl NavigationFetch {
     // (a top-level traversal's, of no initiator: its entry's document state's initiator origin, serialized — which its
     // cookies are judged by alone, Fetch's step 2; nil none), `traversable` (a top-level traversable's, by its number: the
     // opener policy of its document — session_history.rs `opener_policy_of` — is what its responses' are enforced against:
-    // `response`; nil a frame's, none), `commit` (the page's navigation, of that traversable: {handling: 'push', 'replace',
-    // 'reload' or 'traverse', traversal: a traversal's [step, entry id], entry: the fields of the entry it makes — session_history.rs `Data` — leaving_origin: the
-    // origin of the document it leaves, serialized, a window's initial about:blank's its creator's, nil none} — or a
+    // `response`; nil a frame's, none), `commit` (a top-level navigation, of that traversable — the page's, a window's
+    // `window.open` made in an isolate: {handling: 'push', 'replace', 'reload' or 'traverse', traversal: a traversal's
+    // [step, entry id], entry: the fields of the entry it makes — session_history.rs `Data` — leaving_origin: the origin of
+    // the document it leaves, serialized, a window's initial about:blank's its creator's, nil none, opened: whether its
+    // navigable is an auxiliary browsing context's whose opener is there} — or a
     // frame's, {navigable:, traversable: the number of the session history it is of, entry: the number of the navigation
     // whose entry it makes, session_history.rs `begin_frame_entry`, nil a replay's} — navigation_commit.rs `Commit`,
     // `#begin_commit`, `#response_commit`; nil any other navigation).
@@ -317,7 +320,8 @@ impl NavigationFetch {
                             let traversal = Option::<(i64, u64)>::try_convert(field("traversal")?)?;
                             let handling = Handling::named(&handling, traversal).ok_or_else(|| Error::new(ruby.exception_arg_error(), format!("no history handling {handling}")))?;
                             let entry = Option::<RHash>::try_convert(field("entry")?)?.map(|e| crate::session_history::Data::of(ruby, e)).transpose()?;
-                            Ok::<_, Error>(Commit::new(history, handling, entry, Option::<String>::try_convert(field("leaving_origin")?)?))
+                            let leaving_origin = Option::<String>::try_convert(field("leaving_origin")?)?;
+                            Ok::<_, Error>(Commit::new(history, handling, entry, leaving_origin, field("opened")?.to_bool()))
                         })
                         .transpose()?,
                 }
@@ -579,7 +583,7 @@ impl NavigationFetch {
         self.st.borrow().cross
     }
 
-    // The page's navigation (`commit`), step by step — each answer the step the host takes (navigation_commit.rs `Step`,
+    // A top-level navigation (`commit`), step by step — each answer the step the host takes (navigation_commit.rs `Step`,
     // `step_for_ruby`), its session history done with as that says; the block, where asked, gives the opener policy a
     // document of a local scheme inherits (browser.rb `inherited_opener_policy`), asked of no replay:
     // #begin_commit { policy } -> the first, what its URL makes of it before any request (`#start`): its hops to make,
@@ -590,7 +594,7 @@ impl NavigationFetch {
             let st = rb_self.st.borrow();
             (st.chain.target.clone(), start(&st.chain.target, &st.chain.method, false))
         };
-        rb_self.commit_with(|c| c.begin(&url, start));
+        rb_self.commit_with(|c| c.begin(&url));
         let step = match start {
             "about_blank" => {
                 let st = rb_self.st.borrow();

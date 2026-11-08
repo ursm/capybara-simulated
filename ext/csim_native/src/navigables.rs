@@ -66,10 +66,7 @@ pub(crate) struct Navigables {
     // the most recently entered realm execution context ("prepare to run script"): a script the host evaluates in a
     // realm's document, an event listener another realm's dispatch calls (events.js `invokeEntries`) — none between them.
     entry: Option<i32>,
-    // The target names of the top-level windows `window.open` made in this isolate — the page's is its session history's
-    // (`history`: its number in session_history.rs `HISTORIES`, the host's to say, 0 none), held in its active document
-    // state as HTML has it.
-    top_names: HashMap<i32, Vec<u16>>,
+    // The page's session history (`history`: its number in session_history.rs `HISTORIES`, the host's to say, 0 none).
     pub(crate) history: u64,
     documents: HashMap<i32, NodeId>,
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
@@ -303,17 +300,16 @@ pub(crate) enum OpenWindow {
 }
 
 impl RealmArena {
-    // The target name of the navigable realm `cid`'s document is the active document of.
-    // A frame's window whose document is no longer its navigable's active one — the frame removed, or navigated since —
-    // has none: no name, and none to set.
+    // The target name of the navigable realm `cid`'s document is the active document of: a frame's its container's, a
+    // top-level one's — the page's, a window's `window.open` made in this isolate — its session history's, held in its
+    // active document state as HTML has it (session_history.rs `State::name`).
+    // A window whose document is no longer its navigable's active one — a frame removed, a window discarded, either
+    // navigated since — has none: no name, and none to set (HTML's `name` getter, the empty string).
     pub(crate) fn window_name(&self, cid: i32) -> std::borrow::Cow<'_, [u16]> {
         let nav = &self.navigables;
         match nav.containers.get(&cid) {
             Some(container) => nav.children.get(container).filter(|c| c.realm == Some(cid)).map_or(&[][..], |c| &c.name).into(),
-            None if cid == 0 && nav.history != 0 => crate::session_history::name_of(nav.history).unwrap_or_default().into(),
-            // (…a window discarded has no navigable: HTML's `name` getter, the empty string)
-            None if nav.lost.contains(&cid) => (&[][..]).into(),
-            None => nav.top_names.get(&cid).map_or(&[][..], Vec::as_slice).into(),
+            None => crate::session_history::name_of(self.top_history(cid)).unwrap_or_default().into(),
         }
     }
     pub(crate) fn set_window_name(&mut self, cid: i32, name: Vec<u16>) {
@@ -324,15 +320,13 @@ impl RealmArena {
                     child.name = name;
                 }
             }
-            None if cid == 0 && nav.history != 0 => crate::session_history::set_name_of(nav.history, &name),
-            // (…a window's, its current entry's document state's too: session_history.rs `set_current_name`)
-            None => {
-                if let Some((history, _)) = self.window_history(cid) {
-                    history.set_current_name(&name);
-                }
-                self.navigables.top_names.insert(cid, name);
-            }
+            None => crate::session_history::set_name_of(self.top_history(cid), &name),
         }
+    }
+    // …the number of the session history of the top-level traversable whose active document realm `cid`'s is — 0 for
+    // none.
+    fn top_history(&self, cid: i32) -> u64 {
+        if cid == 0 { self.navigables.history } else { self.window_history(cid).filter(|&(_, window)| window == cid).map_or(0, |(h, _)| h.id()) }
     }
     // Realm `realm`'s document is the active document of `container`'s navigable now, or (None) none is; the navigable
     // made the first time it is given one, its target name the container's `name`. Returns the realm of the document
@@ -949,7 +943,6 @@ impl RealmArena {
                     child.realm = None;
                 }
             }
-            nav.top_names.remove(&cid);
             nav.tops.remove(&cid);
             nav.parents.remove(&cid);
             nav.navigable_ids.remove(&cid);
@@ -2077,7 +2070,9 @@ mod tests {
         assert_eq!(route(&arena, 1, "_BLANK", true), LinkRoute::Auxiliary(Vec::new()));
         assert_eq!(route(&arena, 1, "w", false), LinkRoute::Plan(units("w")));
         assert_eq!(route(&arena, 0, "_self", true), LinkRoute::Plan(units("_self")));
-        // (…the page's own name `_top`: the page navigated from a frame, planned from the page)
+        // (…the page's own name `_top`: the page navigated from a frame, planned from the page — its session history's)
+        let history = crate::session_history::SessionHistory::new();
+        arena.navigables.history = history.id();
         arena.set_window_name(0, units("p"));
         assert_eq!(route(&arena, 1, "p", true), LinkRoute::Navigate(0));
         assert_eq!(route(&arena, 0, "p", true), LinkRoute::Plan(units("_top")));
@@ -2107,8 +2102,7 @@ mod tests {
         }
         arena.enter(2);
         arena.location.set_document_origin(Some("http://a.test".to_owned()));
-        arena.navigables.windows.push(2);
-        arena.navigables.openers.insert(2, 0);
+        arena.set_stepped_window(2, true, Some(0), 2);
         arena.set_window_name(2, units("pop"));
         assert_eq!(route(&arena, 0, "pop", true), LinkRoute::Navigate(2));
         assert_eq!(route(&arena, 2, "p", true), LinkRoute::Navigate(0));

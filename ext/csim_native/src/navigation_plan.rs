@@ -77,15 +77,12 @@ struct Own {
 
 // A traversal of a top-level document's session history that makes its document again (session_history.rs
 // `applyTraversal`): the step it goes to — the delta it was asked by, which the page's host judges anew once the tasks
-// due before it ran (browser.rb `perform_history_traverse`) — and the URL of the entry the window is at there, with the
-// Referer its request sent and a POST's body and content type — the request a traversal makes it with again (HTML "apply
-// the history step": the entry's document state's resource).
+// due before it ran (browser.rb `perform_history_traverse`) — and the entry the top-level navigable is at there, whose
+// document state's resource and request a traversal makes its document of again (HTML "apply the history step").
 pub(crate) struct Traversal {
     pub(crate) step: i64,
     pub(crate) delta: i64,
-    pub(crate) url: String,
-    pub(crate) referrer: Option<String>,
-    pub(crate) post: Option<crate::session_history::Post>,
+    pub(crate) entry: u64,
 }
 
 // …and one that keeps its document, moving a frame of it: the step it goes to, each navigable whose active entry the step
@@ -584,11 +581,6 @@ fn take_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let items = location_items(scope, l);
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// …a POST's body (a Uint8Array) and content type, or nothing for a GET's.
-fn post_items<'s>(scope: &mut v8::PinScope<'s, '_>, post: Option<crate::session_history::Post>) -> Vec<v8::Local<'s, v8::Value>> {
-    let Some((body, content_type)) = post else { return Vec::new() };
-    vec![crate::dom::u8_array(scope, body.to_vec()), text_or_null(scope, content_type)]
-}
 fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::Local<'s, v8::Value>> {
     let (realm, source, policy) = match l.initiator {
         Some((realm, source, policy)) => (
@@ -628,7 +620,8 @@ fn windows_planned(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallback
 }
 // __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
 // in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]` — `"javascript"` for a
-// `javascript:` URL's document (`planJavascriptDocument`) — `[realm, "reload", activated, blob]` and `[realm, "traverse", step, url, referrer, body, contentType]` (`Traversal`) — after the
+// `javascript:` URL's document (`planJavascriptDocument`) — `[realm, "reload", activated, blob]` and `[realm, "traverse",
+// step, entry]` (`Traversal`) — after the
 // traversals that move a frame of one, whose tasks ran before them: `[realm, "traverse_navigables", step,
 // navigable, entry, same document, …]` (`FrameTraversal`). A window closed is stepped no more,
 // and plans none the host takes — nor one closing, whose navigation the task its close queued aborts (HTML "destroy a
@@ -708,17 +701,12 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
                 v8::Boolean::new(scope, r.activated).into(),
                 r.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
             ],
-            (None, None, Some(t)) => [
-                vec![
-                    realm,
-                    v8::String::new(scope, "traverse").unwrap().into(),
-                    v8::Number::new(scope, t.step as f64).into(),
-                    v8::String::new(scope, &t.url).unwrap().into(),
-                    text_or_null(scope, t.referrer),
-                ],
-                post_items(scope, t.post),
-            ]
-            .concat(),
+            (None, None, Some(t)) => vec![
+                realm,
+                v8::String::new(scope, "traverse").unwrap().into(),
+                v8::Number::new(scope, t.step as f64).into(),
+                v8::Number::new(scope, t.entry as f64).into(),
+            ],
             (None, None, None) => continue,
         };
         items.push(v8::Array::new_with_elements(scope, &item).into());

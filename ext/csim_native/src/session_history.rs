@@ -1100,22 +1100,31 @@ impl SessionHistory {
     fn seed(&self, nav: u32, parent: u32, url: String) -> Option<u64> {
         self.lock().ensure(nav, parent, &url)
     }
-    // #push(navigable, parent, url, same_document, data) -> the id of the entry a navigation of the navigable adds, what
-    // a replay of it sends and restores `data` (`#update`'s fields).
+    // The id of the entry a navigation of the navigable adds, what a replay of it sends and restores `data` — and of the
+    // one it makes in place of its active entry (a top-level one's first, where it has none).
     fn push(&self, nav: u32, parent: u32, url: String, same_document: bool, data: Data) -> Option<u64> {
         self.lock().commit(nav, parent, &url, same_document, false, data)
     }
-    // #replace(navigable, parent, url, same_document, data) -> …the id of the one it makes in place of its active entry.
     fn replace(&self, nav: u32, parent: u32, url: String, same_document: bool, data: Data) -> Option<u64> {
         let mut t = self.lock();
         let replace = nav != TOP || !t.state.entries.is_empty();
         t.commit(nav, parent, &url, same_document, replace, data)
     }
-    fn push_for_ruby(ruby: &magnus::Ruby, rb_self: &Self, nav: u32, parent: u32, url: String, same_document: bool, fields: RHash) -> Result<Option<u64>, magnus::Error> {
-        Ok(rb_self.push(nav, parent, url, same_document, Data::of(ruby, fields)?))
-    }
-    fn replace_for_ruby(ruby: &magnus::Ruby, rb_self: &Self, nav: u32, parent: u32, url: String, same_document: bool, fields: RHash) -> Result<Option<u64>, magnus::Error> {
-        Ok(rb_self.replace(nav, parent, url, same_document, Data::of(ruby, fields)?))
+    // #commit_javascript_document(url): the document a `javascript:` URL's string result makes of its top-level
+    // navigable committed (HTML "navigate to a javascript: URL", its history handling "replace"): an entry at `url` in
+    // place of the active one — a first where there is none: the initial about:blank's, whose entry HTML replaces with
+    // one of a document that is no initial about:blank, which the next navigation comes after (Chrome 157 and Firefox 159
+    // leave the window as if at its initial about:blank still, `history.length` 1 after `/a`, measured 2026-11-08: the
+    // text over both) — of a new document state of what the active one's was
+    // reached by (its request's origin, Referer and policy, whether its cookies were cross-site, its document's referrer,
+    // the opener policy and the origin it holds; its target name, `commit`'s), of no resource (a reload of it a GET: Chrome
+    // re-POSTs) nor classic history API state (Chrome keeps it, Firefox none); no entry left (`leaving`) whose controls'
+    // state it would take — the one it replaces gone.
+    fn commit_javascript_document(&self, url: String) {
+        let mut t = self.lock();
+        let reached = t.state.current_entry(TOP, t.build).map(|e| Data { texts: e.data.texts.clone(), cross_site: e.data.cross_site, ..Data::default() });
+        t.leaving = None;
+        t.commit(TOP, TOP, &url, false, reached.is_some(), reached.unwrap_or_default());
     }
     // #active(navigable) -> the id of its active entry, or nil.
     pub(crate) fn active(&self, nav: u32) -> Option<u64> {
@@ -1243,18 +1252,6 @@ impl SessionHistory {
     // `takeWindowNavigations`), which one moving a frame of it alone is not.
     pub(crate) fn queued_replacing(&self) -> bool {
         self.lock().queued.iter().any(|q| q.replaces)
-    }
-    // …and its current entry's document state's navigable target name made `name`: a window's of this isolate, whose
-    // `window.name` was set (navigables.rs `set_window_name`) — what a traversal back to that entry brings back.
-    pub(crate) fn set_current_name(&self, name: &[u16]) {
-        let mut t = self.lock();
-        let build = t.build;
-        t.state.set_name(build, name);
-    }
-    // The POST its current entry's document was made of, which a reload of it sends again — none for a GET's.
-    pub(crate) fn current_post(&self) -> Option<Post> {
-        let t = self.lock();
-        t.state.current_entry(TOP, t.build).and_then(|e| e.data.post.clone())
     }
     // #flush_begin / #flush_end: the host running the tasks of the page it navigates away from, and done (`flush_mark`).
     fn flush_begin(&self) {
@@ -1653,8 +1650,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_singleton_method("new", function!(SessionHistory::new, 0))?;
     class.define_singleton_method("of", function!(SessionHistory::of, 1))?;
     class.define_method("id", method!(SessionHistory::id, 0))?;
-    class.define_method("push", method!(SessionHistory::push_for_ruby, 5))?;
-    class.define_method("replace", method!(SessionHistory::replace_for_ruby, 5))?;
+    class.define_method("commit_javascript_document", method!(SessionHistory::commit_javascript_document, 1))?;
     class.define_method("active", method!(SessionHistory::active, 1))?;
     class.define_method("url", method!(SessionHistory::url, 1))?;
     class.define_method("set_url", method!(SessionHistory::set_url, 2))?;
@@ -1850,6 +1846,23 @@ mod tests {
     }
 
     // A replacement keeps its entry's step; a frame's first navigation from its initial about:blank adds none.
+    #[test]
+    fn a_javascript_document_replaces_the_active_entry_keeping_how_it_was_reached() {
+        let h = history();
+        h.commit_javascript_document("about:blank".into());
+        assert_eq!(h.length(), 1);
+        let mut data = Data::default();
+        data.set_text("referer", "http://a.test/r".into());
+        data.post = Some((Arc::from(&b"q=1"[..]), None));
+        data.state = Some(Arc::from(&b"s"[..]));
+        h.record_page_entry("http://a.test/p".into(), false, data);
+        h.set_leaving(h.active(0));
+        h.commit_javascript_document("http://a.test/p".into());
+        let t = h.lock();
+        let e = t.state.current_entry(TOP, t.build).unwrap();
+        assert_eq!((t.state.length(), e.data.text("referer"), e.data.post.is_none(), e.data.state.is_none(), t.leaving), (2, Some("http://a.test/r"), true, true, None));
+    }
+
     #[test]
     fn a_replacement_adds_no_step() {
         let h = history();
@@ -2231,8 +2244,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "applyTraversal", apply_traversal_op, context_id);
     crate::dom::register(scope, ns, "windowsTraversing", windows_traversing_op, context_id);
     crate::dom::register(scope, ns, "destroyNavigableHistory", destroy_navigable_history_op, context_id);
-    crate::dom::register(scope, ns, "windowEntryPost", window_entry_post_op, context_id);
-    crate::dom::register(scope, ns, "commitWindowEntry", commit_window_entry_op, context_id);
     crate::dom::register(scope, ns, "historyUpdate", history_update_op, context_id);
     crate::dom::register(scope, ns, "frameNavigable", frame_navigable_op, context_id);
     crate::dom::register(scope, ns, "frameEntry", frame_entry_op, context_id);
@@ -2318,10 +2329,6 @@ pub(crate) fn end_traversal_of(arena: &crate::dom::RealmArena, realm: i32) {
 pub(crate) fn navigation_ongoing_of(arena: &crate::dom::RealmArena, realm: i32, id: u64) -> bool {
     traversable_of(arena, realm).map_or(id == 0, |(t, _)| lock(&t).navigation_ongoing(arena.realm_tree(realm).2, id))
 }
-// …and that of a window of this isolate's alone, with its document's realm.
-fn window_traversable(arena: &crate::dom::RealmArena, realm: i32) -> Option<(Arc<Mutex<Traversable>>, i32)> {
-    traversable_of(arena, realm).and_then(|(t, window)| Some((t, window?)))
-}
 // The session storage shed of the top-level traversable realm `realm`'s document is of (`session_storage`) — 0 for none (a
 // removed frame's document, a window's gone): no shed's, whose areas hold nothing (storage_areas.rs `area_key` takes
 // none below 1), never one another traversable shares.
@@ -2397,17 +2404,6 @@ fn history_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.windowEntryPost() -> `[body, contentType]` of the POST the current entry of the calling realm's window — one
-// `window.open` made in this isolate — was made of, which its reload sends again (the user's too: browser.rb
-// `navigate_window_realm`), or null for a GET's.
-fn window_entry_post_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let post = crate::dom::realm(scope, cid).window_history(cid).and_then(|(h, _)| h.current_post());
-    let Some((body, content_type)) = post else { return rv.set_null() };
-    let body = crate::dom::u8_array(scope, body.to_vec());
-    let content_type = content_type.and_then(|t| v8::String::new(scope, &t)).map_or_else(|| v8::null(scope).into(), Into::into);
-    rv.set(v8::Array::new_with_elements(scope, &[body, content_type]).into());
-}
 // The number of the top-level traversable the document of realm `realm` is of — its page's, or a window's
 // `window.open` made in this isolate — 0 for none: the one whose navigable's entries it keeps (`traversable_of`), which
 // the host records a frame's navigations in and applies its traversals to (navigables.rs `realmTree`).
@@ -2491,8 +2487,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
             let from = t.state.current_entry(TOP, t.build).map(|e| e.url.clone()).unwrap_or_default();
             let top_change = changes.iter().find(|c| c.0 == TOP).and_then(|c| t.state.entry(c.1).map(|e| (e.clone(), c.2)));
             if let Some((entry, false)) = top_change {
-                let referrer = entry.data.text("referer").map(str::to_owned);
-                planned = Some(Traversal { step, delta: q.delta, url: entry.url, referrer, post: entry.data.post.clone() });
+                planned = Some(Traversal { step, delta: q.delta, entry: entry.id });
                 t.begin_traversal(TOP);
                 asking(&mut t, |t| t.asked.planned = None);
                 t.planned_for_host = true;
@@ -2554,62 +2549,6 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // A URL's fragment — none where it has none, which an empty one is not.
 fn fragment(url: &str) -> Option<&str> {
     url.split_once('#').map(|(_, f)| f)
-}
-
-// __dom.commitWindowEntry(url, how, step, referrer, body, contentType) -> the classic history API state the calling realm's
-// document — a window's of this isolate, made by a navigation of it — starts with: its window's session history told of
-// it. `how` "push" a navigation's entry after the current one, "replace" one in place of it (a `location.replace`, or the
-// first navigation of a window at its initial about:blank, which has none: HTML "navigate"; "javascript" a `javascript:`
-// URL's document's, the traversals its script queued going on after it, as the page's do: browser.rb
-// `commit_javascript_document`), each with the Referer the request sent, a POST's `body` (a Uint8Array) and
-// `contentType`, and no state; "reload" the current entry's document made again; "step" the traversal to `step` applied
-// (`Traversal`), the entry there's state its document's. Undefined for a realm of no such window.
-fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let url = args.get(0).to_rust_string_lossy(scope);
-    let how = args.get(1).to_rust_string_lossy(scope);
-    let step = args.get(2).integer_value(scope).unwrap_or(0);
-    let text = |scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>| (!v.is_null_or_undefined()).then(|| v.to_rust_string_lossy(scope));
-    let referrer = text(scope, args.get(3));
-    let post = (!args.get(4).is_null_or_undefined()).then(|| {
-        let body = crate::blob_data::bytes_arg(scope, args.get(4));
-        (Arc::from(body), text(scope, args.get(5)))
-    });
-    let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let name = arena.window_name(cid).into_owned();
-    let Some((traversable, _)) = window_traversable(arena, cid) else { return };
-    let mut restored = None;
-    let state = {
-        let mut t = lock(&traversable);
-        // (…the traversals the document it replaces queued let go with it — one its `unload` asked for among them (WPT
-        // traverse-during-unload.html) — as the page's are: `clear_queued`)
-        if how != "javascript" {
-            t.queued.clear();
-        }
-        // (…and its frames new navigables, as the page's are: `rebuilt`)
-        t.rebuilt();
-        match how.as_str() {
-            "push" | "replace" | "javascript" => {
-                // (…its document state's navigable target name the window's as its document begins: HTML keeps it there)
-                let data = Data { post, texts: [None, referrer, None, None, None, None], name: Some(name), ..Data::default() };
-                let replace = how != "push" && !t.state.entries.is_empty();
-                t.commit(TOP, 0, &url, false, replace, data);
-                None
-            }
-            // (…and the name its entry's document state keeps, the window's again: HTML "apply the history step")
-            "step" => {
-                t.go_to(step);
-                let entry = t.state.current_entry(TOP, t.build);
-                restored = entry.and_then(|e| e.data.name.clone());
-                entry.and_then(|e| e.data.state.clone())
-            }
-            _ => t.state.current_entry(TOP, t.build).and_then(|e| e.data.state.clone()),
-        }
-    };
-    if let Some(name) = restored {
-        crate::dom::realm(scope, cid).set_window_name(cid, name);
-    }
-    rv.set(state_value(scope, state.as_ref()));
 }
 
 // The navigable of frame realm `realm` in its traversable's session history: its number, its parent's (`TOP` for the

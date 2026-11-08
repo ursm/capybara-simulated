@@ -2616,15 +2616,6 @@ module Capybara
         url.to_s.include?('#') ? url.to_s.split('#', 2)[1] : nil
       end
 
-      # The page's navigation to `entry[:url]` recorded: an entry of the step after the current one — one in place of
-      # the current entry, `replace` (a `location.replace`) — of a new document state, of the same one for a
-      # `:push_state` kind (a pushState's, a fragment's) — what a replay of it sends and restores the rest of `entry`
-      # (session_history.rs `Data`).
-      def record_history(entry, replace: false)
-        same_document = entry[:kind] == :push_state
-        data          = entry.except(:url, :kind)
-        replace ? @session_history.replace(0, 0, entry[:url], same_document, data) : @session_history.push(0, 0, entry[:url], same_document, data)
-      end
       # `is_reload` distinguishes a RELOAD of the current entry (`refresh`) from a
       # history TRAVERSAL (`go_back`/`go_forward`) — a controlling SW observes the
       # difference on `event.request.isReloadNavigation` / `.isHistoryNavigation`.
@@ -7280,9 +7271,6 @@ module Capybara
       # reads body / headers / url / redirected / charset), or `{'error' => true, 'url'}`
       # for a failed navigation (respondWith network error / redirect loop / a blocked
       # opener policy), its URL the hop it failed at.
-      # (…`coop_realm` a top-level traversable's navigation's — a window's — the realm of the document it leaves, whose
-      # opener policy its responses are enforced against: navigation_fetch.rs `response`; either answer then carrying
-      # `'coop_switch'`, whether they need a browsing context group switch)
       def frame_navigation_fetch(
         url,
         referrer_source,
@@ -7300,17 +7288,14 @@ module Capybara
         sandbox: nil,
         download_realm: container_realm,
         user_activated: false,
-        coop_realm: nil,
         replaces_realm: nil
       )
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # A caller in a script (`defer_ok`: the iframe build) can't block for it — the settling message may be sent by this very page's JS —
         # so it gets a deferral marker: the caller parks the navigation and the activated marker
-        # makes it again (__csim_swRetryDeferredNavs). Any other (a window `window.open` made,
-        # waited for already: `navigate_window_realm`) waits what it can (`await_sw_activation`).
-        # (…the top-level site of the environment it navigates: the URL's own for a window's document, the frame's
-        # container's top-level traversable's for a frame's)
+        # makes it again (__csim_swRetryDeferredNavs). Any other waits what it can (`await_sw_activation`).
+        # (…the top-level site of the environment it navigates: the frame's container's top-level traversable's)
         # (…a `data:` URL's response its own, here only one that makes no document — frame_response.rs: saved as a download
         # is below, no request made of it)
         if url.to_s.match?(/\Adata:/i)
@@ -7318,12 +7303,12 @@ module Capybara
           from_document(download_realm.to_i) { save_downloaded_response(url, {'content-type' => mime}, [bytes], sandbox: sandbox) } if mime && download_realm
           return {'no_document' => true}
         end
-        navigation_site = dest == 'document' ? ->(target) { Native.site(target).to_s } : ->(_) { blob_partition_site(container_realm.to_i) }
-        if defer_ok && sw_registered? && sw_activating_controller_for(url, navigation_site.(url))
+        navigation_site = blob_partition_site(container_realm.to_i)
+        if defer_ok && sw_registered? && sw_activating_controller_for(url, navigation_site)
           Native.sw_defer_navigation(@sw_partition)
           return {'deferred' => true}
         end
-        await_sw_activation(url, navigation_site.(url)) if !defer_ok && sw_registered?
+        await_sw_activation(url, navigation_site) if !defer_ok && sw_registered?
         initiator = referrer_source
         # (…referred by the document that holds the container — a srcdoc one's its own container's — under the policy the
         # container's `referrerpolicy` attribute sets, else that document's: `realm_referrer_initiator`)
@@ -7331,8 +7316,7 @@ module Capybara
           initiator, document_policy = realm_referrer_initiator(container_realm.to_i)
           referrer_policy = document_policy if referrer_policy.to_s.empty?
         end
-        # (…a navigation another document begins — a reload by the document reloading, a window's by the one that navigates
-        # it — by that one, under the policy it navigates under (a link's `rel` / `referrerpolicy`: `link_policy`), else
+        # (…a navigation another document begins — a reload by the document reloading — by that one, under the policy it navigates under (a link's `rel` / `referrerpolicy`: `link_policy`), else
         # its own: Chrome — the container's attribute none of its)
         source_realm = container_realm
         if initiator_realm && (initiator_realm.to_i.zero? || @runtime.frame_realm_present?(initiator_realm.to_i))
@@ -7358,32 +7342,29 @@ module Capybara
           origin_null:                   initiating.fetch(:origin_null, false),
           initiator_cross_site_ancestor: initiating.fetch(:initiator_cross_site_ancestor, false),
           ancestors:                     container_realm && @runtime.realm_direct_call(0, '__csimAncestorDocuments', container_realm.to_i, true),
-          # (…a window's navigation, by the same machinery, a top-level navigable's: destination `document`)
           dest:                          dest.to_s,
           user_activated:                user_activated,
           jar:                           @cookie_jar,
-          traversable:                   (window_history(coop_realm)&.id if coop_realm),
           # (…a service worker may answer its hops where one is registered — an https one's only where every ancestor is a
           # secure context, as the JS caller computes the chain (it IS the chain: the building realm is the parent) — its
-          # registration matched in the top-level site of the environment it navigates: the URL's own for a window's
-          # document, the frame's container's top-level traversable's for a frame's)
-          sw:                            ([secure_ancestors, (navigation_site.(url) unless dest == 'document')] if sw_registered?)
+          # registration matched in the top-level site of the environment it navigates, the frame's container's top-level
+          # traversable's)
+          sw:                            ([secure_ancestors, navigation_site] if sw_registered?)
         })
         # (…a network error's the URL it was at — its last hop's: HTML "create navigation params by fetching" sets the
         # entry's URL to each URL a redirect goes on to, the error document committed at that one; Chrome and Firefox,
         # measured 2026-11-01, traverse back to the last URL they requested)
-        failed = -> { {'error' => true, 'url' => fetch.target, 'coop_switch' => fetch.coop_switch?} }
+        failed = -> { {'error' => true, 'url' => fetch.target} }
         hop = run_navigation_fetch(
           fetch,
           body:               body,
           content_type:       content_type,
           dest:               dest,
-          frame_type:         dest == 'document' ? 'auxiliary' : 'nested',
+          frame_type:         'nested',
           origin_url:         origin_url,
           client_id:          initiating[:client_id],
-          replaces_client_id: coop_realm ? sw_replaced_document(coop_realm) : (replaces_realm ? sw_replaced_document(replaces_realm) : [mint_resulting_client_id, container_realm && document_origin(container_realm)]),
-          is_reload:          is_reload,
-          coop_realm:         coop_realm
+          replaces_client_id: replaces_realm ? sw_replaced_document(replaces_realm) : [mint_resulting_client_id, container_realm && document_origin(container_realm)],
+          is_reload:          is_reload
         )
         target = fetch.target
         # (…what its last hop makes of it, the engine's: navigation_commit.rs `Step`)
@@ -7396,23 +7377,20 @@ module Capybara
           return {'no_document' => true}
         # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate"; the
         # frame builder's, whose container's document `container_realm` is)
-        # (…a window's navigation's alike, `download_realm` the document that navigated it)
         when 'download'
           if download_realm
             from_document(download_realm.to_i) { save_downloaded_response(target, hop.headers, hop.rack_body || [hop.document.to_s], sandbox: sandbox) }
             return {'no_document' => true}
           end
         end
-        # (…a response the host cannot hand on — a NUL in a header — a network error at its URL, as one of no response is,
-        # the opener policy switch its hops needed carried all the same: navigation_fetch.rs `coop_switch?`)
+        # (…a response the host cannot hand on — a NUL in a header — a network error at its URL, as one of no response is)
         # (…a PDF's body none of its document's, unread: closed with the hop)
         body = step == 'inline' ? '' : hop.document || read_rack_body(hop.rack_body)
         out  = response_hash(hop.status, hop.headers, body, target, fetch.redirected?) or return failed.()
         # The final reserved client id — the JS frame builder hands it to the new realm
         # (create_frame_realm tells the realm its client id + records the adoption).
         out['resulting_client_id'] = hop.client_id
-        # (…the type its body said, where it did — and whether it is a PDF, its viewer's inline content: frame_response.rs,
-        # `navigate_window_realm`)
+        # (…the type its body said, where it did — and whether it is a PDF, its viewer's inline content: frame_response.rs)
         out['document_type'] = hop.document_type if hop.document_type
         out['inline'] = true if step == 'inline'
         # (…and the method its last request was made with: a POST's a GET where a redirect made it one, a 307 / 308's a POST
@@ -7422,7 +7400,6 @@ module Capybara
         # it makes)
         sent = fetch.referrer
         out['referrer'] = sent if sent
-        out['coop_switch'] = fetch.coop_switch?
         out
       end
 
@@ -8359,34 +8336,22 @@ module Capybara
       end
       # …and the document that response makes, made by this window — a Browser of its own, its first — at `url`: the
       # response's status and headers, its body, and what the navigation made of it (`made`, navigate_window_realm's: the
-      # Referer its request sent and its policy, and its origin, `null` an error document's — a new opaque one — its
-      # Content-Security-Policy and Refresh the response headers' own, as the page's commit reads them).
+      # Referer its request sent, and its origin, `null` an error document's — a new opaque one — its
+      # Content-Security-Policy and Refresh the response headers' own, as the page's commit reads them). Its entry is in
+      # the window's session history already, as the navigation committed it (navigation_commit.rs).
       # (…`traversable` the window's, kept across the switch: its session history and its session storage this one's)
       # (…`made[:content_type]` the type it is made as, which its body may have said: mime.rs `load`; `made[:blob]` the blob a
       # `blob:` URL's document is made of, its type its document's: `boot_blob_document`; an
-      # about:blank one's its initiator's origin and base URL, as the page's takes them: `navigate_top_level`. `made[:entry]`
-      # what the navigation does to the session history: `navigate_window_realm`)
+      # about:blank one's its initiator's origin and base URL, as the page's takes them: `navigate_top_level`)
       def adopt_navigation_response(url, response, body, made, traversable: nil)
-        referrer, referrer_policy = made.values_at(:referrer, :referrer_policy)
         if traversable
           Native.storage_clear(@session_storage)
           @session_history = traversable
           @session_storage = traversable.session_storage
         end
-        @current_referer = referrer.to_s
-        how, step, post = made[:entry]
-        case how
-        when 'step'
-          @session_history.go_to(step)
-        when 'reload'
-          nil
-        else
-          entry = {url: url.to_s, referer: referrer, referrer_policy: referrer_policy}.compact
-          entry.update(body: post[0], content_type: post[1]) if post
-          record_history(entry, replace: how == 'replace')
-        end
+        @current_referer = made[:referrer].to_s
         blob = made[:blob]
-        return boot_blob_document(url, blob[:bytes], blob[:type], coop_switch: true) if blob && made[:doc_origin] != 'null'
+        return boot_blob_document(url, blob[:bytes], blob[:type], coop_switch: true) if blob
 
         inherit_creator(origin: made[:doc_origin], base: made[:about_base]) if about_blank_url?(url)
         self.page_url = url.to_s
@@ -11101,12 +11066,11 @@ module Capybara
       end
       # The document a `javascript:` URL's string result makes of the page (HTML "navigate to a javascript: URL", navigation_plan.rs
       # `planJavascriptDocument`) — its realm's task over, the realm free to go — unasked, as no such navigation "checks if
-      # unloading is canceled": at the URL of the document it replaces, in a new entry in place of that one's, the request
-      # referrer the entry's document state had kept, and no resource: a reload's a GET (Chrome re-POSTs). Of that document's
-      # origin, policy container and opener policy, no browsing context group left; its own referrer none, of no request
-      # (Chrome keeps the last, Firefox none), its classic history state none (Chrome keeps it, Firefox none), and no service
-      # worker's client: "reserved environment: null", no fetch for Handle Fetch to set one (Chrome and Firefox: no controller).
-      JAVASCRIPT_DOCUMENT_ENTRY_KEEPS = %i[referer referrer_policy referrer origin cross_site opener_policy document_origin].freeze
+      # unloading is canceled": at the URL of the document it replaces, in a new entry in place of that one's
+      # (session_history.rs `commit_javascript_document`). Of that document's origin, policy container and opener policy,
+      # no browsing context group left; its own referrer none, of no request (Chrome keeps the last, Firefox none), and no
+      # service worker's client: "reserved environment: null", no fetch for Handle Fetch to set one (Chrome and Firefox: no
+      # controller).
       private def commit_javascript_document(url, markup)
         invalidate_find_cache
         # (…a traversal its script asked for goes on after it, the session history's queue not the document's — its task,
@@ -11128,9 +11092,7 @@ module Capybara
         flush_outgoing_page_init if @timers_active
         return restore_flushed_nav_intents if @runtime.call('__csimFlushedLocation')
 
-        if (id = @session_history.active(0))
-          record_history({url: url}.merge(@session_history.entry(id).slice(*JAVASCRIPT_DOCUMENT_ENTRY_KEEPS)), replace: true)
-        end
+        @session_history.commit_javascript_document(url.to_s)
         inherit_creator(origin: document_origin(0), base: @runtime.realm_direct_call(0, '__csimBaseURL')) if about_blank_url?(url)
         opaque  = document_origin_opaque?(0) == true
         headers = javascript_document_headers(0, url, @last_response_headers)
@@ -11209,10 +11171,8 @@ module Capybara
       # navigate") — taken in the order they were planned, each window's document made again in place: a location's to
       # its URL, by the document that began it (its own where no other did), a `blob:` one's of the blob it began with; a
       # reload's to the URL its document is at, a `blob:` one's of its blob; a traversal's of its session history to the
-      # URL of the entry it goes to, referred as that entry's document was (session_history.rs `applyTraversal`) — or,
+      # entry it goes to, referred as that entry's document was (session_history.rs `applyTraversal`) — or,
       # one that keeps its document, its frames' each to theirs (`traverse_navigables_of`).
-      # Each one's entry of the window's session history its document's (history.js `__csimCommitWindowEntry`): a
-      # location's after the current one, or in its place; a reload's the current one; a traversal's the one it goes to.
       # (None asked for where no window was opened.)
       # …and those the documents they made planned as they loaded — a pop-up's script navigating its opener, another
       # window it opened — taken with them, up to `WINDOW_NAV_ROUNDS` rounds: a document that navigates itself as it
@@ -11253,72 +11213,45 @@ module Capybara
       # referrer none; what the app raises raised to the test, as a visit of the page's is) — the window's next document's
       # realm returned, nil where it made none. (…the response it was made of kept as the window's, `status_code`)
       # (…`post` a form's `[body, content type]`, its document's request a POST)
+      # What it does to the window's session history and what it comes to are the engine's, as the page's are
+      # (navigation_commit.rs, through its NavigationFetch: `navigate_top_level`): its entry — or a replay's step — committed
+      # as it makes a document, of the request its redirects made it, the history left as it is where it makes none; the
+      # window's target name; the document it makes — each answer a step this host takes (`commit_window_navigation`).
       def navigate_window_realm(realm_id, kind, plan, by_user: false, post: nil)
         invalidate_find_cache
+        history = window_history(realm_id) or return
         case kind
         when 'location'
           url, replace, initiator, source, policy, activated, blob, begun = plan
-          how = replace ? 'replace' : 'push'
+          handling = replace ? 'replace' : 'push'
         when 'reload'
           activated, blob = plan
-          url      = @runtime.realm_url(realm_id)
-          resource = @runtime.realm_call(realm_id, '__csimWindowEntryPost')
-          how      = 'reload'
+          url, id, handling = @runtime.realm_url(realm_id), history.active(0), 'reload'
         when 'traverse'
-          step, url, referred, *resource = plan
-          how = 'step'
+          at, id = plan
+          handling = 'traverse'
         end
-        # (…a reload's or a traversal's of a document a POST made, that POST again: its entry's resource)
-        post ||= [resource[0].to_s.b, resource[1].to_s] unless resource.nil? || resource.empty?
+        # (…a reload's or a traversal's of the entry it makes the document of again: a traversal's at its URL, a POST's that
+        # POST again, a `blob:` URL's of the blob it kept — revoked since or not: navigation_commit.rs `keep_blob`)
+        if (replayed = id && history.entry(id))
+          url ||= replayed[:url]
+          post ||= [replayed[:body], replayed[:content_type]] if replayed.key?(:body)
+          kept, type = history.blob(id)
+        end
+        return unless url
+
+        blob = host_blob(blob) || (kept && {bytes: kept, type: type})
         initiator ||= realm_id unless by_user
-        made = {}
-        body, ctype = nil
-        if (blob = host_blob(blob))
-          # (…one of a type that makes no document saved, the window left at the one it is at; a PDF its viewer's inline
-          # content: mime.rs `load`)
-          given = blob[:type].to_s
-          load, type = Native.navigation_load(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
-          if load == 'download'
-            from_document(initiator) { save_downloaded_response(url, {'content-type' => given}, [blob[:bytes].to_s]) }
-            return
-          end
+        # (…none at all of a document's location navigation to a `data:` URL that is no download, before it begins — its
+        # ongoing one, its unload prompt — which a top-level traversable refuses: the user's, a reload's and a traversal's of
+        # the one it made not; navigation_fetch.rs `start`)
+        return if !by_user && kind == 'location' && Native.navigation_start(url.to_s, post ? 'POST' : 'GET', true) == 'refused'
 
-          body, ctype = load == 'inline' ? ['', 'text/html'] : [document_payload(blob[:bytes]), given.empty? ? type : given]
-          made[:doc_origin] = 'null' if load == 'inline'
-        end
-        # (…of a URL a navigation fails on before any request — another about: one than about:blank, a blob: one no store
-        # resolved as it began, a POST to no HTTP(S) URL — an error document, as the page's and a frame's are; none at all
-        # of a document's location navigation to a `data:` URL that is no download, which a top-level traversable refuses —
-        # the user's, a reload's and a traversal's of the one it made not: navigation_fetch.rs `start`)
-        start = Native.navigation_start(url.to_s, post ? 'POST' : 'GET', !by_user && kind == 'location')
-        return if start == 'refused'
-
-        # (…a `data:` URL's its own response: one that makes no document saved, the window left at the one it is at; else
-        # its document, of a new opaque origin — a malformed one an error document: navigation_fetch.rs `data_navigation`)
-        if start == 'data'
-          verdict, mime, bytes = Native.data_navigation(url.to_s)
-          if verdict == 'download'
-            from_document(initiator) { save_downloaded_response(url, {'content-type' => mime}, [bytes]) }
-            return
-          end
-
-          body, ctype = document_payload(bytes), mime if verdict == 'document'
-          body, ctype = '', 'text/html' if verdict == 'inline'
-          made[:doc_origin] = 'null'
-          start = 'fail' if verdict == 'fail'
-        end
-        failed = body.nil? && %w[fail blob].include?(start)
-        # (…of a scheme it loads no document of here, none: one of a blob: URL's resolved as it began, above)
-        unless body || failed || http_url?(url) || start == 'about_blank'
-          log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
-          return
-        end
         # (…its navigation begun, its window's ongoing one: session_history.rs `begin_navigation` — or, its location's, the
         # one its plan began: navigation_plan.rs `Location::ongoing`; a reload's a fresh one, standing in for HTML's
         # "traversal" as the page's does: `navigate_top_level`)
-        history = window_history(realm_id)
-        ongoing = history && [history, 0, begun&.to_i&.nonzero? || history.begin_navigation(0)]
-        if body.nil? && sw_registered?
+        ongoing = [history, 0, begun&.to_i&.nonzero? || history.begin_navigation(0)]
+        if sw_registered?
           deferred = await_sw_activation(url, Native.site(url).to_s, ongoing:) do
             navigate_window_realm(realm_id, kind, plan, by_user:, post:)
           end
@@ -11327,114 +11260,220 @@ module Capybara
 
         # (…its document asked first whether it may be unloaded, as the page's is: `prompt_page_to_unload`)
         @runtime.realm_call(realm_id, '__csimPromptToUnload')
-        # An http(s) one is fetched as its window's top-level navigation request (destination `document`) of the
-        # document that navigated it — its redirects, a service worker and its Fetch Metadata as a frame's are
-        # (`frame_navigation_fetch`) — a response that makes no document (a 204, a download) leaving it at the one it
-        # is at; the document it makes of its bytes, its Content-Security-Policy and Referrer-Policy, the Referer it
-        # sent its referrer, its reserved client its own. (…a traversal's referred as its entry's was, by no document)
-        # (…the initiator's document gone since it began it — a frame's form that navigated the frame itself after — by
-        # the URL and the policy it referred by as it began it: `source`, `policy`)
-        if body.nil? && (http_url?(url) || failed)
-          by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
-          by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
-          awaited = history && navigation_mark(history, realm_id)
-          resp = unless failed
-            frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, coop_realm: realm_id, **by)
-          end
-          return if resp && resp['no_document']
-          # (…none where a navigation begun as the response was awaited ended it: `navigate_top_level`)
-          return if history && navigation_mark(history, realm_id) != awaited
+        fetch, origin_url, client_id = window_navigation_fetch(realm_id, history, url, post, handling, [at, id], replayed, initiator, source, policy, activated)
+        begin
+          # (…an about:blank document's or a blob's opener policy the one it inherits: coop.rs `inherited` — a replay's the
+          # one its entry kept: navigation_commit.rs `Commit::local_policy`)
+          policy_of = proc { inherited_opener_policy(initiator, navigated: history, navigated_realm: realm_id, source: source) }
+          step = fetch.begin_commit(&policy_of)
+          step = fetch.blob_commit(blob && blob[:type], blob && blob[:bytes].to_s, &policy_of) if step[0] == 'blob'
+          if step[0] == 'fetch'
+            # (…of a scheme it loads no document of here, none)
+            unless http_url?(url)
+              log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
+              return
+            end
 
-          # (…a network error an error document at the URL it failed at, of a new opaque origin, as the page's is:
-          # `commit_error_document`)
-          switch = resp ? resp.fetch('coop_switch', false) : false
-          resp = {'status' => 0, 'headers' => {'content-type' => 'text/html'}, 'body' => '', 'url' => resp ? resp['url'] : url, 'error' => true} if !resp || resp['error']
-          headers = resp['headers'] || {}
-          response = [resp['status'], headers]
-          # (…its entry's resource the POST that made it — none where a redirect made it a GET: a 301, 302 or 303's; a 307
-          # or 308 keeps it, Fetch "HTTP-redirect fetch")
-          post = nil if resp['method'] == 'GET'
-          ctype, csp, referrer_policy, refresh, opener_policy, origin_agent_cluster = Native.document_params(headers, resp['url'] || url.to_s, @loopback_stand_in)
-          ctype     = resp['document_type'] || ctype
-          body, url = document_payload(resp['body_bytes'] || resp['body']), resp['url'] || url
-          ctype   ||= 'text/html'
-          made = {
-            csp:                  csp,
-            referrer:             resp['referrer'],
-            referrer_policy:      referrer_policy,
-            client_id:            resp['resulting_client_id'],
-            refresh:              refresh,
-            origin_agent_cluster: origin_agent_cluster
+            # An http(s) one is fetched as its window's top-level navigation request (destination `document`) — its
+            # redirects, a service worker and its Fetch Metadata as the page's are — its reserved client its own.
+            awaited = navigation_mark(history, realm_id)
+            hop = run_navigation_fetch(
+              fetch,
+              body:               post&.first,
+              content_type:       post&.last,
+              dest:               'document',
+              frame_type:         'auxiliary',
+              origin_url:         origin_url,
+              client_id:          client_id,
+              replaces_client_id: sw_replaced_document(realm_id),
+              is_reload:          kind == 'reload',
+              is_history:         kind == 'traverse',
+              coop_realm:         realm_id,
+              # (…a hop into the scope of a worker still activating waiting for it, each hop's: Handle Fetch)
+              ready:              ->(target) { await_sw_activation(target, Native.site(target).to_s) if sw_registered? }
+            )
+            document = hop.document || read_rack_body(hop.rack_body) if hop.command == 'document'
+            # (…none where a navigation begun as the response was awaited ended it: `navigate_top_level`)
+            unless navigation_mark(history, realm_id) == awaited
+              close_rack_body(hop.rack_body) unless document
+              return
+            end
+
+            step = fetch.response_commit(hop.command)
+          end
+          commit_window_navigation(realm_id, history, kind, fetch, step, hop, document, blob, initiator || realm_id) do
+            window_about_blank(realm_id, kind, initiator, source, policy, replayed&.fetch(:referer, nil), url) unless by_user
+          end
+        ensure
+          # (…what it holds let go however it ended: another navigation ending it, a failure of this host's)
+          fetch.close
+        end
+      end
+      # …its request (navigation_fetch.rs) and the commit it carries — `[fetch, its initiator's URL, its client's id]` —
+      # made by the document that navigates it, its Referer that one's under the policy it navigates under (a link's), else
+      # its own, its origin and site that one's (`initiating_document`) — or, that one gone since it began it, by the URL
+      # and the policy it referred by then (`source`, `policy`); a reload's by the document it reloads; a traversal's by the
+      # window's document, "as if navigable navigated itself" (HTML "apply the history step": no source snapshot params
+      # given, its active document's), referred as its entry's document state was; the user's by none, its reload as the
+      # page's (`replay_history_entry`) — its client the window's, Sec-Fetch-Site a user's. A re-post's origin the one it
+      # was first sent with.
+      private def window_navigation_fetch(realm_id, history, url, post, handling, traversal, replayed, initiator, source, policy, activated)
+        replay = REPLAYS.include?(handling)
+        if initiator && (initiator.to_i.zero? || @runtime.frame_realm_present?(initiator.to_i))
+          own_source, own_policy = realm_referrer_initiator(initiator.to_i)
+          source, policy = handling == 'traverse' ? replayed.values_at(:referer, :referrer_policy) : [own_source, policy.to_s.empty? ? own_policy : policy]
+          origin_url = initiating_url(initiator)
+          initiating = initiating_document(initiator)
+        elsif replay
+          source, policy = replayed&.key?(:body) ? replayed.values_at(:referer, :referrer_policy) : nil
+        else
+          origin_url = source
+        end
+        initiating ||= {}
+        traversed = replay && origin_url.nil?
+        origin    = replayed&.fetch(:origin, nil) if replay && (post || traversed)
+        origin  ||= initiator_origin(origin_url, initiating[:origin_null]) unless traversed
+        entry     = {referer: source, referrer_policy: policy, origin: origin}.compact
+        entry.update(body: post[0], content_type: post[1]) if post
+        fetch = Native::NavigationFetch.new({
+          method:                        post ? 'POST' : 'GET',
+          url:                           url.to_s,
+          body_empty:                    post.nil? || post[0].to_s.empty?,
+          referrer:                      source,
+          referrer_policy:               policy.to_s,
+          initiator:                     origin_url,
+          origin:                        origin,
+          origin_null:                   initiating.fetch(:origin_null, false),
+          initiator_cross_site_ancestor: initiating.fetch(:initiator_cross_site_ancestor, false),
+          dest:                          'document',
+          user_activated:                activated == true,
+          jar:                           @cookie_jar,
+          sw:                            ([true, nil] if sw_registered?),
+          reloaded_cross_site:           (replayed&.fetch(:cross_site, nil) if traversed),
+          client_origin:                 (document_origin(realm_id) if traversed),
+          traversed_initiator:           (origin if traversed),
+          traversable:                   history.id,
+          commit:                        {
+            handling:       handling,
+            traversal:      (traversal if handling == 'traverse'),
+            entry:          entry,
+            leaving_origin: document_origin(realm_id),
+            opened:         window_opened?(realm_id)
           }
-          made[:doc_origin] = 'null' if resp['error']
-          # (…a PDF its viewer's document for inline content: `commit_page_navigation`)
-          if resp['inline']
-            body, ctype, opener_policy = '', 'text/html', nil
-            made = {doc_origin: 'null', referrer: resp['referrer'], client_id: resp['resulting_client_id']}
+        })
+        [fetch, origin_url, initiating[:client_id] || (sw_client_id(realm_id) if traversed)]
+      end
+      # …whether window realm `realm`'s browsing context is an auxiliary one whose opener is there, not disowned
+      # (navigables.rs `window_opener`): one whose target name a navigation to another origin keeps (navigation_commit.rs).
+      private def window_opened?(realm)
+        key = @runtime.window_realm_meta.dig(realm, :window_key) or return false
+        V8Runtime.engine_call(@runtime, 'windowOpener', key.to_i).to_i >= 0
+      end
+      # …its navigation `fetch` ended in `step` (navigation_commit.rs `Step`, its session history done with as that says):
+      # the document it makes replacing the one the window is at — of its last hop `hop`'s response (`document` its body),
+      # of a local scheme's (a `blob:` URL's `blob`, about:blank of what the block gives: its initiator's origins, its
+      # referrer — `window_about_blank` — none the user's) — or none, a download saved by the document of realm `source`.
+      private def commit_window_navigation(realm_id, history, kind, fetch, (step, type, payload), hop, document, blob, source)
+        url  = fetch.target
+        made = {}
+        case step
+        when 'none'
+          return
+        when 'download'
+          headers, body = hop ? [hop.headers, hop.rack_body || [hop.document]] : [{'content-type' => type.to_s}, [(payload || blob[:bytes]).to_s]]
+          from_document(source) { save_downloaded_response(url, headers, body) }
+          return
+        # (…a network error an error document at the URL it failed at, of a new opaque origin, as the page's is:
+        # `commit_error_document`)
+        when 'error'
+          body, ctype, response, made = '', 'text/html', [0, {'content-type' => 'text/html'}], {doc_origin: 'null'}
+        # (…a PDF its viewer's document for inline content, of no policy its response sets: `commit_page_navigation`)
+        when 'inline'
+          body, ctype, opener_policy = '', 'text/html', payload
+          made = {doc_origin: 'null', referrer: fetch.referrer, client_id: hop&.client_id}
+        # (…about:blank a new empty document — HTML "navigate" to a URL matching about:blank, its reload too, which Chrome
+        # measured makes a new one, its writes gone — of the initiator's origin and base URL, sandboxed as the window's
+        # navigable is, referred by the initiator as its policy says (Chrome: its origin) — a reload as the document it
+        # replaces was, HTML's reload reusing its document state's referrer; the user's of a new opaque origin, no referrer)
+        when 'about_blank'
+          body, ctype, opener_policy = '', 'text/html', payload
+          made = yield || {}
+        when 'blob_document'
+          body, ctype, opener_policy = document_payload(blob[:bytes]), type, payload
+        # (…the document of its response, its Content-Security-Policy and Referrer-Policy, the Referer it sent its
+        # referrer, its reserved client its own — a `data:` URL's of a new opaque origin)
+        when 'document'
+          if hop
+            ctype, csp, referrer_policy, refresh, opener_policy, origin_agent_cluster = Native.document_params(hop.headers, url, @loopback_stand_in)
+            body, ctype = document_payload(document), hop.document_type || ctype || 'text/html'
+            made = {
+              csp:                  csp,
+              referrer:             fetch.referrer,
+              referrer_policy:      referrer_policy,
+              client_id:            hop.client_id,
+              refresh:              refresh,
+              origin_agent_cluster: origin_agent_cluster
+            }
+          else
+            body, ctype, made = document_payload(payload), type, {doc_origin: 'null'}
           end
         end
-        # (…about:blank a new empty document — HTML "navigate" to a URL matching about:blank, its reload too, which
-        # Chrome measured makes a new one, its writes gone — of the initiator's origin and base URL, sandboxed as the
-        # window's navigable is, referred by the initiator as its policy says (Chrome: its origin) — a reload as the
-        # document it replaces was, HTML's reload reusing its document state's referrer)
-        # (…the user's, no document its initiator, a new opaque origin's with no referrer)
-        if body.nil?
-          body, ctype = '', 'text/html'
-          made = window_about_blank(realm_id, kind, initiator, source, policy, referred, url) unless by_user
-        end
-        # (…its entry of the window's session history: how it is made, the step a traversal goes to, a POST's resource)
-        entry = [how, step, (post if http_url?(url))]
-        # (…an about:blank document's or a blob's opener policy the one it inherits: coop.rs `inherited`)
-        local = blob || start == 'about_blank'
-        if local
-          opener_policy = kind == 'traverse' ? history&.text(history.entry_at_step(step), :opener_policy) || 'unsafe-none' : inherited_opener_policy(initiator, navigated: history, navigated_realm: realm_id, source: source)
-        end
+        response ||= [hop.status, hop.headers] if hop
         # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
         # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
         # use for a navigation response")
         # (…a blob's origin its URL's, as its policy is judged, though its viewer's document for inline content is opaque)
         response_origin = blob ? url_origin(url.to_s.sub(/\Ablob:/i, '')) : made[:doc_origin] || url_origin(url)
-        switch, = history&.commit_opener_policy(opener_policy || 'unsafe-none', response_origin.to_s, switch == true) { coop_leaving_facts(realm_id) }
+        switch, = history.commit_opener_policy(opener_policy || 'unsafe-none', response_origin.to_s, fetch.coop_switch?) { coop_leaving_facts(realm_id) }
         if switch && @driver.respond_to?(:move_window_to_new_group)
-          moved = made.merge(entry: entry, content_type: ctype, blob: blob && blob.merge(type: ctype))
+          moved = made.merge(content_type: ctype, blob: (blob.merge(type: ctype) if step == 'blob_document'))
           return @driver.move_window_to_new_group(self, realm_id, url, response || [200, {'content-type' => ctype.to_s}], body, moved)
         end
-        new_id = replace_window_document(realm_id, url, body, ctype, entry, made, reuses: kind == 'location')
+        # (…a replay's document made with its entry's classic history API state — `history.state` before its scripts run,
+        # HTML "update document for history step application" — as the step left it: none where its origin changed)
+        state = history.entry(history.active(0))[:state] unless kind == 'location'
+        new_id = replace_window_document(realm_id, url, body, ctype, made, reuses: kind == 'location', history_state: state)
         return unless new_id
 
         @runtime.window_realm_meta[new_id][:response] = response || ABOUT_BLANK_RESPONSE
-        history.update(history.active(0), {opener_policy: opener_policy}) if local && history
         # (…a traversal's document given the state its entry's controls were left in, as the page's is: `restore_form_state`)
-        if kind == 'traverse' && (state = history&.entry(history.active(0))&.fetch(:form_state, nil))
-          @runtime.realm_call(new_id, '__csimRestoreFormState', state)
+        if kind == 'traverse' && (form_state = history.entry(history.active(0))[:form_state])
+          @runtime.realm_call(new_id, '__csimRestoreFormState', form_state)
         end
         retarget_scope(realm_id, new_id)
         new_id
       end
-      # …the document it makes replacing the one it is at, the window's next document's realm returned: `entry` how its entry
-      # is made, `made` what the document is of. (…`reuses` where its initial about:blank's realm is the one a document of its
-      # origin is loaded into, its Window kept — and its Document object, renewed: a location's, a `javascript:` URL's)
-      private def replace_window_document(realm_id, url, body, ctype, entry, made, reuses:)
+      # …the document it makes replacing the one it is at, the window's next document's realm returned: `made` what the
+      # document is of, `history_state` its classic history API state. (…`reuses` where its initial about:blank's realm is
+      # the one a document of its origin is loaded into, its Window kept — and its Document object, renewed: a location's, a
+      # `javascript:` URL's) (…`keep_traversals` the traversals the document it replaces queued going on after it: a
+      # `javascript:` URL's, as the page's: `boot_response_into_ctx`)
+      private def replace_window_document(realm_id, url, body, ctype, made, reuses:, history_state: nil, keep_traversals: false)
         keeps = reuses && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
         # (…the document it replaces unloaded first, its frames' with it — HTML "unload a document and its descendants", as
         # the page's is: `boot_response_into_ctx` — while its realms still live, an initial about:blank's too, its renewed
         # Document visible all the same)
         @runtime.realm_call(realm_id, '__csimFireWindowUnloadDeep')
-        # (…its entry taking its controls' state as its handlers left it, which a traversal back to it restores: as the
-        # page's, `capture_left_page_form_state` — none of an initial about:blank, which no entry is of)
-        history = window_history(realm_id)
-        if (id = history&.active(0)) && (state = @runtime.realm_call(realm_id, '__csimCaptureFormState'))
-          history.update(id, {form_state: state})
+        # (…the entry it leaves taking its controls' state as its handlers left it, which a traversal back to it restores, as
+        # the page's: `capture_left_page_form_state` — none of an initial about:blank, which no entry is of; then the
+        # window's session history the next document's, as the page's: its document state the one `window.name` reads, the
+        # traversals the one it replaces queued let go of with it — but a `javascript:` URL's — its frames new navigables)
+        if (history = window_history(realm_id))
+          if (id = history.take_leaving) && (state = @runtime.realm_call(realm_id, '__csimCaptureFormState'))
+            history.update(id, {form_state: state})
+          end
+          history.show
+          history.clear_queued unless keep_traversals
+          history.rebuilt
         end
-        return @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made) if keeps
+        return @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, history_state: history_state, **made) if keeps
 
         made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
-        # (…its name the one the window's next document keeps: window.js `__csimWindowNameFor`)
-        made[:window_name] = @runtime.realm_call(realm_id, '__csimWindowNameFor', url.to_s, made[:csp], *made[:doc_origin])
-        @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
+        @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, history_state: history_state, **made)
       end
       # The document a `javascript:` URL's string result makes of window realm `realm_id` (`commit_javascript_document`, the
-      # page's). (…an about:blank one's origins and base URL the document's: `window_about_blank`)
+      # page's), its entry the engine's (session_history.rs `commit_javascript_document`). (…an about:blank one's origins and
+      # base URL the document's: `window_about_blank`)
       private def commit_window_javascript_document(realm_id, url, markup)
         invalidate_find_cache
         history = window_history(realm_id)
@@ -11444,17 +11483,16 @@ module Capybara
         headers = javascript_document_headers(realm_id, url, given[1])
         _, csp, referrer_policy = Native.document_params(headers, url, @loopback_stand_in)
         made = {csp: csp, referrer_policy: referrer_policy, controlled: false}
-        kept = history.active(0)&.then {|id| history.entry(id).slice(*JAVASCRIPT_DOCUMENT_ENTRY_KEEPS) }
         if about_blank_url?(url)
           made.merge!(window_about_blank(realm_id, 'reload', realm_id, nil, nil, nil, url).except(:referrer, :referrer_policy))
         elsif document_origin_opaque?(realm_id)
           made[:doc_origin] = 'null'
         end
-        new_id = replace_window_document(realm_id, url, markup, 'text/html;charset=utf-8', ['javascript', nil, nil], made, reuses: true)
+        history.commit_javascript_document(url.to_s)
+        new_id = replace_window_document(realm_id, url, markup, 'text/html;charset=utf-8', made, reuses: true, keep_traversals: true)
         return unless new_id
 
         @runtime.window_realm_meta[new_id][:response] = [200, headers]
-        history.update(history.active(0), kept) if kept
         retarget_scope(realm_id, new_id)
         # (…a traversal its script asked for applied after it, as the page's is: `commit_javascript_document`)
         @runtime.realm_call(new_id, '__csimApplyOwnTraversals', true)

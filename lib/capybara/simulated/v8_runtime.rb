@@ -735,17 +735,16 @@ module Capybara
       # Navigate a window realm (`win.location = …`): a FRESH realm for the new
       # document, like reload_frame_realm — an in-place `__csimLoadDocument` on an
       # already-loaded realm does NOT re-run inline scripts, but a fresh realm does.
-      # Returns the new realm's context id; `made` what its response gives the document (`create_window_realm`), `entry`
-      # its entry of the window's session history.
-      def reload_window_realm(old_id, url, body, content_type, entry:, **made)
+      # Returns the new realm's context id; `made` what its response gives the document (`create_window_realm`).
+      def reload_window_realm(old_id, url, body, content_type, **made)
         meta = window_realm_meta[old_id] || {}
         # Like reload_frame_realm, a re-navigated window discards its child browsing contexts — dispose
         # the descendant frame realms too, not just old_id, so a popup's iframes don't linger.
         dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_window_realm(
           url, body, content_type,
-          opener_id: meta[:opener_id], window_key: meta[:window_key], retarget_from: old_id, entry: entry, group: meta[:group],
-          **{about_base: meta[:about_base], window_name: meta[:window_name]}.merge(made)
+          opener_id: meta[:opener_id], window_key: meta[:window_key], retarget_from: old_id, group: meta[:group],
+          about_base: meta[:about_base], **made
         )
       end
       # The navigation's reserved client id — the realm ADOPTS it as its service-worker Client identity
@@ -1597,14 +1596,14 @@ module Capybara
       # A document a navigation of a window `window.open` made in this isolate made, loaded into realm `realm` — a new
       # one's, or the one of its initial about:blank, whose Window it keeps (`reuse_window_realm`): its URL, its origins
       # (its URL's own, but an about:blank one's, which its initiator's are — `doc_origin` / `location_origin`), its
-      # referrer, its sandboxing, the client its navigation reserved, its entry of the window's session history (history.js
-      # `__csimCommitWindowEntry`), then its parse and its scripts, and its `load`.
+      # referrer, its sandboxing, the client its navigation reserved, its classic history API state — a replay's its entry's
+      # (Browser#commit_window_navigation) — then its parse and its scripts, and its `load`.
       private def load_window_document(
         realm,
         url,
         body,
         content_type,
-        entry:,
+        history_state: nil,
         doc_origin: nil,
         location_origin: nil,
         about_base: nil,
@@ -1646,8 +1645,8 @@ module Capybara
         if controlled && doc_origin.to_s != 'null' && (ctrl = @browser.sw_client_controller_for(url.to_s, Native.site(url.to_s)))
           realm.call('__csim_swSetControllerDirect', *ctrl)
         end
-        # (…its window's session history told of it, before its scripts read its `history`)
-        realm.call('__csimCommitWindowEntry', url.to_s, entry[0], entry[1], referrer, *entry[2])
+        # (…its `history.state` before its scripts read it)
+        realm.call('__csimSetHistoryState', history_state) unless history_state.nil?
         # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
         walks_guarded { realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh) }
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
@@ -1661,14 +1660,14 @@ module Capybara
       # listeners: `w.onload = …`) the new document's Window has (Chrome measured for `open(url)`'s; Chrome makes a new
       # Window for `open()` then `location = url`, which HTML does not). Its Document object is the one its realm has,
       # renewed (dom-nodes.js `__csimRenewDocument`) and parsed again — a gap: HTML makes a new one (CLAUDE.md).
-      def reuse_window_realm(id, url, body, content_type, entry:, **made)
+      def reuse_window_realm(id, url, body, content_type, **made)
         realm = frame_realms[id] or return nil
         # (…the initial about:blank a service-worker client no more — its document replaced, its controller none, as a
         # document's unload makes it: Handle Service Worker Client Unload — the new document a client of its own)
         realm.call('__csim_swClientDiscarded')
         @browser.sw_unregister_client(id)
         realm.call('__csimRenewDocument')
-        load_window_document(realm, url, body, content_type, entry: entry, **made.except(:viewport))
+        load_window_document(realm, url, body, content_type, **made.except(:viewport))
         id
       rescue StandardError => e
         @browser.log_console('warn', "window realm load failed: #{e.message}")
@@ -1687,9 +1686,9 @@ module Capybara
       # makes a same-origin window far cheaper than today's isolate-per-window.
       # (…`retarget_from` the realm whose document this one replaces — its window the same WindowProxy wherever a realm
       # holds one, retargeted before the document's scripts run: `realmHooks.retargetWindowProxy` — `csp` its response's
-      # Content-Security-Policy, `client_id` the client its navigation reserved, `entry` — `[how, step]` — its entry of the
-      # window's session history, that of a navigation's document (history.js `__csimCommitWindowEntry`): none for a new
-      # window's initial about:blank, which has none)
+      # Content-Security-Policy, `client_id` the client its navigation reserved, `history_state` a replay's classic history
+      # API state; `window_name` a new window's target name, its session history's to keep from then on, as a navigation
+      # of it hands it on: navigables.rs `window_name`)
       def create_window_realm(
         url,
         body,
@@ -1708,7 +1707,7 @@ module Capybara
         refresh: nil,
         sandbox: nil,
         controlled: true,
-        entry: nil,
+        history_state: nil,
         viewport: nil,
         group: page_group,
         origin_agent_cluster: false
@@ -1745,7 +1744,6 @@ module Capybara
           # its document's to ask for an origin-keyed one: realm_location.rs `origin_keyed_cluster`)
           realm.call('__csimObtainAgentCluster', false)
         end
-        realm.call('__csimSetWindowName', window_name.to_s) unless window_name.nil?
         # Register the realm as alive BEFORE its document loads: its inline scripts run
         # synchronously inside __csimLoadDocument and may post to a BroadcastChannel the
         # opener listens on (a blob popup that posts then self.close()s). The delivery
@@ -1757,10 +1755,10 @@ module Capybara
         # runs THIS realm's tasks too — otherwise its queued tasks (e.g. a
         # BroadcastChannel delivery from a blob document) never fire.
         V8Runtime.engine_call(ctx, 'setSteppedWindow', realm.id, true, opener_id&.to_i, window_key.to_i)
-        # Remember the window's opener / name so a self-navigation (reload_window_realm
-        # builds a FRESH realm) can carry them across — a real popup keeps window.opener
-        # and window.name through its own navigation.
-        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key, group: group}
+        realm.call('__csimSetWindowName', window_name.to_s) unless window_name.nil?
+        # Remember the window's opener so a self-navigation (reload_window_realm builds a FRESH realm) can carry it across
+        # — a real popup keeps window.opener through its own navigation.
+        window_realm_meta[realm.id] = {opener_id: opener_id, about_base: about_base, window_key: window_key, group: group}
         window_realms_changed
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
         if initial
@@ -1774,7 +1772,7 @@ module Capybara
           load_window_document(
             realm, url, body, content_type,
             doc_origin: doc_origin, location_origin: location_origin, about_base: about_base, referrer: referrer, referrer_policy: referrer_policy,
-            csp: csp, client_id: client_id, refresh: refresh, sandbox: sandbox, entry: entry, controlled: controlled,
+            csp: csp, client_id: client_id, refresh: refresh, sandbox: sandbox, history_state: history_state, controlled: controlled,
             origin_agent_cluster: origin_agent_cluster
           )
         end

@@ -54,9 +54,9 @@ RSpec.describe 'the page navigation request' do
     expect(session).to have_current_path('/top')
   end
 
-  # …but none for a window's initial about:blank, which the navigation after it replaces.
+  # …but none for a window's initial about:blank, which the navigation after it replaces — an about:blank one's too, a
+  # document no initial about:blank, which the next navigation comes after (window_navigation_commit_spec.rb).
   it "replaces a window's initial about:blank" do
-    session.visit 'about:blank'
     session.visit '/a'
     expect(session.evaluate_script('history.length')).to eq(1)
     window = session.open_new_window

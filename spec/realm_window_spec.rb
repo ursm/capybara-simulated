@@ -367,7 +367,7 @@ RSpec.describe 'a window made in its opener\'s isolate' do
   end
 
   # (…a form of its opener's posted to it by its name, a traversal back to that entry posting again: its entry's
-  # resource — session_history.rs `commitWindowEntry`)
+  # resource — navigation_commit.rs `Commit`)
   it 'posts again for a traversal back to an entry a form posted to it' do
     session.execute_script("window.w = window.open('', 'named'); w.location = '/second';")
     session.within_window(session.windows.last) { expect(session).to have_css('#second') }
