@@ -118,14 +118,19 @@ module Capybara
       # …and under it, the steps every call of the host's into a realm goes to, by name (engine.js `hostSteps`): none of
       # them a property of any global, each under a name the host's token (`Native.host_token`) begins —
       # `RustyRacer.<token><step>` — which no script of a page's has, so a page that reads the namespace makes none of the
-      # host's calls. (…a path made once a step: a string argument costs a conversion each call, a path made again an
-      # allocation)
+      # host's calls.
       ENGINE_PATHS = Hash.new {|paths, step| paths[step] = "#{HOST_NAMESPACE_NAME}.#{Native.host_token}#{step}".freeze }
-      def self.engine_call(realm, step, *args) = realm.call(ENGINE_PATHS[step], *args)
-      # A list of numbers as the host hands it a step — handles, realms — packed as little-endian doubles into a binary
-      # string (engine.js `numbersOf`): rusty_racer builds an array argument by [[Set]], through any index setter a page
-      # put on the realm's `Array.prototype`, and a binary string as a Uint8Array, through none.
-      def self.packed(numbers) = numbers.pack('E*')
+      def self.engine_call(realm, step, *args) = step_of(realm, step).call(*args)
+      # Step `step` of `realm` — a Ctx, or a frame realm's context — as a function (RustyRacer::Function) resolved once a
+      # realm: a call of it walks no path. A Ctx keeps its own until a reset makes its realm again, or its steps are
+      # published again (`Ctx#publishing`: a worker's); a frame realm's, published once as it is made, as long as its
+      # context object lives.
+      FRAME_STEPS = ObjectSpace::WeakKeyMap.new
+      def self.step_of(realm, step)
+        return realm.step(step) if realm.is_a?(Ctx)
+
+        (FRAME_STEPS[realm] ||= {})[step] ||= realm.function(ENGINE_PATHS[step])
+      end
 
       # One isolate + its default context, presented as a single handle — the
       # shape the rest of the runtime (and `ScriptCache`) passes around.
@@ -141,6 +146,7 @@ module Capybara
           @ctx        = @iso.context
           @attached   = []
           @generation = 0
+          @steps      = {}
         end
 
         # ── Context surface ─────────────────────────────────────────
@@ -150,7 +156,16 @@ module Capybara
         def eval(src)                               = @ctx.eval(src)
         def eval_void(src, filename: '<eval>')      = @ctx.eval_void(src, filename: filename)
         def eval_primitive(src, filename: '<eval>') = @ctx.eval_primitive(src, filename: filename)
-        def call(name, *args)                       = @ctx.call(name, *args)
+        # The realm's step `name` (engine.js `hostSteps`), resolved as it is first called (`V8Runtime.step_of`).
+        def step(name) = (@steps[name] ||= @ctx.function(ENGINE_PATHS[name]))
+
+        # Step `name` called, which publishes the realm's steps again (engine.js `publishHostSteps`: a worker's scope
+        # installs steps of its own) — each resolved anew from then on.
+        def publishing(name, *args)
+          step(name).call(*args)
+        ensure
+          @steps.clear
+        end
 
         # Record every attach so `create_context` can replay them: the bridge
         # in a per-frame realm reaches the same Ruby host fns as the main
@@ -179,6 +194,7 @@ module Capybara
         def reset
           @ctx.reset
           @attached.clear
+          @steps.clear
           @generation += 1
         end
 
@@ -357,9 +373,9 @@ module Capybara
 
       def eval(code)         = walks_guarded { ctx.eval(code.to_s) }
       def eval_void(code)    = walks_guarded { ctx.eval_void(code.to_s) }
-      # A step of the page's realm, by its path (`V8Runtime.engine_call`'s, spelled out on the hottest of the host's calls).
+      # A step of the page's realm (`V8Runtime.engine_call`'s, spelled out on the hottest of the host's calls).
       def call(step, *args)
-        result = outermost { ctx.call(ENGINE_PATHS[step], *args) }
+        result = outermost { ctx.step(step).call(*args) }
         ScriptCache.warm_pending!
         result
       end
@@ -440,7 +456,7 @@ module Capybara
         return call(step, *args) if realm_id.nil? || realm_id.zero?
         fr = frame_realms[realm_id]
         return call(step, *args) unless fr
-        result = outermost { fr.call(ENGINE_PATHS[step], *args) }
+        result = outermost { V8Runtime.engine_call(fr, step, *args) }
         ScriptCache.warm_pending!
         result
       end
@@ -785,8 +801,7 @@ module Capybara
         nil
       end
       # The realms that may hold a WindowProxy of another's window: every live one.
-      # (…packed, as the host hands its integer lists: `V8Runtime.packed`)
-      def proxy_holders = V8Runtime.packed([0] + frame_realms.keys + loading_frame_realms.keys)
+      def proxy_holders = [0] + frame_realms.keys + loading_frame_realms.keys
 
       # Tear down a single frame realm (e.g. a descendant frame destroyed when an
       # ancestor frame re-navigates). No-op for nil/0/unknown ids. `keep_proxies`: its navigable goes on to another
@@ -2329,7 +2344,7 @@ module Capybara
         c.attach('__setTimersActive', ->(_flag) { nil })
         # The worker's scope, of its KIND — 'dedicated', 'shared' or 'service' — and name (worker-globals.js).
         # (…cross-origin isolated as the context that made it is — a service worker by no document's headers: not)
-        V8Runtime.engine_call(c, 'installWorkerScope', kind, name.to_s, isolated, secure)
+        c.publishing('installWorkerScope', kind, name.to_s, isolated, secure)
         # …and the user agent a test set, which its navigator answers as its requests send it.
         V8Runtime.engine_call(c, 'setUserAgent', browser.default_user_agent) if browser.default_user_agent
         WorkerRuntime.new(c)

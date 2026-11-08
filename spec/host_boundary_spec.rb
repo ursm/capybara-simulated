@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'tempfile'
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
@@ -19,7 +20,11 @@ RSpec.describe 'the host boundary' do
         <!DOCTYPE html><body><iframe id=f src="/tick"></iframe><iframe id=x src="http://evil.test/ad"></iframe>
         <script>window.ticks = 0; setInterval(() => ticks++, 10);</script>
       HTML
-      '/arrays' => '<!DOCTYPE html><body><p class=a>one</p><p class=a>two</p><select id=s multiple><option selected>x</option><option selected>y</option></select>',
+      '/args'   => <<~HTML,
+        <!DOCTYPE html><meta charset=utf-8><body><input id=t><input id=f type=file><button id=c>c</button>
+        <script>document.getElementById('c').addEventListener('click', (e) => { window.shifted = e.shiftKey; });</script>
+      HTML
+      '/arrays' =>'<!DOCTYPE html><body><p class=a>one</p><p class=a>two</p><select id=s multiple><option selected>x</option><option selected>y</option></select>',
       '/tick'   =>'<!DOCTYPE html><script>window.ticks = 0; setInterval(() => ticks++, 10);</script>',
       '/ad'     => <<~HTML,
         <!DOCTYPE html><script>
@@ -80,8 +85,8 @@ RSpec.describe 'the host boundary' do
 
   # What the driver finds is the document's, whatever a page — an app, a library that patches arrays — made of
   # `Array.prototype`: the host's steps build and read their lists by index (engine.js `listMap`, `listBuild`), and the
-  # host hands its handles packed, not as an array an index setter there would take (`numbersOf`) — as a real browser's
-  # driver answers from outside the page's script.
+  # arrays the host hands them — a find's handles — have their elements defined, not set through an index setter there
+  # (rusty_racer's marshalling) — as a real browser's driver answers from outside the page's script.
   it "finds what the document holds whatever a page made of Array.prototype's methods" do
     session.visit '/arrays'
     session.execute_script(<<~JS)
@@ -95,6 +100,30 @@ RSpec.describe 'the host boundary' do
     expect(session.all(:xpath, '//p').map(&:text)).to eq(%w[one two])
     expect(session.all(:css, 'body *').map(&:tag_name)).to eq(%w[p p select option option])
     expect(session.find(:css, '#s').value).to eq(%w[x y])
+  end
+
+  # …nor what the host hands a step otherwise: a script's arguments, the keys it types, the files it picks, a click's
+  # event init — none goes through a setter a page put on `Array.prototype` or `Object.prototype`.
+  it "hands a step its arguments whatever setters a page put on Array.prototype and Object.prototype" do
+    file = Tempfile.create(['picked', '.txt'])
+    file.write('12345')
+    file.close
+    session.visit '/args'
+    session.execute_script(<<~JS)
+      const swallow = { configurable: true, set(_) {}, get() { return undefined; } };
+      Object.defineProperty(Array.prototype, '0', swallow);
+      Object.defineProperty(Object.prototype, 'shiftKey', swallow);
+      Object.defineProperty(Object.prototype, 'size', swallow);
+    JS
+    expect(session.evaluate_script('arguments[0] + 1', 41)).to eq(42)
+    session.find(:css, '#t').send_keys('k')
+    session.find(:css, '#f').set(file.path)
+    session.find(:css, '#c').click(:shift)
+    expect(session.evaluate_script(<<~JS)).to eq(['k', 5, true])
+      [document.getElementById('t').value, document.getElementById('f').files.item(0).size, window.shifted]
+    JS
+  ensure
+    File.unlink(file.path)
   end
 
   # …nor of the event loop's: the rendering update's resize steps over the frames, a frame's task run in its realm

@@ -64442,12 +64442,6 @@ fetch/api/basic/stream-response.any.js:
 - "[dedicatedworker] Stream response's body when content-type is present"
 - "[serviceworker] Stream response's body when content-type is not present"
 - "[serviceworker] Stream response's body when content-type is present"
-fetch/api/basic/stream-safe-creation.any.js:
-- "[dedicatedworker] throwing Object.prototype.type accessor should not affect stream
-  creation by 'fetch'"
-- "[serviceworker] throwing Object.prototype.type accessor should not affect stream
-  creation by 'fetch'"
-- throwing Object.prototype.type accessor should not affect stream creation by 'fetch'
 fetch/api/headers/header-values.any.js:
 - XMLHttpRequest with all valid values
 - "[dedicatedworker] fetch() with all valid values"

@@ -1418,12 +1418,11 @@ module Capybara
       def lookup_node(handle)
         handle if dom_call('alive', handle)
       end
-      # …whether each of `handles` is alive, asked at once (`V8Runtime.packed`: no array crosses into the page's realm): a
-      # find's results as Capybara makes its nodes of them (Driver#nodes_of) — for as many as one call for them all costs
-      # less than a call each, a node's own lookup: 2 handles 4.4 µs a call each against 4.5 µs packed, 3 handles 6.4
-      # against 4.5
-      ALIVE_BATCH_MIN = 3
-      def alive_among(handles) = dom_call('aliveAmong', V8Runtime.packed(handles))
+      # …whether each of `handles` is alive, asked at once: a find's results as Capybara makes its nodes of them
+      # (Driver#nodes_of) — for as many as one call for them all costs less than a call each, a node's own lookup: 1 handle
+      # 1.6 µs a call against 2.1 µs at once, 2 handles 3.1 against 2.3
+      ALIVE_BATCH_MIN = 2
+      def alive_among(handles) = dom_call('aliveAmong', handles)
 
       def check_stale(handle, initial, gen = nil)
         return if initial && (gen.nil? || gen == @context_gen) && dom_call('alive', handle)
@@ -8496,7 +8495,7 @@ module Capybara
       # discarded, no task of theirs run again — its timers, its listeners, its observers, its channels (window.js
       # `discardRealms`) — the windows it made stepped by its event loop still.
       def destroy_page
-        @runtime.call('discardRealms', V8Runtime.packed(@runtime.page_realm_tree))
+        @runtime.call('discardRealms', @runtime.page_realm_tree)
         @timers_active = false
       end
       # Whether its close ran, the window to be discarded.
@@ -9764,7 +9763,7 @@ module Capybara
           # each once instead of fetching again) — the engine's (service_worker.rs `swGlobalInit`).
           args = [sw_registration, sw_scope.to_s, sw_uvc, sw_imports_map && JSON.generate(sw_imports_map)]
           rt.call('swGlobalInit', *args)
-          rt.call('installServiceWorkerScope')
+          rt.publishing('installServiceWorkerScope')
         end
         # A DEFERRED main script (worker_spawn found a controlling, fetch-handling SW for the
         # script URL): fetch it through the SW redirect chain NOW, on this worker's own thread

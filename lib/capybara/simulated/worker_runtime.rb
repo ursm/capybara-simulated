@@ -13,7 +13,9 @@ module Capybara
       end
 
       def eval_void(src, **kw) = @ctx.eval_void(src.to_s, **kw)
-      def call(step, *args) = V8Runtime.engine_call(@ctx, step.to_s, *args)
+      def call(step, *args) = @ctx.step(step).call(*args)
+      # (…one that publishes the worker's steps again: `V8Runtime::Ctx#publishing`)
+      def publishing(step, *args) = @ctx.publishing(step, *args)
       # (…the bridge's checkpoint, with the steps HTML runs after it: V8Runtime#drain_microtasks)
       def drain_microtasks  = call('yield')
       # (…its clock advanced `ms` — a poll tick's, or as far as the window's clock went meanwhile: Browser#run_worker)

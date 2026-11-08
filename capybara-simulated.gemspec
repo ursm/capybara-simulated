@@ -56,7 +56,7 @@ Gem::Specification.new do |spec|
   # The JS engine: V8 via rusty_v8. Its native engine is linked into csim_native (above); the gem
   # supplies the Ruby API around it — so the two are ONE version, the tag the crate is built from: a gem's
   # wrappers call into the native source of their own release, and another's may name a method this one
-  # lacks. (0.2.5: `eval_primitive`, `Module#evaluate(report:)`, a thrown value rethrown as itself, and a
-  # released realm's host function that no longer runs its slot's next proc.)
-  spec.add_dependency 'rusty_racer', '0.2.5'
+  # lacks. (0.2.6: `Context#function`, and a host argument's elements and entries defined, through no setter a
+  # page put on `Array.prototype` / `Object.prototype`.)
+  spec.add_dependency 'rusty_racer', '0.2.6'
 end
