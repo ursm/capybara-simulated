@@ -65,6 +65,14 @@ struct Definition {
     construction: Vec<Option<v8::Global<v8::Value>>>,
 }
 
+// An entry of the active custom element constructor map: the definition whose constructor it is for — the registry it
+// maps that constructor to the definition's — and, for "create an element"'s, the registry the element is created with
+// (the bindings' value: undefined for none set); none for an upgrade's, whose element its construction stack holds.
+struct Active {
+    def: u32,
+    registry: Option<v8::Global<v8::Value>>,
+}
+
 // What a definition is, beside its callbacks (custom-elements.js `define`): form-associated, its shadow root disabled.
 const DEFINE_FORM_ASSOCIATED: u32 = 1;
 const DEFINE_DISABLE_SHADOW: u32 = 2;
@@ -123,10 +131,12 @@ pub(crate) struct Reactions {
     // Each realm's window registry (its `customElements`, the latest context's of a realm id): the registry of a node with
     // neither a registry set nor a node document.
     window_registries: HashMap<i32, u32>,
-    // The definitions whose construction stacks an upgrade pushed onto, in the order it did — the agent's, as an upgrade
-    // in one realm constructs by another's HTML element constructor: what that constructor looks its NewTarget up in
-    // (`ceStack[3]` how many, which every element construction reads before it asks).
-    constructing: Vec<u32>,
+    // The agent's active custom element constructor map (HTML), as a stack of what set its entries, the latest last: an
+    // upgrade's (`ceUpgrade` to `ceUpgradeEnd`) or "create an element"'s (`ceCreating` to `ceCreated`) — the agent's, as
+    // an upgrade in one realm constructs by another's HTML element constructor: what that constructor looks its NewTarget
+    // up in, the latest entry of its constructor winning (`ceStack[3]` how many, which an element construction reads
+    // before it asks).
+    active: Vec<Active>,
     // The elements an upgrade is constructing, innermost last (`ceUpgrade` to `ceUpgradeEnd`).
     upgrading: Vec<NodeId>,
     // The definitions by their constructor's identity hash (a constructor may be several registries' definitions'): what
@@ -187,10 +197,10 @@ impl Reactions {
         self.set(DEPTH, 0);
         self.set(DEEPEST, 0);
         self.microtask_lost();
-        // (…and no upgrade constructs: a terminated one left its element on its definition's construction stack)
+        // (…and nothing constructs: a terminated upgrade left its element on its definition's construction stack)
         self.upgrading.clear();
-        for id in std::mem::take(&mut self.constructing) {
-            if let Some(d) = self.definitions.get_mut(id as usize).and_then(Option::as_mut) {
+        for entry in std::mem::take(&mut self.active) {
+            if let Some(d) = self.definitions.get_mut(entry.def as usize).and_then(Option::as_mut) {
                 d.construction.clear();
             }
         }
@@ -252,8 +262,8 @@ impl Reactions {
         }
         if !gone.is_empty() {
             self.custom.retain(|_, d| !gone.contains(d));
-            self.constructing.retain(|d| !gone.contains(d));
-            self.set(CONSTRUCTING, self.constructing.len() as i32);
+            self.active.retain(|a| !gone.contains(&a.def));
+            self.set(CONSTRUCTING, self.active.len() as i32);
             self.by_constructor.retain(|_, ids| {
                 ids.retain(|d| !gone.contains(d));
                 !ids.is_empty()
@@ -295,6 +305,7 @@ impl Reactions {
                 *found = None;
             }
         }
+        self.upgrading.retain(|&n| n != id);
         if self.queues.remove(&id).is_some() {
             self.backup.retain(|&(n, _)| n != id);
             for level in &mut self.levels {
@@ -359,18 +370,23 @@ impl Reactions {
     }
     // The definition an upgrade constructs by `ctor` — the latest that pushed onto its construction stack (HTML's HTML
     // element constructor: the definition with constructor NewTarget).
-    fn constructing_by(&self, ctor: v8::Local<'_, v8::Value>) -> Option<u32> {
-        self.constructing.iter().rev().copied().find(|&d| self.definitions.get(d as usize).and_then(Option::as_ref).is_some_and(|def| def.ctor == ctor))
+    // (…the map's entry for it: the latest that set one)
+    fn constructing_by(&self, ctor: v8::Local<'_, v8::Value>) -> Option<&Active> {
+        self.active.iter().rev().find(|a| self.definitions.get(a.def as usize).and_then(Option::as_ref).is_some_and(|def| def.ctor == ctor))
     }
-    // The last entry of definition `def`'s construction stack, removed (HTML "upgrade an element" step 9's "then").
-    fn pop_construction(&mut self, def: u32) {
-        if let Some(at) = self.constructing.iter().rposition(|&d| d == def) {
-            self.constructing.remove(at);
-            if let Some(d) = self.definitions.get_mut(def as usize).and_then(Option::as_mut) {
-                d.construction.pop();
+    // The map's entry an upgrade (`creating` false) or a "create an element" set for definition `def`, removed — its
+    // previous registry back — and, an upgrade's, the last entry of the definition's construction stack (HTML "upgrade an
+    // element" step 9's "then").
+    fn pop_active(&mut self, def: u32, creating: bool) {
+        if let Some(at) = self.active.iter().rposition(|a| a.def == def && a.registry.is_some() == creating) {
+            self.active.remove(at);
+            if !creating {
+                if let Some(d) = self.definitions.get_mut(def as usize).and_then(Option::as_mut) {
+                    d.construction.pop();
+                }
             }
         }
-        self.set(CONSTRUCTING, self.constructing.len() as i32);
+        self.set(CONSTRUCTING, self.active.len() as i32);
     }
     // The registry `code` names, to change.
     fn registry_mut(&mut self, code: u32) -> Option<&mut Registry> {
@@ -499,6 +515,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "ceUpgradeEnd", ce_upgrade_end, context_id);
     register(scope, ns, "ceConstructionTop", ce_construction_top, context_id);
     register(scope, ns, "ceConstructingDefinition", ce_constructing_definition, context_id);
+    register(scope, ns, "ceCreating", ce_creating, context_id);
+    register(scope, ns, "ceCreated", ce_created, context_id);
     register(scope, ns, "ceMarkConstructed", ce_mark_constructed, context_id);
     register(scope, ns, "ceMakeCustom", ce_make_custom, context_id);
     register(scope, ns, "ceDefineCheck", ce_define_check, context_id);
@@ -1288,9 +1306,9 @@ fn ce_upgrade(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let Some(definition) = reactions.definitions.get_mut(def as usize).and_then(Option::as_mut) else { return rv.set_uint32(0) };
     definition.construction.push(Some(held));
     let refused = definition.flags & DEFINE_DISABLE_SHADOW != 0 && has_shadow;
-    reactions.constructing.push(def);
+    reactions.active.push(Active { def, registry: None });
     reactions.upgrading.push(id);
-    reactions.set(CONSTRUCTING, reactions.constructing.len() as i32);
+    reactions.set(CONSTRUCTING, reactions.active.len() as i32);
     if !refused {
         set_custom_state(scope, id, home, STATE_UPGRADED | STATE_PRECUSTOMIZED);
     }
@@ -1304,12 +1322,19 @@ fn ce_upgrade(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // and its reaction queue emptied, its state left "failed" or "precustomized" as it was.
 fn ce_upgrade_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     use crate::dom::{STATE_CUSTOM, STATE_FORM_ASSOCIATED, STATE_UPGRADED};
-    let Some((id, home, _)) = element_of(scope, args.get(0)) else { return };
+    // (…the map's entry and the construction stack's taken back first, whatever became of the element: its node freed as
+    // its constructor ran ends nothing else)
     let def = definition_id(scope, args.get(1), args.get(2));
+    if let Some(def) = def {
+        dom(scope).arena.ce_reactions.pop_active(def, false);
+    }
+    let id = crate::node_handle::nid_of(scope, args.get(0));
     let reactions = &mut dom(scope).arena.ce_reactions;
-    if let Some(at) = reactions.upgrading.iter().rposition(|&e| e == id) {
+    if let Some(at) = id.and_then(|id| reactions.upgrading.iter().rposition(|&e| e == id)) {
         reactions.upgrading.remove(at);
     }
+    let Some((id, home, _)) = element_of(scope, args.get(0)) else { return };
+    let reactions = &mut dom(scope).arena.ce_reactions;
     // (…a definition whose realm went as its constructor ran — a frame it removed — made it nothing: taken back, as a
     // failure's is, the element left "precustomized")
     let Some(def) = def else {
@@ -1317,7 +1342,6 @@ fn ce_upgrade_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         reactions.queues.remove(&id);
         return;
     };
-    reactions.pop_construction(def);
     if !args.get(3).is_true() {
         reactions.custom.remove(&id);
         reactions.queues.remove(&id);
@@ -1345,7 +1369,7 @@ fn ce_make_custom(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // the definition of the element's registry, whatever realm's HTML element constructor its `super()` reaches.
 fn ce_constructing_definition(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let reactions = &dom(scope).arena.ce_reactions;
-    let weak = reactions.constructing_by(args.get(0)).and_then(|d| reactions.definition_object(d));
+    let weak = reactions.constructing_by(args.get(0)).and_then(|a| reactions.definition_object(a.def));
     if let Some(object) = weak_local(scope, weak) {
         rv.set(object);
     }
@@ -1356,18 +1380,41 @@ fn ce_constructing_definition(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
 // undefined where no upgrade constructs by it (the stack empty: a direct `new`, or "create an element"'s).
 fn ce_construction_top(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let reactions = &dom(scope).arena.ce_reactions;
-    let Some(def) = reactions.constructing_by(args.get(0)) else { return };
-    let top = reactions.definitions[def as usize].as_ref().and_then(|d| d.construction.last().cloned());
-    match top {
-        Some(Some(element)) => rv.set(v8::Local::new(scope, element)),
-        _ => rv.set_null(),
+    let Some(active) = reactions.constructing_by(args.get(0)) else { return };
+    let weak = reactions.definition_object(active.def);
+    let registry = active.registry.clone();
+    let top = reactions.definitions[active.def as usize].as_ref().map(|d| d.construction.last().cloned());
+    let Some(definition) = weak_local(scope, weak) else { return };
+    let registry: v8::Local<'_, v8::Value> = registry.map_or_else(|| v8::undefined(scope).into(), |r| v8::Local::new(scope, r));
+    let top: v8::Local<'_, v8::Value> = match top.flatten() {
+        Some(Some(element)) => v8::Local::new(scope, element),
+        Some(None) => v8::null(scope).into(),
+        None => v8::undefined(scope).into(),
+    };
+    rv.set(v8::Array::new_with_elements(scope, &[definition, registry, top]).into());
+}
+
+// __dom.ceCreating(id, definition, registry) / ceCreated(id, definition) — HTML "create an element" with the synchronous
+// custom elements flag, around its construction of definition `definition`'s (`id`) constructor: the active custom
+// element constructor map's entry for it set, the element created with `registry` (the bindings' value), and taken
+// back.
+fn ce_creating(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(def) = definition_id(scope, args.get(0), args.get(1)) else { return };
+    let registry = Some(v8::Global::new(scope, args.get(2)));
+    let reactions = &mut dom(scope).arena.ce_reactions;
+    reactions.active.push(Active { def, registry });
+    reactions.set(CONSTRUCTING, reactions.active.len() as i32);
+}
+fn ce_created(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(def) = definition_id(scope, args.get(0), args.get(1)) {
+        dom(scope).arena.ce_reactions.pop_active(def, true);
     }
 }
 // __dom.ceMarkConstructed(newTarget) — that entry replaced with the "already constructed" marker (step 14): a second
 // `super()` of the same constructor throws.
 fn ce_mark_constructed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let reactions = &mut dom(scope).arena.ce_reactions;
-    let Some(def) = reactions.constructing_by(args.get(0)) else { return };
+    let Some(def) = reactions.constructing_by(args.get(0)).map(|a| a.def) else { return };
     if let Some(top) = reactions.definitions[def as usize].as_mut().and_then(|d| d.construction.last_mut()) {
         *top = None;
     }

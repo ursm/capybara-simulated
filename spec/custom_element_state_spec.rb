@@ -119,6 +119,51 @@ RSpec.describe 'a custom element state' do
     JS
   end
 
+  # The active custom element constructor map's LATEST entry for a constructor wins: a class two scoped registries
+  # define, whose upgrade in one creates an element of the other before its `super()`, gets a fresh element there —
+  # that definition's construction stack is empty — and its own upgrade still gets the upgrading one. Chrome, Firefox:
+  # `x-two false true`, then `true true`.
+  it 'constructs by the latest entry of the active custom element constructor map' do
+    expect(session.evaluate_script(<<~JS)).to eq(['x-two', false, true, true, true])
+      (() => {
+        const r1 = new CustomElementRegistry(), r2 = new CustomElementRegistry();
+        let nested, first = true;
+        class C extends HTMLElement {
+          constructor() {
+            if (first) { first = false; nested = document.createElement('x-two', {customElementRegistry: r2}); }
+            super();
+          }
+        }
+        const shadow = host.attachShadow({mode: 'open', customElementRegistry: r1});
+        shadow.innerHTML = '<x-one></x-one>';
+        const upgrading = shadow.firstChild;
+        r2.define('x-two', C);
+        r1.define('x-one', C);
+        return [nested.localName, nested === upgrading, nested instanceof C, upgrading instanceof C, upgrading.matches(':defined')];
+      })()
+    JS
+  end
+
+  # DOM "create an element" sets the map's entry for its constructor to the registry around the whole construction
+  # ("Set the surrounding agent's active custom element constructor map[C] to registry. Run these steps while catching
+  # any exceptions: Set result to the result of constructing C"), and HTML's HTML element constructor reads it for
+  # every `super()` of that NewTarget ("If the surrounding agent's active custom element constructor map[NewTarget]
+  # exists, then set registry to [it]"): a nested `new S()` of a scoped-only class inside its own construction, and
+  # the outer `super()` after it, both construct. Firefox does; Chrome throws "Illegal constructor" at the outer
+  # `super()` — the spec's text wins.
+  it 'keeps the map entry of "create an element" through the whole construction' do
+    expect(session.evaluate_script(<<~JS)).to eq(['x-s', true, 'x-s', true])
+      (() => {
+        const r = new CustomElementRegistry();
+        let nested, depth = 0;
+        class S extends HTMLElement { constructor() { if (depth++ === 0) nested = new S(); super(); } }
+        r.define('x-s', S);
+        const made = document.createElement('x-s', {customElementRegistry: r});
+        return [nested.localName, nested instanceof S, made.localName, made instanceof S];
+      })()
+    JS
+  end
+
   # attachInternals step 6: a NotSupportedError for an element neither "precustomized" nor "custom" — one made before
   # its definition and never upgraded ("undefined"), or the one a failed construction made in its stead ("failed").
   it 'attaches no internals to an undefined element, nor a failed one' do

@@ -1128,10 +1128,11 @@ impl<'s> Build<'s> {
     // which holds the document's throw-on-dynamic-markup-insertion counter while it runs) — not where the element goes
     // into template contents, or under a node of the null registry. The element, and whether it is custom (a constructor
     // that failed leaves an HTMLUnknownElement); None where no constructor runs. `rest` the steps after the token's.
-    fn construct(&mut self, scope: &mut v8::PinScope<'s, '_>, ns: i32, local: &str, is: Option<&str>, handle: i32, rest: &[Operand]) -> Option<(crate::dom::NodeId, bool)> {
+    fn construct(&mut self, scope: &mut v8::PinScope<'s, '_>, ns: i32, local: &str, attrs: &[(String, i32, String, String)], handle: i32, rest: &[Operand]) -> Option<(crate::dom::NodeId, bool)> {
         if !self.live.as_ref().is_some_and(|l| l.ce_defined) || namespace_of(ns) != html5ever::ns!(html) {
             return None;
         }
+        let is = is_attribute(attrs);
         // (…a name holding a stand-in of a lone surrogate looked up exactly, as the registry keys it)
         let exact = self.standins.in_text(local).then(|| crate::ce_reactions::name_key(&self.standins.units(local)));
         let reactions = &crate::dom::dom(scope).arena.ce_reactions;
@@ -1492,7 +1493,7 @@ impl<'s> Build<'s> {
                     let contents = int(ops.next())?;
                     let reused = self.live.as_mut().and_then(|l| l.reuse(ns, &local));
                     let constructed = match reused {
-                        None if !names_null_registry(&list) => self.construct(scope, ns, &local, is_attribute(&list), handle, ops.as_slice()),
+                        None if !names_null_registry(&list) => self.construct(scope, ns, &local, &list, handle, ops.as_slice()),
                         _ => None,
                     };
                     let el = match (reused, constructed) {
