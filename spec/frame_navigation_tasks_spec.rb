@@ -1354,6 +1354,27 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # …and a deferred module script, its graph fetched as it runs (HTML "the end" step 3 spins for every entry: Chrome and
+    # Firefox `inl t0 m.js`, rv-sf-probe `v_mod_t0`).
+    it 'runs a zero timer set before "the end" waits on a deferred module script first' do
+      log = page_log("<script>setTimeout(() => L.push('t0'))</script><script type=\"module\" src=\"/slow/0/m.js\"></script><script>L.push('inl')</script>")
+      expect(log).to eq('inl t0 m.js-ran dcl load rs:complete')
+    end
+
+    # HTML "execute the script element" step 2: one a task moved to another document as the parser waited runs nothing and
+    # fires nothing (Chrome and Firefox, rv-sf-probe `v_adopt`, `w_dfr_adopt`; an inline one a style sheet held, Firefox's —
+    # Chrome runs it: `w_inl_sheet_adopt`).
+    MOVE = "<script>setTimeout(() => { const d = document.implementation.createHTMLDocument(''); d.body.append(document.getElementById('s')); L.push('mv'); })</script>"
+    {
+      'a parser-blocking script'               => ['<script id="s" src="/slow/0/b.js" onload="L.push(\'sl\')"></script>', 'mv inl dcl load rs:complete'],
+      'a deferred script'                      => ['<script id="s" defer src="/slow/0/d.js"></script><script defer src="/slow/0/d2.js"></script>', 'inl mv d2.js-ran dcl load rs:complete'],
+      'an inline script a style sheet blocks'  => ["<link rel=\"stylesheet\" href=\"/slow/0/s.css\"><script id=\"s\">L.push('moved')</script>", 'mv inl dcl load rs:complete']
+    }.each do |what, (markup, logged)|
+      it "runs no #{what} moved to another document as the parser waited on it" do
+        expect(page_log("#{MOVE}#{markup}<script>L.push('inl')</script>")).to eq(logged)
+      end
+    end
+
     # …a frame's parser too, its document committed by a task of the event loop's (Chrome and Firefox: r13 `s_frame_src`).
     it "runs a frame's zero timer before its parser-blocking script" do
       child = "<script>setTimeout(() => top.L.push('ft0'))</script><script src=\"/slow/0/fb.js\"></script>"
