@@ -19,6 +19,7 @@ RSpec.describe 'the host boundary' do
         <!DOCTYPE html><body><iframe id=f src="/tick"></iframe><iframe id=x src="http://evil.test/ad"></iframe>
         <script>window.ticks = 0; setInterval(() => ticks++, 10);</script>
       HTML
+      '/arrays' => '<!DOCTYPE html><body><p class=a>one</p><p class=a>two</p><select id=s multiple><option selected>x</option><option selected>y</option></select>',
       '/tick'   =>'<!DOCTYPE html><script>window.ticks = 0; setInterval(() => ticks++, 10);</script>',
       '/ad'     => <<~HTML,
         <!DOCTYPE html><script>
@@ -75,6 +76,43 @@ RSpec.describe 'the host boundary' do
     session.find(:css, '#i').send_keys('k', [:shift, 'a'])
     session.find(:css, '#i').click
     expect(session.evaluate_script('[window.seen, document.getElementById("i").value]')).to eq([0, 'typedkA'])
+  end
+
+  # What the driver finds is the document's, whatever a page — an app, a library that patches arrays — made of
+  # `Array.prototype`: the host's steps build and read their lists by index (engine.js `listMap`, `listBuild`), as a
+  # real browser's driver answers from outside the page's script.
+  it "finds what the document holds whatever a page made of Array.prototype's methods" do
+    session.visit '/arrays'
+    session.execute_script(<<~JS)
+      const keep = (name, wrong) => { const orig = Array.prototype[name]; Array.prototype[name] = function (...a) { return wrong(orig.apply(this, a), this); }; };
+      keep('map', (r) => r.slice(0, 1));
+      keep('push', (r, list) => { list.length = 0; return 0; });
+      keep('includes', () => true);
+      Object.defineProperty(Array.prototype, 0, { set(_) {}, get() { return undefined; }, configurable: true });
+    JS
+    expect(session.all(:css, 'p.a').map(&:text)).to eq(%w[one two])
+    expect(session.all(:xpath, '//p').map(&:text)).to eq(%w[one two])
+    expect(session.find(:css, '#s').value).to eq(%w[x y])
+  end
+
+  # …nor of the event loop's: the rendering update's resize steps over the frames, a frame's task run in its realm
+  # (a page's fake global among the realms would have its "task" run), and the custom element reactions an operation
+  # of the page's leaves — whose elements the page's iterator would be handed.
+  it "hands a page's array iterator nothing of the event loop's steps" do
+    session.visit '/frames'
+    expect(poll_until { session.evaluate_script("document.getElementById('f').contentWindow.ticks > 2") }).to be(true)
+    session.execute_script(<<~JS)
+      window.seen = 0;
+      window.reacted = [];
+      customElements.define('x-e', class extends HTMLElement { connectedCallback() { reacted.push(this.localName); } });
+      const orig = Array.prototype[Symbol.iterator];
+      Array.prototype[Symbol.iterator] = function () { window.seen++; return orig.call(this); };
+    JS
+    ticks = session.evaluate_script("document.getElementById('f').contentWindow.ticks")
+    session.current_window.resize_to(500, 400)
+    expect(poll_until { session.evaluate_script("document.getElementById('f').contentWindow.ticks") > ticks + 2 }).to be(true)
+    session.execute_script("document.body.append(document.createElement('x-e'))")
+    expect(session.evaluate_script('[window.seen, reacted.length]')).to eq([0, 1])
   end
 
   # The steps the host calls a realm by — and whose answers it acts on — are no property of any global, and the
