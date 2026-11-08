@@ -111,6 +111,8 @@ pub(crate) struct Commit {
     holds: Option<u64>,
     // Whether it ended: once, whatever asks again.
     ended: bool,
+    // …and, a frame's replay, whether it is a traversal's, not a reload's (`posts_none`).
+    traverses: bool,
 }
 
 impl Commit {
@@ -133,21 +135,27 @@ impl Commit {
             began: None,
             holds: None,
             ended: false,
+            traverses: false,
         }
     }
 
     // A frame's: navigable `nav`'s, of history `history`, making the entry its navigation of number `token` began, of
-    // `data` beside what that one holds — a replay of the active one, of none.
-    pub(crate) fn of_frame(history: SessionHistory, nav: u32, token: Option<u64>, data: Option<Data>) -> Self {
+    // `data` beside what that one holds — a replay of the active one, of none: a traversal's (`traverses`) or a reload's.
+    pub(crate) fn of_frame(history: SessionHistory, nav: u32, token: Option<u64>, data: Option<Data>, traverses: bool) -> Self {
         let handling = if token.is_some() { Handling::Push } else { Handling::Reload };
         let mut commit = Commit::new(history, handling, data, None, false);
-        (commit.nav, commit.token) = (nav, token);
+        (commit.nav, commit.token, commit.traverses) = (nav, token, traverses && token.is_none());
         commit
     }
 
+    // …of a request to `url`: the URL its document is at but where a redirect takes it (a frame's, which begins no step
+    // here: `begin`).
+    pub(crate) fn at(&mut self, url: &str) {
+        url.clone_into(&mut self.url);
+    }
     // …begun at `url`.
     pub(crate) fn begin(&mut self, url: &str) {
-        url.clone_into(&mut self.url);
+        self.at(url);
         if let Handling::Traverse(..) = self.handling {
             self.began = Some(self.history.keep());
             self.holds = self.history.begin_page_traversal();
@@ -194,12 +202,22 @@ impl Commit {
     pub(crate) fn keep_blob(&mut self, bytes: std::sync::Arc<[u8]>, given: &str) {
         self.data.set_blob(bytes, given);
     }
-    // …and the Referer its request sent, its last hop's: the referrer of the document it makes, which the entry it makes
-    // keeps (a frame's reload makes its document with it again: browser.rb `reload_frame_to_entry`).
+    // …and the Referer its request sent, its last hop's — none, the empty string: "no-referrer" — the request referrer of
+    // the entry it makes (HTML "populate a history entry": the document state's request referrer, "client" until then, the
+    // request's referrer as Fetch determined it, after a redirect's `Referrer-Policy`), which a reload or a traversal of
+    // it refers by again (Chrome 157 and Firefox 159: a redirect that cut it to its origin, the origin again); and the
+    // referrer of the document it makes.
     pub(crate) fn sent(&mut self, referrer: Option<String>) {
+        self.data.set_text("referer", referrer.clone().unwrap_or_default());
         if let Some(referrer) = referrer {
             self.data.set_text("referrer", referrer);
         }
+    }
+    // Whether it sends no POST again: a traversal's (HTML "apply the history step": allowPOST its entry's reload pending,
+    // false — no fetch, an error document; Chrome 157 and Firefox 159, measured 2026-11-08, re-POST none, an error page
+    // where no cache has the response) — a reload's re-posts.
+    pub(crate) fn posts_none(&self) -> bool {
+        matches!(self.handling, Handling::Traverse(..)) || self.traverses
     }
 
     // …ended, at `url`, in `step`, its document's origin a new opaque one where `sandboxed` (its response's
@@ -480,18 +498,18 @@ mod tests {
         let history = page();
         let f1 = history.seed_frame(1, "http://a.test/f1");
         let begin = |url: &str| history.begin_frame_entry_for_test(1, url);
-        let mut c = Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/f2")), None);
+        let mut c = Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/f2")), None, false);
         c.redirected("http://a.test/f3", true);
         assert_eq!(history.length(), 1);
         c.end(&Step::Document(None), false);
         let f3 = history.active(1).unwrap();
         assert_eq!((history.length(), history.url(f3).as_deref()), (2, Some("http://a.test/f3")));
-        Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/nc")), None).end(&Step::None, false);
+        Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(begin("http://a.test/nc")), None, false).end(&Step::None, false);
         let dropped = begin("http://a.test/dropped");
-        drop(Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(dropped), None));
+        drop(Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, Some(dropped), None, false));
         assert_eq!((history.length(), history.active(1)), (2, Some(f3)));
         assert_eq!(history.commit_frame_navigation(1, dropped, None, Data::default()), None);
-        let mut replay = Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, None, None);
+        let mut replay = Commit::of_frame(SessionHistory::of(history.id()).unwrap(), 1, None, None, false);
         replay.redirected("http://a.test/f4", false);
         replay.end(&Step::Document(None), false);
         assert_eq!((history.length(), history.url(f3).as_deref()), (2, Some("http://a.test/f4")));

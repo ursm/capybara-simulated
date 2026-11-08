@@ -25,7 +25,9 @@ RSpec.describe 'a session history entry made again' do
       case env['PATH_INFO']
       when '/form' then html.('<title>form</title><form method=post action=/post><input name=a value=b><button>go</button></form>')
       when '/post' then [303, {'location' => '/done'}, []]
-      when '/top' then html.("<iframe name=f src=/f1></iframe><script>addEventListener('message', (e) => { window.said = e.data })</script>")
+      when '/top', '/topsb'
+        src = env['PATH_INFO'] == '/top' ? '/f1' : '/sandboxes'
+        html.("<iframe name=f src=#{src}></iframe><script>addEventListener('message', (e) => { window.said = e.data })</script>")
       when '/f1' then html.('<title>f1</title><a href=/f2>f2</a>')
       when '/moves' then n > 1 ? [302, {'location' => '/moved'}, []] : html.('<title>moves</title>')
       when '/sandboxes'
@@ -82,6 +84,17 @@ RSpec.describe 'a session history entry made again' do
   it "gives none to a frame's document a traversal back made of another origin" do
     session.visit '/top'
     session.execute_script("frames[0].location = '/sandboxes'")
+    expect(poll_until { frame_title == 'sandboxes' }).to be(true)
+    session.execute_script("frames[0].history.replaceState({k: 3}, '')")
+    session.within_frame('f') { session.click_link 'other' }
+    expect(poll_until { frame_title == '/other' }).to be(true)
+    session.execute_script('history.back()')
+    expect(poll_until { session.evaluate_script('window.said') }).to eq('null null')
+  end
+
+  # …its first one's too, which its container's document loaded (session_history.rs `EntrySeed::origin`).
+  it "gives none to a frame's first document a traversal back made of another origin" do
+    session.visit '/topsb'
     expect(poll_until { frame_title == 'sandboxes' }).to be(true)
     session.execute_script("frames[0].history.replaceState({k: 3}, '')")
     session.within_frame('f') { session.click_link 'other' }

@@ -78,11 +78,13 @@ struct Own {
 // A traversal of a top-level document's session history that makes its document again (session_history.rs
 // `applyTraversal`): the step it goes to — the delta it was asked by, which the page's host judges anew once the tasks
 // due before it ran (browser.rb `perform_history_traverse`) — and the entry the top-level navigable is at there, whose
-// document state's resource and request a traversal makes its document of again (HTML "apply the history step").
+// document state's resource and request a traversal makes its document of again (HTML "apply the history step") — and
+// whether the user asked for it, its request then made by no document (session_history.rs `Queued::by_user`).
 pub(crate) struct Traversal {
     pub(crate) step: i64,
     pub(crate) delta: i64,
     pub(crate) entry: u64,
+    pub(crate) by_user: bool,
 }
 
 // …and one that keeps its document, moving a frame of it: the step it goes to, each navigable whose active entry the step
@@ -95,6 +97,7 @@ pub(crate) struct FrameTraversal {
     pub(crate) step: i64,
     pub(crate) changes: Vec<crate::session_history::Change>,
     pub(crate) planned: u64,
+    pub(crate) by_user: bool,
 }
 
 // A reload: whether the document had transient activation as it began, and — one of a document at a `blob:` URL — the
@@ -621,7 +624,7 @@ fn windows_planned(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallback
 // __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
 // in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]` — `"javascript"` for a
 // `javascript:` URL's document (`planJavascriptDocument`) — `[realm, "reload", activated, blob]` and `[realm, "traverse",
-// step, entry]` (`Traversal`) — after the
+// step, entry, by user]` (`Traversal`) — after the
 // traversals that move a frame of one, whose tasks ran before them: `[realm, "traverse_navigables", step,
 // navigable, entry, same document, …]` (`FrameTraversal`). A window closed is stepped no more,
 // and plans none the host takes — nor one closing, whose navigation the task its close queued aborts (HTML "destroy a
@@ -706,6 +709,7 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
                 v8::String::new(scope, "traverse").unwrap().into(),
                 v8::Number::new(scope, t.step as f64).into(),
                 v8::Number::new(scope, t.entry as f64).into(),
+                v8::Boolean::new(scope, t.by_user).into(),
             ],
             (None, None, None) => continue,
         };
@@ -713,9 +717,14 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// …a traversal moving a frame: `["traverse_navigables", step, navigable, entry, same document, …]` (`FrameTraversal`).
+// …a traversal moving a frame: `["traverse_navigables", by user, step, navigable, entry, same document, …]`
+// (`FrameTraversal`).
 fn frame_traversal_items<'s>(scope: &mut v8::PinScope<'s, '_>, t: FrameTraversal) -> Vec<v8::Local<'s, v8::Value>> {
-    let mut item = vec![v8::String::new(scope, "traverse_navigables").unwrap().into(), v8::Number::new(scope, t.step as f64).into()];
+    let mut item = vec![
+        v8::String::new(scope, "traverse_navigables").unwrap().into(),
+        v8::Boolean::new(scope, t.by_user).into(),
+        v8::Number::new(scope, t.step as f64).into(),
+    ];
     for (nav, id, same_document) in t.changes {
         item.push(v8::Integer::new_from_unsigned(scope, nav).into());
         item.push(v8::Number::new(scope, id as f64).into());
@@ -724,7 +733,7 @@ fn frame_traversal_items<'s>(scope: &mut v8::PinScope<'s, '_>, t: FrameTraversal
     item
 }
 // __dom.takeTraversal(frames) -> the traversal of its session history the calling realm's document — the page's — planned,
-// which it plans no more: `["traverse", delta]` of one making its document again (`Traversal`: the host's to judge anew
+// which it plans no more: `["traverse", delta, by user]` of one making its document again (`Traversal`: the host's to judge anew
 // from its delta, browser.rb `perform_history_traverse`), one moving a frame of it as `takeWindowNavigations` gives it —
 // none of that kind before it is due (`frame_traversal_due`) — or null. Its traversable told whether one is still planned
 // (session_history.rs `planned_for_host`).
@@ -735,7 +744,9 @@ fn take_traversal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let item = if let Some(t) = own.frame_traversal.take_if(|_| due) {
         Some(frame_traversal_items(scope, t))
     } else {
-        own.traversal.take().map(|t| vec![v8::String::new(scope, "traverse").unwrap().into(), v8::Number::new(scope, t.delta as f64).into()])
+        own.traversal.take().map(|t| {
+            vec![v8::String::new(scope, "traverse").unwrap().into(), v8::Number::new(scope, t.delta as f64).into(), v8::Boolean::new(scope, t.by_user).into()]
+        })
     };
     let waiting = plan(scope, &args).traversal_waiting();
     crate::session_history::note_planned_of(&crate::dom::dom(scope).arena, cid, waiting);

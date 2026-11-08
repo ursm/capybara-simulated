@@ -179,8 +179,8 @@ RSpec.describe "a form submission's request" do
     end
   end
 
-  # …and a reload or a traversal re-posting it sends the origin it was first sent with (HTML: the document state's
-  # initiator origin).
+  # …and a reload re-posting it sends the origin it was first sent with (HTML: the document state's initiator origin);
+  # a traversal back to it re-posts none, an error document at its URL (navigation_commit.rs `posts_none`).
   it 'sends the Origin it was first sent with on a re-post from its session history entry' do
     origins = []
     app = lambda {|env|
@@ -197,7 +197,8 @@ RSpec.describe "a form submission's request" do
     session.visit '/other'
     session.go_back
     expect(session).to have_current_path('/r')
-    expect(origins).to eq(['http://www.example.com'] * 3)
+    expect(origins).to eq(['http://www.example.com'] * 2)
+    expect(session.evaluate_script('document.body.textContent')).to eq('')
   end
 
   # …under the referrer policy it was first sent under, not the page it reached's: a `no-referrer` form page's POST is

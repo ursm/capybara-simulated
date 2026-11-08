@@ -265,6 +265,7 @@ struct EntrySeed {
     url: String,
     referrer: String,
     srcdoc: Option<Arc<str>>,
+    origin: String,
 }
 
 #[derive(Default)]
@@ -463,6 +464,9 @@ struct Queued {
     // is judged after, from the step that one goes to: what the document made anew keeps (`#clear_queued`) — the first
     // of a document's that makes the page's document again winning, as for any (`take_due`).
     behind: bool,
+    // Whether the user asked for it (the driver's `go_back` / `go_forward`: HTML's "browser UI" user involvement), its
+    // documents made by no document's request then — Sec-Fetch-Site `none` — a script's by the active document's.
+    by_user: bool,
 }
 #[cfg(test)]
 impl Queued {
@@ -739,6 +743,9 @@ impl Traversable {
         if entry.data.srcdoc.is_none() && seed.srcdoc.is_some() {
             Arc::make_mut(&mut entry.data).srcdoc.clone_from(&seed.srcdoc);
         }
+        if entry.data.text("document_origin").is_none() {
+            Arc::make_mut(&mut entry.data).set_text("document_origin", seed.origin.clone());
+        }
         Some(id)
     }
     // Navigable `nav`'s entry list, made — HTML "create a new child navigable": a nested history in its parent's active
@@ -900,7 +907,7 @@ impl Traversable {
     // [its token, the delay of its task] — none for one making a document again,
     // whose task goes ahead of a navigation the script plans after it (a frame's `src` set, Chrome and Firefox: never
     // requested), a turn for one within the documents. Judged from the step those queued before it reach.
-    fn queue(&mut self, delta: i64) -> (u64, u32) {
+    fn queue(&mut self, delta: i64, by_user: bool) -> (u64, u32) {
         self.tokens += 1;
         let token = self.tokens;
         let ahead: i64 = self.queued.iter().map(|q| q.delta).sum();
@@ -908,7 +915,7 @@ impl Traversable {
         let documents = changes.iter().any(|&(_, _, same)| !same);
         let replaces = changes.iter().any(|&(nav, _, same)| nav == TOP && !same);
         let source = self.state.current_entry(TOP, self.build).map_or(0, |e| e.doc);
-        self.queued.push(Queued { token, delta, documents, source, replaces, behind: self.page_traversal.is_some() });
+        self.queued.push(Queued { token, delta, documents, source, replaces, behind: self.page_traversal.is_some(), by_user });
         (token, if documents { 0 } else { 1 })
     }
     // …those queued up to and with the one of `token`, taken off the queue to be applied in order: none where it is not
@@ -1806,9 +1813,9 @@ mod tests {
     fn a_flush_marks_the_traversals_queued_before_it() {
         let h = history();
         h.push(TOP, TOP, "/a".into(), false, Data::default());
-        let (before, _) = h.lock().queue(-1);
+        let (before, _) = h.lock().queue(-1, false);
         h.flush_begin();
-        let (after, _) = h.lock().queue(-1);
+        let (after, _) = h.lock().queue(-1, false);
         assert_eq!(h.lock().flush_mark, Some(before));
         assert!(after > before);
         h.flush_end();
@@ -1861,8 +1868,8 @@ mod tests {
         let (_, changes) = h.traversal(-1).unwrap();
         assert_eq!(h.url(changes[0].1).as_deref(), Some("http://a.test/f"));
         assert!(h.plan(-1).is_some_and(|(_, c)| h.url(c[0].1).as_deref() == Some("about:srcdoc")));
-        let (t1, delay1) = h.lock().queue(-1);
-        let (t2, _) = h.lock().queue(-1);
+        let (t1, delay1) = h.lock().queue(-1, false);
+        let (t2, _) = h.lock().queue(-1, false);
         // (…a document made again goes at once; one past the history's start is none, judged from where the first goes)
         assert_eq!(delay1, 0);
         assert!(h.queued_documents());
@@ -2232,18 +2239,18 @@ mod tests {
         }
         h.push(TOP, 0, "http://a.test/4".into(), false, Data::default());
         // (…the first that replaces its document taken, those asked of that document after it let go with it)
-        let (first, delay) = h.lock().queue(-1);
+        let (first, delay) = h.lock().queue(-1, false);
         assert_eq!(delay, 0);
-        h.lock().queue(-1);
+        h.lock().queue(-1, false);
         assert_eq!(h.take_queued(first), vec![(first, -1)]);
         assert!(!h.is_queued());
         // (…those within its document taken in order)
-        let (a, delay) = h.lock().queue(-1);
+        let (a, delay) = h.lock().queue(-1, false);
         assert_eq!(delay, 0);
         h.go_to(h.plan(-1).unwrap().0);
-        let (b, delay) = h.lock().queue(-1);
+        let (b, delay) = h.lock().queue(-1, false);
         assert_eq!(delay, 1);
-        let (c, _) = h.lock().queue(1);
+        let (c, _) = h.lock().queue(1, false);
         assert_eq!(h.take_all_queued(), vec![(a, -1), (b, -1), (c, 1)]);
     }
 
@@ -2470,15 +2477,17 @@ fn navigable_traversing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let realm = args.get(0).int32_value(scope).unwrap_or(-1);
     rv.set_bool(realm >= 0 && traversing_of(&crate::dom::dom(scope).arena, realm));
 }
-// __dom.historyTraverse(delta) -> [token, delay, top]: a traversal by `delta` the calling realm's `history` asked for,
-// appended to its traversable's session history traversal queue (`traversable_of`, `Traversable::queue`) — [0, 0, -1] for
+// __dom.historyTraverse(delta, byUser) -> [token, delay, top]: a traversal by `delta` the calling realm's `history` asked
+// for — the user's through it, `byUser` — appended to its traversable's session history traversal queue
+// (`traversable_of`, `Traversable::queue`) — [0, 0, -1] for
 // a realm of none, which traverses nothing. Its task, which the bindings queue with that delay on the event loop of the
 // traversable's top-level document, realm `top` — the traversable's, not the asking frame's, which may be gone by then
 // (HTML "append the following session history traversal steps to traversable") — applies it (`applyTraversal`).
 fn history_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let delta = args.get(0).integer_value(scope).unwrap_or(0);
+    let by_user = args.get(1).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    let queued = traversable_of(crate::dom::realm(scope, cid), cid).filter(|_| delta != 0).map(|(t, window)| (lock(&t).queue(delta), window.unwrap_or(0)));
+    let queued = traversable_of(crate::dom::realm(scope, cid), cid).filter(|_| delta != 0).map(|(t, window)| (lock(&t).queue(delta, by_user), window.unwrap_or(0)));
     let ((token, delay), top) = queued.unwrap_or(((0, 0), -1));
     let items = [v8::Number::new(scope, token as f64).into(), v8::Integer::new_from_unsigned(scope, delay).into(), v8::Integer::new(scope, top).into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
@@ -2567,7 +2576,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
             let from = t.state.current_entry(TOP, t.build).map(|e| e.url.clone()).unwrap_or_default();
             let top_change = changes.iter().find(|c| c.0 == TOP).and_then(|c| t.state.entry(c.1).map(|e| (e.clone(), c.2)));
             if let Some((entry, false)) = top_change {
-                planned = Some(Traversal { step, delta: q.delta, entry: entry.id });
+                planned = Some(Traversal { step, delta: q.delta, entry: entry.id, by_user: q.by_user });
                 t.begin_traversal(TOP);
                 asking(&mut t, |t| t.asked.planned = None);
                 t.planned_for_host = true;
@@ -2586,7 +2595,7 @@ fn apply_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
                         t.begin_traversal(nav);
                     }
                 }
-                frames_planned = Some(crate::navigation_plan::FrameTraversal { step, changes, planned: 0 });
+                frames_planned = Some(crate::navigation_plan::FrameTraversal { step, changes, planned: 0, by_user: q.by_user });
                 t.planned_for_host = true;
                 break;
             }
@@ -2683,6 +2692,7 @@ fn entry_seeds(arena: &crate::dom::RealmArena, realm: i32) -> Option<(FrameNavig
             url: arena.realm_state(at).map_or_else(String::new, |s| s.location.href().to_owned()),
             referrer: arena.realm_document(at).and_then(|doc| arena.document_states.referrer(doc)).unwrap_or_default().to_owned(),
             srcdoc: arena.live_container(at).and_then(|c| arena.frame_document_srcdoc(c)).map(Into::into),
+            origin: arena.realm_state(at).map_or_else(|| "null".to_owned(), |s| s.location.origin().to_owned()),
         });
         if frame.parent_nav == TOP {
             break;

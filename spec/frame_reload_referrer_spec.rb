@@ -4,13 +4,14 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
-# A frame's reload is referred by the document reloading — its own URL, under its own policy — not under its container's
-# `referrerpolicy` attribute, which a navigation of the container's makes alone (Chrome).
+# A frame's reload is referred as its entry's document's request was — the Referer its container's load sent, under its
+# `referrerpolicy` attribute — HTML "create navigation params by fetching", the document state's request referrer
+# (Firefox 159; Chrome 157 sends the reloading document's own URL: the text over it).
 RSpec.describe "a frame's reload" do
   include PollUntil
 
   %w[no-referrer origin].each do |attribute|
-    it "sends its own URL as the Referer, its container's referrerpolicy=#{attribute} none of it" do
+    it "sends the Referer its container's referrerpolicy=#{attribute} load sent" do
       log = []
       session = simulated_session(lambda {|env|
         log << [env['PATH_INFO'], env['HTTP_REFERER']]
@@ -21,7 +22,7 @@ RSpec.describe "a frame's reload" do
       poll_until { session.evaluate_script('1') && log.count {|path, _| path == '/f' } == 1 }
       session.execute_script('frames[0].location.reload()')
       reload = poll_until { session.evaluate_script('1') && log.select {|path, _| path == '/f' }[1] }
-      expect(reload[1]).to eq('http://www.example.com/f?x=1')
+      expect(reload[1]).to eq(attribute == 'origin' ? 'http://www.example.com/' : nil)
     end
   end
 end

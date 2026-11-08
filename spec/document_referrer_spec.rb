@@ -134,26 +134,28 @@ RSpec.describe 'document.referrer' do
     expect(session.evaluate_script('[location.pathname, document.referrer]')).to eq(%w[/c http://www.example.com/top])
   end
 
-  # …but a reload refers by the document reloading (Chrome, measured: `location.reload()` sends the page's own URL).
-  it 'is the reloading document for a reload' do
+  # …and by a reload: the entry's document state's request referrer (HTML "create navigation params by fetching";
+  # Firefox 159 — Chrome 157 sends the reloading document's own URL, the text over it).
+  it "is kept by the page's reload" do
     session.visit '/top'
     session.execute_script('location.href = "/c"')
     expect(session).to have_current_path('/c')
     session.execute_script('location.reload()')
     session.evaluate_script('1')
-    expect(session.evaluate_script('document.referrer')).to eq('http://www.example.com/c')
+    expect(session.evaluate_script('document.referrer')).to eq('http://www.example.com/top')
   end
 
-  it "is the reloading frame document for a frame's reload" do
+  it "is kept by a frame's reload" do
     session.visit '/top'
     session.execute_script('frames[0].location.reload()')
     session.evaluate_script('1')
-    expect(session.evaluate_script('frames[0].document.referrer')).to eq('http://www.example.com/f')
+    expect(session.evaluate_script('frames[0].document.referrer')).to eq('http://www.example.com/top')
+    # (…the page's script navigating it: the page its referrer)
     session.execute_script('frames[0].location = "/f2"')
     expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f2')
     session.execute_script('frames[0].location.reload()')
     session.evaluate_script('1')
-    expect(session.evaluate_script('frames[0].document.referrer')).to eq('http://www.example.com/f2')
+    expect(session.evaluate_script('frames[0].document.referrer')).to eq('http://www.example.com/top')
   end
 
   # A hyperlink with `noreferrer` sends none (HTML "follow the hyperlink"), in its own window as in another.

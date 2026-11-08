@@ -185,7 +185,8 @@ RSpec.describe 'the session history of each traversable' do
   # (…HTML "navigate" with a POST resource, the steps after the source snapshot continuing as the window's task)
   # (…once the document it was opened for is in: a submission in the task that opened it aborts that navigation, the
   # window's ongoing one, which the POST's then replaces its initial about:blank by)
-  it 'posts a form to a pop-up by its name, which a traversal back to its entry posts again' do
+  # (…a traversal back to its entry re-posting none: an error document at its URL — navigation_commit.rs `posts_none`)
+  it 'posts a form to a pop-up by its name, which a traversal back to its entry posts not again' do
     session.execute_script("window.w = window.open('/a', 'named');")
     session.execute_script(<<~JS)
       document.body.insertAdjacentHTML('beforeend', '<form target=named method=post action=/posted><input name=k value=v></form>');
@@ -196,8 +197,11 @@ RSpec.describe 'the session history of each traversable' do
     expect(requests.last).to eq(['POST', '/posted', 'k=v', 'http://a.test'])
     session.execute_script('w.history.back()')
     expect(read('w.location.pathname')).to eq('/a')
+    count = requests.size
     session.execute_script('w.history.forward()')
-    expect(requests.last).to eq(['POST', '/posted', 'k=v', 'http://a.test'])
+    # (…of a new opaque origin, the opener's script reading nothing of it)
+    expect(read('(() => { try { return w.document.title } catch (e) { return e.name } })()')).to eq('SecurityError')
+    expect(requests.size).to eq(count)
   end
 
   context 'navigated to a javascript: URL by another window' do

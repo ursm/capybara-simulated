@@ -65,6 +65,7 @@ RSpec.describe 'a frame traversal request' do
   end
 
   context 'with every host the app', :every_host_local do
+    # (…a reload's; a traversal back re-posts none, an error document at its URL: navigation_commit.rs `posts_none`)
     it "re-posts with the origin the entry's request was first sent with" do
       posts = []
       hits  = []
@@ -81,11 +82,13 @@ RSpec.describe 'a frame traversal request' do
       s.visit '/top'
       s.execute_script('frames[0].document.getElementById("p").submit()')
       poll_until { s.evaluate_script('frames[0].location.pathname') == '/p' }
+      s.execute_script('frames[0].location.reload()')
+      poll_until { posts.size == 2 }
       s.execute_script('frames[0].location = "http://other.example.com/f2"')
       poll_until { hits.include?('/f2') && s.evaluate_script('1') }
       s.go_back
-      poll_until { posts.size == 2 }
-
+      poll_until { hits.count('/f2') == 1 && s.evaluate_script('frames.length') == 1 }
+      sleep 0.2
       expect(posts).to eq(%w[http://www.example.com] * 2)
     end
 
@@ -102,9 +105,7 @@ RSpec.describe 'a frame traversal request' do
       s.visit '/top'
       s.execute_script('p.submit()')
       poll_until { s.evaluate_script('frames[0].location.pathname') == '/p' }
-      s.execute_script('frames[0].location = "http://other.example.com/f2"')
-      poll_until { hits.include?('/f2') && s.evaluate_script('1') }
-      s.go_back
+      s.execute_script('frames[0].location.reload()')
       poll_until { posts.size == 2 }
 
       expect(posts).to eq(%w[http://www.example.com] * 2)

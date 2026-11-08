@@ -366,9 +366,9 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.within_window(session.windows.last) { expect(session).to have_current_path('/dir/next') }
   end
 
-  # (…a form of its opener's posted to it by its name, a traversal back to that entry posting again: its entry's
-  # resource — navigation_commit.rs `Commit`)
-  it 'posts again for a traversal back to an entry a form posted to it' do
+  # (…a form of its opener's posted to it by its name, a traversal back to that entry posting none again: an error
+  # document at its URL — navigation_commit.rs `posts_none`)
+  it 'posts not again for a traversal back to an entry a form posted to it' do
     session.execute_script("window.w = window.open('', 'named'); w.location = '/second';")
     session.within_window(session.windows.last) { expect(session).to have_css('#second') }
     session.execute_script(<<~JS)
@@ -380,7 +380,8 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       session.go_back
       expect(session).to have_css('#second')
       session.go_forward
-      expect(session).to have_text('POST k=v')
+      expect(session).to have_current_path('/posted')
+      expect(session).to have_no_text('POST k=v')
     end
   end
 

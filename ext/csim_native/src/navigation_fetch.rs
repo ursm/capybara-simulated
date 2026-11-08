@@ -287,7 +287,7 @@ impl NavigationFetch {
     // navigable is an auxiliary browsing context's whose opener is there} — or a
     // frame's, {navigable:, traversable: the number of the session history it is of, navigation: the number of the
     // navigation whose entry it makes, session_history.rs `begin_frame_entry`, nil a replay's, entry: the fields of that
-    // entry the host gives} — navigation_commit.rs `Commit`,
+    // entry the host gives, traversal: a replay's, whether it is a traversal's} — navigation_commit.rs `Commit`,
     // `#begin_commit`, `#response_commit`; nil any other navigation).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
@@ -315,7 +315,10 @@ impl NavigationFetch {
                     // (…a frame's, of the traversable its navigable is of: none of whose responses' opener policies matter)
                     Some(nav) => Option::<u64>::try_convert(field("traversable")?)?
                         .and_then(crate::session_history::SessionHistory::of)
-                        .map(|history| Ok::<_, Error>(Commit::of_frame(history, nav, Option::<u64>::try_convert(field("navigation")?)?, entry)))
+                        .map(|history| {
+                            let navigation = Option::<u64>::try_convert(field("navigation")?)?;
+                            Ok::<_, Error>(Commit::of_frame(history, nav, navigation, entry, field("traversal")?.to_bool()))
+                        })
                         .transpose()?,
                     None => traversable
                         .and_then(crate::session_history::SessionHistory::of)
@@ -331,6 +334,10 @@ impl NavigationFetch {
             }
             None => None,
         };
+        let mut commit = commit;
+        if let (Some(c), Some(url)) = (commit.as_mut(), text("url")?) {
+            c.at(&url);
+        }
         let coop = traversable.map(|id| CoopEnforcement {
             coop: crate::session_history::opener_policy_of(id),
             origin: None,
@@ -593,9 +600,12 @@ impl NavigationFetch {
     // its blob to give (`#blob_commit`), about:blank's document, a `data:` URL's response's (`data_navigation`), an
     // error document.
     fn begin_commit(ruby: &Ruby, rb_self: &Self) -> Result<RArray, Error> {
+        // (…a traversal's of an entry a POST made, none: `Commit::posts_none`)
+        let posts_none = rb_self.commit.borrow().as_ref().is_some_and(Commit::posts_none);
         let (url, start) = {
             let st = rb_self.st.borrow();
-            (st.chain.target.clone(), start(&st.chain.target, &st.chain.method, false))
+            let start = if posts_none && st.chain.method == "POST" { "fail" } else { start(&st.chain.target, &st.chain.method, false) };
+            (st.chain.target.clone(), start)
         };
         rb_self.commit_with(|c| c.begin(&url));
         let step = match start {

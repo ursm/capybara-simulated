@@ -73225,6 +73225,17 @@ service-workers/service-worker/fetch-event.https.html:
     gives a frame''s own later navigations an id, its first none; Firefox always none.
     The subtest''s second half, a subresource''s "Client ID Found", spec/sw_handle_fetch_outcome_spec.rb
     holds. Re-check when the test is updated.'
+- name: FetchEvent#request.isHistoryNavigation is true (POST + history.go(-1))
+  reason: 'The test asserts a traversal back to an entry a POST made re-posts, which the
+    current text does not do (rule 1.3; the older text it was written against not re-quoted
+    here — re-check). The current text, "apply the history step", reads "Let allowPOST
+    be targetEntry''s document state''s reload pending" (false for a traversal), and
+    "attempt to populate the history entry''s document" fetches only where "documentResource
+    is null, or allowPOST is true", else navigationParams is null: "creating a document for
+    inline content that doesn''t have a DOM", an error document (navigation_commit.rs
+    `posts_none`). Chrome 157 and Firefox 159, measured 2026-11-08 with no service worker,
+    re-post none either (a cached response, or an error page). Re-check when the test is
+    updated.'
 service-workers/service-worker/partitioned-cookies.tentative.https.html:
 - name: 'Service Worker: Partitioned Cookies'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
