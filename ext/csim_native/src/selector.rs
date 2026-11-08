@@ -483,6 +483,7 @@ impl<'a> Element for NodeRef<'a> {
             "focus-visible" => arena.is_focus_visible(id),
             "focus-within" => arena.has_focus_within(id),
             "hover" => arena.is_hovered(id),
+            "active" => arena.is_active(id),
             "checked" => arena.is_checked(id),
             "indeterminate" => arena.is_indeterminate(id),
             "disabled" => arena.is_actually_disabled(id),
@@ -505,8 +506,8 @@ impl<'a> Element for NodeRef<'a> {
             "popover-open" => arena.is_popover_open(id),
             "modal" => arena.is_modal(id),
             "filtered" => arena.is_filtered(id),
-            // No history, no pressed pointer, no autofill and no fullscreen (`document.fullscreenElement` is always
-            // null): nothing is visited, active, autofilled or fullscreen.
+            // No history, no autofill and no fullscreen (`document.fullscreenElement` is always null): nothing is
+            // visited, autofilled or fullscreen.
             _ => false,
         }
     }
@@ -572,8 +573,8 @@ impl<'a> Element for NodeRef<'a> {
 }
 
 // The non-tree-structural pseudo-classes this engine knows — any other is invalid. Their state is the arena's
-// (element_state.rs); `:visited`, `:active`, `:autofill` and `:fullscreen` parse and never match (no history, no pressed
-// pointer, no autofill, no fullscreen element). The crate's BUILT-INS bypass this list: the tree-structural ones,
+// (element_state.rs); `:visited`, `:autofill` and `:fullscreen` parse and never match (no history, no autofill, no
+// fullscreen element). The crate's BUILT-INS bypass this list: the tree-structural ones,
 // `:scope`, and `:host`.
 fn is_native_pseudo_class(name: &str) -> bool {
     matches!(

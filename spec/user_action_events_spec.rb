@@ -50,12 +50,13 @@ RSpec.describe 'User action events', engine_global: true do
   it "fires a click's as a browser does, a document's listener seeing one inside a shadow tree" do
     session.visit '/'
     session.find('#host').shadow_root.find('#inner').click
+    # (…a pointerdown's and a pointerup's `detail` 0 — Pointer Events, Chrome, Firefox — the mouse events' the count)
     expect(log).to eq([
       'pointermove PointerEvent true true true 0 -1 0 1',
-      'pointerdown PointerEvent true true true 1 0 1',
+      'pointerdown PointerEvent true true true 0 0 1',
       'mousedown MouseEvent true true true 1 0 1',
       'focus host true',
-      'pointerup PointerEvent true true true 1 0 0',
+      'pointerup PointerEvent true true true 0 0 0',
       'mouseup MouseEvent true true true 1 0 0',
       'click PointerEvent true true true 1 0 0 1 "mouse"'
     ])
@@ -91,10 +92,10 @@ RSpec.describe 'User action events', engine_global: true do
     # (…the pointer moved onto it first, as WebDriver's action does — over and enter none, it being hovered already)
     expect(log).to eq([
       'pointermove PointerEvent true true true 0 -1 0 1',
-      'pointerdown PointerEvent true true true 1 2 2',
+      'pointerdown PointerEvent true true true 0 2 2',
       'mousedown MouseEvent true true true 1 2 2',
       'contextmenu PointerEvent true true true 1 2 2',
-      'pointerup PointerEvent true true true 1 2 0',
+      'pointerup PointerEvent true true true 0 2 0',
       'mouseup MouseEvent true true true 1 2 0',
       'auxclick PointerEvent true true true 1 2 0'
     ])

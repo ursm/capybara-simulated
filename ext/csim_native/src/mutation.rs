@@ -487,7 +487,7 @@ fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: N
     let arena = realm(scope, cid);
     arena.parser_form_owners_removed(node);
     let carried = |id: Option<NodeId>| id.is_some_and(|f| arena.shadow_including_ancestor(node, f));
-    if old != Some(parent) && (carried(arena.focus) || carried(arena.hover)) {
+    if old != Some(parent) && (carried(arena.focus) || carried(arena.hover) || carried(arena.active)) {
         arena.note_state_changed();
     }
     Some(old)

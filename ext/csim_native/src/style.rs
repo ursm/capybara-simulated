@@ -2351,6 +2351,7 @@ fn element_state(arena: &RealmArena, id: NodeId, link: bool) -> ElementState {
     set(ElementState::FOCUSRING, arena.is_focus_visible(id));
     set(ElementState::FOCUS_WITHIN, arena.has_focus_within(id));
     set(ElementState::HOVER, arena.is_hovered(id));
+    set(ElementState::ACTIVE, arena.is_active(id));
     set(ElementState::CHECKED, arena.is_checked(id) || arena.is_selected(id));
     set(ElementState::INDETERMINATE, arena.is_indeterminate(id));
     set(ElementState::DISABLED, arena.is_actually_disabled(id));
@@ -3137,7 +3138,7 @@ impl<'a> selectors::Element for StyleNode<'a> {
     fn match_non_ts_pseudo_class(&self, pc: &NonTSPseudoClass, _context: &mut MatchingContext<SelectorImpl>) -> bool {
         let (arena, id) = (self.arena(), self.id);
         match pc {
-            NonTSPseudoClass::Active => false,
+            NonTSPseudoClass::Active => arena.is_active(id),
             NonTSPseudoClass::AnyLink | NonTSPseudoClass::Link => self.is_link(),
             NonTSPseudoClass::Visited => false,
             NonTSPseudoClass::Autofill => false,

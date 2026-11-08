@@ -149,7 +149,7 @@ impl RealmArena {
         Some(if command || in_select { "button" } else { "submit" })
     }
     // The parent, or — for a shadow root — its host.
-    fn shadow_including_parent(&self, id: NodeId) -> Option<NodeId> {
+    pub(crate) fn shadow_including_parent(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
         node.parent.or(node.host).filter(|&p| self.get(p).is_some())
     }
@@ -200,8 +200,22 @@ impl RealmArena {
         self.focus.is_some_and(|f| self.shadow_including_ancestor(id, f))
     }
     // `:hover`: the hovered element or one of its shadow-including ancestors.
+    // `:hover`: the hovered element or one of its shadow-including ancestors, and the labeled control of a label among
+    // them (HTML §4.16.3).
     pub(crate) fn is_hovered(&self, id: NodeId) -> bool {
-        self.hover.is_some_and(|h| self.shadow_including_ancestor(id, h))
+        self.hover.is_some_and(|h| self.shadow_including_ancestor(id, h) || self.hover_controls.contains(&id))
+    }
+    // `:active`: the element the pointer pressed, any button held (Chrome, Firefox), or one of its shadow-including
+    // ancestors, and the labeled control of a label among them (HTML §4.16.3).
+    pub(crate) fn is_active(&self, id: NodeId) -> bool {
+        self.active.is_some_and(|a| self.shadow_including_ancestor(id, a) || self.active_controls.contains(&id))
+    }
+    // The labeled controls of the labels `id` is or is in (HTML §4.10.4), shadow-including.
+    pub(crate) fn label_controls(&self, id: NodeId) -> Vec<NodeId> {
+        std::iter::successors(Some(id), |&n| self.shadow_including_parent(n))
+            .filter(|&n| self.get(n).is_some_and(|d| d.is_html_named("label")))
+            .filter_map(|label| self.labeled_control(label))
+            .collect()
     }
 
     // `:checked`: an option's selectedness, or a checkbox's / radio button's checkedness — its own once dirty (a

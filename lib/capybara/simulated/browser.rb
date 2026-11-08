@@ -1815,19 +1815,12 @@ module Capybara
         ensure_alive_after_tick(handle)
         init = click_event_init(handle, keys, opts)
         raise_if_click_intercepted(handle, init)
-        # UI Events spec: two full mousedown→mouseup→click chains, the
-        # second's count 2, before the trailing `dblclick`. Jspreadsheet
-        # (table-builder's `.jss_worksheet`) enters edit mode on the inner
-        # mousedown.
+        # UI Events: two full mousedown→mouseup→click chains, the second's count
+        # 2 — whose press selects the word, and whose release ends in the
+        # `dblclick` (pointer.rs `MousePointer`). Jspreadsheet (table-builder's
+        # `.jss_worksheet`) enters edit mode on the inner mousedown; ProseMirror
+        # reads the word selected as the `dblclick` fires.
         [1, 2].each {|detail| dom_call('clickResolve', handle, init.merge('detail' => detail)) }
-        # A browser selects the word during the SECOND press's default action, so
-        # the selection is already in place when `dblclick` fires — ProseMirror's
-        # double-click handling reads the selection at event time, and selecting
-        # only afterwards let PM commit its own narrower word first (its anchor
-        # then survived the late correction: the paste-URL-over-selection test
-        # wrapped `**bold**` but not the adjacent `` `code` `` span).
-        dom_call('selectWordAt', handle)
-        dom_call('dblClick', handle, init)
         settle
       end
 

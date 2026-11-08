@@ -340,6 +340,8 @@ pub(crate) const STATE_OBJECT_FALLBACK: u32 = 1 << 22;
 // `STATE_INITIAL_ABOUT_BLANK`).
 pub(crate) const STATE_INITIAL_ABOUT_BLANK: u32 = 1 << 23;
 // (…bit 24 a document's, the bindings' alone, which nothing here reads: native-query-shadow.js `STATE_HIDDEN`)
+// The element the mouse pointer pressed, while a button is down (`:active`: pointer.rs, which alone writes it).
+pub(crate) const STATE_ACTIVE: u32 = 1 << 25;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward
@@ -1154,6 +1156,12 @@ pub(crate) struct RealmState {
     // `:focus-within` and `:hover` walk up.
     pub(crate) focus: Option<NodeId>,
     pub(crate) hover: Option<NodeId>,
+    // …and the one being activated — carrying STATE_ACTIVE — from which `:active` walks up. Each with the labeled controls
+    // of the labels among them, which match too (HTML §4.16.3: "any element that is the labeled control of a label element
+    // that is currently matching :hover / :active"; Chrome, Firefox), as they were when it was set (`set_state`).
+    pub(crate) active: Option<NodeId>,
+    pub(crate) hover_controls: Vec<NodeId>,
+    pub(crate) active_controls: Vec<NodeId>,
     // Its "sequential focus navigation starting point" (HTML §6.6.3), where Tab goes on from when nothing is focused:
     // the element focus last moved to — kept as focus leaves it for the viewport (Chrome: Tab after `blur()` goes on
     // from the blurred element) — or the node a press that focused nothing landed on (`setFocusStart`).
@@ -1804,6 +1812,9 @@ impl RealmArena {
         self.focus = None;
         self.focus_start = None;
         self.hover = None;
+        self.active = None;
+        self.hover_controls.clear();
+        self.active_controls.clear();
         self.target = None;
         // (…what the old page's parse changed has no pass left to correct: the next page's are kept from its first)
         self.parsed = Default::default();
@@ -2020,7 +2031,7 @@ impl RealmArena {
             self.note_state_changed();
         }
         let state = &mut self.state;
-        for (bit, slot) in [(STATE_FOCUSED, &mut state.focus), (STATE_HOVERED, &mut state.hover)] {
+        for (bit, slot) in [(STATE_FOCUSED, &mut state.focus), (STATE_HOVERED, &mut state.hover), (STATE_ACTIVE, &mut state.active)] {
             if bits & bit != 0 {
                 *slot = Some(id);
             } else if *slot == Some(id) {
@@ -2036,6 +2047,12 @@ impl RealmArena {
             if bits & STATE_MODAL != 0 {
                 state.modals.push(id);
             }
+        }
+        if (had ^ bits) & STATE_HOVERED != 0 {
+            self.state.hover_controls = self.state.hover.map_or_else(Vec::new, |h| self.label_controls(h));
+        }
+        if (had ^ bits) & STATE_ACTIVE != 0 {
+            self.state.active_controls = self.state.active.map_or_else(Vec::new, |a| self.label_controls(a));
         }
     }
 
@@ -2680,8 +2697,8 @@ pub(crate) struct Dom {
     pub(crate) offscreen_canvas_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) crypto_key_template: Option<v8::Global<v8::ObjectTemplate>>,
     pub(crate) blob_data_template: Option<v8::Global<v8::ObjectTemplate>>,
-    // The mouse pointer's PREVENT MOUSE EVENT flag (pointer.rs `mouse_prevented`).
-    pub(crate) mouse_events_prevented: bool,
+    // The mouse pointer and the gesture it plays (pointer.rs).
+    pub(crate) mouse: crate::pointer::MousePointer,
     // …and a header list's (headers.rs).
     pub(crate) headers_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and an XMLHttpRequest's state's (xhr_state.rs).

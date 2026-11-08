@@ -143,7 +143,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "eventPath", event_path, context_id);
     crate::dom::register(scope, ns, "activationTarget", activation_target_op, context_id);
     crate::dom::register(scope, ns, "retarget", retarget_op, context_id);
-    crate::dom::register(scope, ns, "hoverChains", hover_chains_op, context_id);
     crate::dom::register(scope, ns, "composedPath", composed_path_op, context_id);
 }
 
@@ -347,7 +346,7 @@ fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // innermost first — and those it enters — `to`'s, outermost first — up to the one they share; an element's ancestors
 // the flat tree's (a slotted node's next its slot, a shadow tree's top its host), elements alone (no shadow root, which
 // Chrome fires none at).
-fn hover_chains(arena: &RealmArena, from: Option<NodeId>, to: Option<NodeId>) -> (Vec<NodeId>, Vec<NodeId>) {
+pub(crate) fn hover_chains(arena: &RealmArena, from: Option<NodeId>, to: Option<NodeId>) -> (Vec<NodeId>, Vec<NodeId>) {
     let chain = |start: Option<NodeId>| -> Vec<NodeId> {
         std::iter::successors(start, |&n| crate::geometry::flat_parent(arena, n)).filter(|&n| arena.is_element(n)).collect()
     };
@@ -362,24 +361,6 @@ fn hover_chains(arena: &RealmArena, from: Option<NodeId>, to: Option<NodeId>) ->
     }
     enter.reverse();
     (leave, enter)
-}
-
-// __dom.hoverChains(fromNid, toNid) -> [[left…], [entered…]] (`hover_chains`; -1 for no node).
-fn hover_chains_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let from = nid_arg(scope, &args, 0);
-    let to = nid_arg(scope, &args, 1);
-    let cid = realm_id(scope, &args);
-    let (leave, enter) = hover_chains(crate::dom::realm(scope, cid), from, to);
-    // (…none past a node factory that threw: its exception is what the op ends with)
-    let leave = crate::dom::nodes_value(scope, cid, &leave);
-    if crate::dom::factory_threw(scope) {
-        return;
-    }
-    let enter = crate::dom::nodes_value(scope, cid, &enter);
-    if crate::dom::factory_threw(scope) {
-        return;
-    }
-    rv.set(v8::Array::new_with_elements(scope, &[leave, enter]).into());
 }
 
 #[cfg(test)]

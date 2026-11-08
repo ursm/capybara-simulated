@@ -689,6 +689,7 @@ pub(crate) fn box_parent(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "isInert", is_inert_op, context_id);
     crate::dom::register(scope, ns, "hitTest", hit_test_op, context_id);
+    crate::dom::register(scope, ns, "pointerTarget", pointer_target_op, context_id);
     crate::dom::register(scope, ns, "clickObstructor", click_obstructor_op, context_id);
     crate::dom::register(scope, ns, "observedVisible", observed_visible_op, context_id);
     crate::dom::register(scope, ns, "clickPoint", click_point_op, context_id);
@@ -725,6 +726,19 @@ fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let cid = crate::dom::realm_id(scope, &args);
     let Some(hits) = painting(scope, &args, |p| p.hit(x, y, all)) else { return };
     rv.set(crate::dom::nodes_value(scope, cid, &hits));
+}
+
+// __dom.pointerTarget(nid, x, y) -> what the driver's pointer aimed at the element `nid` at the viewport point lands on —
+// the event's real target, as WebDriver's element click's is — where that is inside it in the flat tree (a closed
+// details' summary, a button's icon, a node in its shadow tree); the element itself where it is not, or nothing is there.
+fn pointer_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let [x, y] = [1, 2].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
+    let cid = crate::dom::realm_id(scope, &args);
+    let hit = painting(scope, &args, |p| p.hit(x, y, false)).and_then(|hits| hits.first().copied());
+    let arena = crate::dom::realm(scope, cid);
+    let inside = hit.filter(|&h| h != target && crate::geometry::flat_inclusive_ancestor(arena, target, h));
+    rv.set(crate::dom::node_value(scope, Some(inside.unwrap_or(target))));
 }
 
 // __dom.clickObstructor(nid, x, y, rect) -> what receives a real pointer click aimed at the element `nid` at the

@@ -4,7 +4,7 @@
 // state a removal changes: a showing popover hides and a dialog is modal no more, quietly, and a dialog leaves its open
 // dialogs list.
 
-use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena, STATE_FOCUSED, STATE_HOVERED, STATE_MODAL, STATE_POPOVER_OPEN};
+use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena, STATE_ACTIVE, STATE_FOCUSED, STATE_HOVERED, STATE_MODAL, STATE_POPOVER_OPEN};
 
 // A document's open dialogs list: each dialog with the close watcher group its close watcher is in (HTML "close watcher
 // manager": a new group where a user activation has come since the last one was made, else the last group — so a page's
@@ -85,7 +85,7 @@ impl RealmArena {
     // behavior its own intent is retiring) and what a focused text control armed for its blur is gone (change_on_blur.rs).
     // Whether they changed an element's state.
     pub(crate) fn removing_steps(&mut self, root: NodeId) -> bool {
-        const LEAVING: u32 = STATE_POPOVER_OPEN | STATE_MODAL | STATE_FOCUSED | STATE_HOVERED;
+        const LEAVING: u32 = STATE_POPOVER_OPEN | STATE_MODAL | STATE_FOCUSED | STATE_HOVERED | STATE_ACTIVE;
         let mut stack = vec![root];
         let (mut leave, mut dialogs) = (Vec::new(), Vec::new());
         while let Some(id) = stack.pop() {
