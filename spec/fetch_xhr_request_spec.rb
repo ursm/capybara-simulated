@@ -22,6 +22,9 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
         const u = new URL(e.request.url);
         if (u.pathname === '/seen') return e.respondWith(new Response(JSON.stringify(seen)));
         if (u.pathname === '/answer') return e.respondWith(new Response('answered'));
+        if (u.pathname === '/stream') {
+          return e.respondWith(new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('s')); c.close(); } })));
+        }
         if (u.pathname === '/away') return e.respondWith(Response.redirect('https://b.example.com/end', 302));
         if (u.pathname !== '/echo') return;
         const r = e.request;
@@ -383,5 +386,25 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
       });
     JS
     expect(got).to eq('get' => 'answered', 'set' => 'answered', 'delete' => 'answered', 'has' => 'answered')
+  end
+
+  # …a service worker's streamed answer too, however soon its stream finished: read after a task its reader's turn
+  # queued, and an abort a task later errors it (Chrome and Firefox; rvfx probe cb2.html).
+  it "hands a service worker's finished stream over as a fetched body" do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      controlled().then(async () => {
+        const r = await fetch('/stream');
+        const read = await new Promise((res) => { r.text().then(() => res('read first')); setTimeout(() => res('task first'), 0); });
+        const c = new AbortController();
+        const r2 = await fetch('/stream', { signal: c.signal });
+        const t = r2.text();
+        setTimeout(() => c.abort(), 0);
+        done([read, await t.then(() => 'ok', (e) => e.name)]);
+      });
+    JS
+    expect(got).to eq(['task first', 'AbortError'])
   end
 end
