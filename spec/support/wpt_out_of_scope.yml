@@ -52171,10 +52171,6 @@ fetch/api/abort/general.any.js:
   reason: Aborting mid-stream must error the body AND have the server observe the
     connection close; both need a real streaming connection the in-process Rack model
     lacks (rule 1).
-- name: Stream errors once aborted. Underlying connection closed.
-  reason: Aborting mid-stream must error the body AND have the server observe the
-    connection close; both need a real streaming connection the in-process Rack model
-    lacks (rule 1).
 - name: Underlying connection is closed when aborting after receiving response
   reason: Needs SERVER-SIDE detection of the client closing the connection on abort
     (the test aborts a fetch, then reads a stash the server writes when the connection
@@ -52210,10 +52206,6 @@ fetch/api/abort/general.any.js:
     + stash); no persistent connection in the in-process Rack model (rule 1).
 - name: "[dedicatedworker] Stream errors once aborted, after reading. Underlying connection
     closed."
-  reason: Aborting mid-stream must error the body AND have the server observe the
-    connection close; both need a real streaming connection the in-process Rack model
-    lacks (rule 1).
-- name: "[dedicatedworker] Stream errors once aborted. Underlying connection closed."
   reason: Aborting mid-stream must error the body AND have the server observe the
     connection close; both need a real streaming connection the in-process Rack model
     lacks (rule 1).
@@ -52254,10 +52246,6 @@ fetch/api/abort/general.any.js:
     + stash); no persistent connection in the in-process Rack model (rule 1).
 - name: "[serviceworker] Stream errors once aborted, after reading. Underlying connection
     closed."
-  reason: Aborting mid-stream must error the body AND have the server observe the
-    connection close; both need a real streaming connection the in-process Rack model
-    lacks (rule 1).
-- name: "[serviceworker] Stream errors once aborted. Underlying connection closed."
   reason: Aborting mid-stream must error the body AND have the server observe the
     connection close; both need a real streaming connection the in-process Rack model
     lacks (rule 1).

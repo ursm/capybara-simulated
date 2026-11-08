@@ -414,6 +414,7 @@ impl FetchPlan {
             st.chain.method.clone(),
             names,
             now,
+            self.preflight,
         );
         if !granted {
             crate::cors::forget(self.preflight_cache, origin, st.chain.target.clone());

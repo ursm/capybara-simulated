@@ -72,8 +72,8 @@ fn covers(methods: &[String], headers: &[String], method: &str, unsafe_names: &[
 
 // Fetch "CORS-preflight fetch" steps 7.1-7.9 over its response (`status`, its `Access-Control-Allow-*` and
 // `-Max-Age` values): the grant it makes for a request of method `method` with CORS-unsafe header names
-// `unsafe_names` from `origin`, or None — a network error — where it is no ok status, fails the CORS check, names a
-// method or header that is no token, or allows too little.
+// `unsafe_names` from `origin`, `forced` its use-CORS-preflight flag, or None — a network error — where it is no ok
+// status, fails the CORS check, names a method or header that is no token, or allows too little.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn preflight(
     status: u32,
@@ -86,18 +86,22 @@ pub(crate) fn preflight(
     unsafe_names: &[String],
     origin: &str,
     credentialed: bool,
+    forced: bool,
 ) -> Option<Grant> {
     if !(200..300).contains(&status) || !check(acao, acac, Some(origin), credentialed) {
         return None;
     }
-    let methods = token_list(allow_methods)?;
+    // (…no `Access-Control-Allow-Methods` a grant of the request's method where its use-CORS-preflight flag is set —
+    // step 7.4 — none of any method else)
+    let methods = match allow_methods {
+        None if forced => vec![method.to_owned()],
+        _ => token_list(allow_methods)?,
+    };
     let headers: Vec<String> = token_list(allow_headers)?.into_iter().map(|h| h.to_ascii_lowercase()).collect();
     if !covers(&methods, &headers, method, unsafe_names, credentialed, false) {
         return None;
     }
-    // (…a missing `Access-Control-Allow-Methods` no grant of the request's method: Fetch's step 7.4 makes it one only for a
-    // request whose use-CORS-preflight flag is set, which no request here has. Its max-age `delta-seconds`, digits alone,
-    // and one past the limit the limit.)
+    // (…its max-age `delta-seconds`, digits alone, and one past the limit the limit)
     let max_age = max_age
         .map(|v| v.trim_matches([' ', '\t']))
         .filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()))
@@ -191,7 +195,7 @@ pub(crate) fn covers_request(id: u64, origin: String, url: String, credentials: 
     caches().1.get(&id).is_some_and(|c| c.covers(&origin, &url, credentials, &method, &unsafe_names, now, forced))
 }
 // (…[status, acao, acac, methods, headers, max-age] of the preflight's response, [origin, url, credentials, method,
-// unsafe names] of the request)
+// unsafe names, use-CORS-preflight flag] of the request)
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn grant_preflight(
     id: u64,
@@ -202,6 +206,7 @@ pub(crate) fn grant_preflight(
     method: String,
     unsafe_names: Vec<String>,
     now: f64,
+    forced: bool,
 ) -> bool {
     let (status, acao, acac, methods, headers, max_age) = response;
     let Some(grant) = preflight(
@@ -215,6 +220,7 @@ pub(crate) fn grant_preflight(
         &unsafe_names,
         &origin,
         credentials,
+        forced,
     ) else {
         return false;
     };
@@ -284,28 +290,32 @@ mod tests {
     #[test]
     fn a_preflight_grants_what_it_names_until_its_max_age() {
         let unsafe_names = s(&["x-a"]);
-        let g = preflight(200, Some("*"), None, Some("PUT"), Some("X-A"), None, "PUT", &unsafe_names, "o", false).unwrap();
+        let g = preflight(200, Some("*"), None, Some("PUT"), Some("X-A"), None, "PUT", &unsafe_names, "o", false, false).unwrap();
         assert_eq!(g.max_age, DEFAULT_MAX_AGE);
-        assert!(preflight(200, Some("*"), None, Some("Bad value"), None, None, "PUT", &[], "o", false).is_none());
-        assert!(preflight(204, Some("*"), None, Some("put"), None, None, "PUT", &[], "o", false).is_none());
+        assert!(preflight(200, Some("*"), None, Some("Bad value"), None, None, "PUT", &[], "o", false, false).is_none());
+        assert!(preflight(204, Some("*"), None, Some("put"), None, None, "PUT", &[], "o", false, false).is_none());
         // (…`*` none for a credentialed request, nor `Authorization` but by name)
-        assert!(preflight(200, Some("o"), Some("true"), Some("*"), None, None, "PUT", &[], "o", true).is_none());
-        assert!(preflight(200, Some("*"), None, None, Some("*"), None, "GET", &s(&["authorization"]), "o", false).is_none());
+        assert!(preflight(200, Some("o"), Some("true"), Some("*"), None, None, "PUT", &[], "o", true, false).is_none());
+        assert!(preflight(200, Some("*"), None, None, Some("*"), None, "GET", &s(&["authorization"]), "o", false, false).is_none());
         let mut cache = PreflightCache::default();
         cache.store("o", "u", false, &g, 0.0);
         assert!(cache.covers("o", "u", false, "PUT", &unsafe_names, 4.0, false));
         assert!(!cache.covers("o", "u", false, "PUT", &unsafe_names, 5.0, false));
         assert!(!cache.covers("o", "u", false, "DELETE", &unsafe_names, 1.0, false));
         // (…a later grant adds its entries, the earlier's kept)
-        let d = preflight(200, Some("*"), None, Some("DELETE"), None, Some("60"), "DELETE", &[], "o", false).unwrap();
+        let d = preflight(200, Some("*"), None, Some("DELETE"), None, Some("60"), "DELETE", &[], "o", false, false).unwrap();
         cache.store("o", "u", false, &d, 1.0);
         assert!(cache.covers("o", "u", false, "PUT", &unsafe_names, 2.0, false));
         assert!(cache.covers("o", "u", false, "DELETE", &[], 30.0, false));
         // (…a credentialed request's entries serve an uncredentialed one, not the other way round)
-        let c = preflight(200, Some("o"), Some("true"), Some("PATCH"), None, None, "PATCH", &[], "o", true).unwrap();
+        let c = preflight(200, Some("o"), Some("true"), Some("PATCH"), None, None, "PATCH", &[], "o", true, false).unwrap();
         cache.store("o", "u", true, &c, 1.0);
         assert!(cache.covers("o", "u", false, "PATCH", &[], 2.0, false));
         assert!(!cache.covers("o", "u", true, "PUT", &unsafe_names, 2.0, false));
+        // (…a forced preflight with no Access-Control-Allow-Methods grants the request's method, an unforced one none)
+        let f = preflight(200, Some("*"), None, None, None, None, "POST", &[], "o", false, true).unwrap();
+        assert_eq!(f.methods, s(&["POST"]));
+        assert!(preflight(200, Some("*"), None, None, None, None, "POST", &[], "o", false, false).unwrap().methods.is_empty());
         // (…a safelisted method needs no entry, but of a request whose use-CORS-preflight flag is set)
         assert!(cache.covers("o", "u", false, "POST", &[], 2.0, false) && !cache.covers("o", "u", false, "POST", &[], 2.0, true));
         cache.clear_for("o", "u");
@@ -314,14 +324,14 @@ mod tests {
 
     #[test]
     fn a_max_age_is_delta_seconds_up_to_two_hours() {
-        let age = |v: &str| preflight(200, Some("*"), None, None, None, Some(v), "GET", &[], "o", false).unwrap().max_age;
+        let age = |v: &str| preflight(200, Some("*"), None, None, None, Some(v), "GET", &[], "o", false, false).unwrap().max_age;
         assert_eq!(age(" 60 "), 60.0);
         assert_eq!(age("+60"), DEFAULT_MAX_AGE);
         assert_eq!(age("6e1"), DEFAULT_MAX_AGE);
         assert_eq!(age("86400"), MAX_MAX_AGE);
         assert_eq!(age("99999999999999999999999999"), MAX_MAX_AGE);
         // (…no grant of an unsafe method the response does not name)
-        assert!(preflight(200, Some("*"), None, None, None, None, "PUT", &[], "o", false).is_none());
+        assert!(preflight(200, Some("*"), None, None, None, None, "PUT", &[], "o", false, false).is_none());
     }
 
     #[test]

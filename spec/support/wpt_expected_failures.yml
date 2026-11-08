@@ -64363,9 +64363,7 @@ fetch/api/abort/keepalive.html:
 fetch/api/abort/serviceworker-intercepted.https.html:
 - Abort reason serialization happens on abort
 - Service Worker can observe the fetch abort and associated abort reason
-- Stream errors once aborted.
 - "[harness] TIMEOUT"
-- fetch() response body has abort reason
 fetch/api/basic/error-after-response.any.js:
 - Response reader closed promise should reject after a network error happening after
   resolving fetch promise

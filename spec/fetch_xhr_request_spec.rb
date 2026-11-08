@@ -21,6 +21,7 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
       self.addEventListener('fetch', (e) => {
         const u = new URL(e.request.url);
         if (u.pathname === '/seen') return e.respondWith(new Response(JSON.stringify(seen)));
+        if (u.pathname === '/answer') return e.respondWith(new Response('answered'));
         if (u.pathname === '/away') return e.respondWith(Response.redirect('https://b.example.com/end', 302));
         if (u.pathname !== '/echo') return;
         const r = e.request;
@@ -54,6 +55,7 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
       case path
       when '/cors'
         cors = {'access-control-allow-origin' => 'https://www.example.com', 'access-control-allow-methods' => 'POST'}
+        cors.delete('access-control-allow-methods') if env['QUERY_STRING'].include?('noacam')
         [200, {'content-type' => 'text/plain', **cors}, ['cors']]
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker_js]]
       when '/echo' then [200, {'content-type' => 'text/plain'}, ['echo']]
@@ -302,5 +304,84 @@ RSpec.describe 'a fetch() or XHR request', :every_host_local, :https do
       })().then((out) => { restore(); done(out); }, (e) => { restore(); done('threw ' + e.message); });
     JS
     expect(got).to eq(['echo', 'text/plain', 'AbortError', 'echo text/plain'])
+  end
+
+  # Fetch "CORS-preflight fetch" step 7.4: a forced preflight (the use-CORS-preflight flag) answered with no
+  # Access-Control-Allow-Methods grants the request's method — cached, as in Chrome and Firefox: one preflight for two.
+  it "caches a forced preflight that names no methods as its request's method" do
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = null;
+      const post = () => new Promise((res) => {
+        const x = new XMLHttpRequest();
+        x.open('POST', 'https://b.example.com/cors?noacam');
+        x.upload.onprogress = () => {};
+        x.onloadend = () => res(x.status);
+        x.send('b');
+      });
+      post().then(post).then((status) => { window.got = status; });
+    JS
+    expect(poll_until { s.evaluate_script('window.got') }).to eq(200)
+    expect(log).to eq([%w[OPTIONS noacam], %w[POST noacam], %w[POST noacam]])
+  end
+
+  # A fetched response's body is handed over on tasks as Fetch's steps queue its chunks: its read settles after a task
+  # its reader's turn queued, whether or not its fetch was given a signal (the microtasks queued with it before it) — and
+  # an abort before then, at once, a microtask, two or a task later, errors it, a pending reader's read too. A Response
+  # a script made reads at once. (Chrome's and Firefox's figures, rvfx probe cb.html.)
+  it "hands a fetched response's body over on tasks, an abort before then erroring it" do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const st = (p) => p.then(() => 'ok', (e) => e.name);
+      const get = async (signal = true) => {
+        const c = new AbortController();
+        return [await fetch('/echo', signal ? { signal: c.signal } : {}), c];
+      };
+      const beforeTask = (p) => new Promise((res) => {
+        p.then(() => res('read first'));
+        setTimeout(() => res('task first'), 0);
+      });
+      (async () => {
+        const out = {};
+        { const [r, c] = await get(); const t = r.text(); c.abort(); out.sync = await st(t); }
+        { const [r, c] = await get(); const t = r.text(); queueMicrotask(() => c.abort()); out.micro = await st(t); }
+        { const [r, c] = await get(); const t = r.text(); Promise.resolve().then(() => 0).then(() => c.abort()); out.twoTicks = await st(t); }
+        { const [r, c] = await get(); const t = r.text(); setTimeout(() => c.abort(), 0); out.task = await st(t); }
+        { const [r, c] = await get(); const p = r.body.getReader().read(); c.abort(); out.reader = await st(p); }
+        { const [r] = await get(true); out.signal = await beforeTask(r.text()); }
+        { const [r] = await get(false); out.noSignal = await beforeTask(r.json().catch(() => 0)); }
+        out.made = await beforeTask(new Response('x').text());
+        { const [r] = await get(true); const log = []; r.text().then(() => log.push('text')); Promise.resolve().then(() => log.push('m1')); queueMicrotask(() => log.push('m2')); await new Promise((r2) => setTimeout(r2, 10)); out.order = log.join(); }
+        return out;
+      })().then(done, (e) => done('threw ' + e));
+    JS
+    expect(got).to eq(
+      'sync' => 'AbortError', 'micro' => 'AbortError', 'twoTicks' => 'AbortError', 'task' => 'AbortError',
+      'reader' => 'AbortError', 'signal' => 'task first', 'noSignal' => 'task first', 'made' => 'read first',
+      'order' => 'm1,m2,text'
+    )
+  end
+
+  # …and a page's Map methods none of a service worker's answer's way back to its fetch either.
+  it "answers through a service worker whatever a page did to Map.prototype" do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      controlled().then(async () => {
+        const out = {};
+        for (const m of ['get', 'set', 'delete', 'has']) {
+          const saved = Map.prototype[m];
+          Map.prototype[m] = () => { throw new Error('evil'); };
+          out[m] = await fetch('/answer').then((r) => r.text(), (e) => e.message);
+          Map.prototype[m] = saved;
+        }
+        done(out);
+      });
+    JS
+    expect(got).to eq('get' => 'answered', 'set' => 'answered', 'delete' => 'answered', 'has' => 'answered')
   end
 end
