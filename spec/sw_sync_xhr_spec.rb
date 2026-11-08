@@ -3,13 +3,14 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/engine_global'
 
 # Handle Fetch applies to a controlled client's every request, a synchronous one's too: Fetch's "HTTP fetch" asks the
 # service worker whatever the caller waits on — XHR's synchronous flag only makes `send()` wait for the response. So a
 # controlled page's sync XHR and a controlled dedicated worker's are its service worker's to answer, as their async XHR,
 # fetch() and importScripts() are. Firefox answers all of them from the worker; Chrome all but the page's sync XHR
 # (measured 2026-11-02, Chrome 156 / Firefox 159) — a Blink departure from Fetch, which the spec outranks.
-RSpec.describe 'a controlled client’s synchronous XHR' do
+RSpec.describe 'a controlled client’s synchronous XHR', engine_global: true do
   include PollUntil
 
   let(:app) {
@@ -133,10 +134,10 @@ RSpec.describe 'a controlled client’s synchronous XHR' do
     session = controlled_session
     sync = <<~JS
       (() => {
-        const v0 = __virtualNow(), x = new XMLHttpRequest();
+        const v0 = RustyRacer.steps.virtualNow(), x = new XMLHttpRequest();
         x.open('GET', '/data.txt?tag=slow&ms=15000', false);
         x.send();
-        return [x.responseText, Math.round(__virtualNow() - v0)];
+        return [x.responseText, Math.round(RustyRacer.steps.virtualNow() - v0)];
       })()
     JS
     t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -208,8 +209,8 @@ RSpec.describe 'a controlled client’s synchronous XHR' do
           const x = new XMLHttpRequest();
           x.open('GET', '${location.origin}/delayed.txt', false);
           x.timeout = timeout;
-          const v0 = __virtualNow();
-          try { x.send(); out.push(x.responseText, Math.round(__virtualNow() - v0)); } catch (e) { out.push(e.name); }
+          const v0 = RustyRacer.steps.virtualNow();
+          try { x.send(); out.push(x.responseText, Math.round(RustyRacer.steps.virtualNow() - v0)); } catch (e) { out.push(e.name); }
         }
         postMessage(out);`;
       new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))).onmessage = (e) => { window.got = e.data; };

@@ -83,8 +83,8 @@ module Capybara
 
         def warm_pending!
           # Fast path: `V8Runtime#call` drains here after every host-fn
-          # call (including hot polling like `__settleGenGet` /
-          # `__hasReadyTimer`), so the empty-queue branch must not pay
+          # call (including hot polling like `settleGenGet` /
+          # `hasReadyTimer`), so the empty-queue branch must not pay
           # the mutex round-trip. `@pending.empty?` lock-free read is
           # safe — at worst a queued miss waits one extra `call`.
           return unless enabled? && !@pending.empty?

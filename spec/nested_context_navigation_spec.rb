@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # Navigation initiated INSIDE a nested browsing context — a frame realm reached
 # via `iframe.contentWindow.document` rather than an entered `within_frame`
@@ -10,7 +11,7 @@ require_relative 'support/session_teardown'
 # reloads the nested document (discarding its descendant frames). The per-realm
 # pending-navigation/-submit slots live on the nested document's globalThis, so
 # they're routed to Ruby through realm-tagged host calls and drained there.
-RSpec.describe 'nested-context navigation' do
+RSpec.describe 'nested-context navigation', engine_global: true do
   def session
     app = lambda do |env|
       path = env['PATH_INFO'].to_s
@@ -32,7 +33,7 @@ RSpec.describe 'nested-context navigation' do
   # Drive the event loop the way the WPT runner does (drains run after each
   # evaluate_script), so deferred frame navigations + their load chains land.
   def pump(s, n = 40)
-    n.times { s.evaluate_script("typeof __runLoopStep === 'function' ? __runLoopStep(50, 50, false) : null") }
+    n.times { s.evaluate_script("RustyRacer.steps.runLoopStep(50, 50, false)") }
   end
 
   it 'GET-submits a form in a nested document to a named sibling frame, excluding shadow-tree fields' do

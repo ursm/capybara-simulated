@@ -11,7 +11,7 @@ require_relative 'support/poll_until'
 # from the network through a transform (a POST sent once), off a timer, from the cache. Only a real deadlock — the
 # response itself waiting on that get, the worker able to do nothing more — is broken, as Firefox 159 has it: the get
 # resolved early to the reserved client (Chrome 156 never loads such a document), the worker's own response then made,
-# its request sent once (workers.js `__csim_swBreakSelfWait`).
+# its request sent once (workers.js `swBreakSelfWait`).
 RSpec.describe "a navigation fetch handler waiting on its reserved client's get" do
   HEAD_HTML = "<!doctype html><meta charset=utf-8><script>globalThis.__got=[];navigator.serviceWorker.onmessage=e=>__got.push(e.data)</script>"
 

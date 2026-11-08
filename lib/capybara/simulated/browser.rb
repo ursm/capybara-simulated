@@ -370,7 +370,7 @@ module Capybara
         # reader threads, and a thread-safe Queue of parsed events
         # awaiting delivery into the VM. Threads do the long-lived
         # HTTP read; the main thread polls the Queue in `settle` and
-        # dispatches via `__csim_deliverEventSourceEvents`.
+        # dispatches via `deliverEventSourceEvents`.
         # A worker's source rides the same machinery from its own thread, its reader's events into the worker's inbox
         # (WorkerSink) — so the id counter and the registries are taken under `@event_source_lock`.
         @event_source_seq     = 0
@@ -383,7 +383,7 @@ module Capybara
         # client→server frames), and a Queue of lifecycle / message events
         # awaiting delivery into the VM. Same model as SSE: the reader thread
         # does the blocking socket read; the main thread drains the Queue in
-        # `settle` and dispatches via `__csim_deliverWebSocketEvents`. The
+        # `settle` and dispatches via `deliverWebSocketEvents`. The
         # connection rides the in-process `rack.hijack` socket Action Cable
         # (and any Rack WebSocket middleware) takes over.
         # A worker's WebSocket rides the same machinery from its own thread, its reader's events into the worker's inbox
@@ -415,7 +415,7 @@ module Capybara
         # uses to push publishes immediately rather than waiting for
         # the next client poll). Same shape as SSE: the thread reads
         # the hijacked pipe; main settle drains the Queue and
-        # dispatches via `__csim_deliverHijackedFetches`.
+        # dispatches via `deliverHijackedFetches`.
         @hijack_fetch_seq     = 0
         @hijack_fetch_threads = {}
         @hijack_fetch_queue   = Thread::Queue.new
@@ -423,7 +423,7 @@ module Capybara
         @hijack_fetch_contexts = {}
         # Web Workers — per-Browser handle counter, per-worker
         # {thread, inbox} pair, and a shared outbox the main settle
-        # drains via `__csim_deliverWorkerMessages`. Each worker
+        # drains via `deliverWorkerMessages`. Each worker
         # thread owns its own V8 Context (real isolate);
         # cross-isolate messaging is JSON-marshalled.
         @worker_seq    = 0
@@ -467,7 +467,7 @@ module Capybara
         # "longer-matched"), the worker activating it (Handle Fetch PARKS a functional event
         # against such a registration until activation completes — fetch-waits-for-activate: a
         # frame navigation defers its whole build, see frame_navigation_fetch /
-        # __csim_swRetryDeferredNavs, a subresource fetch queues on the worker record, see
+        # swRetryDeferredNavs, a subresource fetch queues on the worker record, see
         # service_worker_controller_fetch / flush_sw_deferred_fetches), the one serving it (so a
         # navigation fetched Ruby-side — before the destination realm's JS exists — finds its
         # controlling SW), its updateViaCache mode and navigation preload state; and each worker's
@@ -620,10 +620,10 @@ module Capybara
       # port messages (deliver_worker_messages).
       PORT_END_KINDS = %w[port_here port_gone port_closed port_redeliver].freeze
       STREAM_FRAME_FNS = {
-        'fr_start' => '__csim_swFetchStreamStart',
-        'fr_chunk' => '__csim_swFetchStreamChunk',
-        'fr_close' => '__csim_swFetchStreamClose',
-        'fr_error' => '__csim_swFetchStreamError'
+        'fr_start' => 'swFetchStreamStart',
+        'fr_chunk' => 'swFetchStreamChunk',
+        'fr_close' => 'swFetchStreamClose',
+        'fr_error' => 'swFetchStreamError'
       }.freeze
       private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_START_MS, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :WORKER_QUIESCE_MAX_ROUNDS, :PORT_END_KINDS, :STREAM_FRAME_FNS
 
@@ -657,7 +657,7 @@ module Capybara
         # (…one to a fragment of the page's document navigated in it, no request made — HTML "navigate", the realm's to say:
         # location.js `tryFragmentNavigate`)
         url = resolve_visit_url(url)
-        return if window_has_document? && in_top_context { @runtime.call('__csimFragmentNavigate', url, replace) } == true
+        return if window_has_document? && in_top_context { @runtime.call('fragmentNavigate', url, replace) } == true
 
         navigate(
           url,
@@ -937,7 +937,7 @@ module Capybara
           tick_real_time
           # (…and a navigation of it the host is to make made first: the document the user switching to the frame waits for)
           run_navigation_turn
-          rid = dom_call('__csimEnsureFrameRealm', target.to_i).to_i
+          rid = dom_call('ensureFrameRealm', target.to_i).to_i
           if rid.zero?
             raise Capybara::Simulated::StaleElement,
               "could not enter frame ##{target} (not a frame element, or its document failed to load)"
@@ -1043,7 +1043,7 @@ module Capybara
         s = css.to_s
         return find_xpath(s, context_handle) if xpath_shaped?(s)
         find_with_timer_fallback(:css, s, context_handle) do
-          dom_call('__csimQuery', context_handle || current_document_handle, s).to_a
+          dom_call('query', context_handle || current_document_handle, s).to_a
         rescue StandardError => e
           # Invalid selector → empty result. Callers that genuinely
           # need the throw go through `evaluate_script`.
@@ -1055,7 +1055,7 @@ module Capybara
       def find_first_css(css, context_handle = nil)
         s = css.to_s
         find_with_timer_fallback(:css_first, s, context_handle) do
-          h = dom_call('__csimQueryOne', context_handle || current_document_handle, s).to_i
+          h = dom_call('queryOne', context_handle || current_document_handle, s).to_i
           h.zero? ? nil : h
         rescue StandardError => e
           raise unless invalid_selector_error?(e)
@@ -1088,7 +1088,7 @@ module Capybara
       def find_xpath(xpath, context_handle = nil)
         xpath_str = xpath.to_s
         find_with_timer_fallback(:xpath, xpath_str, context_handle) do
-          dom_call('__csimEvaluateXPath', xpath_str, context_handle || 0).to_a
+          dom_call('evaluateXPath', xpath_str, context_handle || 0).to_a
         end
       end
 
@@ -1224,10 +1224,10 @@ module Capybara
       # callback is a task of its own — run here (`maxMs: 0`), as a background tab's would: what its callback releases
       # reaches the window waiting for it, which the active window's loop does not otherwise step.
       def deliver_own_agent_notices(background: false)
-        return 0 unless @runtime.call('__csimAgentsPending')
+        return 0 unless @runtime.call('agentsPending')
 
-        @runtime.call('__csimAgentDeliver')
-        @runtime.frame_realm_ids.each {|rid| @runtime.realm_call(rid, '__csimAgentDeliver') }
+        @runtime.call('agentDeliver')
+        @runtime.frame_realm_ids.each {|rid| @runtime.realm_call(rid, 'agentDeliver') }
         if background
           r = @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
           @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
@@ -1239,7 +1239,7 @@ module Capybara
       # (engine-notices.js `deliver`). The session's check first, which costs no V8 call.
       def agent_notices_pending? = Native.agent_notices_pending(@session_partition) && session_windows.any? {|b| b.runtime_agent_notices_pending? }
 
-      def runtime_agent_notices_pending? = @runtime.call('__csimAgentsPending') == true
+      def runtime_agent_notices_pending? = @runtime.call('agentsPending') == true
 
       # The session's service workers' work, which their host's event loop runs (`sw_host`) — a job's run or a lifecycle
       # step queued there, a worker's answer to deliver: stepped as this window settles, where it is another window's,
@@ -1340,23 +1340,23 @@ module Capybara
         @find_cache_dirty = true
       end
 
-      def text(handle)        = dom_call('__csimText', handle).to_s
-      def tag(handle)         = dom_call('__csimTag', handle).to_s
-      def attr(handle, name)  = dom_call('__csimAttr', handle, name.to_s)
-      def inner_html(handle)  = dom_call('__csimInnerHTML', handle).to_s
-      def outer_html(handle)  = dom_call('__csimOuterHTML', handle).to_s
+      def text(handle)        = dom_call('text', handle).to_s
+      def tag(handle)         = dom_call('tag', handle).to_s
+      def attr(handle, name)  = dom_call('attr', handle, name.to_s)
+      def inner_html(handle)  = dom_call('innerHTML', handle).to_s
+      def outer_html(handle)  = dom_call('outerHTML', handle).to_s
       def file_input?(handle)
         tag(handle) == 'input' && attr(handle, 'type').to_s.downcase == 'file'
       end
-      def visible?(handle)    = dom_call('__csimVisible', handle) ? true : false
+      def visible?(handle)    = dom_call('visible', handle) ? true : false
       # `obscured?` — coarse occlusion / hit-test in JS (layout.js). Non-visible / out-of-viewport /
       # click-point-lands-on-another-element → obscured.
-      def obscured?(handle)   = dom_call('__csimObscured', handle) ? true : false
+      def obscured?(handle)   = dom_call('obscured', handle) ? true : false
       # `rect` — the element's coarse border-box from the layout engine, as the full 8-field box.
       # Two key styles on purpose: Capybara's spatial `Rectangle` reads STRING keys
       # (`position['top']`); Discourse's `wait_for_animation` reads the SYMBOL key (`rect[:x]`).
       def rect(handle)
-        r = dom_call('__csimRect', handle)
+        r = dom_call('rect', handle)
         x = (r['x'] || 0).to_f
         y = (r['y'] || 0).to_f
         w = (r['width'] || 0).to_f
@@ -1370,7 +1370,7 @@ module Capybara
       # is a target element's handle (or nil); `pos` a keyword (`:top`/`:bottom`/`:center`); `x`/`y`
       # an explicit coordinate. Symbols are stringified for the JS side.
       def scroll_to(handle, target = nil, pos = nil, x = nil, y = nil)
-        dom_call('__csimScrollTo', handle, target, pos&.to_s, x, y)
+        dom_call('scrollTo', handle, target, pos&.to_s, x, y)
         nil
       end
 
@@ -1379,17 +1379,17 @@ module Capybara
       def scroll_by(handle, dx, dy)
         tick_real_time
         ensure_alive_after_tick(handle)
-        dom_call('__csimScrollBy', handle, dx.to_f, dy.to_f)
+        dom_call('scrollBy', handle, dx.to_f, dy.to_f)
         settle
       end
 
       # Capybara::Driver::Node surface — Node calls `check_stale`
       # before each read, and that advances the virtual clock.
       def all_text(handle)     = text(handle)
-      def visible_text(handle) = dom_call('__csimVisibleText', handle).to_s
+      def visible_text(handle) = dom_call('visibleText', handle).to_s
       def tag_name(handle)     = tag(handle)
-      def value(handle)        = dom_call('__csimValue', handle)
-      def disabled?(handle)    = dom_call('__csimDisabled', handle)
+      def value(handle)        = dom_call('value', handle)
+      def disabled?(handle)    = dom_call('disabled', handle)
       # HTML spec: `<option>.selected` IDL is true when the `selected`
       # *attribute* is set OR when no sibling option has `selected` and
       # this is the first non-disabled option of a single-select
@@ -1399,28 +1399,28 @@ module Capybara
       # `<option selected>` reports no selected options and the matcher
       # fails even though the first option *is* the currently chosen
       # one in real browsers.
-      def option_selected?(h)  = !!dom_call('__csimOptionSelected', h)
+      def option_selected?(h)  = !!dom_call('optionSelected', h)
       def shadow_root_handle(handle)
-        h = dom_call('__csimShadowRoot', handle).to_i
+        h = dom_call('shadowRoot', handle).to_i
         h.zero? ? nil : h
       end
       def computed_style(handle, names)
         tick_real_time
-        result = dom_call('__csimComputedStyle', handle, names.map(&:to_s))
+        result = dom_call('computedStyle', handle, names.map(&:to_s))
         return names.to_h {|n| [n, ''] } unless result.is_a?(Hash)
         result.transform_keys(&:to_s)
       end
-      def node_path(handle)    = dom_call('__csimNodePath', handle).to_s
+      def node_path(handle)    = dom_call('nodePath', handle).to_s
 
       def lookup_node(handle)
-        handle if dom_call('__csimAlive', handle)
+        handle if dom_call('alive', handle)
       end
 
       def check_stale(handle, initial, gen = nil)
-        return if initial && (gen.nil? || gen == @context_gen) && dom_call('__csimAlive', handle)
+        return if initial && (gen.nil? || gen == @context_gen) && dom_call('alive', handle)
 
         tick_real_time
-        return if initial && (gen.nil? || gen == @context_gen) && dom_call('__csimAlive', handle)
+        return if initial && (gen.nil? || gen == @context_gen) && dom_call('alive', handle)
 
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
@@ -1431,10 +1431,10 @@ module Capybara
       # but that was BEFORE the tick — re-verify after so Capybara
       # catches the now-stale handle and retries the find. Otherwise
       # `__csim*` lookups would return null and the operation would
-      # silently no-op (or, in the case of `__csimClickResolve`,
+      # silently no-op (or, in the case of `clickResolve`,
       # dispatch on a detached node whose listeners no longer matter).
       def ensure_alive_after_tick(handle)
-        return if dom_call('__csimAlive', handle)
+        return if dom_call('alive', handle)
         raise Capybara::Simulated::StaleElement, "Element with handle #{handle} is no longer attached to the document"
       end
 
@@ -1450,19 +1450,19 @@ module Capybara
             # Wall-sleep between mousedown and mouseup so click handlers
             # reading `Date.now()` see the elapsed gap (selenium parity).
             init['mouseDownOnly'] = true
-            partial = dom_call('__csimClickResolve', handle, init, {'interceptCheck' => true})
+            partial = dom_call('clickResolve', handle, init, {'interceptCheck' => true})
             # An intercepted click never dispatched its mousedown — surface it
             # here rather than letting clickFinish fire the up/click half against
             # the covered target.
-            # (…and the release is the press's own: the page holds what it pressed, `__csimClickFinish`)
+            # (…and the release is the press's own: the page holds what it pressed, `clickFinish`)
             if !partial.is_a?(Hash) || partial['kind'] != 'partial'
               partial
             else
               sleep delay
-              dom_call('__csimClickFinish')
+              dom_call('clickFinish')
             end
           else
-            dom_call('__csimClickResolve', handle, init, {'interceptCheck' => true})
+            dom_call('clickResolve', handle, init, {'interceptCheck' => true})
           end
         unless action.is_a?(Hash)
           settle
@@ -1596,7 +1596,7 @@ module Capybara
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
-        case dom_call('__csimInert', handle)
+        case dom_call('inert', handle)
         when 'click'
           raise Capybara::Simulated::ClickIntercepted, "element click intercepted: #{describe_node_handle(handle)} is inert"
         when 'keys'
@@ -1628,18 +1628,18 @@ module Capybara
           # a Hash keeps apart from the Integer it equals)
           @file_picks[handle.to_i] = paths
           # Expose File-list metadata to the JS side BEFORE setting the
-          # value: __csimSetValue fires input + change synchronously,
+          # value: setValue fires input + change synchronously,
           # and Redmine's onchange="addInputFiles(this)" reads
           # `inputEl.files` — if we set files after, the handler sees
           # an empty FileList and tears down the input.
-          dom_call('__csimSetFiles', handle, paths.map {|p| picked_file(p) })
+          dom_call('setFiles', handle, paths.map {|p| picked_file(p) })
           # Mirror real browser: <input type=file>.value reflects only
           # the filename of the first chosen file (security-faked path).
-          # __csimSetValue dispatches input + change synchronously.
+          # setValue dispatches input + change synchronously.
           js_value = paths.first ? picked_file_name(paths.first) : ''
-          dom_call('__csimSetValue', handle, js_value)
+          dom_call('setValue', handle, js_value)
         else
-          dom_call('__csimSetValue', handle, coerced)
+          dom_call('setValue', handle, coerced)
         end
         drain_after_user_action
       end
@@ -1690,10 +1690,10 @@ module Capybara
       end
 
       # WebDriver's obscured-click refusal, shared by the click chains that don't
-      # route through `__csimClickResolve`. Raises the retryable error so
+      # route through `clickResolve`. Raises the retryable error so
       # Capybara re-finds and re-clicks once the overlay is gone.
       private def raise_if_click_intercepted(handle, init)
-        r = dom_call('__csimClickInterceptedAt', handle, init)
+        r = dom_call('clickInterceptedAt', handle, init)
         return unless r.is_a?(Hash) && r['kind'] == 'intercepted'
         raise Capybara::Simulated::ClickIntercepted,
               "element click intercepted: #{r['target']} is not clickable at point " \
@@ -1709,9 +1709,9 @@ module Capybara
         raise_if_click_intercepted(handle, init)
         # The press retargets to what the point hits; the release is
         # over the same element.
-        pressed = dom_call('__csimContextPress', handle, init)
+        pressed = dom_call('contextPress', handle, init)
         sleep opts[:delay].to_f if opts[:delay].to_f > 0
-        dom_call('__csimContextRelease', pressed, init) if pressed.to_i > 0
+        dom_call('contextRelease', pressed, init) if pressed.to_i > 0
       end
 
       # A file the user picked from disk, as the JS side builds its File:
@@ -1757,7 +1757,7 @@ module Capybara
         @drops = (@drops || 0) + 1
         pick   = -@drops
         (@file_picks ||= {})[pick] = items.select {|i| i['kind'] == 'file' }.map {|i| i['path'] }
-        dom_call('__csimDropOnto', handle, items, pick)
+        dom_call('dropOnto', handle, items, pick)
       end
 
       # Element-to-element drag. Capybara's `Element#drag_to(target,
@@ -1779,12 +1779,12 @@ module Capybara
         # use that gap (SortableJS applies its ghost class from a `setTimeout` scheduled in
         # `dragstart` and never reaches its reorder logic if `dragover` lands in the same turn).
         # This is what the reference driver's `delay:` between steps buys.
-        dom_call('__csimDragBegin', source_handle, target_handle,
+        dom_call('dragBegin', source_handle, target_handle,
                  {'html5' => html5, 'modifiers' => modifier_flags(drop_modifiers)})
         settle
-        dom_call('__csimDragMove')
+        dom_call('dragMove')
         settle
-        dom_call('__csimDragFinish')
+        dom_call('dragFinish')
         drain_after_user_action
       end
       def drop_items(arg)
@@ -1811,15 +1811,15 @@ module Capybara
         # second's count 2, before the trailing `dblclick`. Jspreadsheet
         # (table-builder's `.jss_worksheet`) enters edit mode on the inner
         # mousedown.
-        [1, 2].each {|detail| dom_call('__csimClickResolve', handle, init.merge('detail' => detail)) }
+        [1, 2].each {|detail| dom_call('clickResolve', handle, init.merge('detail' => detail)) }
         # A browser selects the word during the SECOND press's default action, so
         # the selection is already in place when `dblclick` fires — ProseMirror's
         # double-click handling reads the selection at event time, and selecting
         # only afterwards let PM commit its own narrower word first (its anchor
         # then survived the late correction: the paste-URL-over-selection test
         # wrapped `**bold**` but not the adjacent `` `code` `` span).
-        dom_call('__csimSelectWordAt', handle)
-        dom_call('__csimDblClick', handle, init)
+        dom_call('selectWordAt', handle)
+        dom_call('dblClick', handle, init)
         settle
       end
 
@@ -1863,7 +1863,7 @@ module Capybara
         has_xy = opts[:x] || opts[:y]
         center = opts[:offset] == :center || !has_xy
         if has_xy || center
-          rect = dom_call('__csimPointerRect', handle)
+          rect = dom_call('pointerRect', handle)
           base_x = rect['x'].to_f + (center ? rect['width'].to_f  / 2.0 : 0.0)
           base_y = rect['y'].to_f + (center ? rect['height'].to_f / 2.0 : 0.0)
           # (WebDriver's in-view centre point, floored: "Let x be floor((left + right) ÷ 2.0)" — no driver's click is at a
@@ -1882,21 +1882,21 @@ module Capybara
         # Set the document's hovered element so `:hover` pseudo-class matches
         # resolve against this element (Redmine's gantt tooltips +
         # context-menu submenus rely on CSS `:hover`). The host fn
-        # call into `__csimSetHover` does the slot update on the JS
+        # call into `setHover` does the slot update on the JS
         # side AND fires the hover events (`mouseover` / `mouseenter`
         # where the hovered element changed, the moves) — keeping the
         # state-set and dispatch on the same path avoids the
         # double-eval recursion the inlined `globalThis.document.
         # _hoverElement = ...` triggered (the eval string ran inside
         # a fresh microtask that re-entered the hover listeners).
-        dom_call('__csimSetHover', handle)
+        dom_call('setHover', handle)
       end
 
       def dispatch_event(handle, type, init = {})
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
-        dom_call('__csimDispatchEvent', handle, type.to_s, init)
+        dom_call('dispatchEvent', handle, type.to_s, init)
       end
 
       # Capybara's `send_keys` accepts Strings and Symbols (special
@@ -1940,7 +1940,7 @@ module Capybara
           end
         }.compact
         # Contenteditable hosts (ProseMirror, Trix, Tiptap) reconcile
-        # their view between chars; a batched `__csimSendKeys` queues
+        # their view between chars; a batched `sendKeys` queues
         # all `beforeinput` events on the same microtask round and PM
         # nukes the editor wrapper when its reconciler can't apply
         # them in order. Split multi-char text atoms into per-char
@@ -1948,20 +1948,20 @@ module Capybara
         # before the next char arrives. Plain `<input>` / `<textarea>`
         # don't need this — keep the single batched call there.
         has_multichar_text = atoms.any? {|a| a['kind'] == 'text' && a['value'].to_s.length > 1 }
-        if has_multichar_text && dom_call('__csimIsContentEditable', handle)
+        if has_multichar_text && dom_call('isContentEditable', handle)
           per_char = atoms.flat_map {|a|
             next a unless a['kind'] == 'text' && a['value'].to_s.length > 1
             a['value'].to_s.each_char.map {|c| {'kind' => 'text', 'value' => c} }
           }
           head, *tail = per_char
-          dom_call('__csimSendKeys', handle, [head])
+          dom_call('sendKeys', handle, [head])
           tail.each {|atom|
             tick_real_time
-            dom_call('__csimSendKeys', handle, [atom])
+            dom_call('sendKeys', handle, [atom])
             settle
           }
         else
-          dom_call('__csimSendKeys', handle, atoms)
+          dom_call('sendKeys', handle, atoms)
         end
         drain_after_user_action
       end
@@ -1970,7 +1970,7 @@ module Capybara
         mark_action_baseline
         tick_real_time
         invalidate_find_cache
-        dom_call('__csimSelectOption', handle)
+        dom_call('selectOption', handle)
         tick_real_time
         drain_after_user_action
       end
@@ -1984,11 +1984,11 @@ module Capybara
         # the JS side whether the option's parent select is `multiple`
         # before issuing the unselect; the answer doubles as the
         # "found the right ancestor" check.
-        info = dom_call('__csimOptionContext', handle)
+        info = dom_call('optionContext', handle)
         if info.is_a?(Hash) && info['hasSelect'] && !info['multiple']
           raise Capybara::UnselectNotAllowed, 'Cannot unselect option from single select box.'
         end
-        dom_call('__csimUnselectOption', handle)
+        dom_call('unselectOption', handle)
         tick_real_time
         drain_after_user_action
       end
@@ -2000,7 +2000,7 @@ module Capybara
       # select_option). Without this hop the planned submission (navigation_plan.rs)
       # is never taken and the form never actually navigates / POSTs.
       def consume_pending_form_submit
-        pending = @runtime.call('__csimTakePendingFormSubmit')
+        pending = @runtime.call('takePendingFormSubmit')
         return unless pending.is_a?(Hash)
         # (…the main document's plan, which a frame's submission is routed past: its form submitted as that document's)
         in_top_context { submit_form_spec(pending) }
@@ -2168,7 +2168,7 @@ module Capybara
       # `click`, so without a parallel drain here the navigation stays
       # queued and the page never reloads.
       def consume_pending_navigation
-        pending = @runtime.call('__csimTakePendingNavigation')
+        pending = @runtime.call('takePendingNavigation')
         return unless pending.is_a?(Hash) && pending['url']
         # (…the main document's plan: its hyperlink's href resolved against it, whichever frame `within_frame` entered)
         in_top_context { follow_pending_hyperlink(pending) }
@@ -2224,7 +2224,7 @@ module Capybara
       # of this isolate: navigation_plan.rs `takeDownload`)
       def consume_pending_download
         loop do
-          pending = @runtime.call('__csimTakePendingDownload')
+          pending = @runtime.call('takePendingDownload')
           break unless pending.is_a?(Hash) && pending['url']
 
           save_download(pending)
@@ -2239,7 +2239,7 @@ module Capybara
         url, filename, realm = download['url'].to_s, download['filename'].to_s, download['realm'].to_i
         from_document(realm) do
           if url.start_with?('blob:')
-            blob = host_blob(@runtime.call('__csimReadBlobForWindow', url))
+            blob = host_blob(@runtime.call('readBlobForWindow', url))
             save_downloaded_response(url, {'content-type' => blob[:type]}, [blob[:bytes].to_s], hint: filename) if blob
           else
             download_link(url, filename, realm: realm, link_policy: download['policy'].to_s)
@@ -2252,16 +2252,16 @@ module Capybara
       def submit_form(handle)
         tick_real_time
         invalidate_find_cache
-        form_handle = dom_call('__csimAncestorForm', handle).to_i
+        form_handle = dom_call('ancestorForm', handle).to_i
         return if form_handle.zero?
         # (…none its document's sandbox refuses: `form.submit()`'s steps, which this one's are)
-        return if dom_call('__csimFormSubmissionRefused', form_handle)
-        submit_form_spec(dom_call('__csimFormSerialize', form_handle, 0))
+        return if dom_call('formSubmissionRefused', form_handle)
+        submit_form_spec(dom_call('formSerialize', form_handle, 0))
       end
 
       def title
         tick_real_time
-        @runtime.call('__csimDocumentTitle').to_s
+        @runtime.call('documentTitle').to_s
       end
 
       # The differences CSIM_ARENA_VERIFY=1 found between this browser's trees and their arena copies since the last
@@ -2272,7 +2272,7 @@ module Capybara
       # source (Selenium parity), so route through the active realm.
       def html
         tick_real_time
-        dom_call('__csimDocumentHtml').to_s
+        dom_call('documentHtml').to_s
       end
 
       # The trace's screenshot: the painted page as a data URL, or nil if anything at all went
@@ -2300,7 +2300,7 @@ module Capybara
       # RECORD what happened must not — a trace is an observer.
       def screenshot_png(full: false, tick: true)
         tick_real_time if tick
-        out = dom_call('__csimScreenshot', full)
+        out = dom_call('screenshot', full)
         return nil unless out.is_a?(Hash) && out['refId']
 
         # The painter wrote the PNG (natively) and stashed it here, returning an id for it.
@@ -2390,18 +2390,18 @@ module Capybara
         # `[Replaceable]` accessors over it, and the `@media` cascade and the layout engine read it
         # directly. Every live frame's content box moves with it — a frame lays out against its
         # container — handed on by the resize steps below.
-        @runtime.eval_void("globalThis.__csimSetViewport(#{@viewport_width}, #{@viewport_height});")
+        @runtime.call('setViewport', @viewport_width, @viewport_height)
         # Recompute the cascade `@media` rules against the new
         # viewport so visibility checks (Capybara `visible?`,
         # `getComputedStyle().display`) re-reflect mobile-breakpoint
         # `display: none` / `display: block` flips. Without this the
         # style engine keeps the pre-resize media answers.
-        @runtime.call('__csimRebuildCascade') if @document_handle.to_i > 0
+        @runtime.call('rebuildCascade') if @document_handle.to_i > 0
         # …and the resize steps, now rather than at the next rendering update, which a page with
         # nothing scheduled never runs: the window's `resize`, its `matchMedia` listeners' `change`s
         # (Discourse's viewport-based mobile/desktop class swap), then each frame's whose container
         # the new size moved.
-        @runtime.call('__csimResizeSteps') if @document_handle.to_i > 0
+        @runtime.call('resizeSteps') if @document_handle.to_i > 0
         nil
       end
       def viewport_width                  ; @viewport_width  || SCREEN_SIZE[0] ; end
@@ -2425,14 +2425,14 @@ module Capybara
       end
       # The session history of realm `realm`'s document — the page's (0), or a window's `window.open` made in this isolate —
       # traversed by `delta` (HTML "traverse the history by a delta", the user's as a script's): queued on its traversal
-      # queue as its `history.go(delta)` queues it (history.js `__csimTraverseHistory`) but with no task, applied at once
+      # queue as its `history.go(delta)` queues it (history.js `traverseHistory`) but with no task, applied at once
       # with those queued before it — no script of the page's on the stack, as its task would, run first: a move within
       # the documents made, one that makes a document again planned, which the driver takes with what else is planned
       # (`drain_task_intents`) — none asked where nothing is.
       def traverse_history(realm, delta)
         invalidate_find_cache
-        @runtime.realm_call(realm, '__csimTraverseHistory', delta.to_i, true)
-        @runtime.realm_call(realm, '__csimApplyOwnTraversals', true)
+        @runtime.realm_call(realm, 'traverseHistory', delta.to_i, true)
+        @runtime.realm_call(realm, 'applyOwnTraversals', true)
         consume_planned_traversal if realm.zero?
         drain_task_intents if pending_nav_intent? || (!realm.zero? && windows_planned?)
       end
@@ -2446,7 +2446,7 @@ module Capybara
       # (…`at_turn` as the navigation turn hands over what it made due, these with it: none waits for another)
       private def apply_planned_traversals_before_navigations(at_turn: false)
         if @session_history.queued? && (@session_history.queued_documents? || pending_navigation_besides_traversals?)
-          @runtime.call('__csimApplyOwnTraversals', true, at_turn)
+          @runtime.call('applyOwnTraversals', true, at_turn)
         end
         consume_planned_traversal
       end
@@ -2462,7 +2462,7 @@ module Capybara
       def consume_planned_traversal
         return unless @session_history.traversal_planned?
 
-        while (planned = @runtime.call('__csimTakeTraversal'))
+        while (planned = @runtime.call('takeTraversal'))
           kind, *plan = planned
           invalidate_find_cache
           begin
@@ -2475,7 +2475,7 @@ module Capybara
                 # (…its navigable traversing no more, whichever became of it: `end_traversal`)
                 @session_history.end_traversal
               end
-              @runtime.call('__csimApplyOwnTraversals', true)
+              @runtime.call('applyOwnTraversals', true)
             end
           rescue StandardError => e
             log_console('warn', "history traversal failed: #{e.message}")
@@ -2564,7 +2564,7 @@ module Capybara
         ensure
           history.end_traversal
         end
-        @runtime.realm_call(realm, '__csimApplyOwnTraversals', true) if realm.zero? || @runtime.frame_realm_alive?(realm)
+        @runtime.realm_call(realm, 'applyOwnTraversals', true) if realm.zero? || @runtime.frame_realm_alive?(realm)
       end
 
       # Navigable `nav` (0 its top-level one: the page's, or window realm `top`'s) moved within the document it is at to an
@@ -2576,9 +2576,9 @@ module Capybara
 
         old_url = realm.zero? ? page_url : frame_realm_url(realm)
         self.page_url = url if realm.zero?
-        @runtime.realm_call(realm, '__csimUpdateLocation', url)
-        @runtime.realm_call(realm, '__csimDispatchPopState', state)
-        @runtime.realm_call(realm, '__csimQueueHashChange', old_url, url) if hashchange
+        @runtime.realm_call(realm, 'updateLocation', url)
+        @runtime.realm_call(realm, 'dispatchPopState', state)
+        @runtime.realm_call(realm, 'queueHashChange', old_url, url) if hashchange
       end
 
       # The history entry the page's document leaves — noted by the engine as a navigation of it begins, before its entry is
@@ -2588,7 +2588,7 @@ module Capybara
       # Chrome keeps a value a pagehide handler writes, as a frame's entry keeps it (`frame_document_unloaded`).
       private def capture_left_page_form_state
         id = @session_history.take_leaving
-        return unless id && (state = @runtime.call('__csimCaptureFormState'))
+        return unless id && (state = @runtime.call('captureFormState'))
 
         @session_history.update(id, {form_state: state})
       end
@@ -2598,7 +2598,7 @@ module Capybara
       # input/change, so a restored value doesn't look like a fresh user edit.
       def restore_form_state(id)
         return unless (state = @session_history.entry(id)[:form_state])
-        @runtime.call('__csimRestoreFormState', state)
+        @runtime.call('restoreFormState', state)
       end
 
       # `is_reload` distinguishes a RELOAD of the current entry (`refresh`) from a
@@ -2644,7 +2644,7 @@ module Capybara
       end
       def active_element_handle
         tick_real_time
-        h = dom_call('__csimActiveElement').to_i
+        h = dom_call('activeElement').to_i
         h.zero? ? nil : h
       end
       # Session-level keystroke. Tab / shift-tab cycle focus; everything
@@ -2687,7 +2687,7 @@ module Capybara
 
       def start_trace(metadata = {})
         @trace = Trace.new(metadata: metadata)
-        @runtime.call('__csimSetTraceActive', true)
+        @runtime.call('setTraceActive', true)
       end
 
       # Persist `trace` (defaults to live or pending) to `path` and
@@ -2701,7 +2701,7 @@ module Capybara
       def clear_trace!
         @trace         = nil
         @pending_trace = nil
-        @runtime.call('__csimSetTraceActive', false)
+        @runtime.call('setTraceActive', false)
       end
 
       # Wraps a driver action so the trace records description, urls,
@@ -2720,7 +2720,7 @@ module Capybara
         return yield if @trace.nil? && @trace_mode == :off
         if @trace.nil?
           @trace = Trace.new(metadata: {auto_started_at: Time.now.utc.iso8601(3)})
-          @runtime.call('__csimSetTraceActive', true)
+          @runtime.call('setTraceActive', true)
         end
         return yield if @recording_action
         @recording_action = true
@@ -2792,7 +2792,7 @@ module Capybara
       # …the one script `url` named as it ran — a module's, or a classic script's, which the bridge keeps (`noteSourceMap`)
       # — or nil.
       def source_map_of(url)
-        @module_source_maps&.[](url.to_s) || @runtime.call('__csimSourceMapOf', url.to_s)
+        @module_source_maps&.[](url.to_s) || @runtime.call('sourceMapOf', url.to_s)
       rescue StandardError
         nil
       end
@@ -2805,7 +2805,7 @@ module Capybara
       # description Proc).
       def describe_node_handle(handle)
         return "handle=#{handle}" if handle.nil? || handle.zero?
-        info = dom_call('__csimDescribeNode', handle)
+        info = dom_call('describeNode', handle)
         return "handle=#{handle}" unless info.is_a?(Hash)
         s = info['tag'].to_s
         s += "##{info['id']}"  unless info['id'].to_s.empty?
@@ -2823,7 +2823,7 @@ module Capybara
         invalidate_find_cache
         # Routes to the active frame realm inside `within_frame` (Selenium
         # parity: `evaluate_script` runs in the current browsing context).
-        result = dom_call('__csimEvalScript', code.to_s, marshal_args(args || []))
+        result = dom_call('evalScript', code.to_s, marshal_args(args || []))
         settle_idle_style
         drain_task_intents
         result
@@ -2837,7 +2837,7 @@ module Capybara
         tick_real_time
         flush_module_rt
         invalidate_find_cache
-        dom_call('__csimExecScript', code.to_s, marshal_args(args || []))
+        dom_call('execScript', code.to_s, marshal_args(args || []))
         settle_idle_style
         drain_task_intents
         nil
@@ -2845,15 +2845,15 @@ module Capybara
 
       # A task this driver ran has ended: under the style engine, the style it changed is applied on an idle page, as a
       # browser's rendering update would apply it — which starts any transition or animation it declares, and those keep
-      # the page stepping (timers.js `__csimSettleIdleStyle`).
+      # the page stepping (timers.js `settleIdleStyle`).
       def settle_idle_style
-        @runtime.call('__csimSettleIdleStyle')
+        @runtime.call('settleIdleStyle')
       end
 
       # The session's emulated position (WebDriver BiDi "set emulated position data", Geolocation §12) — the engine's,
       # by the session's partition (geolocation.rs), every window and worker of it reading it — a denial the
       # geolocation permission's state. A significant change of position: each window and worker told
-      # (geolocation.js `__csimGeolocationChanged`), its watches called back again and each PermissionStatus whose
+      # (geolocation.js `geolocationChanged`), its watches called back again and each PermissionStatus whose
       # state moved told — the windows' notices taken at once (a worker takes its own as its loop steps).
       #
       #   set_geolocation(latitude: 35.6, longitude: 139.7)
@@ -2867,12 +2867,12 @@ module Capybara
       def set_permission(name, state)
         raise ArgumentError, "no permission #{name.inspect} to set here (#{PERMISSIONS.join(', ')}; geolocation: set_geolocation)" unless PERMISSIONS.include?(name)
 
-        @runtime.call('__csimSetClipboardPermission', name, state)
+        @runtime.call('setClipboardPermission', name, state)
         nil
       end
 
       def clear_permissions
-        PERMISSIONS.each {|name| @runtime.call('__csimSetClipboardPermission', name, 'prompt') }
+        PERMISSIONS.each {|name| @runtime.call('setClipboardPermission', name, 'prompt') }
         nil
       end
 
@@ -2930,7 +2930,7 @@ module Capybara
             {'coords' => {'latitude' => latitude, 'longitude' => longitude, 'accuracy' => accuracy}.merge(rest.transform_keys(&:to_s))}
           end
         invalidate_find_cache
-        @runtime.call('__csimGeolocationChanged', JSON.generate(source))
+        @runtime.call('geolocationChanged', JSON.generate(source))
         deliver_agent_notices
         nil
       end
@@ -2955,7 +2955,7 @@ module Capybara
         # Runs in the active frame realm inside `within_frame` (Selenium
         # parity), same as evaluate_script; the result slot is realm-local so
         # the poll below must read from the same realm.
-        dom_call('__evalAsyncScript', code.to_s, marshal_args(args || []))
+        dom_call('evalAsyncScript', code.to_s, marshal_args(args || []))
         settle_idle_style
         # Pump virtual time so any setTimeout-driven completion lands.
         # Capybara's polling can't help here — we're inside one session
@@ -2963,7 +2963,7 @@ module Capybara
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) +
                    Capybara.default_max_wait_time.to_f
         loop do
-          result = dom_call('__pollAsyncResult')
+          result = dom_call('pollAsyncResult')
           return result['value'] if result.is_a?(Hash) && result.key?('value')
           break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
           # (…awake the moment a worker posts, what the script may be waiting on, where one runs; none of it waited for a job's
@@ -3269,7 +3269,7 @@ module Capybara
         # this advance (e.g. a `setTimeout(…, 8)` firing mid-frame) and the nav hop
         # it queues are real progress, so a caller mustn't read the frame as idle.
         frame_progressed = step_and_drain_progressed(@runtime.run_loop_step(frame_ms))
-        probe = dom_call('__csimEventLoopProbe')
+        probe = dom_call('eventLoopProbe')
         {
           'raf'        => !!probe['raf'],
           # A live WS or event stream reader counts as async so the drain loop yields the GVL to it each frame — see
@@ -3278,7 +3278,7 @@ module Capybara
           'async'      => !!probe['async'] || websocket_reader_active? || event_source_reader_active? || worker_drive_pending?,
           # ms until the nearest scheduled timer (-1 = none). Lets a caller keep
           # advancing while a near-future `setTimeout` is parked (a `step_timeout`-
-          # style wait) instead of declaring the page idle — see `__csimEventLoopProbe`.
+          # style wait) instead of declaring the page idle — see `eventLoopProbe`.
           'next_timer' => [probe['nextTimer'].to_f, worker_next_timer].select {|t| t >= 0 }.min || -1.0,
           # `turns > 1` ⇒ phase 1's quiescence did work (the trailing no-progress
           # turn that ends the loop is the +1); OR phase 2's advance did.
@@ -3302,7 +3302,7 @@ module Capybara
         return nil unless reply_ready || hold_left?(ClockHolds::FETCH)
 
         held_progressed = reply_ready && step_and_drain_progressed(@runtime.run_loop_step(0))
-        probe = dom_call('__csimEventLoopProbe')
+        probe = dom_call('eventLoopProbe')
         {
           'raf'        => !!probe['raf'],
           'async'      => true,
@@ -3331,7 +3331,7 @@ module Capybara
         return nil unless ready || hold_left?(ClockHolds::SOCKET_CLOSE)
 
         held_progressed = ready && step_and_drain_progressed(@runtime.run_loop_step(0))
-        probe = dom_call('__csimEventLoopProbe')
+        probe = dom_call('eventLoopProbe')
         {
           'raf'        => !!probe['raf'],
           'async'      => true,
@@ -3409,7 +3409,7 @@ module Capybara
       # once per `run_event_loop_frame` (e.g. the WPT runner checking its harness's
       # completion sentinel) doesn't perturb the frame cadence the loop maintains.
       def peek_script(expr)
-        dom_call('__csimEvalScript', expr.to_s, marshal_args([]))
+        dom_call('evalScript', expr.to_s, marshal_args([]))
       end
 
       # Any navigation intent queued and waiting for `drain_pending_navigation`
@@ -3425,7 +3425,7 @@ module Capybara
       # Whether a window `window.open` made in this isolate has a navigation of its own planned, or a traversal queued that
       # plans one (`consume_pending_window_nav`) — none asked where it made none.
       private def windows_planned?
-        !@runtime.window_realm_meta.empty? && @runtime.call('__csimWindowsPlanned') == true
+        !@runtime.window_realm_meta.empty? && @runtime.call('windowsPlanned') == true
       end
       private def pending_navigation_besides_traversals?
         own_planned.anybits?(~OWN_TRAVERSAL)
@@ -3514,7 +3514,7 @@ module Capybara
       # script of the page's, as a fetch it made run-to-completion holds (an inserted script's, a synchronous XHR's: Chrome and
       # Firefox `after` before the timer it set before them).
       def server_slept_ms(ms)
-        return unless ms.positive? && !@runtime.call('__csimScriptOnStack')
+        return unless ms.positive? && !@runtime.call('scriptOnStack')
 
         tick_real_time(step_ms: ms, drain: false)
       end
@@ -3555,7 +3555,7 @@ module Capybara
       attr_reader :context_gen
 
       # A form's submission in the current document (the page's, an entered frame's), its request as it was submitted
-      # (`__csimFormSerialize`): routed, then navigated (`submit_form_in_realm`) — the current document's, for what its
+      # (`formSerialize`): routed, then navigated (`submit_form_in_realm`) — the current document's, for what its
       # response would download (`from_document`).
       def submit_form_spec(spec)
         return unless spec.is_a?(Hash)
@@ -3573,7 +3573,7 @@ module Capybara
       end
       # A form's submission as its request — [method, url, body, content_type], the body and its type nil for a GET — or
       # nil where it submits nothing (its action no URL), the engine's (text_codec.rs `form_request`): `spec` the form's
-      # (`__csimFormSerialize`), its action resolved as `action_url`. Each entry string {'name','value'} or file
+      # (`formSerialize`), its action resolved as `action_url`. Each entry string {'name','value'} or file
       # {'name','file'=>true,'filename','type', and 'handle'/'index' or 'bytes'}: a file's bytes read — only where its
       # body carries them — through its `@file_picks` slot, else the VM's (an in-memory `new File([…])`).
       def form_request(spec, action_url)
@@ -3773,11 +3773,11 @@ module Capybara
         # document of this one's, nor a domain any of them wrote counted — realm_location.rs `forgetOrigins`)
         new_browsing_context_group
         @runtime.reset_page
-        V8Runtime.engine_call(@runtime, 'forgetOrigins')
+        @runtime.call('forgetOrigins')
         # Per-visit ctx rebuild drops the JS-side trace-active flag,
         # so re-flip it if we're carrying a pending trace into the
         # next visit.
-        @runtime.call('__csimSetTraceActive', false)
+        @runtime.call('setTraceActive', false)
         reset_timer_state
         invalidate_find_cache
       end
@@ -3919,7 +3919,7 @@ module Capybara
       def flush_module_rt
         return if (Thread.current[:csim_module_rt] || []).empty?
 
-        dom_call('__csimFlushModuleRt')
+        dom_call('flushModuleRt')
       end
 
       # A resource fetched only for its Resource Timing entry — a `<video>` / `<audio>` / `<embed>` /
@@ -4054,7 +4054,7 @@ module Capybara
       # read-throughs the per-visit asset cache) and cached iff durably cacheable.
       # Returns nil on a status that is not ok (not 200 to 299) / fetch failure, so the
       # JS caller fails the load.
-      # A document starts loading — the page's, a frame's, an auxiliary window's (the bridge's `__csimLoadDocument` asks,
+      # A document starts loading — the page's, a frame's, an auxiliary window's (the bridge's `loadDocument` asks,
       # and keeps the answer: handles.js `docToken`): a token of its own, naming its asset memo in `external_asset_response`.
       # The last ASSET_DOCUMENTS documents' memos are kept, so a page's survives the frames it builds while it loads.
       ASSET_DOCUMENTS = 16
@@ -4162,7 +4162,7 @@ module Capybara
       #      the body as it comes, pushing each `{id:, type:, data:, lastEventId:}` (or `{type: '__open', url:}` /
       #      `{type: '__error', message:}` sentinel) onto a thread-safe queue.
       #   3. Settle's drain loop calls `deliver_event_source_events`, which polls the queue and hands the batch to
-      #      `__csim_deliverEventSourceEvents` for dispatch.
+      #      `deliverEventSourceEvents` for dispatch.
       # rusty_racer VMs are single-threaded; only the main thread ever enters the VM. Background threads only touch the
       # Queue and the engine's plan, which is theirs alone. `reset!` and per-visit context rebuilds kill all open threads —
       # the new VM gets a fresh handle space.
@@ -4236,7 +4236,7 @@ module Capybara
         events = event_source_poll
         return 0 if events.empty?
         # (…each a task of its own — see deliver_window_messages)
-        events.each {|event| @runtime.call('__csim_deliverEventSourceEvents', [event]) }
+        events.each {|event| @runtime.call('deliverEventSourceEvents', [event]) }
         events.size
       end
 
@@ -4596,7 +4596,7 @@ module Capybara
         # a realm gone since)
         js_events.each do |event|
           realm = @websocket_lock.synchronize { @websocket_realms[event[:id]] }.to_i
-          @runtime.realm_call(realm, '__csim_deliverWebSocketEvents', [event]) if realm.zero? || @runtime.frame_realm_alive?(realm)
+          @runtime.realm_call(realm, 'deliverWebSocketEvents', [event]) if realm.zero? || @runtime.frame_realm_alive?(realm)
         end
         # A terminal event (`__close` / `__error`) completes its socket's close handshake — release the clock hold (a
         # server-INITIATED close's none: no ws_close held it).
@@ -4939,8 +4939,8 @@ module Capybara
           by_realm[context[:realm]] << {'handle' => r['handle'], 'response' => response}
         end
         by_realm.each do |realm, responses|
-          if realm.zero? then @runtime.call('__csim_deliverHijackedFetches', responses)
-          elsif @runtime.frame_realm_alive?(realm) then @runtime.realm_call(realm, '__csim_deliverHijackedFetches', responses)
+          if realm.zero? then @runtime.call('deliverHijackedFetches', responses)
+          elsif @runtime.frame_realm_alive?(realm) then @runtime.realm_call(realm, 'deliverHijackedFetches', responses)
           end
         end
         raw.size
@@ -5169,10 +5169,10 @@ module Capybara
         # (…and how far the agent's `Date` scale, which every message's time is on, stands ahead of its maker's `Date` —
         # its creator's document's, else the page's: what it converts the times it is told and tells by, agent_clock.rs
         # `WorkerClock::anchor_shift`)
-        record[:shift]         = shift ? shift.to_f : @runtime.call('__csimAgentShift').to_f
+        record[:shift]         = shift ? shift.to_f : @runtime.call('agentShift').to_f
         # (…and the host's clock's offset its maker's time origin holds — `travel_to`'s, as its creator's document was
         # made, else the page's — which its own takes: agent_clock.rs `TimeOrigin`)
-        record[:travel]        = travel ? travel.to_f : @runtime.call('__csimTimeTravel').to_f
+        record[:travel]        = travel ? travel.to_f : @runtime.call('timeTravel').to_f
         record[:epoch]         = if epoch_at then epoch_at.to_f
                                  elsif @runtime.clock_date.positive? then [@runtime.clock_date + record[:origin] - @runtime.clock, @runtime.clock_held].max - record[:shift]
                                  elsif @clock_epoch_ms then @clock_epoch_ms + record[:origin] - @clock_epoch_at.to_f
@@ -5293,7 +5293,7 @@ module Capybara
       # `source` = the posting client. Counted as a message owed (released by the worker's
       # `swack`) so settle waits for the SW to process it and any client.postMessage reply.
       # (…the host's to deliver: `sw_host`)
-      # (…`sender` the service worker posting it, 0 for a client: `__csim_swClientMessage`)
+      # (…`sender` the service worker posting it, 0 for a client: `swClientMessage`)
       def service_worker_post_message(handle, data, client_id = nil, client_url = nil, sender = 0)
         return sw_host.service_worker_post_message(handle, sw_host.restamped(data.to_s, self), client_id, client_url, sender) unless sw_host?
 
@@ -5735,7 +5735,7 @@ module Capybara
       def clock_at_least(at)
         return false unless at > @runtime.clock
 
-        @runtime.realm_direct_call(0, '__csimClockAtLeast', at)
+        @runtime.realm_direct_call(0, 'clockAtLeast', at)
         true
       end
 
@@ -5896,7 +5896,7 @@ module Capybara
         return if WorkerHost.direct?(fid)
         # Run the network leg RIGHT HERE, on the worker's own thread, before the
         # fetch event dispatches (this hook fires at the top of
-        # __csim_swDispatchFetch). Sequential-on-one-thread makes the race
+        # swDispatchFetch). Sequential-on-one-thread makes the race
         # scheduling-independent; simultaneity is restored at DECISION time: the
         # leg's cost is the server's MODELED delay (the wpt py shim virtualizes
         # `time.sleep` and surfaces the total as X-Csim-Server-Delay-Ms; a
@@ -6112,9 +6112,9 @@ module Capybara
       # its own event loop: a worker's queued as it is told — the block's task queued behind it — a realm's run here.
       private def sw_update_worker_state(handle, state)
         changed = Native.sw_set_worker_state(@sw_partition, handle.to_i, state.to_s)
-        sw_tell_workers('__csim_swWorkerStateChanged', handle.to_i, state.to_s) if changed
+        sw_tell_workers('swWorkerStateChanged', handle.to_i, state.to_s) if changed
         yield if block_given?
-        sw_tell_realms('__csim_swWorkerStateChanged', handle.to_i, state.to_s) if changed
+        sw_tell_realms('swWorkerStateChanged', handle.to_i, state.to_s) if changed
         nil
       end
 
@@ -6201,10 +6201,10 @@ module Capybara
         sw_soft_update_later(handle) if handle
       end
       # …a little after it, the page that navigation made under way, as SW's "the user agent may call this as often as it
-      # likes" leaves open: a timer of the worker's own (workers.js `__csim_swSoftUpdateLater`), on the clock of a window that
+      # likes" leaves open: a timer of the worker's own (workers.js `swSoftUpdateLater`), on the clock of a window that
       # may have gone on to another page by then.
       def sw_soft_update_later(handle)
-        @workers[handle.to_i]&.dig(:inbox)&.push({kind: 'sw_told', fn: '__csim_swSoftUpdateLater', args: []})
+        @workers[handle.to_i]&.dig(:inbox)&.push({kind: 'sw_told', fn: 'swSoftUpdateLater', args: []})
       end
       # …a subresource request's, where the registration of the worker that answers it is stale.
       private def sw_soft_update_if_stale(handle)
@@ -6247,15 +6247,15 @@ module Capybara
         sw_with_realms { browser&.sw_controller_changed(realm, handle, intercepts, script_url) }
       end
       def sw_controller_changed(realm, *controller)
-        return realm_told(realm, '__csim_swSetControllerDirect', *controller) unless realm.negative?
+        return realm_told(realm, 'swSetControllerDirect', *controller) unless realm.negative?
 
-        @workers[-realm]&.dig(:inbox)&.push({kind: 'sw_told', fn: '__csim_swSetControllerDirect', args: controller})
+        @workers[-realm]&.dig(:inbox)&.push({kind: 'sw_told', fn: 'swSetControllerDirect', args: controller})
       end
 
       # The realm the host knows as `realm` (0: its window) announced as a client, where it is still alive.
       private def sw_report_client(realm)
         browser, realm = sw_window_realm(realm)
-        browser&.realm_told(realm, '__csim_swReportClient')
+        browser&.realm_told(realm, 'swReportClient')
       end
 
       # The job's worker `handle` evaluated its script, `ok` or not (`message`).
@@ -6267,7 +6267,7 @@ module Capybara
       # broadcast, so a listener finds the registration as the step leaves it) — and answers what the
       # host is to do for it, in order (`sw_run`): tell the realms, end an isolate, have a worker fire
       # its activate event, queue the next step as a task of the platform's on the window's event
-      # loop (sw-client.js __csim_swQueueStep, which calls sw_step back), so an observer sees every
+      # loop (sw-client.js swQueueStep, which calls sw_step back), so an observer sees every
       # state between. A step waiting on the worker's own phase or on Try Activate resumes at once
       # when that arrives (sw_resume_step).
 
@@ -6285,22 +6285,22 @@ module Capybara
           when 'state'         then sw_update_worker_state(n, *args)
           when 'terminate'     then worker_terminate(n)
           when 'update_found'
-            sw_tell_workers('__csim_swRegistrationUpdateFound', n)
+            sw_tell_workers('swRegistrationUpdateFound', n)
             @workers[args[0]]&.dig(:inbox)&.push({kind: 'sw_install'})
-            sw_tell_realms('__csim_swRegistrationUpdateFound', n)
+            sw_tell_realms('swRegistrationUpdateFound', n)
           when 'activate'      then sw_update_worker_state(n, 'activating') { @workers[n]&.dig(:inbox)&.push({kind: 'sw_activate'}) }
           when 'controller'    then sw_controller_told(n, *args)
-          when 'queue_step'    then @runtime.call('__csim_swQueueStep', n)
+          when 'queue_step'    then @runtime.call('swQueueStep', n)
           when 'continue'      then sw_run(Native.sw_continue(@sw_partition, n))
           when 'try_clear'     then try_clear_uninstalls
           when 'try_activate'  then sw_try_activate
           when 'retry_navs'
-            sw_tell_realms('__csim_swRetryDeferredNavs')
+            sw_tell_realms('swRetryDeferredNavs')
             sw_with_realms { sw_browsers.each(&:sw_navigations_due!) }
-          when 'queue_job'     then @runtime.call('__csim_swQueueJob', n)
+          when 'queue_job'     then @runtime.call('swQueueJob', n)
           when 'fetch'         then sw_fetch_job(n)
           when 'report_client' then sw_report_client(n)
-          when 'settled'       then sw_broadcast('__csim_swJobSettled', n, *args)
+          when 'settled'       then sw_broadcast('swJobSettled', n, *args)
           end
         end
         nil
@@ -6684,7 +6684,7 @@ module Capybara
 
       # Deliver a clients.claim() to EVERY in-scope client: broadcast to the main realm AND every
       # frame realm; each self-checks whether its own document is in the claiming registration's
-      # scope (__csim_swClaimClient) so no realm→URL map is needed here. has_fetch = the SW's
+      # scope (swClaimClient) so no realm→URL map is needed here. has_fetch = the SW's
       # install-time fetch-listener snapshot, so a claimed client routes its fetches.
       private def broadcast_claim(handle, has_fetch, scope)
         # The claim's has_fetch snapshot predates install — a router-rules-only SW
@@ -6707,7 +6707,7 @@ module Capybara
       # its worker CLIENTS (a dedicated/shared worker whose script URL is in scope adopts the claiming SW): the same
       # self-check, run in the worker's isolate via its inbox.
       def sw_claim_told(claim)
-        broadcast_to_realms('__csim_swClaimClient', *claim.values_at(:handle, :has_fetch, :script_url, :scope, :all_scopes, :site))
+        broadcast_to_realms('swClaimClient', *claim.values_at(:handle, :has_fetch, :script_url, :scope, :all_scopes, :site))
         # Snapshot: a live worker thread can insert into @workers (a nested spawn) mid-walk.
         @workers.to_a.each do |_h, w|
           next if w[:service] || !w[:thread]&.alive? || w[:partition].to_s != claim[:site]
@@ -7074,7 +7074,7 @@ module Capybara
         sw_host.sw_client_settled(id) if Native.sw_discard_reserved_client(@sw_partition, id)
       end
       # …and either way, every service worker of the session told: a `clients.get` of it each waits on settles
-      # (workers.js `__csim_swClientSettled`) — to the client, or to none.
+      # (workers.js `swClientSettled`) — to the client, or to none.
       # (…and what was posted to it meanwhile put back on the outbox, for the next delivery to route — its document's realm
       # alive by then, its queue taking it — or to drop, the client discarded)
       def sw_client_settled(id)
@@ -7121,7 +7121,7 @@ module Capybara
       # reads (it can't query the browser): this window's focus chain (navigables.rs `focus_chain`), by the session's
       # numbers for its realms, the window with the system focus the driver's (Driver#switch_to_window).
       def focus_changed
-        chain = @runtime.realm_direct_call(0, '__csimFocusChain') || []
+        chain = @runtime.realm_direct_call(0, 'focusChain') || []
         Native.sw_set_focus(@sw_partition, @window_number, chain.map {|realm| sw_realm_key(realm) })
         nil
       end
@@ -7181,7 +7181,7 @@ module Capybara
         if realm.negative?
           (w = @workers[-realm]) && w[:inbox] << {kind: 'sw_client_message', data: data, handle: handle}
         else
-          realm_told(realm, '__csim_swDeliverClientMessage', data, handle)
+          realm_told(realm, 'swDeliverClientMessage', data, handle)
         end
         nil
       end
@@ -7240,9 +7240,9 @@ module Capybara
           # (…taken at the time it was posted at, as a message to the worker itself is: `worker_post_to_worker`)
           w[:asked] = true
         elsif id.zero?
-          @runtime.call('__csimPortEndDeliver', end_id, data)
+          @runtime.call('portEndDeliver', end_id, data)
         elsif @runtime.frame_realm_alive?(id)
-          @runtime.realm_call(id, '__csimPortEndDeliver', end_id, data)
+          @runtime.realm_call(id, 'portEndDeliver', end_id, data)
         end
       end
 
@@ -7280,7 +7280,7 @@ module Capybara
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # A caller in a script (`defer_ok`: the iframe build) can't block for it — the settling message may be sent by this very page's JS —
         # so it gets a deferral marker: the caller parks the navigation and the activated marker
-        # makes it again (__csim_swRetryDeferredNavs). Any other waits what it can (`await_sw_activation`).
+        # makes it again (swRetryDeferredNavs). Any other waits what it can (`await_sw_activation`).
         # (…the top-level site of the environment it navigates: the frame's container's top-level traversable's)
         # (…a `data:` URL's response its own, here only one that makes no document — frame_response.rs: saved as a download
         # is below, no request made of it)
@@ -7329,7 +7329,7 @@ module Capybara
           initiator:                     origin_url,
           origin_null:                   initiating.fetch(:origin_null, false),
           initiator_cross_site_ancestor: initiating.fetch(:initiator_cross_site_ancestor, false),
-          ancestors:                     container_realm && @runtime.realm_direct_call(0, '__csimAncestorDocuments', container_realm.to_i, true),
+          ancestors:                     container_realm && @runtime.realm_direct_call(0, 'ancestorDocuments', container_realm.to_i, true),
           dest:                          dest.to_s,
           user_activated:                user_activated,
           jar:                           @cookie_jar,
@@ -7505,7 +7505,7 @@ module Capybara
         id = realm_id.to_i
         return false if id.positive? && !@runtime.frame_realm_alive?(id)
 
-        @runtime.realm_call(id, '__csimSwMayControlNavigation') == true
+        @runtime.realm_call(id, 'swMayControlNavigation') == true
       end
 
       # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
@@ -7855,7 +7855,7 @@ module Capybara
         # holds is released with it, so settle can reach idle.
         @worker_host.streams_gone(handle.to_i).each do |key, fetch_id|
           browser, realm = sw_window_realm(key)
-          browser&.sw_fetch_answered(realm, '__csim_swFetchStreamError', fetch_id, nil, nil)
+          browser&.sw_fetch_answered(realm, 'swFetchStreamError', fetch_id, nil, nil)
         end
         # A registration whose active worker this was routes no later navigation to it (it falls
         # through to the network instead).
@@ -7975,7 +7975,7 @@ module Capybara
         # (…an id naming nothing we know dropped: a real browser discards a message to a gone client, and delivering it
         # to a main realm would MISROUTE it)
         # (…one to a reserved client — a navigation's, its document not committed, which a deadlocked worker's `get` resolved
-        # to early: workers.js `__csim_swBreakSelfWait` — held until it is a client: `sw_client_settled`)
+        # to early: workers.js `swBreakSelfWait` — held until it is a client: `sw_client_settled`)
         sw_msgs.each do |e|
           # (…one posted after a claim held — an earlier drain's, or this one's before it in the outbox — is causally after
           # it: `clients.claim()` sets each client's active worker before its promise resolves, so a message sent after
@@ -7995,7 +7995,7 @@ module Capybara
         # (…a realm of another window's by the session's number for it: `sw_realm_key`)
         fetch_resps.each do |e|
           browser, realm = sw_window_realm(e[:realm_id])
-          browser&.sw_fetch_answered(realm, '__csim_swControllerFetchResponse', e[:fetch_id], [e[:resp], e[:spent].to_f, e[:took].to_f], {kind: 'sw_fetch_response', resp: e[:resp], spent: e[:spent].to_f, took: e[:took].to_f})
+          browser&.sw_fetch_answered(realm, 'swControllerFetchResponse', e[:fetch_id], [e[:resp], e[:spent].to_f, e[:took].to_f], {kind: 'sw_fetch_response', resp: e[:resp], spent: e[:spent].to_f, took: e[:took].to_f})
         end
         # Streaming respondWith frames — deliver IN EMISSION ORDER (per fetch id: start → chunk* →
         # close/error) so the client reassembles the body ReadableStream correctly. The request's
@@ -8038,7 +8038,7 @@ module Capybara
         end
         # Each worker→parent message fires from its OWN task, its checkpoint before the next (HTML: the message event is
         # fired from a queued task) — the delivery's own, workers.js `deliverWorkerEvent`, the batch handed over at once.
-        @runtime.call('__csim_deliverWorkerMessages', direct) unless direct.empty?
+        @runtime.call('deliverWorkerMessages', direct) unless direct.empty?
         events.size
       end
 
@@ -8237,30 +8237,30 @@ module Capybara
       end
 
       # …and the navigation it was opened for, to `url`, by the document of realm `initiator` — planned for the window as
-      # `open()`'s script runs (location.js `__csimNavigateFrom`), its source snapshot's activation `activated`: whether
+      # `open()`'s script runs (location.js `navigateFrom`), its source snapshot's activation `activated`: whether
       # that document's window had it before the new window consumed it.
       def plan_window_realm_navigation(realm, url, initiator, activated)
-        @runtime.realm_call(realm, '__csimNavigateFrom', url.to_s, initiator.to_i, '', activated)
+        @runtime.realm_call(realm, 'navigateFrom', url.to_s, initiator.to_i, '', activated)
       end
 
       # …or, opened at about:blank — `url`, a fragment of it its own; none for '' — its initial about:blank at that URL (HTML's
       # window open steps: the URL and history update steps in place of a navigation), the initial one still.
       def initial_document_at(realm, url)
-        @runtime.realm_call(realm, '__csimUpdateLocation', url.to_s) unless url.to_s.empty? || url.to_s == 'about:blank'
+        @runtime.realm_call(realm, 'updateLocation', url.to_s) unless url.to_s.empty? || url.to_s == 'about:blank'
       end
       # The sandboxing a window the document of realm `realm` opens is made with (realm_location.rs `popupFlags`), which a
       # window of a browsing context group of its own is given (Driver#open_aux_window).
-      def popup_flags(realm) = @runtime.realm_direct_call(realm.to_i, '__csimPopupFlags').to_i
+      def popup_flags(realm) = @runtime.realm_direct_call(realm.to_i, 'popupFlags').to_i
 
       # ── The windows `window.open` made in this isolate, as the driver addresses them (RealmWindow) ──
       # The realm of the document window `key` shows now — the one its first document's was, a navigation's after each
       # (v8_runtime.rb `window_realm_meta`) — none for one gone: closed by a script or the user, its realm
       # discarded with its page's (`dispose_frame_realms`).
       # …as `[realm, closing, gone]`: whether its close was asked (a script's `close()`, its close a task to come) or ran
-      # (window.js `__csimWindowState`).
+      # (window.js `windowState`).
       def window_realm_state(key)
         realm = window_realm_made(key) or return [nil, true, true]
-        state = @runtime.realm_call(realm, '__csimWindowState').to_i
+        state = @runtime.realm_call(realm, 'windowState').to_i
         [(realm unless state == 2), state.positive?, state == 2]
       end
       # …which changes only as a window of this isolate is made, navigated, closed or let go of: the generation that
@@ -8270,7 +8270,7 @@ module Capybara
       private def window_realm_made(key) = @runtime.window_realm_meta.find {|_, meta| meta[:window_key] == key }&.first
       # Its URL and its title: its document's.
       def window_realm_url(realm)   = @runtime.realm_url(realm)
-      def window_realm_title(realm) = @runtime.realm_call(realm, '__csimDocumentTitle').to_s
+      def window_realm_title(realm) = @runtime.realm_call(realm, 'documentTitle').to_s
       # The user's navigation of it (Capybara's `visit` in it): a new document at `url`, no document its initiator.
       def visit_window_realm(realm, url)
         navigate_window_realm(realm, 'location', [url.to_s, false, nil, nil, nil, true, nil], by_user: true)
@@ -8283,22 +8283,22 @@ module Capybara
       end
       # …and a traversal of its session history (`go_back` / `go_forward`): `traverse_history`.
       # …and its viewport (`resize_to`), its resize steps run: as the page's (`set_viewport`), in its realm.
-      def window_realm_viewport(realm) = @runtime.realm_call(realm, '__csimViewportSize').map(&:to_i)
+      def window_realm_viewport(realm) = @runtime.realm_call(realm, 'viewportSize').map(&:to_i)
       # …and the response its document was made of, `[status, headers]` — one no response made, 200.
       def window_realm_response(realm) = @runtime.window_realm_meta.dig(realm, :response) || ABOUT_BLANK_RESPONSE
       def set_window_realm_viewport(realm, w, h)
         invalidate_find_cache
-        @runtime.realm_call(realm, '__csimSetViewport', w.to_i, h.to_i)
-        @runtime.realm_call(realm, '__csimRebuildCascade')
-        @runtime.realm_call(realm, '__csimResizeSteps')
+        @runtime.realm_call(realm, 'setViewport', w.to_i, h.to_i)
+        @runtime.realm_call(realm, 'rebuildCascade')
+        @runtime.realm_call(realm, 'resizeSteps')
         nil
       end
       # …and its close by the user (Capybara's `Window#close`): its document unloaded and its browsing context discarded
-      # at once (window.js `__csimCloseWindowNow`), then its realms — its document's, its frames' — let go of.
+      # at once (window.js `closeWindowNow`), then its realms — its document's, its frames' — let go of.
       def close_window_realm(key)
         realm = window_realm_made(key) or return
         invalidate_find_cache
-        @runtime.realm_call(realm, '__csimCloseWindowNow')
+        @runtime.realm_call(realm, 'closeWindowNow')
         discard_window_realm(key)
       end
       # …and, closed by a script whose task discarded it, let go of: its realms disposed (none while a script of this
@@ -8318,7 +8318,7 @@ module Capybara
       # with — handed over (navigables.rs `release_window_history`): the handle that owns it from now on.
       def hand_over_window_traversable(realm)
         history = window_history(realm) or return
-        @runtime.realm_call(realm, '__csimReleaseWindowHistory')
+        @runtime.realm_call(realm, 'releaseWindowHistory')
         history.own!
         history
       end
@@ -8357,13 +8357,13 @@ module Capybara
       # …whether that window has it now, unconsumed: the source snapshot of a navigation its document begins of another
       # window (HTML's "has transient activation").
       def source_activated?(realm_id)
-        @runtime.realm_call(realm_id.to_i, '__csimSourceActivation') == true
+        @runtime.realm_call(realm_id.to_i, 'sourceActivation') == true
       rescue StandardError
         false
       end
       # …whether that window had it.
       def consume_user_activation(realm_id)
-        @runtime.realm_call(realm_id.to_i, '__csimConsumeTransientActivation') == true
+        @runtime.realm_call(realm_id.to_i, 'consumeTransientActivation') == true
       rescue StandardError
         false
       end
@@ -8384,12 +8384,12 @@ module Capybara
       # close"): `beforeunload` at its document, then at its frames' documents, its unload counter raised while each runs
       # (dom-nodes.js `promptDocumentToUnload`). The navigation or the close goes on whatever a handler says: HTML cancels
       # it only where the user, prompted, declines — none here to ask, the driver one who confirms the prompt.
-      def prompt_page_to_unload(traversal: false) = (@runtime.call('__csimPromptToUnload', traversal) rescue nil)
+      def prompt_page_to_unload(traversal: false) = (@runtime.call('promptToUnload', traversal) rescue nil)
       # The document-teardown pair (pagehide+unload), this window AND its nested
       # frames, theirs first — fired as a navigation replaces the page's document
       # (`boot_response_into_ctx`), and by the Driver before an explicitly-closed aux
       # window's VM is parked/disposed (redirect-keepalive "[new window][unload]").
-      def fire_document_teardown        = (@runtime.call('__csimFireWindowUnloadDeep') rescue nil)
+      def fire_document_teardown        = (@runtime.call('fireWindowUnloadDeep') rescue nil)
 
       # Covers BroadcastChannel and `storage` — the cross-window event channels share these drain/pending hooks.
       # (…the isolate's BroadcastChannel queue where a post may have filled it since it was last drained: `BroadcastInbox#queued?`)
@@ -8480,9 +8480,9 @@ module Capybara
       # …and, its window closed while windows `window.open` made in its isolate are open still — whose host it is kept
       # as (Driver `@hosts`) — its page's document destroyed (HTML "destroy a document"): its realm and its frames'
       # discarded, no task of theirs run again — its timers, its listeners, its observers, its channels (window.js
-      # `__csimDiscardRealms`) — the windows it made stepped by its event loop still.
+      # `discardRealms`) — the windows it made stepped by its event loop still.
       def destroy_page
-        @runtime.call('__csimDiscardRealms', @runtime.page_realm_tree)
+        @runtime.call('discardRealms', @runtime.page_realm_tree)
         @timers_active = false
       end
       # Whether its close ran, the window to be discarded.
@@ -8579,7 +8579,7 @@ module Capybara
           # origin — the posting realm's excepted — as one of this isolate's own does: one queue, in creation order
           # (HTML "postMessage" sorts its destinations by creation), which `deliver_broadcast_queue` drains below.
           posts.each do |name, data, source, origin|
-            @runtime.call('__csimBcQueueInbound', name, data, origin, source)
+            @runtime.call('bcQueueInbound', name, data, origin, source)
           end
           n += posts.size
           @broadcast_inbox.queued = true
@@ -8590,9 +8590,9 @@ module Capybara
           # as the change was made and are still, the source's skipped (storage_areas.rs `storage_event_targets`).
           events.each do |kind, key, old, new, url, area, source, made|
             event = {'kind' => kind, 'key' => key, 'old' => old, 'new' => new, 'url' => url, 'area' => area}
-            @runtime.call('__csimStorageEventTargets', source || -1, made).each do |target_id|
+            @runtime.call('storageEventTargets', source || -1, made).each do |target_id|
               next unless target_id.zero? || @runtime.frame_realm_alive?(target_id)
-              @runtime.realm_call(target_id, '__csim_deliverStorageEvents', event)
+              @runtime.realm_call(target_id, 'deliverStorageEvents', event)
             end
           end
           n += events.size
@@ -8673,13 +8673,13 @@ module Capybara
       def deliver_broadcast_queue
         n = 0
         while n < BROADCAST_DRAIN_CAP
-          realm_id, id, data, origin, inbound = @runtime.call('__csimBcTakeQueued')
+          realm_id, id, data, origin, inbound = @runtime.call('bcTakeQueued')
           break @broadcast_inbox.queued = false unless realm_id
           # (…a channel closed since the post receives nothing: the realm's delivery asks the registry)
           next unless realm_id.zero? || @runtime.frame_realm_alive?(realm_id)
 
           # (…another window's or a worker's post its origin's KEY, which the receiving realm serializes)
-          @runtime.realm_call(realm_id, inbound ? '__csim_bcDeliverInbound' : '__csim_bcDeliverOne', id, data, origin)
+          @runtime.realm_call(realm_id, inbound ? 'bcDeliverInbound' : 'bcDeliverOne', id, data, origin)
           n += 1
         end
         n
@@ -8791,7 +8791,7 @@ module Capybara
       end
 
       # Hand every finished async image load to its realm: the one that began it, which the engine
-      # keeps for the request (`__csimImageFetchRealm`); an id no realm has (its page died) is
+      # keeps for the request (`imageFetchRealm`); an id no realm has (its page died) is
       # dropped. Returns the number delivered.
       def deliver_image_loads
         finished = nil
@@ -8806,9 +8806,9 @@ module Capybara
         finished.each do |id, slot|
           payload = image_result_payload(slot[:result])
           consumed = begin
-            rid = @runtime.call('__csimImageFetchRealm', id).to_i
-            if rid.zero? then @runtime.call('__csimApplyAsyncImage', id, payload) == true
-            elsif rid.positive? then @runtime.realm_call(rid, '__csimApplyAsyncImage', id, payload) == true
+            rid = @runtime.call('imageFetchRealm', id).to_i
+            if rid.zero? then @runtime.call('applyAsyncImage', id, payload) == true
+            elsif rid.positive? then @runtime.realm_call(rid, 'applyAsyncImage', id, payload) == true
             else false
             end
           rescue StandardError
@@ -9264,7 +9264,7 @@ module Capybara
           return record[:partition].to_s
         end
 
-        @runtime.realm_direct_call(realm.to_i, '__csimBlobPartitionSite').to_s
+        @runtime.realm_direct_call(realm.to_i, 'blobPartitionSite').to_s
       end
 
       # The blob a `blob:` URL names now — wherever the window that made it is (its partition's) — as `{bytes:, type:}`, or
@@ -9277,7 +9277,7 @@ module Capybara
       # blob store) — the Driver uses it to load a blob: document into a fresh aux
       # window opened by this window. Returns {bytes:, type:} or nil.
       def read_blob_for_window(url)
-        host_blob(@runtime.call('__csimReadBlobForWindow', url.to_s))
+        host_blob(@runtime.call('readBlobForWindow', url.to_s))
       rescue StandardError
         nil
       end
@@ -9300,10 +9300,10 @@ module Capybara
       end
       # …and whether a blob URL this window makes may be resolved so — another window of the session open — its bytes
       # then entered in the registry as it is made (blob.js `createObjectURL`), for a worker of that window to read; the
-      # ones it made before another opened entered as that one opens (`__csimFillBlobMarkers`).
+      # ones it made before another opened entered as that one opens (`fillBlobMarkers`).
       def blob_shared? = @driver.respond_to?(:other_windows?) && @driver.other_windows?(self)
       def fill_blob_markers
-        @runtime.call('__csimFillBlobMarkers')
+        @runtime.call('fillBlobMarkers')
       rescue StandardError
         nil
       end
@@ -9345,7 +9345,7 @@ module Capybara
         # page to begin here lets go of.
         boot_response_into_ctx(bytes, coop_switch: coop_switch, inherited_coop: inherited_coop) { Native.blob_registry_copy(@blob_window, url.to_s, bytes, content_type.to_s) }
         # Adopt into the in-VM store too, so the document's blob resolves as the blob it is.
-        @runtime.call('__csimAdoptBlobBytes', url.to_s, bytes, content_type.to_s) rescue nil
+        @runtime.call('adoptBlobBytes', url.to_s, bytes, content_type.to_s) rescue nil
       end
 
       # …and a blob: URL loaded as THIS window's top-level document that no store resolves (revoked before it was taken):
@@ -9373,7 +9373,7 @@ module Capybara
       # its in-VM store entry. Called for a local revoke and, via
       # the Driver, when another same-partition window revokes a blob this isolate
       # created. The registry removal is the AUTHORITATIVE invalidation
-      # (resolveBlobBytes gates on it cross-realm); the in-VM `__csimDropBlob` is a
+      # (resolveBlobBytes gates on it cross-realm); the in-VM `dropBlob` is a
       # same-thread V8 call, so it's skipped on a worker thread — a worker's
       # `revokeObjectURL` forwards here on the WORKER thread, and calling a
       # thread-confined isolate from a non-owning thread SEGVs (V8 isolates
@@ -9382,7 +9382,7 @@ module Capybara
       def drop_local_blob(url)
         Native.blob_registry_delete(@blob_window, url.to_s)
         return if Thread.current[:csim_worker_handle]   # worker thread: the registry removal above is enough
-        @runtime.call('__csimDropBlob', url.to_s) rescue nil
+        @runtime.call('dropBlob', url.to_s) rescue nil
       end
 
       # Revoke every blob URL owned by a context that's going away (its blob URL
@@ -9442,7 +9442,7 @@ module Capybara
         toks, modules = @transfer_tokens_lock.synchronize { ts = [@transfer_tokens, @module_tokens]; @transfer_tokens = []; @module_tokens = []; ts }
         Native.wasm_modules_drop(modules) unless modules.empty?
         return if toks.empty?
-        @runtime.call('__csimTransferDropAll', toks) rescue nil
+        @runtime.call('transferDropAll', toks) rescue nil
       end
 
       # Fetch a media resource (http / relative URL) and return its bytes, so a `<video
@@ -9529,15 +9529,15 @@ module Capybara
           # (…a worker with nothing to run its clock moved all the same, no step of its loop: what its `Date` and
           # `performance.now()` read next — a message's handler's — is the window's time, not the time it last ran at)
           # (…to the window's time then, where it is the window's last step's — what a message it posts carries from there:
-          # timers.js `__csimCaughtUp` — and held where the window's is, whatever time it is caught up to)
+          # timers.js `caughtUp` — and held where the window's is, whatever time it is caught up to)
           date = @runtime && to == @runtime.clock ? @runtime.clock_date : 0
           held = @runtime ? @runtime.clock_held : 0
-          if rt.call('__nextTimerDelay').to_f < 0 && !(Native.agent_notices_pending(@session_partition) && rt.call('__csimAgentsPending'))
-            rt.call('__csimCaughtUp', step, true, date, held) if step.positive? || date.positive? || held.positive?
+          if rt.call('nextTimerDelay').to_f < 0 && !(Native.agent_notices_pending(@session_partition) && rt.call('agentsPending'))
+            rt.call('caughtUp', step, true, date, held) if step.positive? || date.positive? || held.positive?
             next
           end
 
-          rt.call('__csimCaughtUp', step, false, date, held) if step.positive? || date.positive? || held.positive?
+          rt.call('caughtUp', step, false, date, held) if step.positive? || date.positive? || held.positive?
           rt.drain_microtasks
           rt.drain_timers(step)
         end
@@ -9673,24 +9673,24 @@ module Capybara
         end
         # …and how its clock moves on by `ms`, nothing of its run — the time a worker's answer took, which its script
         # waited for inside a sync XHR (`await_worker_reply`): its time and its isolate's together.
-        record[:clock_moved_by] = ->(ms) { worker_clock_step.call(worker_now + ms) && rt.call('__csimClockMovedBy', ms) } if record
+        record[:clock_moved_by] = ->(ms) { worker_clock_step.call(worker_now + ms) && rt.call('clockMovedBy', ms) } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`
         # is a no-op until `traceActive` is set (console.js). The main realm turns it on
         # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed
         # through it, e.g. an Emscripten `printErr` — is silently dropped during debugging.
-        rt.call('__csimSetTraceActive', true) if CONSOLE_STDERR
+        rt.call('setTraceActive', true) if CONSOLE_STDERR
         # Its time origin, the time it was made at, with its maker's host offset (set again as its script begins, below).
-        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f, record[:travel].to_f) if record&.dig(:epoch)
+        rt.call('setClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f, record[:travel].to_f) if record&.dig(:epoch)
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
-        # never collide with another isolate's (see __csim_installWorkerScope's allocator).
-        V8Runtime.engine_call(rt, 'realmIdentify', 'workerHandle', handle.to_i)
+        # never collide with another isolate's (see installWorkerScope's allocator).
+        rt.call('realmIdentify', 'workerHandle', handle.to_i)
         # …and the token its realm's agent of the engine's registries is made with (agents.rs), whose locks and
         # connections go as it is reaped — not only once its isolate is gone, which a terminated one may outlive.
         if record
           record[:agent_owner] = Native.agent_owner_new
-          V8Runtime.engine_call(rt, 'realmIdentify', 'agentOwner', record[:agent_owner])
+          rt.call('realmIdentify', 'agentOwner', record[:agent_owner])
           # (…and its storage partition, its owner document's: what the blob URLs it makes and resolves are of)
-          V8Runtime.engine_call(rt, 'realmIdentify', 'partition', record[:partition].to_s) if record[:partition]
+          rt.call('realmIdentify', 'partition', record[:partition].to_s) if record[:partition]
         end
         # A dedicated / shared worker is a service-worker CLIENT of its origin, and the host
         # registry already records it as 'client-worker-<handle>' (sw_note_worker_client). Seed
@@ -9703,23 +9703,23 @@ module Capybara
         # A SERVICE worker is no client of another, but its global is an environment of its own all the
         # same, its id its own (what its lock requests are held by: web_locks.rs) — never the realm-numbered
         # key of the window space, which would name the page's realm 0 (`sw_client_realm`).
-        V8Runtime.engine_call(rt, 'realmIdentify', 'clientId', sw_worker_client_id(handle))
+        rt.call('realmIdentify', 'clientId', sw_worker_client_id(handle))
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
         # (importScripts throws a TypeError); its script evaluates as a real module graph
         # below (eval_module_graph).
-        V8Runtime.engine_call(rt, 'realmIdentify', 'moduleWorker', true) if module_worker
+        rt.call('realmIdentify', 'moduleWorker', true) if module_worker
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
         # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a
         # controlled frame realm gets (create_frame_realm).
         if !service && controller.to_i.positive? && (cw = sw_controller(controller))
-          rt.call('__csim_swSetControllerDirect', *cw)
+          rt.call('swSetControllerDirect', *cw)
         end
         # Set the worker's `self.location.href` so webpack /
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
         # resolve chunks against the worker's own origin rather than
         # the snapshot-time `http://placeholder/`.
-        rt.eval_void("globalThis.__csimUpdateLocation(#{JSON.generate(url.to_s)});")
+        rt.call('updateLocation', url.to_s)
         # A worker's origin KEY (its agent-cluster identity, its BroadcastChannels' storage key's origin). A blob: worker
         # INHERITS the creating context's origin (the blob URL carries no real origin of its own);
         # a data: worker gets a FRESH opaque origin, unique per worker, so it never cross-talks with
@@ -9732,11 +9732,11 @@ module Capybara
           elsif url.to_s.start_with?('data:')
             Native.opaque_origin_key("worker#{handle}")
           end
-        V8Runtime.engine_call(rt, 'setOriginKey', worker_origin_key) if worker_origin_key
+        rt.call('setOriginKey', worker_origin_key) if worker_origin_key
         # …and its agent cluster (HTML "obtain a dedicated/shared worker agent"): a dedicated worker's its owner's, a shared
         # or service worker's one of its own — what a WebAssembly.Module it is sent is read back in (clone.rs).
         cluster = shared || service ? "#{@browsing_context_group}|worker:#{handle}" : record&.dig(:cluster_key)
-        V8Runtime.engine_call(rt, 'setAgentClusterKey', cluster) if cluster
+        rt.call('setAgentClusterKey', cluster) if cluster
         # A service worker runs in a ServiceWorkerGlobalScope: adjust the worker scope
         # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs. The
         # registration SCOPE rides in first — `self.registration.scope` must be the
@@ -9749,8 +9749,8 @@ module Capybara
           # HTTP cache) and the Update probe's import responses (this version's script resource map, which importScripts take
           # each once instead of fetching again) — the engine's (service_worker.rs `swGlobalInit`).
           args = [sw_registration, sw_scope.to_s, sw_uvc, sw_imports_map && JSON.generate(sw_imports_map)]
-          V8Runtime.engine_call(rt, 'swGlobalInit', *args)
-          rt.eval_void('__csim_installServiceWorkerScope();')
+          rt.call('swGlobalInit', *args)
+          rt.call('installServiceWorkerScope')
         end
         # A DEFERRED main script (worker_spawn found a controlling, fetch-handling SW for the
         # script URL): fetch it through the SW redirect chain NOW, on this worker's own thread
@@ -9776,12 +9776,12 @@ module Capybara
             if final_url != url
               url = final_url
               (w = @workers[handle]) && w[:url] = url
-              rt.eval_void("globalThis.__csimUpdateLocation(#{JSON.generate(url)});")
+              rt.call('updateLocation', url)
             end
             if final_ctrl != controller.to_i
               controller = final_ctrl
               if controller.positive? && (cw = sw_controller(controller))
-                rt.call('__csim_swSetControllerDirect', *cw)
+                rt.call('swSetControllerDirect', *cw)
               end
             end
             # Refresh the registry's client record (URL + controller) — called from this worker's
@@ -9790,7 +9790,7 @@ module Capybara
           end
         end
         # (…the hooks this host calls in it made read-only first: engine.js `sealHostHooks`)
-        V8Runtime.engine_call(rt, 'sealHostHooks')
+        rt.call('sealHostHooks')
         # Booted: its script runs from here, what a window's wait on it is counted against (`worker_deadline`).
         record[:running_since] = Process.clock_gettime(Process::CLOCK_MONOTONIC) if record
         # …and its clock from its time origin, the time it was made at — its high resolution time beginning a step of its
@@ -9798,7 +9798,7 @@ module Capybara
         # its scripts' time counted from that statement: not the real time its start took, its script fetched, its isolate
         # made and its scope installed, which its window's clock does not go on through — a worker read its window's
         # `Date` that far ahead for good, 25 ms on a loaded machine (agent_clock.rs).
-        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f, record[:travel].to_f) if record&.dig(:epoch)
+        rt.call('setClockEpoch', record[:epoch], WORKER_START_MS, record[:shift].to_f, record[:travel].to_f) if record&.dig(:epoch)
         if service
           # A SERVICE worker's registration is GATED on its script actually evaluating
           # ("Run Service Worker": an importScripts that 404s, a top-level throw, a
@@ -9877,13 +9877,13 @@ module Capybara
         #     waitUntil still activates (the spec ignores activate failure for state).
         sw_check_phase = nil
         if service
-          sw_has_fetch = !!rt.call('__csim_swHasFetchListener')
+          sw_has_fetch = !!rt.call('swHasFetchListener')
           # Publish the fetch-handler snapshot + script URL on the worker record so a NAVIGATION
           # into this SW's scope can decide (Ruby-side) whether routing through it is worthwhile,
           # and a freshly-built frame client can mint a `controller` naming this script.
           Native.sw_set_worker_flag(@sw_partition, handle, 'fetch', sw_has_fetch)
           sw_fire_phase = lambda do |phase|
-            rt.eval_void("globalThis.__csim_swFireLifecycleEvent(#{JSON.generate(phase)});")
+            rt.call('swFireLifecycleEvent', phase)
             # Drain microtasks AND the timers due now: a `waitUntil` promise may settle off a
             # setTimeout(0). (Not on past now: the worker's clock is the window's, which the window's
             # steps move it along — a drain of its own moved its clock 50 ms ahead of the window's for good.)
@@ -9896,7 +9896,7 @@ module Capybara
           # fires no activate; the client terminates this worker).
           sw_phase_pending = 'installation'
           sw_check_phase = lambda do
-            while %w[install activate].include?(sw_phase_pending) && (t = rt.call('__csim_swPhaseTake'))
+            while %w[install activate].include?(sw_phase_pending) && (t = rt.call('swPhaseTake'))
               if t['phase'] == 'install'
                 ok = t['ok'] != false
                 outbox << {handle: handle, kind: 'sw_phase', phase: 'install', ok: ok}
@@ -9923,7 +9923,7 @@ module Capybara
         # follow-on pending (the fetch owed / outbox) is counted before the release.
         # (…its timers due now: not on past now, which the window's steps move it to — a drain of its own moved its clock 50 ms
         # ahead of the window's for good, its `Date` with it, as soon as its script set a timer)
-        if !stopping.call && rt.call('__nextTimerDelay').to_f >= 0
+        if !stopping.call && rt.call('nextTimerDelay').to_f >= 0
           rt.drain_microtasks
           rt.drain_timers(0)
         end
@@ -9932,7 +9932,7 @@ module Capybara
         # A worker that called `self.close()` in its top-level script stops here —
         # the script ran (and may have posted), but no further messages are pulled.
         ticked = false
-        unless rt.call('__csimWorkerClosedRead')
+        unless rt.call('workerClosedRead')
           loop do
             # (…waiting on its inbox, no worker a window's step waits for to go on: `await_resumed_workers`)
             record[:resuming] = false if record
@@ -9979,7 +9979,7 @@ module Capybara
               # (…each channel's delivery a task of the worker's: run, a handler's synchronous postback with it, BEFORE the
               # ack — the outbox is FIFO, so the reply precedes the ack settle waits on)
               begin
-                rt.call('__csim_deliverBroadcasts', [{'name' => msg[:name], 'data' => msg[:data], 'origin' => msg[:origin]}])
+                rt.call('deliverBroadcasts', [{'name' => msg[:name], 'data' => msg[:data], 'origin' => msg[:origin]}])
                 # (…the window's now, by design: the broadcast's handler ran at the time the window reached as it was taken)
                 run_worker_timers.call(@runtime.clock)
               ensure
@@ -9994,7 +9994,7 @@ module Capybara
               # virtual clock fast-forwards past the caller's timeout before the reply lands. The
               # `ensure` keeps a raising handler from leaking the counter and hanging settle.
               begin
-                rt.call('__csim_swClientMessage', msg[:data], msg[:client], msg[:url], msg[:sender])
+                rt.call('swClientMessage', msg[:data], msg[:client], msg[:url], msg[:sender])
                 # A synchronously-resolved waitUntil must settle NOW: its allSettled
                 # continuation flips the extended-lifetime counter back to 0 (the
                 # try-activate release), and nothing else drains this isolate's
@@ -10026,18 +10026,18 @@ module Capybara
               if ev[:type] == '__setcookie'
                 store_set_cookies({'set-cookie' => ev[:cookies]}, ev[:url], ev[:cookie_context])
               else
-                rt.call('__csim_deliverWebSocketEvents', [ev])
+                rt.call('deliverWebSocketEvents', [ev])
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'es'
               # One of this worker's EventSources: its event delivered here, as the window's are at settle.
-              rt.call('__csim_deliverEventSourceEvents', [msg[:event]])
+              rt.call('deliverEventSourceEvents', [msg[:event]])
             elsif msg.is_a?(Hash) && msg[:kind] == 'port_msg'
               # A message for a channel end THIS worker holds: deliver it to that port. Counted like an
               # sw_message (deliver_port_message counted a message owed), so ack AFTER dispatch
               # under `ensure` — a synchronous reply the port handler posts back (another port_msg on the
               # outbox) is FIFO-guaranteed to precede this swack.
               begin
-                rt.call('__csimPortEndDeliver', msg[:end], msg[:data])
+                rt.call('portEndDeliver', msg[:end], msg[:data])
               ensure
                 outbox << {handle: handle, kind: 'swack'}
               end
@@ -10069,19 +10069,19 @@ module Capybara
               rt.drain_microtasks
             elsif msg.is_a?(Hash) && msg[:kind] == 'client_navigate_result'
               # The outcome of a WindowClient.navigate() this worker is awaiting — settles the
-              # promise it is holding (js/src/workers.js __csim_swClientNavigateResult).
-              rt.call('__csim_swClientNavigateResult', msg[:nav_id], msg[:url], msg[:client], msg[:error])
+              # promise it is holding (js/src/workers.js swClientNavigateResult).
+              rt.call('swClientNavigateResult', msg[:nav_id], msg[:url], msg[:client], msg[:error])
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_client_settled'
               # A reserved client execution ready, or discarded: the `clients.get` of it this worker waits on settled
               # (js/src/workers.js), its continuation drained as an unregister result's is.
-              rt.call('__csim_swClientSettled', msg[:id])
+              rt.call('swClientSettled', msg[:id])
               rt.drain_microtasks
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_client_message'
               # A service worker → THIS worker, which is one of its clients: `client.postMessage`
               # targets the client's `navigator.serviceWorker` 'message' event, which a worker
               # isolate has just like a document (WorkerNavigator.serviceWorker). Fire-and-forget —
               # the SW's send is not awaiting a reply.
-              rt.call('__csim_swDeliverClientMessage', msg[:data], msg[:handle])
+              rt.call('swDeliverClientMessage', msg[:data], msg[:handle])
             elsif msg.is_a?(Hash) && msg[:kind] == 'fetch'
               # A controlled client's fetch: dispatch a `fetch` event. The SW's respondWith result
               # (or a fall-through / network-error marker) is posted back as a `fetch_response`
@@ -10097,7 +10097,7 @@ module Capybara
               record[:took][fid] = worker_now if record && (fid.negative? || WorkerHost.direct?(fid))
               sw_fetch_event_begun(handle, msg[:realm_id].to_i, fid)
               begin
-                rt.call('__csim_swDispatchFetch', msg[:req], fid, msg[:realm_id], fid.negative? || WorkerHost.direct?(fid))
+                rt.call('swDispatchFetch', msg[:req], fid, msg[:realm_id], fid.negative? || WorkerHost.direct?(fid))
                 dispatched = true
               ensure
                 sw_deliver_fetch_response(handle, fid, WorkerHost::FALLTHROUGH, outbox, msg[:realm_id].to_i) unless dispatched
@@ -10111,7 +10111,7 @@ module Capybara
               # here — without the hold a drain can bail mid-chain.
               @worker_host.owe(WorkerHost::BUSY, 1)
               busy_held = true
-              rt.call('__csim_swControllerFetchResponse', msg[:fetch_id], msg[:resp], msg[:spent].to_f, msg[:took].to_f)
+              rt.call('swControllerFetchResponse', msg[:fetch_id], msg[:resp], msg[:spent].to_f, msg[:took].to_f)
               drive_worker_to_quiescence(rt, stopping)
             elsif msg.is_a?(Hash) && msg[:kind] == 'nested_worker_msgs'
               # Postbacks from a NESTED worker this isolate created — dispatch on its
@@ -10121,19 +10121,19 @@ module Capybara
               @worker_host.owe(WorkerHost::BUSY, 1)
               busy_held = true
               # (…each a task of its own, as the window-side delivery's: workers.js `deliverWorkerEvent`)
-              rt.call('__csim_deliverWorkerMessages', msg[:events])
+              rt.call('deliverWorkerMessages', msg[:events])
               drive_worker_to_quiescence(rt, stopping)
             elsif msg.is_a?(Hash) && msg[:kind] == 'claim_client'
               # clients.claim() reaches worker clients too: adopt the claiming SW as this
               # isolate's controller when this worker's script URL is in scope (the same
-              # self-check pages run — __csim_swClaimClient compares against location).
-              rt.call('__csim_swClaimClient', msg[:handle], msg[:has_fetch], msg[:script_url], msg[:scope], msg[:all_scopes], msg[:site])
+              # self-check pages run — swClaimClient compares against location).
+              rt.call('swClaimClient', msg[:handle], msg[:has_fetch], msg[:script_url], msg[:scope], msg[:all_scopes], msg[:site])
             elsif msg.is_a?(Hash) && msg[:kind] == 'fetch_cancel'
               # The client cancelled this streaming respondWith body — cancel the reader
               # streamDeliver is draining, firing the SW source stream's `cancel()`. Fire-and-forget:
               # the reader's cancellation resolves its read as done, emitting the terminal frame that
               # releases the fetch owed; no ack/counter of its own.
-              rt.call('__csim_swStreamCancel', msg[:fetch_id])
+              rt.call('swStreamCancel', msg[:fetch_id])
             elsif msg
               # Mark BUSY for the whole span of this postMessage handler. Unlike the SW /
               # broadcast branches above (each tracked by its own pending counter),
@@ -10151,7 +10151,7 @@ module Capybara
               # fired timer queued *after the last timer* stranded, so the factory promise
               # never settles (Tesseract hangs at "initializing tesseract"). Run the worker's
               # own event loop to quiescence instead of a single gated tick.
-              rt.call('__csim_workerOnMessage', msg)
+              rt.call('workerOnMessage', msg)
               drive_worker_to_quiescence(rt, stopping)
             end
             # (…a quiet tick's once: a second run at the same instant fired the 0 ms task a timer of the first queued — a
@@ -10162,7 +10162,7 @@ module Capybara
             # while it does (`polling?`) — and how soon, for the window's event loop, whose page waits on it
             # (`worker_next_timer`).
             if record
-              next_timer = stopping.call ? -1.0 : rt.call('__nextTimerDelay').to_f
+              next_timer = stopping.call ? -1.0 : rt.call('nextTimerDelay').to_f
               record[:timers_due] = next_timer >= 0
               record[:next_timer] = next_timer
               # (…and when, on the window's clock, which the worker's follows: what a wait on it steps the window to)
@@ -10181,13 +10181,13 @@ module Capybara
             sw_check_phase&.call
             # (…a service worker that can do nothing more — no message waiting, no timer, nothing in flight — while a
             # navigation's fetch event it holds waits on a `clients.get` of that navigation's own reserved client: a
-            # deadlock, answered from the network: workers.js `__csim_swBreakSelfWait`)
-            rt.call('__csim_swBreakSelfWait') if service && inbox.empty?
+            # deadlock, answered from the network: workers.js `swBreakSelfWait`)
+            rt.call('swBreakSelfWait') if service && inbox.empty?
             if busy_held
               @worker_host.release(WorkerHost::BUSY, 1)
               busy_held = false
             end
-            break if rt.call('__csimWorkerClosedRead')
+            break if rt.call('workerClosedRead')
           end
         end
       rescue StandardError => e
@@ -10248,16 +10248,16 @@ module Capybara
       # circuit to the JS-side blob registry instead. Http(s) URLs
       # fall through to the regular Rack path.
       # A worker's script, run as a top-level Script; an exception it throws is the worker's to report (HTML "report an
-      # exception": workers.js __csimReportWorkerScriptError) — its message and the place of its top frame, what the
+      # exception": workers.js reportWorkerScriptError) — its message and the place of its top frame, what the
       # host's evaluation keeps of it — and the worker runs on.
       private def run_worker_script(rt, body, url)
         rt.eval_void("#{body}\n//# sourceURL=#{url.tr("\n", ' ')}", filename: url)
       rescue RustyRacer::ParseError => e
         message, line = e.message.match(/\A(.*) at \S+?:(\d+)\z/m)&.captures
-        rt.call('__csimReportWorkerScriptError', message || e.message, url, line.to_i, 0)
+        rt.call('reportWorkerScriptError', message || e.message, url, line.to_i, 0)
       rescue RustyRacer::RuntimeError => e
         file, line, col = e.backtrace.to_a.first.to_s.match(/\(?([^\s()]+):(\d+):(\d+)\)?\z/)&.captures
-        rt.call('__csimReportWorkerScriptError', e.message, file || url, line.to_i, col.to_i)
+        rt.call('reportWorkerScriptError', e.message, file || url, line.to_i, col.to_i)
       end
 
       # …and a module worker's (`{type: 'module'}`) as a module graph, its static imports fetched on the worker's thread as
@@ -10320,7 +10320,7 @@ module Capybara
       private def fetch_worker_script(url, client_url, client_origin: nil, dest: 'worker')
         u = url.to_s
         # (…a NESTED worker's on its parent's thread, from the window's registry alone: the window's isolate is another
-        # thread's — where the worker that made the URL entered its bytes, `__csimFillBlobMarkers` those of the page's
+        # thread's — where the worker that made the URL entered its bytes, `fillBlobMarkers` those of the page's
         # its parent may resolve)
         return worker_blob(u, client_url)&.first if u.start_with?('blob:') && Thread.current[:csim_worker_record]
         if u.start_with?('blob:')
@@ -10332,8 +10332,8 @@ module Capybara
             return data[:bytes]
           end
           # (…the isolate's store, whichever of its realms made it — `new Worker(blobURL)` from a data: iframe —
-          # else the window's registry, where a worker's isolate entered its bytes: `__csimReadBlobBytes`)
-          bytes = @runtime.call('__csimReadBlobBytes', u)
+          # else the window's registry, where a worker's isolate entered its bytes: `readBlobBytes`)
+          bytes = @runtime.call('readBlobBytes', u)
           return nil if bytes.nil? || bytes.empty?
           return bytes
         end
@@ -10349,12 +10349,12 @@ module Capybara
       private def decode_data_url_body(url) = Native.data_url(url)&.last || ''
 
       # A window's module script's source no network fetches — a `blob:` URL's, its blob's bytes as realm `realm` resolves
-      # the URL now (`__csimResolveBlobForHost`: by a context of its storage key alone), a `data:` one's its own — and its
+      # the URL now (`resolveBlobForHost`: by a context of its storage key alone), a `data:` one's its own — and its
       # MIME type, the blob's type or the URL's: [bytes, type], [nil, nil] where it names none (a revoked blob, another
       # origin's), nil for a URL of another scheme.
       def local_module_source(url, realm)
         if url.start_with?('blob:')
-          blob = host_blob(@runtime.realm_direct_call(realm, '__csimResolveBlobForHost', url))
+          blob = host_blob(@runtime.realm_direct_call(realm, 'resolveBlobForHost', url))
           [blob&.[](:bytes), blob&.[](:type)]
         elsif url.start_with?('data:')
           Native.data_url(url)&.reverse || [nil, nil]
@@ -10378,7 +10378,7 @@ module Capybara
       private def drive_worker_to_quiescence(rt, stopping = nil)
         WORKER_QUIESCE_MAX_ROUNDS.times do
           rt.drain_microtasks
-          break unless rt.call('__nextTimerDelay').to_f.zero?
+          break unless rt.call('nextTimerDelay').to_f.zero?
           break if stopping&.call
           rt.drain_timers(0)
         end
@@ -10428,13 +10428,13 @@ module Capybara
       # URL through `realm`'s import map — the URL, or nil where it resolves to none (a bare one nothing maps: a
       # TypeError, no fetch) — and that base URL, which the request is referred by (HTML "fetch the descendants of a
       # module script", HostLoadImportedModule: the referring script's base URL its referrer)].
-      # (…an inline classic script's — no URL of its own — its base URL, its document's as it ran (`__csimInlineScriptBase`:
+      # (…an inline classic script's — no URL of its own — its base URL, its document's as it ran (`inlineScriptBase`:
       # a frame's, not the page's, its `<base href>` heeded, one inserted after it not); a script the realm knows by no
       # name — a handler's, a string timer's — its document's base URL now, and no referring script at all: the request
       # referred by its client, nil)
       def resolve_module_request(specifier, base_url, realm)
-        referrer = module_base_url(base_url) || realm_text(realm, '__csimInlineScriptBase', base_url.to_s)
-        base     = referrer || realm_text(realm, '__csimBaseURL') || effective_module_base(nil)
+        referrer = module_base_url(base_url) || realm_text(realm, 'inlineScriptBase', base_url.to_s)
+        base     = referrer || realm_text(realm, 'baseURL') || effective_module_base(nil)
         [Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base), referrer]
       end
       # …a string realm `realm` (0 the page) answers `name` with, nil for none.
@@ -10559,7 +10559,7 @@ module Capybara
             client_origin:         client_origin,
             # (…the page's realm asked where the caller names the client's realm rather than its ancestors; none where it
             # cannot answer: a context being torn down)
-            ancestors:             ancestors || (client_realm.to_i.positive? && @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i)) || [],
+            ancestors:             ancestors || (client_realm.to_i.positive? && @runtime.realm_direct_call(0, 'ancestorDocuments', client_realm.to_i)) || [],
             cookie_cross_site:     cookie_cross_site == true,
             navigation_cross_site: navigation_cross_site == true,
             nav_dest:              nav_dest,
@@ -10952,7 +10952,7 @@ module Capybara
         o_r
       end
 
-      # A document as `__csimLoadDocument` takes it: its BYTES (BINARY-tagged, a Uint8Array to V8), decoded as it loads
+      # A document as `loadDocument` takes it: its BYTES (BINARY-tagged, a Uint8Array to V8), decoded as it loads
       # by HTML's encoding sniffing — or, with none, the empty string: about:blank and a blank response are UTF-8.
       def document_payload(bytes)
         bytes.to_s.empty? ? '' : bytes.to_s.b
@@ -11036,12 +11036,12 @@ module Capybara
       OWN_JAVASCRIPT_DOCUMENT = 32
       OWN_TRAVERSAL = 64
       FRAMES_PLANNED = 8 | 16
-      private def own_planned = @runtime.call('__csimOwnPlanned').to_i
+      private def own_planned = @runtime.call('ownPlanned').to_i
       # The navigation of the page its `location` planned, taken: its URL, whether it replaces the current entry, the
       # document that began it where that is another's than the page's with the Referer it sends, its source's
       # activation, a `blob:` one's blob as it began (location.js `dispatchNav`).
       def consume_pending_location
-        url, replace, initiator_realm, source, policy, activated, blob, ongoing, document = @runtime.call('__csimTakeLocation')
+        url, replace, initiator_realm, source, policy, activated, blob, ongoing, document = @runtime.call('takeLocation')
         return unless url
         return in_top_context { commit_javascript_document(url, document) } if document
 
@@ -11074,7 +11074,7 @@ module Capybara
         @session_history.hold_traversals(false)
         # (…those whose tasks found them held, where no document was made after all — a location the flush planned went
         # first: a task again)
-        @runtime.call('__csimRequeueTraversals') if @session_history.queued?
+        @runtime.call('requeueTraversals') if @session_history.queued?
       end
       private def commit_javascript_document!(url, markup)
         # (…what is due on the page run first, as before any navigation: `flush_outgoing_page_init`. The text asks no more of
@@ -11082,10 +11082,10 @@ module Capybara
         # `javascript:` URL's begun after it — but where a task of the flush began a location navigation, the one the navigable
         # goes on to, which this one's document would only have stood in front of.)
         flush_outgoing_page_init if @timers_active
-        return restore_flushed_nav_intents if @runtime.call('__csimFlushedLocation')
+        return restore_flushed_nav_intents if @runtime.call('flushedLocation')
 
         @session_history.commit_javascript_document(url.to_s)
-        inherit_creator(origin: document_origin(0), base: @runtime.realm_direct_call(0, '__csimBaseURL')) if about_blank_url?(url)
+        inherit_creator(origin: document_origin(0), base: @runtime.realm_direct_call(0, 'baseURL')) if about_blank_url?(url)
         opaque  = document_origin_opaque?(0) == true
         headers = javascript_document_headers(0, url, @last_response_headers)
         self.page_url = url
@@ -11093,14 +11093,14 @@ module Capybara
         @current_referer = ''
         boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy, controlled: false, keep_traversals: true)
         @session_history.hold_traversals(false)
-        @runtime.call('__csimApplyOwnTraversals', true)
+        @runtime.call('applyOwnTraversals', true)
         consume_planned_traversal
       end
       # …the response it is made of, HTML's: `text/html;charset=utf-8` and, given here as its headers, the policy container of
       # realm `realm`'s document: the Content-Security-Policy its own response had (`headers`), the referrer policy it has now.
       private def javascript_document_headers(realm, url, headers)
         _, csp,  = Native.document_params(headers, url, @loopback_stand_in)
-        policy   = @runtime.realm_direct_call(realm, '__csimDocumentReferrerPolicy').to_s
+        policy   = @runtime.realm_direct_call(realm, 'documentReferrerPolicy').to_s
         response = {'content-type' => 'text/html;charset=utf-8'}
         response['content-security-policy'] = csp if csp
         response['referrer-policy'] = policy unless policy.empty?
@@ -11115,7 +11115,7 @@ module Capybara
       def consume_pending_frame_nav
         # Window-realm self-navs are realm navs too — drain them at every frame-nav drain point.
         consume_pending_window_nav
-        @runtime.call('__csimTakeFrameNavigations', 'navigate').each do |realm_id, url, replace, initiator, source, policy, sandbox, activated|
+        @runtime.call('takeFrameNavigations', 'navigate').each do |realm_id, url, replace, initiator, source, policy, sandbox, activated|
           parent    = @runtime.frame_realm_parent(realm_id)
           container = frame_container_handle(realm_id, parent)
           referrer  = [source, policy]
@@ -11154,7 +11154,7 @@ module Capybara
       # one transition for it (frame-nav.js `frameNavigationFinalized`), by the container's handle in its parent's document,
       # taken before the navigation ran (its realm may be another's after).
       private def frame_navigation_finalized(parent, container)
-        frame_realm_host_call(parent, '__csimFrameNavigationFinalizedAt', container) unless parent.nil? || container.to_i.zero?
+        frame_realm_host_call(parent, 'frameNavigationFinalizedAt', container) unless parent.nil? || container.to_i.zero?
       rescue StandardError
         nil
       end
@@ -11174,10 +11174,10 @@ module Capybara
         return if @runtime.window_realm_meta.empty?
 
         # (…a traversal a script queued that makes a window's document again applied first, as the page's are: its task's
-        # the host's now — history.js `__csimApplyWindowTraversals`)
-        @runtime.call('__csimApplyWindowTraversals')
+        # the host's now — history.js `applyWindowTraversals`)
+        @runtime.call('applyWindowTraversals')
         WINDOW_NAV_ROUNDS.times do
-          navs = @runtime.call('__csimTakeWindowNavigations')
+          navs = @runtime.call('takeWindowNavigations')
           break if navs.empty?
 
           navs.each do |realm_id, kind, *plan|
@@ -11204,7 +11204,7 @@ module Capybara
               if history
                 history.end_traversal
                 window = window_realm_made(key)
-                @runtime.realm_call(window, '__csimApplyOwnTraversals', true) if window && @runtime.frame_realm_alive?(window)
+                @runtime.realm_call(window, 'applyOwnTraversals', true) if window && @runtime.frame_realm_alive?(window)
               end
             end
           rescue StandardError => e
@@ -11263,7 +11263,7 @@ module Capybara
         end
 
         # (…its document asked first whether it may be unloaded, as the page's is: `prompt_page_to_unload`)
-        @runtime.realm_call(realm_id, '__csimPromptToUnload')
+        @runtime.realm_call(realm_id, 'promptToUnload')
         fetch, origin_url, client_id = window_navigation_fetch(realm_id, history, url, post, handling, [at, id], replayed, initiator, source, policy, activated)
         begin
           # (…an about:blank document's or a blob's opener policy the one it inherits: coop.rs `inherited` — a replay's the
@@ -11379,7 +11379,7 @@ module Capybara
       # (navigables.rs `window_opener`): one whose target name a navigation to another origin keeps (navigation_commit.rs).
       private def window_opened?(realm)
         key = @runtime.window_realm_meta.dig(realm, :window_key) or return false
-        V8Runtime.engine_call(@runtime, 'windowOpener', key.to_i).to_i >= 0
+        @runtime.call('windowOpener', key.to_i).to_i >= 0
       end
       # …its navigation `fetch` ended in `step` (navigation_commit.rs `Step`, its session history done with as that says):
       # the document it makes replacing the one the window is at — of its last hop `hop`'s response (`document` its body),
@@ -11450,7 +11450,7 @@ module Capybara
         @runtime.window_realm_meta[new_id][:response] = response || ABOUT_BLANK_RESPONSE
         # (…a traversal's document given the state its entry's controls were left in, as the page's is: `restore_form_state`)
         if kind == 'traverse' && (form_state = history.entry(history.active(0))[:form_state])
-          @runtime.realm_call(new_id, '__csimRestoreFormState', form_state)
+          @runtime.realm_call(new_id, 'restoreFormState', form_state)
         end
         retarget_scope(realm_id, new_id)
         new_id
@@ -11461,17 +11461,17 @@ module Capybara
       # `javascript:` URL's) (…`keep_traversals` the traversals the document it replaces queued going on after it: a
       # `javascript:` URL's, as the page's: `boot_response_into_ctx`)
       private def replace_window_document(realm_id, url, body, ctype, made, reuses:, history_state: nil, keep_traversals: false)
-        keeps = reuses && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
+        keeps = reuses && @runtime.realm_call(realm_id, 'keepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
         # (…the document it replaces unloaded first, its frames' with it — HTML "unload a document and its descendants", as
         # the page's is: `boot_response_into_ctx` — while its realms still live, an initial about:blank's too, its renewed
         # Document visible all the same)
-        @runtime.realm_call(realm_id, '__csimFireWindowUnloadDeep')
+        @runtime.realm_call(realm_id, 'fireWindowUnloadDeep')
         # (…the entry it leaves taking its controls' state as its handlers left it, which a traversal back to it restores, as
         # the page's: `capture_left_page_form_state` — none of an initial about:blank, which no entry is of; then the
         # window's session history the next document's, as the page's: its document state the one `window.name` reads, the
         # traversals the one it replaces queued let go of with it — but a `javascript:` URL's — its frames new navigables)
         if (history = window_history(realm_id))
-          if (id = history.take_leaving) && (state = @runtime.realm_call(realm_id, '__csimCaptureFormState'))
+          if (id = history.take_leaving) && (state = @runtime.realm_call(realm_id, 'captureFormState'))
             history.update(id, {form_state: state})
           end
           history.show
@@ -11480,7 +11480,7 @@ module Capybara
         end
         return @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, history_state: history_state, **made) if keeps
 
-        made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
+        made[:viewport] = @runtime.realm_call(realm_id, 'viewportSize')
         @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, history_state: history_state, **made)
       end
       # The document a `javascript:` URL's string result makes of window realm `realm_id` (`commit_javascript_document`, the
@@ -11507,7 +11507,7 @@ module Capybara
         @runtime.window_realm_meta[new_id][:response] = [200, headers]
         retarget_scope(realm_id, new_id)
         # (…a traversal its script asked for applied after it, as the page's is: `commit_javascript_document`)
-        @runtime.realm_call(new_id, '__csimApplyOwnTraversals', true)
+        @runtime.realm_call(new_id, 'applyOwnTraversals', true)
         new_id
       end
       # The session history of window realm `realm`'s document — its traversable's, a window `window.open` made in this
@@ -11517,11 +11517,11 @@ module Capybara
       # base URL, the window's navigable's sandboxing, and its referrer — a reload's the document's it replaces, a
       # traversal's its entry's (`referred`), else the initiator's under the policy it navigated under (`source`, `policy`).
       private def window_about_blank(realm_id, kind, initiator, source, policy, referred, url)
-        doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator, realm_id)
+        doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, 'navigationOrigins', initiator, realm_id)
         case kind
         when 'reload'
-          referrer = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer')
-          policy   = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy')
+          referrer = @runtime.realm_direct_call(realm_id, 'documentReferrer')
+          policy   = @runtime.realm_direct_call(realm_id, 'documentReferrerPolicy')
         when 'traverse'
           referrer = referred
         else
@@ -11533,7 +11533,7 @@ module Capybara
           doc_origin:      doc_origin,
           location_origin: location_origin,
           sandbox:         sandbox,
-          about_base:      @runtime.realm_direct_call(initiator, '__csimBaseURL'),
+          about_base:      @runtime.realm_direct_call(initiator, 'baseURL'),
           referrer:        referrer,
           referrer_policy: policy
         }
@@ -11543,10 +11543,10 @@ module Capybara
       # `ScriptTerminatedError`. (…`activated` whether the page had transient activation as it was called)
       # (…the tasks queued on the page's event loop before it run first: `run_queued_before_reload`)
       def consume_pending_reload
-        activated = @runtime.call('__csimTakeReload')
+        activated = @runtime.call('takeReload')
         if activated.is_a?(Array)
           run_queued_before_reload(0, activated[0])
-          activated = @runtime.call('__csimTakeReload')
+          activated = @runtime.call('takeReload')
         end
         from_document(0) { refresh(user_activated: activated, through_ui: false) } unless activated.nil? || activated.is_a?(Array)
       end
@@ -11577,7 +11577,7 @@ module Capybara
         end
         # (…what the documents they made planned meanwhile, due already — the settle's step ran its turn — another turn's: the
         # driver waits for it, as it does for any task)
-        @runtime.call('__csimQueueNavigationTurn') if own_planned.anybits?(FRAMES_PLANNED)
+        @runtime.call('queueNavigationTurn') if own_planned.anybits?(FRAMES_PLANNED)
         true
       end
       # A reload's history step unloads the document by a task HTML "apply the history step" queues (step 12) on its event
@@ -11587,12 +11587,12 @@ module Capybara
       # timer's later ones. (…a navigation one of them begins outruns the reload, whose history step is taken only after:
       # the traversal queue runs in parallel with the document's tasks — Chrome and Firefox navigate, not reload)
       private def run_queued_before_reload(realm, mark)
-        @runtime.realm_call(realm, '__csimRunQueued', mark.to_i)
+        @runtime.realm_call(realm, 'runQueued', mark.to_i)
       end
       # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken at the event loop's
       # navigation turn, behind the tasks queued before it.
       def consume_pending_frame_reload
-        reloads = @runtime.call('__csimTakeFrameNavigations', 'reload')
+        reloads = @runtime.call('takeFrameNavigations', 'reload')
         reloads.each do |realm_id, reload_url|
           parent    = @runtime.frame_realm_parent(realm_id)
           container = frame_container_handle(realm_id, parent)
@@ -11628,7 +11628,7 @@ module Capybara
             reload_frame_to_entry(realm_id, cur, is_reload: true, is_history: false)
           else
             # (…by the realm whose document holds its container: a nested frame's, its parent frame's)
-            frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimReloadFrameByRealm', realm_id, reload_url)
+            frame_realm_host_call(@runtime.frame_realm_parent(realm_id), 'reloadFrameByRealm', realm_id, reload_url)
           end
         rescue StandardError => e
           log_console('warn', "frame self-reload failed: #{e.message}")
@@ -11637,7 +11637,7 @@ module Capybara
         end
       end
       def consume_pending_page_submission
-        realm_id, spec, source, policy = @runtime.call('__csimTakeFrameSubmission')
+        realm_id, spec, source, policy = @runtime.call('takeFrameSubmission')
         return unless realm_id
 
         invalidate_find_cache
@@ -11652,7 +11652,7 @@ module Capybara
       # navigation finalized with it, as `consume_pending_frame_nav`'s, what it made or not, by its container taken before
       # it ran.
       def consume_pending_frame_submit
-        while (realm_id, spec, kind, at, source, policy = @runtime.call('__csimTakeRoutedSubmission'))
+        while (realm_id, spec, kind, at, source, policy = @runtime.call('takeRoutedSubmission'))
           invalidate_find_cache
           frame = {'frame' => at, 'self' => (realm_id unless @runtime.window_realm_meta.key?(realm_id))}[kind]
           parent = frame && @runtime.frame_realm_parent(frame)
@@ -11678,7 +11678,7 @@ module Capybara
       def frame_navigable(realm_id)
         return nil if realm_id.to_i.zero?
 
-        nav, parent_nav, parent, traversable = @runtime.realm_direct_call(0, '__csimFrameNavigable', realm_id.to_i)
+        nav, parent_nav, parent, traversable = @runtime.realm_direct_call(0, 'frameNavigable', realm_id.to_i)
         (history = nav && traversable_history(traversable)) && [nav, parent_nav, parent, history]
       end
       # The session history numbered `id`: the page's own, or a window's of this isolate (session_history.rs
@@ -11709,7 +11709,7 @@ module Capybara
       def frame_entry(realm_id, create: false)
         return nil if realm_id.to_i.zero?
 
-        traversable, id = @runtime.realm_direct_call(0, '__csimFrameEntry', realm_id.to_i, create)
+        traversable, id = @runtime.realm_direct_call(0, 'frameEntry', realm_id.to_i, create)
         (history = id && traversable_history(traversable)) && [history, id]
       end
       # A navigation of frame realm `realm_id` to `url` begun — every frame navigation's, a form's, a link's, a location's —
@@ -11757,7 +11757,7 @@ module Capybara
       # (HTML, Chrome), its entry never made (`Commit`) — the container's `sandbox` the navigation began with let go
       # (frame_navigation.rs `releaseFrameSandbox`), and a traversal applying its step told.
       def frame_navigation_made_no_document(realm_id)
-        @runtime.call('__csimReleaseFrameSandbox', realm_id)
+        @runtime.call('releaseFrameSandbox', realm_id)
         @traversing_frames[:none] << realm_id if @traversing_frames
       end
       # The Referer and policy a reload or a traversal of frame realm `realm_id`'s `entry` refers by: its document state's
@@ -11766,7 +11766,7 @@ module Capybara
       def entry_referrer(realm_id, entry)
         return [entry[:referer], entry[:referrer_policy].to_s] if entry.key?(:referer)
 
-        [entry.fetch(:referrer) { @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer').to_s }, 'unsafe-url']
+        [entry.fetch(:referrer) { @runtime.realm_direct_call(realm_id, 'documentReferrer').to_s }, 'unsafe-url']
       end
       # The frame's CURRENT history entry (the loaded document), or nil — read by a reload to decide
       # whether to re-POST.
@@ -11833,7 +11833,7 @@ module Capybara
       # …as the engine answers it: [url, policy, opaque, realm, source] — the page's URL alone before the page has a realm
       # to ask. Asked on the page's context directly, as a frame's parser-time requests ask it from inside a V8 callback.
       private def request_client(realm, element_policy = nil, opaque = nil)
-        @runtime.realm_direct_call(0, '__csimRequestClient', realm.to_i, element_policy.to_s, opaque) || [page_url, '', false, 0, page_url, false]
+        @runtime.realm_direct_call(0, 'requestClient', realm.to_i, element_policy.to_s, opaque) || [page_url, '', false, 0, page_url, false]
       end
       # The origin a request of client `client` is made as — its own where it is opaque, else its URL's, the page's for a
       # client of no http(s) URL — as `rack_fetch` judges its request.
@@ -11843,7 +11843,7 @@ module Capybara
       # `ancestors`) — asked here, as no realm is asked from a host thread; an opaque client's own origin is judged by
       # its `origin` (`null`) all the same.
       def pinned_client(client)
-        ancestors = client[:realm] ? @runtime.realm_direct_call(0, '__csimAncestorDocuments', client[:realm].to_i, true) || [] : []
+        ancestors = client[:realm] ? @runtime.realm_direct_call(0, 'ancestorDocuments', client[:realm].to_i, true) || [] : []
         client.merge(ancestors: ancestors, realm: nil)
       end
       # The document of realm `realm` (0 the page) as a request's initiator: the URL whose site Sec-Fetch-Site compares and
@@ -11872,7 +11872,7 @@ module Capybara
       def main_document_referrer_policy = request_client(0)[1]
       def capture_frame_form_state(realm_id)
         return nil unless @runtime.frame_realm_alive?(realm_id)
-        @runtime.realm_call(realm_id, '__csimCaptureFormState')
+        @runtime.realm_call(realm_id, 'captureFormState')
       end
       # Re-fetch a history entry's URL and rebuild the frame realm from it, then restore the entry's
       # captured form state (before the element load fires). Used for a history traversal
@@ -11893,7 +11893,7 @@ module Capybara
 
           # (…not asked again where a traversal asked it before its step: `perform_history_traverse`)
           prompted = @prompted_frames&.delete?(realm_id) ? true : false
-          return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, nil, prompted)
+          return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), 'navigateFrameByRealm', realm_id, url, nil, prompted)
         end
         # (…a data: URL's and a srcdoc's as a navigation to them is, no server's to answer — its markup the entry's)
         srcdoc = entry[:srcdoc]
@@ -11907,7 +11907,7 @@ module Capybara
             return reload_current_frame_realm(url, srcdoc || body.to_s, srcdoc ? 'text/html' : (type || 'text/html'), entry: entered, doc_origin: (srcdoc ? nil : 'null'))
           end
 
-          return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, nil, true, srcdoc)
+          return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), 'navigateFrameByRealm', realm_id, url, nil, true, srcdoc)
         end
         # A history TRAVERSAL restores the entry's persisted form state (bfcache); a RELOAD gives a fresh document, so it
         # must NOT restore the (possibly stale) snapshot the entry was left with. Either is referred as the entry's
@@ -11920,9 +11920,9 @@ module Capybara
         return unless prompt_to_unload_frame(realm_id)
 
         # A `blob:` URL, which no server answers: the blob its container loaded the document of, for a reload, else the
-        # one it names now in this window's registry (`__csimTakeFrameNavBlob`) — none a failed load at the URL.
+        # one it names now in this window's registry (`takeFrameNavBlob`) — none a failed load at the URL.
         if url.match?(/\Ablob:/i)
-          blob = host_blob(frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimTakeFrameNavBlob', realm_id, url, is_reload, is_reload))
+          blob = host_blob(frame_realm_host_call(@runtime.frame_realm_parent(realm_id), 'takeFrameNavBlob', realm_id, url, is_reload, is_reload))
           return reload_frame_realm_by_id(realm_id, url, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', **restored, history_state: [entry[:state]])
         end
         navigate_realm_self(realm_id, url, entry.key?(:body) ? entry[:body].to_s : nil, entry[:content_type], is_reload: is_reload, is_history: is_history,
@@ -11938,7 +11938,7 @@ module Capybara
       end
       # …where it goes, as the engine routes it (navigation_plan.rs `submissionRoute`).
       def form_route(realm_id, spec)
-        kind, at, source, policy = @runtime.call('__csimSubmissionRoute', realm_id.to_i, spec['target'].to_s, spec['rel'].to_s)
+        kind, at, source, policy = @runtime.call('submissionRoute', realm_id.to_i, spec['target'].to_s, spec['rel'].to_s)
         submission_route(kind, at, source, policy)
       end
       # The route a submission takes, as the engine answers it (navigation_plan.rs `route_items`): `to` the navigable it
@@ -11960,7 +11960,7 @@ module Capybara
         # (…the page's own navigable its top-level traversable)
         to = :top if to == :self && realm_id.zero?
         # (…a `javascript:` action its target navigated to it — the URL's script run there, where the form's document may
-        # run it (location.js `__csimNavigateFrom`): no request is made of it — HTML "submit", "navigate to a javascript:
+        # run it (location.js `navigateFrom`): no request is made of it — HTML "submit", "navigate to a javascript:
         # URL"; one into a new window none, the window's about:blank and its script run not modeled)
         if spec['action'].to_s.match?(/\Ajavascript:/i)
           target = {self: realm_id, top: 0, window: route[:window]}.fetch(to) { to if to.is_a?(Integer) }
@@ -11982,7 +11982,7 @@ module Capybara
         post = method == 'GET' ? nil : [body, content_type]
         # (…a GET to a fragment of the document its frame is at moved within it: HTML "navigate to a fragment")
         if frame && !post && @runtime.frame_realm_alive?(frame) && Native.url_fragment_navigation(@runtime.realm_url(frame), url.to_s)
-          return @runtime.realm_call(frame, '__csimFragmentNavigate', url, false)
+          return @runtime.realm_call(frame, 'fragmentNavigate', url, false)
         end
         initiator = route[:referrer]
         # (…whether its window had transient activation as it was submitted: navigation_plan.rs `planSubmission`)
@@ -12039,7 +12039,7 @@ module Capybara
       private def javascript_form_action(target, url, realm_id)
         return unless target.zero? || @runtime.frame_realm_alive?(target)
 
-        @runtime.realm_call(target, '__csimNavigateFrom', url, realm_id)
+        @runtime.realm_call(target, 'navigateFrom', url, realm_id)
       end
       # …into a new window the driver opens (or reuses, by its name `name`) — with the opener HTML "get an element's
       # noopener" leaves it (token_list.rs `noopener`: `noopener` / `noreferrer` drop it, `_blank` without `opener` too, a
@@ -12126,7 +12126,7 @@ module Capybara
         prompted = !url.to_s.match?(/\Ajavascript:/i)
         return if prompted && !prompt_to_unload_frame(realm_id, parent)
 
-        frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, url, begun, prompted, nil, handling&.to_s)
+        frame_realm_host_call(parent, 'navigateFrameByRealm', realm_id, url, begun, prompted, nil, handling&.to_s)
       end
       # A self-targeted POST form submit in the initiating frame realm. POST the
       # entity body to the action URL, then rebuild that frame's realm from the
@@ -12215,7 +12215,7 @@ module Capybara
         # (…its navigation begun, the frame's ongoing one: session_history.rs `begin_navigation`)
         nav, _, _, history = frame_navigable(realm_id)
         ongoing = history && [history, nav, history.begin_navigation(nav)]
-        dest = @runtime.realm_direct_call(0, '__csimFrameDestination', realm_id.to_i)
+        dest = @runtime.realm_direct_call(0, 'frameDestination', realm_id.to_i)
         if sw_registered?
           deferred = await_sw_activation(url, blob_partition_site(realm_id), ongoing:, frame: true) do
             navigate_realm_self(
@@ -12276,7 +12276,7 @@ module Capybara
           initiator_cross_site_ancestor: initiating[:initiator_cross_site_ancestor] == true,
           # (…its cookies cross-site by the frame's ancestors' documents — a property of the frame the document commits
           # into, so it rides the SW fetch event too: a rewritten request keeps it)
-          ancestors:                     @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm_id.to_i),
+          ancestors:                     @runtime.realm_direct_call(0, 'ancestorDocuments', realm_id.to_i),
           client_origin:                 (document_origin(realm_id) if traversal),
           dest:                          dest,
           user_activated:                user_activated,
@@ -12384,7 +12384,7 @@ module Capybara
         seed = frame_seed(parent, handle, url, csp, doc_origin) or return
         return unless unload_frame_document(parent, realm_id)
 
-        frame_realm_host_call(parent, '__csimHostCommitBegins', handle)
+        frame_realm_host_call(parent, 'hostCommitBegins', handle)
         new_id = @runtime.reload_frame_realm(
           realm_id,
           parent.to_i,
@@ -12410,8 +12410,8 @@ module Capybara
           # Restore captured form state (history traversal) BEFORE the element load
           # fires, so the restored values are in place by the time the parent's
           # `iframe.onload` handler — and any assertion after it — runs.
-          @runtime.realm_call(new_id, '__csimRestoreFormState', restore_state) if restore_state
-          frame_realm_host_call(parent, '__csimFireFrameElementLoad', handle)
+          @runtime.realm_call(new_id, 'restoreFormState', restore_state) if restore_state
+          frame_realm_host_call(parent, 'fireFrameElementLoad', handle)
         rescue StandardError
           # The element rebind/load failed — don't strand the freshly built realm
           # (it's no longer referenced by any iframe), then surface the error — the WindowProxies of the frame, over its
@@ -12426,23 +12426,23 @@ module Capybara
       # The iframe/frame element handle that owns `realm_id`, found in the document
       # of its parent realm (main realm for a top-level frame).
       def frame_container_handle(realm_id, parent)
-        frame_realm_host_call(parent, '__csimGetFrameHandle', realm_id).to_i
+        frame_realm_host_call(parent, 'getFrameHandle', realm_id).to_i
       end
       # Call a host fn in the realm that OWNS an iframe (main realm for 0/nil).
       # A frame's navigation asks its document whether it may be unloaded before it fetches anything (HTML "check if
-      # unloading is canceled": its `beforeunload`, and its frames' — `__csimPromptToUnloadFrame`): false when a handler
+      # unloading is canceled": its `beforeunload`, and its frames' — `promptToUnloadFrame`): false when a handler
       # removed the frame, the navigation then going no further.
       # (…none a second time of one a traversal asked as it applied its step: `perform_history_traverse`)
       def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id), traversal: false)
         return true if @prompted_frames&.delete?(realm_id)
 
-        frame_realm_host_call(parent, '__csimPromptToUnloadFrame', realm_id, traversal) != false
+        frame_realm_host_call(parent, 'promptToUnloadFrame', realm_id, traversal) != false
       end
       # …and, its response in, its document unloaded (pagehide and unload, its frames' after it) while still the frame's
       # — false when a handler of them removed the frame, the response then having nowhere to go: what is left of the old
       # realm disposed.
       def unload_frame_document(parent, realm_id)
-        return true if frame_realm_host_call(parent, '__csimTearDownFrameDocument', realm_id) != false
+        return true if frame_realm_host_call(parent, 'tearDownFrameDocument', realm_id) != false
 
         @runtime.dispose_frame_realm_tree(realm_id)
         false
@@ -12485,7 +12485,7 @@ module Capybara
       # event-loop drain. Safe mid-call (builds a separate Browser). Same-window /
       # frame navs are left untouched (handled by drain_after_user_action).
       def consume_pending_aux_window
-        pending = @runtime.call('__csimTakePendingAuxWindow')
+        pending = @runtime.call('takePendingAuxWindow')
         return unless pending.is_a?(Hash) && pending['url'] && @driver.respond_to?(:open_aux_window)
         open_hyperlink_window(
           pending['url'].to_s,
@@ -12710,13 +12710,13 @@ module Capybara
         if about_blank_url?(url)
           return with_frame_entry(realm, url, handling) {|began| reload_current_frame_realm('about:blank', '', 'text/html', entry: entry, began: began) }
         end
-        # A `blob:` URL, which no server answers: the blob the container has its navigation load (`__csimTakeFrameNavBlob`:
+        # A `blob:` URL, which no server answers: the blob the container has its navigation load (`takeFrameNavBlob`:
         # the one it began with, a reload's the one the document was loaded of, else the one it names now in this window's
         # registry — no other window's partition) — none a failed load at the URL. (A redirect to one is followed to none:
         # navigation_fetch.rs `redirect`.)
         if url.to_s.match?(/\Ablob:/i)
           return with_frame_entry(realm, url, handling) do |began|
-            blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', realm, url.to_s, is_reload || is_history))
+            blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], 'takeFrameNavBlob', realm, url.to_s, is_reload || is_history))
             reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry, began: began)
           end
         end
@@ -12788,10 +12788,10 @@ module Capybara
         return unless unload_frame_document(parent, old_id)
 
         # (…the bytes a reload of it loads again none but a blob document's, which the container kept as it took them:
-        # `__csimTakeFrameNavBlob`)
-        frame_realm_host_call(parent, '__csimForgetFrameLoaded', old_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
+        # `takeFrameNavBlob`)
+        frame_realm_host_call(parent, 'forgetFrameLoaded', old_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
 
-        frame_realm_host_call(parent, '__csimHostCommitBegins', entry[:iframe_handle])
+        frame_realm_host_call(parent, 'hostCommitBegins', entry[:iframe_handle])
         new_id = @runtime.reload_frame_realm(
           old_id,
           parent.to_i,
@@ -12821,24 +12821,24 @@ module Capybara
         end
         # (…its container's `load` fired as the navigation's document loads, as a frame reached by its realm's is:
         # `reload_frame_realm_by_id`)
-        frame_realm_host_call(parent, '__csimFireFrameElementLoad', entry[:iframe_handle])
+        frame_realm_host_call(parent, 'fireFrameElementLoad', entry[:iframe_handle])
         invalidate_find_cache
         settle
       end
 
-      # What the container `handle` in realm `parent` gives the document it is to hold at `url` (`__csimFrameSeed`) — its
+      # What the container `handle` in realm `parent` gives the document it is to hold at `url` (`frameSeed`) — its
       # origin `doc_origin` where the caller decides it (an error document's, a new opaque one: 'null').
       private def frame_seed(parent, handle, url, csp, doc_origin)
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp) or return
+        seed = frame_realm_host_call(parent, 'frameSeed', handle, url.to_s, csp) or return
         seed['docOrigin'] = doc_origin if doc_origin
         seed
       end
 
       def rebind_frame_realm(parent_realm_id, iframe_handle, old_id, new_id)
         if parent_realm_id.nil? || parent_realm_id.zero?
-          @runtime.call('__csimRebindFrameRealm', iframe_handle, old_id, new_id)
+          @runtime.call('rebindFrameRealm', iframe_handle, old_id, new_id)
         else
-          @runtime.realm_call(parent_realm_id, '__csimRebindFrameRealm', iframe_handle, old_id, new_id)
+          @runtime.realm_call(parent_realm_id, 'rebindFrameRealm', iframe_handle, old_id, new_id)
         end
       end
 
@@ -13009,7 +13009,7 @@ module Capybara
         @recent_urls_last_push_at = nil
         @action_url_baseline = nil
         # While navigate is in progress (and the loaded page's bootstrap
-        # JS is running synchronously inside __csimLoadDocument), any
+        # JS is running synchronously inside loadDocument), any
         # `history.pushState`/`replaceState` chain belongs to that load
         # — record intermediates so a polling matcher can walk them.
         prior_navigating = @navigating
@@ -13112,7 +13112,7 @@ module Capybara
         # here — a gap); its referrer the request's, under the initiator's policy — the initiator's, though the window be at
         # its initial about:blank still (that one made with the window, its creator's: `open_initial_document`).
         when 'about_blank'
-          inherit_creator(origin: type, base: initiator == page_url ? @runtime.realm_direct_call(0, '__csimBaseURL').to_s : initiator.to_s) if type
+          inherit_creator(origin: type, base: initiator == page_url ? @runtime.realm_direct_call(0, 'baseURL').to_s : initiator.to_s) if type
           self.page_url = url
           record_response(*ABOUT_BLANK_RESPONSE)
           boot_response_into_ctx('', inherited_coop: payload)
@@ -13147,7 +13147,7 @@ module Capybara
       # taken before it: its number (`ongoing_navigation`), and what is planned that no number records yet (a reload, a form's:
       # navigation_plan.rs `navigationAwaited`), which the driver's own visit found planned or not as it began.
       private def navigation_mark(history, realm)
-        [history.ongoing_navigation(0), @runtime.realm_call(realm, '__csimNavigationAwaited')]
+        [history.ongoing_navigation(0), @runtime.realm_call(realm, 'navigationAwaited')]
       end
       # The origin of the page's document a navigation leaves, serialized — `null` an opaque one's — a window's of no entry
       # yet its initial about:blank's, its creator's (`inherit_creator`), none where it does not know one (a `noopener`
@@ -13204,8 +13204,8 @@ module Capybara
       # is its initial about:blank (session_history.rs `commit_opener_policy`) — and for each response as it comes
       # (navigation_fetch.rs `response`, HTML "enforce a response's opener policy") its navigable's popup sandboxing flag set
       # (realm_location.rs `pageSandbox` of no Content-Security-Policy).
-      private def coop_leaving_facts(realm) = [document_origin(realm).to_s, @runtime.realm_call(realm, '__csimInitialAboutBlank') == true]
-      private def coop_facts(realm) = [*coop_leaving_facts(realm), @runtime.realm_call(realm, '__csimNavigationSandbox', nil).to_i]
+      private def coop_leaving_facts(realm) = [document_origin(realm).to_s, @runtime.realm_call(realm, 'initialAboutBlank') == true]
+      private def coop_facts(realm) = [*coop_leaving_facts(realm), @runtime.realm_call(realm, 'navigationSandbox', nil).to_i]
       # The page's document committed, of opener policy `coop` and origin `origin` — the one place every commit goes through
       # (a response's, an about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context
       # group is left for a new one where needed (session_history.rs `commit_opener_policy`), `carried` what its navigation's
@@ -13227,7 +13227,7 @@ module Capybara
       # origin's, WPT coep-navigate-popup and coop-navigated-popup of both)
       private def leave_browsing_context_group
         @session_history.clear_name
-        @runtime.call('__csimForgetPageOpenings')
+        @runtime.call('forgetPageOpenings')
         @runtime.page_left_group!
         new_browsing_context_group
       end
@@ -13238,7 +13238,7 @@ module Capybara
       end
       # Rebuild the JS Context and load `html` into it. Called from
       # every code path that handles a full-page Rack response (`navigate`
-      # for GETs, `navigate_post` for POSTs). `__csimLoadDocument` walks
+      # for GETs, `navigate_post` for POSTs). `loadDocument` walks
       # importmaps + module scripts during `theEnd`; the bridge
       # pushes the importmap back via `__csim_pushImportmap` before any
       # module loads so resolver lookups agree with the JS side.
@@ -13308,13 +13308,13 @@ module Capybara
         yield if block_given?
         # The lifecycle steps queued on the outgoing page's event loop are the new page's to run.
         Native.sw_queued_steps(@sw_partition).each do |h|
-          @runtime.call('__csim_swQueueStep', h)
+          @runtime.call('swQueueStep', h)
         end
         Native.sw_queued_jobs(@sw_partition).each do |id|
-          @runtime.call('__csim_swQueueJob', id)
+          @runtime.call('swQueueJob', id)
         end
         # The service workers that outlive the navigation follow the new page's clock (timers.js `followWindowClock`).
-        @runtime.call('__csimFollowWindowClock') unless @workers.empty?
+        @runtime.call('followWindowClock') unless @workers.empty?
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.
         # Its frames are new navigables, which the nested histories its document state kept from before are not.
@@ -13369,7 +13369,7 @@ module Capybara
           opts['aboutBase']     = creator[:base]
           opts['referrer']      = creator[:url] unless creator[:url].empty?
         end
-        @document_handle = @runtime.call('__csimBootContext', opts).to_i
+        @document_handle = @runtime.call('bootContext', opts).to_i
         # Drain the app's deferred external-script (chunk) boot chain to quiescence.
         # A dynamically-inserted external <script> runs async (setTimeout 0; HTML
         # "prepare the script" force-async), so a module/chunk loader's scripts
@@ -13382,17 +13382,17 @@ module Capybara
         # init a browser runs during the load, but not its later timers"). Bounded by
         # the finite pending-script count.
         BOOT_SCRIPT_DRAIN_MAX_ITER.times do
-          break if @runtime.call('__csimPendingExternalScriptCount').to_i.zero?
+          break if @runtime.call('pendingExternalScriptCount').to_i.zero?
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
         end
         # The document, loaded, refreshes its service-worker client record (its URL may have moved since it reported
         # itself as it began loading), as a frame's does (V8Runtime).
-        @runtime.call('__csim_swReportClient')
+        @runtime.call('swReportClient')
         sw_document_loaded(0)
         # (…a new window's initial about:blank completely loaded as it is made, which no parse made and whose `load` never
         # fires: `open_initial_document`)
         if initial
-          @runtime.call('__csimCompleteInitialDocument')
+          @runtime.call('completeInitialDocument')
           return
         end
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
@@ -13523,11 +13523,11 @@ module Capybara
         @session_history.flush_begin
         @flushing_outgoing_page = true
         begin
-          @runtime.call('__csimFlushBegin')
+          @runtime.call('flushBegin')
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
           # (…and the traversals the page asked for before the navigation began, whose tasks a browser would have run by
           # now: the driver took the navigation first)
-          @runtime.call('__csimApplyOwnTraversals', true)
+          @runtime.call('applyOwnTraversals', true)
         rescue StandardError
           # Outgoing page is discarded by this navigation; its flush error is moot.
         ensure
@@ -13536,7 +13536,7 @@ module Capybara
           # document (a `Content-Disposition: attachment` response, a raise mid-fetch):
           # there the page lives on, so its `location.href = …` must still happen.
           @session_history.flush_end
-          @runtime.call('__csimFlushEnd')
+          @runtime.call('flushEnd')
         end
       end
 
@@ -13546,8 +13546,8 @@ module Capybara
       # (navigation_plan.rs `flushRestore`: a traversal the flush planned among them).
       def restore_flushed_nav_intents
         # (…let go with the rest where a restore is under way)
-        return @runtime.call('__csimFlushRestore', true) if @restoring_flushed_nav_intents
-        return unless @runtime.call('__csimFlushRestore', false) == true
+        return @runtime.call('flushRestore', true) if @restoring_flushed_nav_intents
+        return unless @runtime.call('flushRestore', false) == true
 
         # And run them. The flush consumed the task that stashed them, so the
         # settle that follows a user action sees nothing left to do and would
@@ -13576,7 +13576,7 @@ module Capybara
       # last path segment: downloads.rs `filename`)
       def save_downloaded_response(url, headers, body, realm: nil, sandbox: nil, hint: nil)
         source  = @download_source || realm
-        allowed = @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, sandbox)
+        allowed = @runtime.call('downloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, sandbox)
         # (…a frame's session history as it stood before: a download is no navigation of it)
         frame_navigation_made_no_document(realm) if realm
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
@@ -13699,7 +13699,7 @@ module Capybara
       # A document's site for cookies (RFC 6265bis "site for cookies"): its top-level document's site where every ancestor
       # of it is of that site, else none (nil) — an about:blank / srcdoc one inheriting its creator's: the engine's
       # (referrer.rs `site_for_cookies`).
-      private def site_for_cookies(realm_id) = @runtime.realm_direct_call(0, '__csimSiteForCookies', realm_id.to_i)
+      private def site_for_cookies(realm_id) = @runtime.realm_direct_call(0, 'siteForCookies', realm_id.to_i)
 
       # A navigation's hop sent over the network — its request to `url` by method `method`, of `body` (nil none) and
       # `content_type` — carrying the headers its navigation gives it (navigation_fetch.rs `begin_hop`: its Fetch
@@ -14107,7 +14107,7 @@ module Capybara
       # The active document's base URL (the engine's, as `document.baseURI` reads it) — routed to the current frame realm
       # inside `within_frame`, else the main document — or nil for none.
       def document_base_url
-        url = dom_call('__csimBaseURL').to_s
+        url = dom_call('baseURL').to_s
         url.empty? ? nil : url
       end
 

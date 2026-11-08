@@ -649,8 +649,8 @@ impl Partition {
 
 // ── The job queues (Service Workers §8 Schedule Job, Run Job, Finish Job; the Register, Update and Unregister jobs) ──
 // The jobs at a scope run one at a time, in order (the scope's job queue), each as a task of the platform's on the
-// window's event loop (sw-client.js __csim_swQueueJob, which runs it back), and settle the promises waiting on it in
-// every realm (__csim_swJobSettled). What runs on the network or in an isolate is the host's: the script's fetch and
+// window's event loop (sw-client.js swQueueJob, which runs it back), and settle the promises waiting on it in
+// every realm (swJobSettled). What runs on the network or in an isolate is the host's: the script's fetch and
 // byte check, and its worker's spawn — each answered back here.
 impl Partition {
     fn job(&mut self, id: u32) -> Option<&mut Job> {

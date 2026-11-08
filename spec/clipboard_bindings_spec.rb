@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/engine_global'
 
 # Clipboard, ClipboardItem and ScreenOrientation, generated from their IDL. The figures are headless Chrome's, but where
 # the spec decides: a ClipboardItem's key is a MIME type (Chrome takes "bogus"), its options' presentationStyle an
@@ -10,7 +11,7 @@ require_relative 'support/poll_until'
 # knows the optional text/uri-list this clipboard holds (Chrome: false); readText() of a clipboard with no text is a
 # NotFoundError; write() refuses a type no page may write — by its essence, so a key or a Blob type with parameters
 # (`text/plain;charset=utf-8`, writeText's own) writes, where Chrome refuses it.
-RSpec.describe 'Clipboard bindings' do
+RSpec.describe 'Clipboard bindings', engine_global: true do
   let(:app) {
     lambda do |env|
       body = env['PATH_INFO'] == '/framed' ? '<iframe src="/blank"></iframe>' : ''
@@ -112,9 +113,9 @@ RSpec.describe 'Clipboard bindings' do
       (async () => {
         await navigator.clipboard.write([new ClipboardItem({'web text/custom': 'c', 'text/plain': 'p'})]);
         got.push((await navigator.clipboard.read())[0].types);
-        got.push(__csimClipboardFiles().length);
+        got.push(RustyRacer.steps.clipboardFiles().length);
         await navigator.clipboard.write([new ClipboardItem({'text/html': 'h', 'image/svg+xml': '<svg/>', 'image/png': new Blob(['p'], {type: 'image/png'})})]);
-        got.push(__csimClipboardFiles().map((f) => [f instanceof File, f.name, f.type, f.size]));
+        got.push(RustyRacer.steps.clipboardFiles().map((f) => [f instanceof File, f.name, f.type, f.size]));
         const five = await new ClipboardItem({'text/plain': 5}).getType('text/plain');
         got.push([five instanceof Blob, await five.text()]);
         got.push(await settle(new ClipboardItem({'text/plain': Promise.reject(new Error('boom'))}).getType('text/plain')));

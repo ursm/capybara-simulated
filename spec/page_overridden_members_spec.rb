@@ -1,11 +1,12 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # What the platform does is the engine's, not the page's: a page may redefine a member of an interface prototype (a
 # polyfill, a test double, an analytics shim), and the platform's own algorithms — serializing, parsing, focusing,
 # showing a popover — go on reading the node's own state, never the member the page replaced. In Chrome a throwing
 # `Node.prototype.ownerDocument` breaks none of these.
-RSpec.describe 'members a page overrides' do
+RSpec.describe 'members a page overrides', engine_global: true do
   it "leaves the platform's own reads of a node's document alone" do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><input id="i"><div id="p" popover>p</div>']] })
     s.visit '/'
@@ -381,7 +382,7 @@ RSpec.describe 'members a page overrides' do
         dt.items.add(new File(['x'], 'own.txt', { type: 'text/plain' }));
         return [
           bx.getImageData(5, 5, 1, 1).data[3],
-          __csimScreenshot(false) !== null,
+          RustyRacer.steps.screenshot(false) !== null,
           document.getElementById('f').value.endsWith('page_overridden_members_spec.rb'),
           dt.items[0].type
         ];

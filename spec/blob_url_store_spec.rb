@@ -3,10 +3,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/engine_global'
 
 # The blob URL store is the isolate's (blob_urls.rs): one entry a URL, the realm that made it beside it — and its
 # window's registry (blob_registry.rs), which its other contexts, a worker's isolate, resolve it in.
-RSpec.describe 'the blob URL store' do
+RSpec.describe 'the blob URL store', engine_global: true do
   include PollUntil
 
   # A revoke removes the URL whichever realm made it — a frame's, revoked by its page (same origin) — and nothing in the
@@ -17,9 +18,9 @@ RSpec.describe 'the blob URL store' do
     s.visit '/'
     url = s.evaluate_script('window.__made')
     expect(url).to start_with('blob:')
-    expect(s.evaluate_script("__csimReadBlobBytes(#{url.to_json}) !== null")).to be(true)
+    expect(s.evaluate_script("RustyRacer.steps.readBlobBytes(#{url.to_json}) !== null")).to be(true)
     s.execute_script("URL.revokeObjectURL(#{url.to_json})")
-    expect(s.evaluate_script("[__csimReadBlobBytes(#{url.to_json}), __csimReadBlobForWindow(#{url.to_json})]")).to eq([nil, nil])
+    expect(s.evaluate_script("[RustyRacer.steps.readBlobBytes(#{url.to_json}), RustyRacer.steps.readBlobForWindow(#{url.to_json})]")).to eq([nil, nil])
   end
 
   # A new document in a realm revokes the URLs its last one made (File API's unloading document cleanup steps) — and
@@ -34,7 +35,7 @@ RSpec.describe 'the blob URL store' do
       s.evaluate_script("URL.createObjectURL(new Blob(['x']))")
     }
     s.visit '/'
-    expect(urls.map {|u| s.evaluate_script("[__csimReadBlobBytes(#{u.to_json}), __csimResolveBlobBytes(#{u.to_json})]") })
+    expect(urls.map {|u| s.evaluate_script("[RustyRacer.steps.readBlobBytes(#{u.to_json}), RustyRacer.steps.resolveBlobBytes(#{u.to_json})]") })
       .to all(eq([nil, nil]))
     ctx = s.driver.browser.instance_variable_get(:@runtime).instance_variable_get(:@ctx)
     ctx.low_memory_notification
@@ -163,7 +164,7 @@ RSpec.describe 'the blob URL store' do
       w.postMessage(mine);
     JS
     expect(poll_until { s.evaluate_script('window.revoked') }).to be(true)
-    expect(s.evaluate_script('[__csimReadBlobBytes(mine), __csimReadBlobForWindow(mine)]')).to eq([nil, nil])
+    expect(s.evaluate_script('[RustyRacer.steps.readBlobBytes(mine), RustyRacer.steps.readBlobForWindow(mine)]')).to eq([nil, nil])
   end
 
   # A URL the page made before any worker existed — no other context to resolve it then, its entry only a marker — the

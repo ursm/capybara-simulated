@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # IntersectionObserver against the layout engine. What matters most is the half a "fires
 # isIntersecting: true once" stub can never report — LEAVING, and never entering at all — because
@@ -9,7 +10,7 @@ require_relative 'support/session_teardown'
 #
 # The initial-notification expectations are real Chrome's, read off the same markup with
 # `--headless --dump-dom` over http at 1024x768.
-RSpec.describe 'IntersectionObserver' do
+RSpec.describe 'IntersectionObserver', engine_global: true do
   def body
     <<~HTML
       <!DOCTYPE html>
@@ -47,7 +48,7 @@ RSpec.describe 'IntersectionObserver' do
   end
 
   def pump(s, n = 5)
-    n.times { s.evaluate_script("typeof __runLoopStep === 'function' ? __runLoopStep(50, 50, false) : null") }
+    n.times { s.evaluate_script("RustyRacer.steps.runLoopStep(50, 50, false)") }
   end
 
   def entries(s) = s.evaluate_script('window.__io')
@@ -151,7 +152,7 @@ RSpec.describe 'IntersectionObserver' do
     rounds = s.evaluate_script(<<~JS)
       (() => {
         const before = window.__rounds;
-        for (let i = 0; i < 3; i++) __runLoopStep(50, 50, false);
+        for (let i = 0; i < 3; i++) RustyRacer.steps.runLoopStep(50, 50, false);
         return [before > 0, window.__rounds - before];
       })()
     JS

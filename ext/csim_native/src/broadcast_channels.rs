@@ -205,7 +205,7 @@ fn channel_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 
 // ── A window's inbox of posts from beyond its isolate ──
 // The BroadcastChannel posts another window or a worker sent, which this window's isolate takes as its event loop next
-// runs (browser.rb `deliver_window_messages`: each queued on the isolate's queue, `__csimBcQueueInbound`) — and whether
+// runs (browser.rb `deliver_window_messages`: each queued on the isolate's queue, `bcQueueInbound`) — and whether
 // that queue may hold a delivery since it was last drained (`queued`). Written from whichever window posts, the host's;
 // read with no lock where nothing waits (`pending?`), as a background window is asked whether to step.
 #[magnus::wrap(class = "Capybara::Simulated::Native::BroadcastInbox", free_immediately)]

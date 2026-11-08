@@ -172,7 +172,7 @@ RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
     before = s.evaluate_script(read)
     s.evaluate_script("document.getElementById('p').classList.add('menu')")
     expect(s.evaluate_script(read)).to eq(before)
-    s.evaluate_script("__csimHoverElement(document.getElementById('p'))")
+    s.evaluate_script("RustyRacer.steps.hoverElement(document.getElementById('p'))")
     expect(s.evaluate_script(read)).to eq(before + 40)
   end
 
@@ -735,7 +735,7 @@ RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
         JSON.stringify(['a2', 'l3'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.y, r.width, r.height]; }))
       JS
       closed = walk_session_for(body, css: css).evaluate_script(geo)
-      open   = walk_session_for(body, css: css).evaluate_script("(__csimHoverElement(document.getElementById('a2')), #{geo.strip})")
+      open   = walk_session_for(body, css: css).evaluate_script("(RustyRacer.steps.hoverElement(document.getElementById('a2')), #{geo.strip})")
       expect(open).not_to eq(closed)
       s = walk_session_for(body, css: css)
       got = s.evaluate_script(<<~JS)
@@ -743,9 +743,9 @@ RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
           const geo = () => #{geo.strip};
           const out = [geo()];
           document.getElementById('p').firstChild.data = 'y'; out.push(geo());
-          __csimHoverElement(document.getElementById('a2')); out.push(geo());
+          RustyRacer.steps.hoverElement(document.getElementById('a2')); out.push(geo());
           document.getElementById('p').firstChild.data = 'z'; out.push(geo());
-          __csimHoverElement(null); out.push(geo());
+          RustyRacer.steps.hoverElement(null); out.push(geo());
           return out;
         })()
       JS
@@ -1142,7 +1142,7 @@ RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
       expect(got).to eq([false, 'hidden', true])
     end
 
-    # …and Capybara asks the same question (`__csimVisible` kept its own node-tree copy of the walk), and so does the
+    # …and Capybara asks the same question (`visible` kept its own node-tree copy of the walk), and so does the
     # text: a light child no rendered slot takes, and a fallback beside an assigned node, are neither visible nor text.
     # A closed `<details>`'s content is SKIPPED — laid out (a rect 17 tall) but `checkVisibility()` false. Chrome:
     # `["I\ns", "", false, false, true, false, false, 17]`.

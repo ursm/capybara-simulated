@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # The UI events of the user's actions the driver plays, as a browser fires them: trusted, their view the window and
 # composed (but the enter / leave ones), a click a PointerEvent counting its clicks, a pressed button in `buttons`, a
@@ -10,7 +11,7 @@ require_relative 'support/session_teardown'
 # keydown was canceled — a paste a composed ClipboardEvent of a read-only DataTransfer — a right click's contextmenu and
 # auxclick, a double click's two clicks and dblclick — and a drop's files the user's, unreadable while dragged over
 # the page (HTML's protected drag data store) and gone once dropped.
-RSpec.describe 'User action events' do
+RSpec.describe 'User action events', engine_global: true do
   let(:app) {
     lambda do |env|
       next [404, {}, ['']] unless env['PATH_INFO'] == '/'
@@ -382,7 +383,7 @@ RSpec.describe 'User action events' do
     user = session.evaluate_script('__order.splice(0)')
     scripted = session.evaluate_script(<<~JS)
       (() => {
-        __csimDispatchTrusted(document.getElementById('lb'), new MouseEvent('click', {bubbles: true, cancelable: true}));
+        RustyRacer.steps.dispatchTrusted(document.getElementById('lb'), new MouseEvent('click', {bubbles: true, cancelable: true}));
         __order.push('after');
         return __order.slice();
       })()

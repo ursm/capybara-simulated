@@ -261,7 +261,7 @@ impl crate::dom::RealmArena {
     // isolate's trees — the page's, and those of the windows `window.open` made in it — that were there then, a document
     // begun since (a navigation's, the realm reused or not) none of them, nor one no longer fully active (a closed
     // window's, a destroyed page's: HTML's task would not run), but `source`'s, the one that made it. Which of them have
-    // the area is theirs to tell (storage.js `__csim_deliverStorageEvents`).
+    // the area is theirs to tell (storage.js `deliverStorageEvents`).
     // (…by DOCUMENT, not by Window: "queue a global task" gives the task its global's associated Document as it is
     // queued, and a task whose document is not fully active is not runnable (HTML §8.1.7.1, "event loops") — so a change
     // queued at an initial about:blank whose Window the next document keeps fires at neither, the about:blank no longer

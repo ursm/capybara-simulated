@@ -608,7 +608,7 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
 // __dom.windowsPlanned() -> whether a window `window.open` made in this isolate has a navigation of its own planned —
 // a location's, a reload's, a traversal's, one moving a frame of it — or a traversal queued that makes a document again,
 // its task still to plan it: what the host's drain takes (`takeWindowNavigations`, history.js
-// `__csimApplyWindowTraversals`) as it takes the page's, round after round while any is left.
+// `applyWindowTraversals`) as it takes the page's, round after round while any is left.
 fn windows_planned(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     for w in crate::dom::dom(scope).arena.stepped_windows() {
         if crate::dom::dom(scope).arena.window_history(w).is_some_and(|(h, _)| h.queued_documents()) {
@@ -798,7 +798,7 @@ const FORM_PLANNED: u32 = 0;
 const FORM_PLANNED_TURN: u32 = 1;
 const FORM_POPUP_REFUSED: u32 = 2;
 // __dom.planFormSubmission(formNid, request, interactive) -> FORM_*: HTML "submit" from its action on, the calling realm's
-// document's form's, its request as the bindings made it (form-fields.js `__csimFormSerialize`) — ended where the action is no
+// document's form's, its request as the bindings made it (form-fields.js `formSerialize`) — ended where the action is no
 // URL (step 14) or the navigable it chooses is being unloaded ("navigate"; a teardown handler's submit: `unloading`) — planned
 // by what it navigates (HTML "plan to navigate"): a frame's navigable its own (frame_navigation.rs `planFrameSubmission`), its
 // target's frame or its own — whichever the realm's — and of a frame's document, the page's plan where it chooses the page
@@ -1069,7 +1069,7 @@ fn flushed_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 // __dom.flushRestore(drop) -> [whether any was, realms]: the navigation committed no document — what the flushed tasks
 // planned put back where nothing was planned since — or (`drop`) what they planned let go, `realms` those of the
 // top-level documents whose traversal it let go so: the traversals queued behind it, which waited for it, have a task
-// no more, the bindings' to queue them one (history.js `__csimRequeueTraversals`). (One that commits a document drops
+// no more, the bindings' to queue them one (history.js `requeueTraversals`). (One that commits a document drops
 // the page's with the rest of its plan: the page load's reset.)
 fn traversables(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Vec<i32> {
     let cid = realm_id(scope, args);

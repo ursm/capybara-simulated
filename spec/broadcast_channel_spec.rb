@@ -158,7 +158,7 @@ RSpec.describe 'BroadcastChannel delivery' do
   end
 
   # (…a channel heard as its delivery's task runs — one given its listener after the post among them — and none that no
-  # listener hears then, whose task is let go: broadcast-channel.js `__csimBcTakeQueued`)
+  # listener hears then, whose task is let go: broadcast-channel.js `bcTakeQueued`)
   it 'delivers to a listener added after the post, where another realm makes the deliveries queued' do
     session.execute_script(<<~JS)
       window.got = [];

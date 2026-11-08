@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # `scroll` (CSSOM-View "Scrolling events") is a PENDING SCROLL EVENT TARGET, the
 # same as `scrollend`: scrolling a box adds it to the document's pending set and
@@ -17,7 +18,7 @@ require_relative 'support/session_teardown'
 #
 # Every expectation here is real Chrome's, read off the same markup with
 # `--headless --dump-dom`.
-RSpec.describe 'scroll event' do
+RSpec.describe 'scroll event', engine_global: true do
   def session
     app = lambda do |_env|
       [200, {'content-type' => 'text/html'},
@@ -32,7 +33,7 @@ RSpec.describe 'scroll event' do
 
   # Drive the event loop so the render-phase scroll flush runs.
   def pump(s, n = 5)
-    n.times { s.evaluate_script("typeof __runLoopStep === 'function' ? __runLoopStep(50, 50, false) : null") }
+    n.times { s.evaluate_script("RustyRacer.steps.runLoopStep(50, 50, false)") }
   end
 
   it 'delivers one event per scroller per frame, after the task that moved it' do
@@ -160,7 +161,7 @@ RSpec.describe 'scroll event' do
     app = ->(_env) { [200, {'content-type' => 'text/html'}, [%(<!DOCTYPE html><meta charset="utf-8"><iframe id="f" style="width:300px;height:150px" srcdoc="#{frame}"></iframe>)]] }
     s = simulated_session(app)
     s.visit '/'
-    pump = -> { 8.times { s.evaluate_script('__runLoopStep(50, 50, false)') } }
+    pump = -> { 8.times { s.evaluate_script('RustyRacer.steps.runLoopStep(50, 50, false)') } }
     pump.call
     s.execute_script("Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop').set.call(f.contentDocument.documentElement, 5000)")
     pump.call

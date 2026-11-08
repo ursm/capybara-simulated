@@ -133,7 +133,7 @@ module WptRunner
                              # microtask / timer hop land after the jump
   POST_TIMEOUT_STEP_MS = 50  # small virtual step per post-jump settle hop
   DRAIN_ITER         = 5_000
-  # `__runLoopStep`'s per-call task cap pins the virtual clock to `limit` only
+  # `runLoopStep`'s per-call task cap pins the virtual clock to `limit` only
   # when it runs out of *due* timers — if it hits the iter cap first it returns
   # short of `limit`. The big force jumps must actually reach the harness-timeout
   # horizon, so they get a cap large enough to walk a 1 ms-clamped setInterval
@@ -1590,14 +1590,14 @@ module WptRunner
       # jumps cover the 10 s normal and 60 s `<meta name=timeout content=long>`
       # horizons; we stop at the first one that completes.
       [FORCE_TIMEOUT_MS, LONG_TIMEOUT_MS].each do |jump|
-        s.evaluate_script("typeof __drainTimers === 'function' ? __drainTimers(#{jump}, #{FORCE_DRAIN_ITER}) : null")
+        s.evaluate_script("RustyRacer.steps.drainTimers(#{jump}, #{FORCE_DRAIN_ITER})")
         res = s.evaluate_script('globalThis.__wptResults')
         break unless res.nil?
       end
       # Let a completion that chains through a final microtask / timer hop land.
       POST_TIMEOUT_STEPS.times do
         break unless res.nil?
-        s.evaluate_script("typeof __drainTimers === 'function' ? __drainTimers(#{POST_TIMEOUT_STEP_MS}, #{DRAIN_ITER}) : null")
+        s.evaluate_script("RustyRacer.steps.drainTimers(#{POST_TIMEOUT_STEP_MS}, #{DRAIN_ITER})")
         res = s.evaluate_script('globalThis.__wptResults')
       end
     end

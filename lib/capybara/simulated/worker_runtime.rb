@@ -13,12 +13,12 @@ module Capybara
       end
 
       def eval_void(src, **kw) = @ctx.eval_void(src.to_s, **kw)
-      def call(name, *args) = @ctx.call(name.to_s, *args)
+      def call(step, *args) = V8Runtime.engine_call(@ctx, step.to_s, *args)
       # (…the bridge's checkpoint, with the steps HTML runs after it: V8Runtime#drain_microtasks)
-      def drain_microtasks  = @ctx.call('__csim_yield')
+      def drain_microtasks  = call('yield')
       # (…its clock advanced `ms` — a poll tick's, or as far as the window's clock went meanwhile: Browser#run_worker)
-      def drain_timers(ms = 50) = @ctx.call('__drainTimers', ms.to_i)
-      def has_ready_timer?  = !!@ctx.call('__hasReadyTimer')
+      def drain_timers(ms = 50) = call('drainTimers', ms.to_i)
+      def has_ready_timer?  = !!call('hasReadyTimer')
       def dispose           = (@ctx.dispose rescue nil)
 
       # Stop whatever JavaScript this worker is running, FROM ANOTHER THREAD — the one thing the

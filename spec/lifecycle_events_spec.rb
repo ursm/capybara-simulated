@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # Document lifecycle: as the page transitions from `loading` →
 # `interactive` → `complete`, the browser dispatches a
@@ -8,7 +9,7 @@ require_relative 'support/session_teardown'
 # DOMContentLoaded) to fire `turbo:load`, so anything chained off
 # that (Avo's tippy init, ahoy.js, etc.) only runs once we emit the
 # transition events.
-RSpec.describe 'document lifecycle events' do
+RSpec.describe 'document lifecycle events', engine_global: true do
   let(:app) {
     lambda do |_env|
       [200, {'content-type' => 'text/html'}, [<<~HTML]]
@@ -61,7 +62,7 @@ RSpec.describe 'document lifecycle events' do
     # Several places can be the one to fire it (the driver here, the realm builder
     # for a frame, the WPT harness for a test file) — whoever gets there first
     # does, and the rest are no-ops.
-    again = session.evaluate_script('__csimFireWindowLoad()')
+    again = session.evaluate_script('RustyRacer.steps.fireWindowLoad()')
     expect(again).to be(false)
     expect(session.evaluate_script('window.__lifecycleEvents')).to eq(['DOMContentLoaded@interactive', 'load@complete'])
   end

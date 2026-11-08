@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/engine_global'
 
 # A request a service worker answers is answered at the time its `fetch` event's work takes on the window's clock — one
 # virtual time for the window's event loop and its workers' (Browser#worker_due_within) — and a timeout the client set
@@ -15,7 +16,7 @@ require_relative 'support/poll_until'
 # Before, the worker's thread took the request whenever it got to it, the window's clock run on meanwhile — a
 # fast-forward to the request's own timeout among it — and an answer due in 50 ms of a timeout of 100 came at 100, the
 # request aborted, or by however much a loaded machine's scheduler made it: 141, 100, 1016.
-RSpec.describe 'a request a service worker answers, on the clock' do
+RSpec.describe 'a request a service worker answers, on the clock', engine_global: true do
   include PollUntil
 
   let(:app) {
@@ -42,9 +43,9 @@ RSpec.describe 'a request a service worker answers, on the clock' do
         const x = new XMLHttpRequest();
         x.open('GET', '/d.txt?' + query);
         x.timeout = timeout;
-        const t0 = performance.now(), v0 = __virtualNow();
-        x.onload = () => postMessage(['load', performance.now() - t0, __virtualNow() - v0]);
-        x.ontimeout = () => postMessage(['timeout', performance.now() - t0, __virtualNow() - v0]);
+        const t0 = performance.now(), v0 = RustyRacer.steps.virtualNow();
+        x.onload = () => postMessage(['load', performance.now() - t0, RustyRacer.steps.virtualNow() - v0]);
+        x.ontimeout = () => postMessage(['timeout', performance.now() - t0, RustyRacer.steps.virtualNow() - v0]);
         x.send();
       };
     JS
@@ -77,15 +78,15 @@ RSpec.describe 'a request a service worker answers, on the clock' do
   def page_requests(s, query, timeout)
     s.execute_script(<<~JS)
       window.got = {};
-      const t0 = performance.now(), v0 = __virtualNow();
+      const t0 = performance.now(), v0 = RustyRacer.steps.virtualNow();
       fetch('/d.txt?#{query}', { signal: AbortSignal.timeout(#{timeout}) }).then((r) => r.text()).then(
-        (t) => { got.fetch = [t, performance.now() - t0, __virtualNow() - v0]; },
-        (e) => { got.fetch = [e.name, performance.now() - t0, __virtualNow() - v0]; });
+        (t) => { got.fetch = [t, performance.now() - t0, RustyRacer.steps.virtualNow() - v0]; },
+        (e) => { got.fetch = [e.name, performance.now() - t0, RustyRacer.steps.virtualNow() - v0]; });
       const x = new XMLHttpRequest();
       x.open('GET', '/d.txt?#{query}');
       x.timeout = #{timeout};
-      x.onload = () => { got.xhr = [x.responseText, performance.now() - t0, __virtualNow() - v0]; };
-      x.ontimeout = () => { got.xhr = ['timeout', performance.now() - t0, __virtualNow() - v0]; };
+      x.onload = () => { got.xhr = [x.responseText, performance.now() - t0, RustyRacer.steps.virtualNow() - v0]; };
+      x.ontimeout = () => { got.xhr = ['timeout', performance.now() - t0, RustyRacer.steps.virtualNow() - v0]; };
       x.send();
     JS
     poll_until(timeout: 20) { s.evaluate_script('got.fetch && got.xhr ? got : null') }
@@ -135,14 +136,14 @@ RSpec.describe 'a request a service worker answers, on the clock' do
     poll_until { s.evaluate_script("document.querySelector('iframe').contentDocument.body?.textContent == 'f'") }
     s.execute_script(<<~JS)
       const w = new Worker('/w.js'), fw = frames[0];
-      const p0 = __virtualNow(), f0 = fw.__virtualNow();
+      const p0 = RustyRacer.steps.virtualNow(), f0 = fw.RustyRacer.steps.virtualNow();
       fw.eval('window.ticks = 0; setInterval(() => ticks++, 100)');
       let rendered = 0;
       const frame = () => { rendered++; requestAnimationFrame(frame); };
       requestAnimationFrame(frame);
       window.r = null;
       const iv = setInterval(() => w.postMessage(1), 4);
-      setTimeout(() => { clearInterval(iv); r = [__virtualNow() - p0, fw.__virtualNow() - f0, fw.ticks, rendered]; }, 1000);
+      setTimeout(() => { clearInterval(iv); r = [RustyRacer.steps.virtualNow() - p0, fw.RustyRacer.steps.virtualNow() - f0, fw.ticks, rendered]; }, 1000);
     JS
     r = poll_until(timeout: 30) {
       sleep 0.05
@@ -214,9 +215,9 @@ RSpec.describe 'a request a service worker answers, on the clock' do
     s.execute_script(<<~JS)
       window.got = null;
       const quick = async () => {
-        const d = Date.now(), v = __virtualNow();
+        const d = Date.now(), v = RustyRacer.steps.virtualNow();
         const sw = Number(await (await fetch('/d.txt?date')).text());
-        return [sw - d, Date.now() - d, __virtualNow() - v];
+        return [sw - d, Date.now() - d, RustyRacer.steps.virtualNow() - v];
       };
       (async () => {
         await fetch('/d.txt?spin=1000');

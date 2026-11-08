@@ -105,7 +105,7 @@ RSpec.describe 'customizable-select content model' do
                '<select id=d disabled><div><option id=od>x</option></div></select>' \
                '<select id=e><div><option id=oe>y</option></div></select></body></html>'
 
-    # The owning-select disabled walk (host-queries.js __csimDisabled, backing
+    # The owning-select disabled walk (host-queries.js disabled, backing
     # Capybara's `disabled?`) now steps past the wrapper to the select.
     expect(session.find('#od', visible: :all).disabled?).to be(true)
     expect(session.find('#oe', visible: :all).disabled?).to be(false)

@@ -2516,7 +2516,7 @@ fn destroy_navigable_history_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Func
 }
 // __dom.windowsTraversing() -> the realms of the windows `window.open` made in this isolate a traversal queued of which
 // makes a document again, its task still to apply it: what the host applies as the task that asked ends, as it does the
-// page's (history.js `__csimApplyWindowTraversals`).
+// page's (history.js `applyWindowTraversals`).
 fn windows_traversing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);

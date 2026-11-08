@@ -2,11 +2,12 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # A realm's animation frame callbacks are the engine's (timers.rs `frames`): a frame runs those requested before it
 # began, in order — one requested by a callback of it in the next frame, and one an earlier callback of it cancelled not
 # at all (HTML "run the animation frame callbacks").
-RSpec.describe 'animation frame callbacks' do
+RSpec.describe 'animation frame callbacks', engine_global: true do
   let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] }) }
 
   it 'runs a frame\'s callbacks in order, passing by one cancelled during it' do
@@ -23,7 +24,7 @@ RSpec.describe 'animation frame callbacks' do
       const c = requestAnimationFrame(() => log.push('c'));
       requestAnimationFrame(() => { log.push('d'); cancelAnimationFrame(c); });
     JS
-    3.times { session.execute_script('__drainTimers(20)') }
+    3.times { session.execute_script('RustyRacer.steps.drainTimers(20)') }
     expect(session.evaluate_script('log')).to eq(%w[a c d next])
   end
 
@@ -40,7 +41,7 @@ RSpec.describe 'animation frame callbacks' do
         log.push('frame');
         requestAnimationFrame((t) => log.push('next frame ' + (t - t0 < 50)));
       });
-      __drainTimers(100);
+      RustyRacer.steps.drainTimers(100);
     JS
     expect(session.evaluate_script('log')).to eq(['frame', 'next frame true', 'timer'])
   end
@@ -57,9 +58,9 @@ RSpec.describe 'animation frame callbacks' do
           setTimeout(() => document.body.append(Object.assign(document.createElement('p'), { id: 'task' })), 0);
         });
         const seen = (id) => !!document.getElementById(id);
-        __drainTimers(50);
+        RustyRacer.steps.drainTimers(50);
         const once = [seen('frame'), seen('task')];
-        __drainTimers(50);
+        RustyRacer.steps.drainTimers(50);
         return [...once, seen('task')];
       })()
     JS

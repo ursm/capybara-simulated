@@ -3,11 +3,12 @@
 require 'capybara/simulated'
 require_relative 'support/raster'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # `save_screenshot` rasters the laid-out page (js/src/paint.js) rather than serializing it. There
 # is no second geometry: the painter reads the same boxes every geometry query reads, so these
 # assert that what the driver BELIEVES about a box is what lands in the pixels.
-RSpec.describe 'save_screenshot' do
+RSpec.describe 'save_screenshot', engine_global: true do
   # A small viewport on purpose. Every assertion here is about a handful of pixels at known
   # coordinates, so the raster's SIZE proves nothing — but every pixel of it is painted and
   # crosses to the host.
@@ -206,7 +207,7 @@ RSpec.describe 'save_screenshot' do
     # rasteriser's width made words overrun the space after them; the painter condenses to the
     # flow's figure instead. What this pins is that the figure travels with the run at all.
     s = page_with('<p id="p">The painter reads the same boxes</p>', css: 'p{margin:0;font:14px sans-serif}')
-    runs = s.evaluate_script('globalThis.__csimPaintRuns()')
+    runs = s.evaluate_script('RustyRacer.steps.paintRuns()')
     words = runs.map {|r| r['text'] }
     expect(words).to eq(%w[The painter reads the same boxes])
     expect(runs.map {|r| r['width'] }).to all(be > 0)
@@ -223,7 +224,7 @@ RSpec.describe 'save_screenshot' do
   # cannot see this; only the painter can.
   it 'paints an auto-height float where its second placement put it' do
     s = page_with('<div style="width:200px">' + (1..6).map {|i| %(<div style="float:left;width:60px">c#{i}</div>) }.join + '</div>')
-    recorded = s.evaluate_script('globalThis.__csimPaintRuns()').map {|r| [r['text'], [r['x'].round, r['y'].round]] }
+    recorded = s.evaluate_script('RustyRacer.steps.paintRuns()').map {|r| [r['text'], [r['x'].round, r['y'].round]] }
     runs = recorded.to_h
     boxes = s.evaluate_script(<<~JS).to_h {|t, x, y| [t, [x.round, y.round]] }
       [...document.querySelectorAll('div div')].map(e => {
@@ -302,7 +303,7 @@ RSpec.describe 'save_screenshot' do
                                           '<div style="display:table">jj</div></div></td></tr></table>'
     }.each do |label, body|
       s = page_with(body)
-      runs = s.evaluate_script('globalThis.__csimPaintRuns()').map {|r| [r['text'], r['x'].round, r['y'].round] }
+      runs = s.evaluate_script('RustyRacer.steps.paintRuns()').map {|r| [r['text'], r['x'].round, r['y'].round] }
       boxes = s.evaluate_script(<<~JS).map {|t, x, y| [t, x.round, y.round] }
         [...document.querySelectorAll('div div, span, b')].filter(e => !e.children.length)
           .map(e => { const r = e.getBoundingClientRect(); return [e.textContent, r.x, r.y]; })
@@ -328,7 +329,7 @@ RSpec.describe 'save_screenshot' do
         '<div style="width:200px"><span style="position:relative;left:40px;top:12px"><slot></slot></span></div>'
     JS
     s.evaluate_script('document.body.offsetHeight')
-    runs = s.evaluate_script('globalThis.__csimPaintRuns()').map {|r| [r['text'], r['x'].round, r['y'].round] }
+    runs = s.evaluate_script('RustyRacer.steps.paintRuns()').map {|r| [r['text'], r['x'].round, r['y'].round] }
     box  = s.evaluate_script("(r => [r.x, r.y])(document.querySelector('b').getBoundingClientRect())").map(&:round)
     expect(box).to eq([40, 12])          # …the shadow's relative inline moved the slotted box
     expect(runs).to eq([['bb', 40, 12]]) # …and its glyphs went with it
@@ -345,7 +346,7 @@ RSpec.describe 'save_screenshot' do
       <select><option>one</option><option selected label="">two</option></select><input type="submit">
     HTML
     s.find('#t').set('typed')
-    runs = s.evaluate_script('globalThis.__csimPaintRuns().map((r) => r.text)')
+    runs = s.evaluate_script('RustyRacer.steps.paintRuns().map((r) => r.text)')
     expect(runs).to eq(%W[typed ph ••• two Submit])
     expect(s.evaluate_script('getComputedStyle(document.querySelector("input"), "::placeholder").color')).to eq('rgb(117, 117, 117)')
   end
@@ -353,7 +354,7 @@ RSpec.describe 'save_screenshot' do
   # …and a placeholder is a text field's or a textarea's: a button input's `placeholder` shows nothing (Chrome).
   it 'paints no placeholder on a button input' do
     s = page_with('<input type="submit" value="" placeholder="P1"><input type="button" placeholder="P2">')
-    expect(s.evaluate_script('globalThis.__csimPaintRuns().map((r) => r.text)')).to eq([])
+    expect(s.evaluate_script('RustyRacer.steps.paintRuns().map((r) => r.text)')).to eq([])
   end
 
   # A box's OWN overflow clips its content — its text included, which the painter drew clipped only by the boxes
@@ -377,7 +378,7 @@ RSpec.describe 'save_screenshot' do
   def cell_text_y(va)
     s = page_with(%(<table id="t"><tr><td style="padding:0"><div style="width:20px;height:80px"></div></td>) +
                   %(<td style="padding:0;vertical-align:#{va}">Hi</td></tr></table>), css: 'table{border-spacing:0}')
-    runs = s.evaluate_script('globalThis.__csimPaintRuns()')
+    runs = s.evaluate_script('RustyRacer.steps.paintRuns()')
     top  = s.evaluate_script("document.getElementById('t').getBoundingClientRect().y")
     hi   = runs.find {|r| r['text'].to_s.include?('Hi') }
     (hi['y'] - top).round(2)
@@ -394,7 +395,7 @@ RSpec.describe 'save_screenshot' do
   # in the first row.
   it 'paints a cell text on the row the flow placed it (declared-height table)' do
     s = page_with('<table id="t" style="height:200px"><tr><td style="padding:0">R1</td></tr><tr><td style="padding:0">R2</td></tr></table>', css: 'table{border-spacing:0}')
-    runs = s.evaluate_script('globalThis.__csimPaintRuns()')
+    runs = s.evaluate_script('RustyRacer.steps.paintRuns()')
     top  = s.evaluate_script("document.getElementById('t').getBoundingClientRect().y")
     y = ->(t) { r = runs.find {|x| x['text'].to_s.include?(t) }; (r['y'] - top).round(2) }
     expect(y.('R2')).to be > 90                 # the second row sits in the lower half of the 200px table
@@ -548,14 +549,14 @@ RSpec.describe 'save_screenshot' do
     s = page_with('<p style="font-size:40px;color:red">Hello</p>')
     shot(s) {}
     s.execute_script('document.documentElement.remove()')
-    expect(s.evaluate_script('__csimPaintRuns()')).to eq([])
+    expect(s.evaluate_script('RustyRacer.steps.paintRuns()')).to eq([])
   end
 
   # `unicode-bidi: plaintext` takes a paragraph's direction from its first strong character outside any isolate (UAX #9
   # P2), as CSS Writing Modes says: an RLI…PDI around Latin text, then Hebrew, is a right-to-left paragraph.
   it "takes a plaintext paragraph's direction past its isolates" do
     s = page_with('<p dir=ltr style="unicode-bidi:plaintext">&#x2067;abc&#x2069;&#x5e9;&#x5dc;</p>')
-    got = s.evaluate_script('__csimPaintTexts().map((t) => t.direction)').uniq
+    got = s.evaluate_script('RustyRacer.steps.paintTexts().map((t) => t.direction)').uniq
     expect(got).to eq(['rtl'])
   end
 end

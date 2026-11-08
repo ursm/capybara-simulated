@@ -305,7 +305,7 @@ impl RealmArena {
     }
     // …and whether some of them are still to run: scheduled by the mark and due by its clock — the occurrences queued
     // then, a repeating timer's later ones (scheduled again, past the mark) none: the mark's number, which the host runs
-    // the event loop's tasks by (`__csimRunQueued`). What a reload's history step runs before it unloads the document
+    // the event loop's tasks by (`runQueued`). What a reload's history step runs before it unloads the document
     // (HTML "apply the history step" step 12 queues its unloading as a global task on the document's window, after those
     // queued on its event loop before it — a `javascript:` URL's, a frame's timer due).
     pub(crate) fn queued_by(&mut self, mark: (u64, f64)) -> Option<u64> {

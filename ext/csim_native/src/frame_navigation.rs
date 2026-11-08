@@ -124,7 +124,7 @@ const PROMPT_OWED: u32 = 1 << 12;
 // frame's session history entry, the realm of the document that began it and the Referer that one sends, the container's
 // `sandbox` attribute as it began (what the document it makes is sandboxed by), whether that document had transient
 // activation — a reload of the document it is at, or a form's submission: its request as it was submitted (form-fields.js
-// `__csimFormSerialize`), the realm of the form's document and the Referer that one sends. Taken once the event loop's
+// `formSerialize`), the realm of the form's document and the Referer that one sends. Taken once the event loop's
 // navigation turn has run (`Plans::through`), HTML's parallel steps as what is due before them has run.
 pub(crate) enum HostNavigation {
     Navigate { url: String, replace: bool, initiator: i32, referrer: (String, String), sandbox: Option<String>, activated: bool },

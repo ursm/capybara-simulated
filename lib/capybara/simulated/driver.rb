@@ -682,7 +682,7 @@ module Capybara
         window = add_realm_window(host, realm)
         if url.empty? || Native.about_blank_url(url)
           host.initial_document_at(realm, url)
-        # (…a `javascript:` URL's run as the window's own task, a hyperlink's or a form's too: location.js `__csimNavigateFrom`)
+        # (…a `javascript:` URL's run as the window's own task, a hyperlink's or a form's too: location.js `navigateFrom`)
         elsif planned || url.match?(/\Ajavascript:/i)
           host.plan_window_realm_navigation(realm, url, activation_realm, activated == true)
         else

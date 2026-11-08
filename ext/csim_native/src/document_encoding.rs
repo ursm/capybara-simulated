@@ -3,7 +3,7 @@
 // in its first 1024 bytes ("prescan a byte stream to determine its encoding"), an XML one its XML declaration's
 // `encoding` — else, for an HTML document in a frame, its PARENT's encoding, else the default: windows-1252 for an HTML
 // document, UTF-8 for an XML one. Decoded by encoding_rs, every encoding the Encoding Standard has, as the document's
-// realm loads it (`__csimLoadDocument`), where its parent is at hand.
+// realm loads it (`loadDocument`), where its parent is at hand.
 
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, UTF_8, WINDOWS_1252, X_USER_DEFINED};
 

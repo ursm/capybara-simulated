@@ -135,7 +135,7 @@ RSpec.describe 'native arena upkeep', engine_global: true do
   it "clears the reused skeleton's attributes for a page loaded in place" do
     session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><html lang=en data-old=1><body class=old data-x=1>']] })
     session.visit '/'
-    session.execute_script("__csimLoadDocument('<!DOCTYPE html><html><body><p id=three>3</p>')")
+    session.execute_script("RustyRacer.steps.loadDocument('<!DOCTYPE html><html><body><p id=three>3</p>')")
     got = session.evaluate_script("[document.documentElement.getAttributeNames().join(','), document.body.getAttributeNames().join(','), !!document.querySelector('body.old')]")
     expect(got).to eq(['', '', false])
   end

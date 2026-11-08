@@ -1034,7 +1034,7 @@ fn expire_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
 }
 // __dom.webauthnForgetRequest(): the calling realm's Document renewed for a next document (dom-nodes.js
-// `__csimRenewDocument`), whose settings object has no active credential type.
+// `renewDocument`), whose settings object has no active credential type.
 fn forget_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = realm_id(scope, &args);
     if let Some(state) = crate::dom::dom(scope).arena.realm_state_mut(realm) {

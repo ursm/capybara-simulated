@@ -4,19 +4,20 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/engine_global'
 
 # A worker's timers run on the window's virtual time (Browser#worker_due_within, `worker_now`): its clock starts where
 # the window's stands as `new Worker()` runs, a window step stops at a worker's timer, the worker runs it at that time,
 # the window goes on to the step's end (V8Runtime#run_loop_step) — so a page timer fires at its own virtual time however
 # busy a worker's interval is, and what a worker posts on its interval reaches the page between the page's timers in the
-# same order every run, however loaded the machine. (Virtual time read as the driver keeps it, `__virtualNow`: a page's
+# same order every run, however loaded the machine. (Virtual time read as the driver keeps it, `virtualNow`: a page's
 # `performance.now()` adds the real time the driver spent too — timers.js `platformDateNow`.)
-RSpec.describe 'a worker beside a page timer, on one virtual time' do
+RSpec.describe 'a worker beside a page timer, on one virtual time', engine_global: true do
   def fire_time(interval, delay)
     sw = "self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));" +
          (interval ? "setInterval(() => { self.n = (self.n || 0) + 1; }, #{interval});" : '')
     page = '<!doctype html><meta charset=utf-8><body>' \
-           "<button onclick=\"const v0 = __virtualNow(); setTimeout(() => { const i = document.createElement('i'); i.id = 'done'; i.textContent = Math.round(__virtualNow() - v0); document.body.append(i); }, #{delay})\">b</button>"
+           "<button onclick=\"const v0 = RustyRacer.steps.virtualNow(); setTimeout(() => { const i = document.createElement('i'); i.id = 'done'; i.textContent = Math.round(RustyRacer.steps.virtualNow() - v0); document.body.append(i); }, #{delay})\">b</button>"
     session = simulated_session(lambda {|env|
       next [200, {'content-type' => 'text/javascript'}, [sw]] if env['PATH_INFO'] == '/sw.js'
 
@@ -149,8 +150,8 @@ RSpec.describe 'a worker beside a page timer, on one virtual time' do
          "if (path === '/x') e.respondWith(new Promise(r => setTimeout(() => r(new Response('sw')), 300))); });"
     page = <<~HTML
       <!doctype html><meta charset=utf-8>
-      <script>globalThis.log = []; const at = (l) => log.push(`${l}@${Math.round(__virtualNow() - t0)}`); navigator.serviceWorker.onmessage = (e) => at(e.data);</script>
-      <button onclick="globalThis.t0 = __virtualNow(); [50, 200, 500, 900].forEach((t) => setTimeout(() => at('t' + t), t)); new Worker('/w.js').onmessage = (e) => at(e.data)">b</button>
+      <script>globalThis.log = []; const at = (l) => log.push(`${l}@${Math.round(RustyRacer.steps.virtualNow() - t0)}`); navigator.serviceWorker.onmessage = (e) => at(e.data);</script>
+      <button onclick="globalThis.t0 = RustyRacer.steps.virtualNow(); [50, 200, 500, 900].forEach((t) => setTimeout(() => at('t' + t), t)); new Worker('/w.js').onmessage = (e) => at(e.data)">b</button>
     HTML
     session = simulated_session(lambda {|env|
       next [200, {'content-type' => 'text/javascript'}, [sw]] if env['PATH_INFO'] == '/sw.js'

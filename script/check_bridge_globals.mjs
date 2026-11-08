@@ -29,9 +29,8 @@ const SCOPE_VERSION = 2025;
 const BARE_GLOBALS = [
   // Host functions Ruby attaches to the realm (runtime_shared.rb / v8_runtime.rb).
   '__rackFetch', '__csim_runScript', '__csim_evalEsmEntry', '__csim_asyncIoPending',
-  // Bridge internals one module installs for another — and for the Ruby side to call.
-  '__csimHasPendingRAF', '__nextTimerDelay', '__csimSecureAncestorChain', '__isVisibleNode',
-  '__csimClickResolve', '__csimNeuterDetachedWindow'
+  // Bridge internals one module installs for another.
+  '__csimHasPendingRAF', '__isVisibleNode'
 ];
 
 // The JS builtins, from a bare VM context — the host's V8, which is the engine the bridge targets.

@@ -1,10 +1,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # Globals real apps probe at boot or use during a test. Specs here lock
 # the bridge's contract for each one — apps that hit `if (typeof X)`
 # guards or actually call these methods shouldn't silently misbehave.
-RSpec.describe 'browser global surface' do
+RSpec.describe 'browser global surface', engine_global: true do
   let(:app) {
     lambda do |_env|
       [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
@@ -125,7 +126,7 @@ RSpec.describe 'browser global surface' do
       session.evaluate_script(<<~JS)
         window.__idle = false;
         requestIdleCallback(() => { window.__idle = true });
-        __drainTimers(1);
+        RustyRacer.steps.drainTimers(1);
       JS
       expect(session.evaluate_script('window.__idle')).to eq(true)
     end
@@ -135,7 +136,7 @@ RSpec.describe 'browser global surface' do
         window.__idle = false;
         const id = requestIdleCallback(() => { window.__idle = true });
         cancelIdleCallback(id);
-        __drainTimers(1);
+        RustyRacer.steps.drainTimers(1);
       JS
       expect(session.evaluate_script('window.__idle')).to eq(false)
     end

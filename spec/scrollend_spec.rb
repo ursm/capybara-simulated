@@ -1,13 +1,14 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # `scrollend` (CSSOM-View): the driver models the spec "pending scroll event
 # targets" — scrollend is queued on a position change and dispatched at the next
 # rendering update, not synchronously. An element scroller fires on the element only
 # (bubbles:false); the viewport scroller fires at the document (bubbles:true),
 # reaching a window listener exactly once via bubbling.
-RSpec.describe 'scrollend event' do
+RSpec.describe 'scrollend event', engine_global: true do
   def session
     app = lambda do |_env|
       [200, {'content-type' => 'text/html'},
@@ -21,7 +22,7 @@ RSpec.describe 'scrollend event' do
 
   # Drive the event loop so the render-phase scrollend flush runs.
   def pump(s, n = 5)
-    n.times { s.evaluate_script("typeof __runLoopStep === 'function' ? __runLoopStep(50, 50, false) : null") }
+    n.times { s.evaluate_script("RustyRacer.steps.runLoopStep(50, 50, false)") }
   end
 
   it 'fires scrollend on an element scroller once, non-bubbling, not on document/window' do

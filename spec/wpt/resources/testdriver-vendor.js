@@ -29,7 +29,7 @@
     if (refs != null) return '';
     // A custom element's ElementInternals supplies the DEFAULT semantics the
     // element's own attributes didn't override (ElementInternals-role).
-    const internals = globalThis.__csimInternalsOf(element);
+    const internals = RustyRacer.steps.internalsOf(element);
     if (internals) {
       const irefs = internals.ariaLabelledByElements;
       if (irefs && irefs.length) return labelFromRefs(irefs);
@@ -79,7 +79,7 @@
       const r = validRoleOf(attr);
       if (r) return r;
     }
-    const internals = globalThis.__csimInternalsOf(element);
+    const internals = RustyRacer.steps.internalsOf(element);
     if (internals && internals.role != null) {
       const r = validRoleOf(internals.role);
       if (r) return r;
@@ -93,19 +93,19 @@
 
   // `test_driver.bless(intent, fn)` grants transient user activation (a real
   // automation backend does this via a trusted click): the activation
-  // notification steps a user's click runs (`__csimActivationNotify`), read by
+  // notification steps a user's click runs (`activationNotify`), read by
   // navigator.userActivation and consumed by activation-gated APIs like
   // HTMLInputElement.showPicker(). An optional 3rd `context` argument blesses
   // ANOTHER window (a cross-window proxy) — that window's own steps.
   // `test_driver.set_permission`: the clipboard's, the session's to say (the rest of the Permissions API's answer no
   // test's setting here).
   window.test_driver.set_permission = function (descriptor, state) {
-    globalThis.__csimSetClipboardPermission(descriptor.name, state);
+    RustyRacer.steps.setClipboardPermission(descriptor.name, state);
     return Promise.resolve();
   };
   window.test_driver.bless = function (intent, fn, context) {
     const target = context && context !== window && typeof context === 'object' ? context : globalThis;
-    try { target.__csimActivationNotify(); } catch (e) {}
+    try { target.RustyRacer.steps.activationNotify(); } catch (e) {}
     try {
       return Promise.resolve(typeof fn === 'function' ? fn() : undefined);
     } catch (e) {
@@ -117,7 +117,7 @@
   // an element. A real backend routes through WebDriver; the in-process driver
   // exposes the same capabilities its Ruby side uses (the click resolver and the
   // key-send engine) as handle-keyed bridge entry points. We obtain a handle for
-  // the passed Node via __csimRegisterNode, then call them directly — the ones of
+  // the passed Node via registerNode, then call them directly — the ones of
   // the window whose document holds it (a frame's element, clicked from its parent,
   // is that frame's to resolve: a realm answers for its own nodes' handles).
   function windowOf(element) {
@@ -174,7 +174,7 @@
 
   // Resolve on a macrotask so any DEFERRED default actions the key/click engine
   // schedules via setTimeout(0) have run before the test inspects state — Tab's
-  // sequential-focus advance (__csimAdvanceFocus) and Enter's implicit submit
+  // sequential-focus advance (advanceFocus) and Enter's implicit submit
   // are parked on a 0ms timer, so a synchronous resolve would observe focus /
   // navigation that hasn't happened yet. The deferred default is enqueued before
   // this resolver, so FIFO timer order runs it first.
@@ -187,7 +187,7 @@
 
   window.test_driver.send_keys = function (element, keys) {
     const w = windowOf(element);
-    const h = w.__csimRegisterNode && w.__csimRegisterNode(element);
+    const h = w.RustyRacer.steps.registerNode && w.RustyRacer.steps.registerNode(element);
     // Dispatch the keys on the NEXT task, not synchronously — real
     // test_driver.send_keys is async, so a test that wires up an EventWatcher
     // AFTER calling send_keys (e.g. `Promise.all([send_keys(...), watcher.wait_for(...)])`,
@@ -197,7 +197,7 @@
     return new Promise((resolve, reject) => {
       const run = () => {
         try {
-          if (h && typeof w.__csimSendKeys === 'function') w.__csimSendKeys(h, parseKeys(keys));
+          if (h && typeof w.RustyRacer.steps.sendKeys === 'function') w.RustyRacer.steps.sendKeys(h, parseKeys(keys));
         } catch (e) { reject(e); return; }
         if (typeof globalThis.setTimeout === 'function') globalThis.setTimeout(resolve, 0);
         else resolve();
@@ -210,14 +210,14 @@
   window.test_driver.click = function (element) {
     try {
       const w = windowOf(element);
-      const h = w.__csimRegisterNode && w.__csimRegisterNode(element);
-      // __csimClickResolve runs the trusted mousedown→mouseup→click sequence
+      const h = w.RustyRacer.steps.registerNode && w.RustyRacer.steps.registerNode(element);
+      // clickResolve runs the trusted mousedown→mouseup→click sequence
       // (+ checkbox/radio activation + focus). leavePending keeps any resulting
       // submit/navigate intent in its pending slot so the driver's drain actions
       // it — this JS-side click discards the return value the Ruby click path
       // would otherwise consume (so without it a target=_blank submit is lost).
-      if (h && typeof w.__csimClickResolve === 'function') {
-        w.__csimClickResolve(h, null, { leavePending: true });
+      if (h && typeof w.RustyRacer.steps.clickResolve === 'function') {
+        w.RustyRacer.steps.clickResolve(h, null, { leavePending: true });
       }
       return settleThen();
     } catch (e) {

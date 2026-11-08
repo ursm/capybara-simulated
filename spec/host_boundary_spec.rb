@@ -6,14 +6,33 @@ require_relative 'support/poll_until'
 
 # What the host hands a realm and what it takes back go through nothing a page can replace: a host step reads the
 # engine's answers and the host's arguments by index, not by the iterator `Array.prototype` has (engine.js `listOf`);
-# the functions the host calls by name are read-only from the realm's first script on (`sealHostHooks`); and a window's
-# parent and top are the host's to set, kept where no script can name them (`realmHooks`).
+# the steps the host calls by name are no page's to call (`hostSteps`, behind the host's token) and the functions the
+# bindings reach by a global's name read-only from the realm's first script on (`sealHostHooks`); and a window's parent
+# and top are the host's to set, kept where no script can name them (`realmHooks`).
 RSpec.describe 'the host boundary' do
   let(:pages) {
     {
       '/'       => '<!DOCTYPE html><meta charset=utf-8><body><input id=i><form id=f action=/sent><button id=b>go</button></form>',
       '/sent'   => '<!DOCTYPE html><title>sent</title>',
       '/c'      => '<!DOCTYPE html><script>window.ao = [...location.ancestorOrigins].join(","); window.topIsParent = top === parent</script>',
+      '/frames' => <<~HTML,
+        <!DOCTYPE html><body><iframe id=f src="/tick"></iframe><iframe id=x src="http://evil.test/ad"></iframe>
+        <script>window.ticks = 0; setInterval(() => ticks++, 10);</script>
+      HTML
+      '/tick'   =>'<!DOCTYPE html><script>window.ticks = 0; setInterval(() => ticks++, 10);</script>',
+      '/ad'     => <<~HTML,
+        <!DOCTYPE html><script>
+          window.kill = () => {
+            for (let i = 0; i < 6; i++) {
+              try { __csimDiscardRealms([i]); } catch (_) {}
+              try { RustyRacer.discardRealms([i]); } catch (_) {}
+            }
+            try { __csimActivationNotify(); } catch (_) {}
+            try { RustyRacer.activationNotify(); } catch (_) {}
+            window.active = navigator.userActivation.isActive;
+          };
+        </script>
+      HTML
       '/muted'  => <<~HTML
         <!DOCTYPE html><meta charset=utf-8><body>
         <script>
@@ -58,19 +77,32 @@ RSpec.describe 'the host boundary' do
     expect(session.evaluate_script('[window.seen, document.getElementById("i").value]')).to eq([0, 'typedkA'])
   end
 
-  # The functions the host calls by name, and whose answers it acts on, are no page's to replace.
-  it 'lets no page replace a function the host calls' do
+  # The steps the host calls a realm by — and whose answers it acts on — are no property of any global, and the
+  # namespace's way to them names them to no script: only the host's token, which no page has, opens it. A page neither
+  # calls nor replaces one.
+  it 'lets no page call a step the host calls' do
     session.visit '/'
     names = %w[__csimTakeRoutedSubmission __csimSubmissionRoute __csimFlushRestore __csimApplyWindowTraversals
-               __csimDiscardRealms __runLoopStep __csim_runScript __csimSetValue __csimReportException]
-    expect(session.evaluate_script(<<~JS)).to eq(names.map { [false, false, true] })
-      #{names.to_json}.map((name) => {
-        const before = globalThis[name];
-        try { globalThis[name] = () => 'page'; } catch (_) {}
-        const d = Object.getOwnPropertyDescriptor(globalThis, name);
-        return [d.writable, d.configurable, globalThis[name] === before];
-      })
+               __csimDiscardRealms __runLoopStep __csimSetValue __csimActivationNotify __csimDispatchTrusted]
+    expect(session.evaluate_script(<<~JS)).to eq([names.map { 'undefined' }, [], [false, false], 'undefined'])
+      [
+        #{names.to_json}.map((name) => typeof globalThis[name]),
+        Reflect.ownKeys(RustyRacer),
+        [Reflect.defineProperty(RustyRacer, 'x', { value: 1 }), 'discardRealms' in RustyRacer],
+        typeof RustyRacer.engine
+      ]
     JS
+  end
+
+  # (…a cross-origin frame's script among them: it stops no timer of its parent's or a sibling's by discarding their
+  # realms, nor grants itself the transient activation only a user's gesture gives (HTML "activation notification"))
+  it "lets a frame's script neither discard another realm nor grant itself activation" do
+    session.visit '/frames'
+    expect(poll_until { session.evaluate_script("window.ticks > 2 && document.getElementById('f').contentWindow.ticks > 2") }).to be(true)
+    session.within_frame('x') { session.execute_script('kill()') }
+    before = session.evaluate_script("[window.ticks, document.getElementById('f').contentWindow.ticks]")
+    expect(poll_until { session.evaluate_script("[window.ticks, document.getElementById('f').contentWindow.ticks]").zip(before).all? { _1 > _2 } }).to be(true)
+    expect(session.within_frame('x') { session.evaluate_script('window.active') }).to be(false)
   end
 
   # (…but none of the host's own procs is sealed in the snapshot, where the bindings have a stub of one: the host's
@@ -82,9 +114,7 @@ RSpec.describe 'the host boundary' do
                Dir[File.join(lib, '*.rb')].flat_map { File.read(_1).scan(/attach\(['"](__[A-Za-z0-9_]+)/).flatten }
     engine = File.read(File.join(lib, 'js/src/engine.js'))
     procs = engine[/HOST_PROCS = new Set\(\[(.*?)\]\)/m, 1].scan(/'([^']+)'/).flatten
-    called = engine[/HOST_CALLED = new Set\(\[(.*?)\]\)/m, 1].scan(/'([^']+)'/).flatten
     expect(procs.sort).to eq(attached.uniq.select { _1.start_with?('__csim') && !_1.start_with?('__csim_') }.sort)
-    expect(called & attached).to eq([])
   end
 
   # (…[LegacyUnforgeable] `parent` and `top`, and `ancestorOrigins`: the host's to set as it makes a frame — a page's

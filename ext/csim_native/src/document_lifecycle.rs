@@ -1,8 +1,8 @@
 // A document's load lifecycle (HTML "the end", "update the current document readiness", "completely finish loading",
 // "abort a document", the document open steps): its readiness, the DOMContentLoaded and the load "the end" queues for it,
 // its page showing, its being completely loaded — kept with the document's state (document_state.rs) and decided here.
-// The bindings ask what is due and fire what that says (bridge.entry.js `__csimLoadDocument`, `__csimTaskOfTheEnd`,
-// `__csimFireWindowLoad`); the events are theirs, the decisions are the engine's.
+// The bindings ask what is due and fire what that says (bridge.entry.js `loadDocument`, `__csimTaskOfTheEnd`,
+// `fireWindowLoad`); the events are theirs, the decisions are the engine's.
 
 use crate::dom::{nid_arg, realm_id, NodeId};
 use crate::frame_navigation::LOAD_DELAYED;

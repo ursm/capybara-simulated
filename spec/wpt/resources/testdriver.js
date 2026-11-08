@@ -71,12 +71,12 @@
   // preventDefault'd: the clipboard + select-all shortcuts. Cut / copy / paste
   // run the user-gesture clipboard algorithm (the ClipboardEvent → cancelable
   // beforeinput → mutate → input sequence a real accelerator fires — richer than
-  // scripted execCommand, which fires only input); see __csimClipboardGesture.
+  // scripted execCommand, which fires only input); see clipboardGesture.
   function accelShortcut(letter, target) {
     var k = String(letter).toLowerCase();
     var clip = k === 'c' ? 'copy' : k === 'x' ? 'cut' : k === 'v' ? 'paste' : null;
     if (clip) {
-      if (typeof W.__csimClipboardGesture === 'function') W.__csimClipboardGesture(clip, target.ownerDocument);
+      if (typeof W.RustyRacer.steps.clipboardGesture === 'function') W.RustyRacer.steps.clipboardGesture(clip, target.ownerDocument);
     } else if (k === 'z') {
       historyKeyAction(__shiftHeld ? 'historyRedo' : 'historyUndo', target);   // Ctrl/Cmd+Z, +Shift = redo
     } else if (k === 'y') {
@@ -150,8 +150,8 @@
   // edit that targets the selection (typing, formatBold, and — once extended to
   // the range it removes — deletion). A text control reports none.
   function ceTargetRanges(target) {
-    return (target && target.isContentEditable && typeof W.__csimTargetRangesFromSelection === 'function')
-      ? W.__csimTargetRangesFromSelection() : [];
+    return (target && target.isContentEditable && typeof W.RustyRacer.steps.targetRangesFromSelection === 'function')
+      ? W.RustyRacer.steps.targetRangesFromSelection() : [];
   }
   // Backspace / Delete: delete the selection (deleteContent{Backward,Forward}) or,
   // with a word modifier at a caret (Ctrl, or Alt on Mac), the adjacent word
@@ -218,7 +218,7 @@
     editingKeyAction(target, inputType, null, function () {
       if (isTextarea) spliceTextCtl(target, '\n');
       // (…the engine's insertion, `EDIT_PARAGRAPH` (2) or with Shift `EDIT_LINE_BREAK` (1): dom-nodes.js)
-      else if (typeof W.__csimInsertInEditingHost === 'function') W.__csimInsertInEditingHost(shift ? 1 : 2);
+      else if (typeof W.RustyRacer.steps.insertInEditingHost === 'function') W.RustyRacer.steps.insertInEditingHost(shift ? 1 : 2);
     }, ceTargetRanges(target));
   }
   // Undo / Redo accelerator (Ctrl/Cmd+Z, +Shift = redo, Ctrl+Y): historyUndo /
@@ -244,7 +244,7 @@
     editingKeyAction(target, 'insertText', ch, function () {
       if (isTextControlTarget(target)) spliceTextCtl(target, ch);
       // (…the engine's insertion of text, `EDIT_TEXT` (0): dom-nodes.js)
-      else if (typeof W.__csimInsertInEditingHost === 'function') W.__csimInsertInEditingHost(0, ch);
+      else if (typeof W.RustyRacer.steps.insertInEditingHost === 'function') W.RustyRacer.steps.insertInEditingHost(0, ch);
     }, ceTargetRanges(target));
   }
   // The default action this driver ties to a trusted key press. Today: Tab moves
@@ -253,14 +253,14 @@
   function keyDefaultAction(name, keydownEv) {
     if (keydownEv && keydownEv.defaultPrevented) return;
     // (…Tab's none with Control / Meta / Alt held, as the engine's key plan has it: keys.rs `FOCUS_NAVIGATION`)
-    if (name === 'Tab' && !__ctrlHeld && !__metaHeld && !__altHeld && typeof W.__csimAdvanceFocus === 'function') {
-      W.__csimAdvanceFocus(__shiftHeld);
+    if (name === 'Tab' && !__ctrlHeld && !__metaHeld && !__altHeld && typeof W.RustyRacer.steps.advanceFocus === 'function') {
+      W.RustyRacer.steps.advanceFocus(__shiftHeld);
     } else if ((name === 'ArrowDown' || name === 'ArrowUp' || name === 'ArrowLeft' || name === 'ArrowRight') &&
-               typeof W.__csimArrowKeyDefault === 'function') {
+               typeof W.RustyRacer.steps.arrowKeyDefault === 'function') {
       // Arrow-key default on a focused radio (group navigation) / single-line select.
       // (…as a step of the test's script, on the stack: no microtask checkpoint between a picked radio's listeners)
       var t = D() && D().activeElement;
-      if (t) W.__csimArrowKeyDefault(t, name);
+      if (t) W.RustyRacer.steps.arrowKeyDefault(t, name);
     }
   }
 
@@ -277,12 +277,12 @@
   function chainHasNonPassive(target, type) {
     // (…along the composed event path the UA's event takes — through a slot and its shadow root to the host — and
     // the window, where it reaches the document)
-    var path = W.__csimComposedPathOf(target);
+    var path = W.RustyRacer.steps.composedPathOf(target);
     for (var i = 0; i < path.length; i++) {
-      if (listHasNonPassive(W.__csimListenersFor(path[i], type))) return true;
+      if (listHasNonPassive(W.RustyRacer.steps.listenersFor(path[i], type))) return true;
     }
     var top = path[path.length - 1];
-    return !!(top && top.nodeType === 9 && top === D() && listHasNonPassive(W.__csimWindowListenersFor(type)));
+    return !!(top && top.nodeType === 9 && top === D() && listHasNonPassive(W.RustyRacer.steps.windowListenersFor(type)));
   }
 
   // ---- target resolution without layout -----------------------------------
@@ -295,7 +295,7 @@
     var stack = [root], guard = 0;
     while (stack.length && guard++ < 200000) {
       var el = stack.pop();
-      if (W.__csimListenersFor(el, type).length) return el;
+      if (W.RustyRacer.steps.listenersFor(el, type).length) return el;
       var kids = el.children;
       if (kids) for (var i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
     }
@@ -312,8 +312,8 @@
     // WebDriver input injection is a user-agent action → trusted. Route through
     // the driver's trusted-dispatch hook so the public dispatchEvent() IDL
     // path (which sets isTrusted=false) doesn't strip the trusted flag.
-    if (typeof W.__csimDispatchTrusted === 'function') {
-      try { return W.__csimDispatchTrusted(target, ev); } catch (e) { return true; }
+    if (typeof W.RustyRacer.steps.dispatchTrusted === 'function') {
+      try { return W.RustyRacer.steps.dispatchTrusted(target, ev); } catch (e) { return true; }
     }
     ev.isTrusted = true;
     try { return target.dispatchEvent(ev); } catch (e) { return true; }
@@ -334,7 +334,7 @@
     var el = elementWithListenerFor(type);
     if (el) return el;
     var d = D();
-    if (d && W.__csimListenersFor(d, type).length) return d;  // listener on document
+    if (d && W.RustyRacer.steps.listenersFor(d, type).length) return d;  // listener on document
     return null;
   }
   function fireWheelOn(target, dx, dy) {
@@ -367,11 +367,11 @@
     if (mType && !suppressed) {
       var ev = new W.MouseEvent(mType, Object.assign({ bubbles: true, cancelable: true, composed: true }, at));
       dispatch(target, ev);
-      // HTML's mousedown default action, the driver's own press's (`__csimFocusOnPress`): focus to the nearest element
+      // HTML's mousedown default action, the driver's own press's (`focusOnPress`): focus to the nearest element
       // up from the node pressed that can take it — its editing host, a link around it, a delegatesFocus host — and
       // where none can, the focused element loses it.
       if (mType === 'mousedown' && !ev.defaultPrevented) {
-        try { W.__csimFocusOnPress(target); } catch (e) {}
+        try { W.RustyRacer.steps.focusOnPress(target); } catch (e) {}
       }
     }
   }
@@ -388,12 +388,12 @@
           p.x = box.left + box.width / 2 + (a.x || 0); p.y = box.top + box.height / 2 + (a.y || 0);
           // (…what is at that point inside it, in its shadow tree too — not retargeted: the event is, as it climbs; the
           // element itself where what is there is not inside it)
-          p.target = W.__csimPointerTargetAt ? W.__csimPointerTargetAt(a.origin, p.x, p.y) : a.origin;
+          p.target = W.RustyRacer.steps.pointerTargetAt ? W.RustyRacer.steps.pointerTargetAt(a.origin, p.x, p.y) : a.origin;
         } else {
           // (…a viewport origin — or the pointer's own — the point named, and what is there the target)
           if (a.origin === 'pointer') { p.x = (p.x || 0) + (a.x || 0); p.y = (p.y || 0) + (a.y || 0); }
           else { p.x = a.x || 0; p.y = a.y || 0; }
-          var hit = W.__csimPointerTargetAt ? W.__csimPointerTargetAt(null, p.x, p.y) : D() && D().elementFromPoint(p.x, p.y);
+          var hit = W.RustyRacer.steps.pointerTargetAt ? W.RustyRacer.steps.pointerTargetAt(null, p.x, p.y) : D() && D().elementFromPoint(p.x, p.y);
           p.target = hit || scroller();
         }
         if (p.down) {                                   // implicit pointer capture

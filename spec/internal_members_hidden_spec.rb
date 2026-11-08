@@ -163,10 +163,11 @@ RSpec.describe 'internal members' do
   end
 
   # The engine's ops are no global of a page's, a frame's nor a worker's: the bindings hold them (engine.js), taken as the
-  # realm is made, by a hook its global loses then; the host reaches the few it calls under its own namespace.
+  # realm is made, by a hook its global loses then; the host reaches the steps it calls by its token, which names none
+  # of them to a script.
   it "gives a page's globals no engine" do
-    probe = "[typeof __dom, '__dom' in globalThis, typeof __csimTakeEngine, typeof RustyRacer.engine.nidOf, typeof RustyRacer.engine.setSandbox]"
-    expected = ['undefined', false, 'undefined', 'undefined', 'function']
+    probe = "[typeof __dom, '__dom' in globalThis, typeof __csimTakeEngine, typeof RustyRacer.nidOf, typeof RustyRacer.setSandbox, Reflect.ownKeys(RustyRacer).length]"
+    expected = ['undefined', false, 'undefined', 'undefined', 'undefined', 0]
     expect(outcome(probe)).to eq(expected)
     expect(outcome("document.getElementById('fr').contentWindow.eval(#{probe.to_json})")).to eq(expected)
     session.execute_script(<<~JS)
@@ -175,8 +176,8 @@ RSpec.describe 'internal members' do
     expect(poll_until { session.evaluate_script('window.workerSaw') }).to eq(expected)
   end
 
-  # …and the host's namespace a page reads makes none of the host's calls: each takes the host's token, which no script
-  # of a page's has — a sandboxed frame's `setSandbox(0)` would lift its sandbox, `dropRealm(0)` empty the page — nor
+  # …and the host's namespace a page reads makes none of the host's calls: they are reached by the host's token, which no
+  # script of a page's has — a sandboxed frame's `setSandbox(0)` would lift its sandbox, `dropRealm(0)` empty the page — nor
   # holds rusty_racer's own functions (`contextGlobal`, any realm's raw global, whatever its origin), nor can a page put
   # another in its place, which the host's calls would reach.
   it "gives a page none of the host's calls" do
@@ -185,7 +186,7 @@ RSpec.describe 'internal members' do
         const call = (f) => { try { f(); return 'ok'; } catch (e) { return e.constructor.name; } };
         const before = RustyRacer;
         RustyRacer = {};
-        return [call(() => RustyRacer.engine.setSandbox(0)), call(() => RustyRacer.engine.dropRealm(0)),
+        return [call(() => RustyRacer.setSandbox(0)), call(() => RustyRacer.dropRealm(0)),
           typeof RustyRacer.contextGlobal, typeof RustyRacer.contextOf,
           Object.getOwnPropertyDescriptor(globalThis, 'RustyRacer').writable, RustyRacer === before,
           document.querySelectorAll('iframe').length];

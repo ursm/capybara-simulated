@@ -5,12 +5,13 @@ require 'cgi'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/engine_global'
 
 # A worker's clock follows the window's (`Browser#run_worker`'s `worker_clock_step`): a timer it sets waits for the
 # window's clock to reach it — not fired at once by the message's quiescence drive, not owed whatever the window moved
 # before it was set (while the worker had no timer, or earlier in the step that posted the message), and not run ahead
 # by a burst of messages that moved the window nowhere.
-RSpec.describe 'Worker clock' do
+RSpec.describe 'Worker clock', engine_global: true do
   def page(worker_js, script = '')
     <<~HTML
       <!doctype html><meta charset="utf-8"><body><script>
@@ -341,8 +342,8 @@ RSpec.describe 'Worker clock' do
       const mc = new MessageChannel();
       const C = new Worker(URL.createObjectURL(new Blob([`onmessage = (e) => { const p = e.ports[0]; const d = Date.now(); while (Date.now() - d < 220); p.postMessage('Cport220'); };`])));
       window.log = [];
-      const t0 = performance.now(), v0 = __virtualNow();
-      const at = (x) => log.push([x, performance.now() - t0, __virtualNow() - v0]);
+      const t0 = performance.now(), v0 = RustyRacer.steps.virtualNow();
+      const at = (x) => log.push([x, performance.now() - t0, RustyRacer.steps.virtualNow() - v0]);
       A.onmessage = (e) => at(e.data); B.onmessage = (e) => at(e.data); mc.port1.onmessage = (e) => at(e.data);
       window.onmessage = (e) => at(e.data);
       setTimeout(() => {

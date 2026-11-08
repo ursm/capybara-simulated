@@ -117,7 +117,7 @@ RSpec.describe 'frame viewport', engine_global: true do
       s.execute_script("window.__resized = 0; addEventListener('resize', () => window.__resized++)")
     end
     s.execute_script("document.querySelector('iframe').style.width = '300px'")
-    s.evaluate_script('__runLoopStep(50, 50, false)')   # (…the rendering update)
+    s.evaluate_script('RustyRacer.steps.runLoopStep(50, 50, false)')   # (…the rendering update)
     s.within_frame(0) do
       expect(s.evaluate_script('[innerWidth, document.documentElement.clientWidth]')).to eq([300, 300])
       expect(s.evaluate_script("matchMedia('(min-width: 250px)').matches")).to be(true)
@@ -148,7 +148,7 @@ RSpec.describe 'frame viewport', engine_global: true do
     s = simulated_session(app)
     s.current_window.resize_to(900, 600)
     s.visit '/'
-    3.times { s.evaluate_script('__runLoopStep(50, 50, false)') }
+    3.times { s.evaluate_script('RustyRacer.steps.runLoopStep(50, 50, false)') }
     expect(s.evaluate_script('window.__log')).to eq([])
   end
 

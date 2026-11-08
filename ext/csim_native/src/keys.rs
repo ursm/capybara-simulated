@@ -1,4 +1,4 @@
-// The keys a driver's `send_keys` presses (form-fields.js `__csimSendKeys`): what each names — a key by its name
+// The keys a driver's `send_keys` presses (form-fields.js `sendKeys`): what each names — a key by its name
 // (`enter`, `left`, `page_down` …, as Capybara's symbols arrive stringified), a modifier (`control`, `cmd` …), or a
 // character typed — as the KeyboardEvent a US keyboard gives for it: its `key`, its `code`, its legacy `keyCode`, the
 // character it types and the `inputType` of the edit that is (none for a key that types nothing). A punctuation

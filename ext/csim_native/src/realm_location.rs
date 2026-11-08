@@ -430,7 +430,7 @@ fn set_document_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     }
 }
 // __dom.renewOrigin() — the calling realm's document's origin a new record, with no domain set, and its agent to obtain
-// anew: the next document of a window, which a realm kept for it (dom-nodes.js `__csimRenewDocument`).
+// anew: the next document of a window, which a realm kept for it (dom-nodes.js `renewDocument`).
 fn renew_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
@@ -446,7 +446,7 @@ fn forget_origins(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
     arena.domain_writes.set(0);
 }
 // …and whether a `document.domain` write set its origin's domain: a window's initial about:blank whose creator's did is
-// no longer same origin-domain with a document of its origin, whose own is new (window.js `__csimKeepsWindowFor`).
+// no longer same origin-domain with a document of its origin, whose own is new (window.js `keepsWindowFor`).
 fn origin_domain_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     rv.set_bool(realm(scope, cid).location.domain.is_some());
