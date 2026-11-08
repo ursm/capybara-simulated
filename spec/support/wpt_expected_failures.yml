@@ -829,9 +829,6 @@ css/css-shadow/part/interaction-with-pseudo-elements.html:
 - "::first-letter in selected host is styled"
 - "::first-line in selected host is styled"
 - "::selection in selected host is styled"
-css/css-shadow/part/invalidation-part-pseudo.html:
-- Invalidation of nested part on hover
-- "[harness] TIMEOUT"
 css/css-shadow/part/multiple-scopes.html:
 - correct part selector matches from middle scope
 - exported part selector (for outer scope) does not match from middle scope
@@ -2246,7 +2243,6 @@ dom/nodes/moveBefore/css-transition-trigger.html:
 - "[harness] TIMEOUT"
 dom/nodes/moveBefore/hover-style-update.html:
 - Element loses hover when moved to different position
-- Hover works immediately after moved
 dom/nodes/moveBefore/iframe-document-preserve.window.js:
 - window.frames ordering does not change due to moveBefore()
 dom/nodes/moveBefore/moveBefore-size-query.html:
@@ -2543,15 +2539,8 @@ editing/other/double-click-range-selection-in-floating-list-item.html:
 editing/other/double-click-range-selection-in-list-item.html:
 - Double click on one list item should not select more than one list item
 - Double click on one text item should select only one text item
-editing/other/empty-elements-insertion-padding.html:
-- Insert text into the inline element styled with padding
 editing/other/empty-elements-insertion.html:
-- Insert text into the inline element styled with border
 - Insert text into the unstyled inline element
-- Insert text into the unstyled inline element with the styled ::after pseudoelement
-- Insert text into the unstyled inline element with the styled ::before and ::after
-  pseudoelements
-- Insert text into the unstyled inline element with the styled ::before pseudoelement
 editing/other/end-key-with-wbr.html:
 - End key moves from before a leading wbr to the end of the line
 - Home key moves from after a trailing wbr to the start of the line
@@ -13360,22 +13349,10 @@ editing/run/bold.html:
 - '[["stylewithcss","true"],["bold",""]] "{<table><tr><td>foo<td>bar<td>baz</table>}":
   execCommand("stylewithcss", false, "true") return value'
 editing/run/caret-navigation-around-line-break.html:
-- "<br> separator - move down"
-- "<br> separator - move left"
-- "<br> separator - move right"
-- "<br> separator - move up"
 - "<span> separator - move down"
 - "<span> separator - move left"
 - "<span> separator - move right"
 - "<span> separator - move up"
-- "<wbr> separator - move down"
-- "<wbr> separator - move left"
-- "<wbr> separator - move right"
-- "<wbr> separator - move up"
-- no separator - move down
-- no separator - move left
-- no separator - move right
-- no separator - move up
 - two <span> separators - move down
 - two <span> separators - move left
 - two <span> separators - move right
@@ -67801,7 +67778,6 @@ html/semantics/interactive-elements/the-dialog-element/dialog-form-submission.ht
   synchronously
 - input image button should return the coordinates
 html/semantics/interactive-elements/the-dialog-element/dialog-light-dismiss-pointer-capture.html:
-- Light dismiss on dialog with mouse input with pointer capture.
 - Light dismiss on dialog with touch input with pointer capture.
 html/semantics/interactive-elements/the-dialog-element/dialog-light-dismiss-touch.html:
 - Dialog light dismiss should work with touch and not trigger a click event.
@@ -67830,8 +67806,6 @@ html/semantics/interactive-elements/the-dialog-element/focus-after-close.html:
 html/semantics/interactive-elements/the-dialog-element/inert-node-is-unselectable.html:
 - Test that inert nodes cannot be selected. The test passes if the only text you can
   select is inside the dialog.
-html/semantics/interactive-elements/the-dialog-element/inert-svg-hittest.html:
-- Hit-testing can reach contents of a no longer inert SVG
 html/semantics/interactive-elements/the-dialog-element/inertness-with-modal-dialogs-and-iframes.html:
 - Modal dialog in the inner iframe marks outer nodes in that iframe as inert.
 - Modal dialog in the main document marks outer nodes as inert. Contents of the outer
@@ -67848,8 +67822,6 @@ html/semantics/interactive-elements/the-dialog-element/modal-dialog-backdrop-opa
 - "== html/semantics/interactive-elements/the-dialog-element/modal-dialog-backdrop-opacity-ref.html"
 html/semantics/interactive-elements/the-dialog-element/modal-dialog-backdrop.html:
 - "== html/semantics/interactive-elements/the-dialog-element/modal-dialog-backdrop-ref.html"
-html/semantics/interactive-elements/the-dialog-element/modal-dialog-blocks-mouse-events.html:
-- Ensure that mouse events are not dispatched to an inert node.
 html/semantics/interactive-elements/the-dialog-element/modal-dialog-display-contents.html:
 - "== html/semantics/interactive-elements/the-dialog-element/modal-dialog-display-contents-ref.html"
 html/semantics/interactive-elements/the-dialog-element/modal-dialog-generated-content.html:

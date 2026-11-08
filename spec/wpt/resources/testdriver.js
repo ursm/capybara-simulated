@@ -351,29 +351,13 @@
     dispatch(t, new W.WheelEvent('mousewheel', Object.assign({ cancelable: chainHasNonPassive(t, 'mousewheel') }, init)));
   }
 
-  // A `pointerdown` canceled keeps its compatibility mouse events from firing until the pointer is released — the
-  // `mousedown` (and its focus), the moves, the `mouseup` (Pointer Events; the driver's click and drag do the same).
-  var mouseSuppressed = false;
-  function firePointer(target, pType, mType, x, y) {
-    if (!target) return;
-    var at = { clientX: x || 0, clientY: y || 0 };
-    if (pType && W.PointerEvent) {
-      var pointer = new W.PointerEvent(pType, Object.assign({ bubbles: true, cancelable: true, composed: true, pointerType: 'mouse', isPrimary: true }, at));
-      dispatch(target, pointer);
-      if (pType === 'pointerdown') mouseSuppressed = pointer.defaultPrevented;
-    }
-    var suppressed = mouseSuppressed && (mType === 'mousedown' || mType === 'mousemove' || mType === 'mouseup');
-    if (pType === 'pointerup') mouseSuppressed = false;
-    if (mType && !suppressed) {
-      var ev = new W.MouseEvent(mType, Object.assign({ bubbles: true, cancelable: true, composed: true }, at));
-      dispatch(target, ev);
-      // HTML's mousedown default action, the driver's own press's (`focusOnPress`): focus to the nearest element
-      // up from the node pressed that can take it — its editing host, a link around it, a delegatesFocus host — and
-      // where none can, the focused element loses it.
-      if (mType === 'mousedown' && !ev.defaultPrevented) {
-        try { W.RustyRacer.steps.focusOnPress(target); } catch (e) {}
-      }
-    }
+  // A mouse pointer's action — a move, a press, a release (`phase`: 1, 2, 4) at what is at the pointer — the driver's own
+  // gesture, as the engine sequences it (pointer.rs `MousePointer`): the boundary events, the compatibility mouse events a
+  // canceled `pointerdown` holds back, the press's focus, `:active`, pointer capture, the click at what the press and the
+  // release share.
+  function mouseAction(phase, target, x, y, button) {
+    var mods = { shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, altKey: __altHeld, metaKey: __metaHeld };
+    W.RustyRacer.steps.pointerAction(phase, target, x || 0, y || 0, button || 0, mods);
   }
 
   // ---- action replay -------------------------------------------------------
@@ -396,11 +380,9 @@
           var hit = W.RustyRacer.steps.pointerTargetAt ? W.RustyRacer.steps.pointerTargetAt(null, p.x, p.y) : D() && D().elementFromPoint(p.x, p.y);
           p.target = hit || scroller();
         }
-        if (p.down) {                                   // implicit pointer capture
-          // (…a touch's moves and its end at the element it started on: Touch Events)
-          if (p.type === 'touch') fireTouch(p.downTarget, 'touchmove');
-          else firePointer(p.target, 'pointermove', 'mousemove', p.x, p.y);
-        }
+        // (…a touch's moves and its end at the element it started on: Touch Events)
+        if (p.type === 'touch') { if (p.down) fireTouch(p.downTarget, 'touchmove'); }
+        else mouseAction(1, p.target, p.x, p.y, 0);
         break;
       case 'pointerDown':
         p = state[a.pointer];
@@ -408,20 +390,13 @@
         if (!p.target) p.target = scroller();
         p.downTarget = p.target;
         if (p.type === 'touch') fireTouch(p.target, 'touchstart');
-        else firePointer(p.target, 'pointerdown', 'mousedown', p.x, p.y);
+        else mouseAction(2, p.target, p.x, p.y, a.button);
         break;
       case 'pointerUp':
         p = state[a.pointer];
         if (!p.target) p.target = scroller();
         if (p.type === 'touch') fireTouch(p.downTarget || p.target, 'touchend');
-        else {
-          firePointer(p.target, 'pointerup', 'mouseup', p.x, p.y);
-          // `click` fires only when up lands on the same target the pointer went
-          // down on (no drag away) — matches real browsers.
-          if (p.target === p.downTarget) {
-            dispatch(p.target, new W.MouseEvent('click', { bubbles: true, cancelable: true, composed: true }));
-          }
-        }
+        else mouseAction(4, p.target, p.x, p.y, a.button);
         p.down = false;
         break;
       case 'scroll':
@@ -560,9 +535,8 @@
       // do NOT call element.click(): that IDL method fires an UNtrusted click
       // (per spec), which would defeat the injection's trusted semantics.
       var t = element || (D() && D().body);
-      firePointer(t, 'pointerdown', 'mousedown');
-      firePointer(t, 'pointerup', 'mouseup');
-      dispatch(t, new W.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, button: 0 }));
+      mouseAction(2, t, 0, 0, 0);
+      mouseAction(4, t, 0, 0, 0);
       return settled();
     },
     send_keys: function (element, keys) {

@@ -62448,14 +62448,6 @@ html/semantics/forms/the-input-element/input-type-checkbox-switch.tentative.wind
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-html/semantics/forms/the-label-element/control-active-with-multiple-clicks.html:
-- name: Control should be :active on mousedown when clicking the label twice in succession.
-  reason: Needs the test_driver.Actions pointer-automation backend to synthesize a
-    real pointerdown/up sequence AND the `:active` ("being actively pointed at") interaction
-    pseudo-state, with label→labeled-control forwarding of that state. Both the automation
-    pointer backend and the transient :active UI state are deliberately unmodeled
-    (CLAUDE.md rule 1); there is no rendering/interaction engine to observe `:active`
-    during a held mousedown.
 html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-appearance.tentative.html:
 - name: "== html/semantics/forms/the-select-element/customizable-select-multiple-popup/select-multiple-popup-appearance-ref.html"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -72918,10 +72910,6 @@ selection/contenteditable/modifying-selection-with-non-primary-mouse-button.tent
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 selection/contenteditable/modifying-selection-with-primary-mouse-button.tentative.html:
-- name: Primary click should move caret in an editable element
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: Primary mouse button down should move caret, and primary mouse button up should
     extend the selection
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -73212,6 +73200,20 @@ service-workers/service-worker/clients-matchall-frozen.https.html:
     which the generated Client omits as that proposal's member. Unratified specs default
     out per CLAUDE.md rule 1. Re-audit if it advances to a ratified standard."
 service-workers/service-worker/fetch-event.https.html:
+- name: FetchEvent#request.isHistoryNavigation is true (POST + history.go(-1))
+  reason: 'Assumes a traversal back to an entry a POST made re-sends the POST, which
+    a service worker sees (method POST, isHistoryNavigation true). HTML "apply the
+    history step": ''Let allowPOST be targetEntry''s document state''s reload pending''
+    (false for a traversal); "attempt to populate the history entry''s document" fetches
+    only where ''documentResource is null, or allowPOST is true'' — else no fetch,
+    no fetch event: an error document (navigation_commit.rs `posts_none`). The 2022
+    text ("traverse the history", 0b273eaef5) made a bodyless GET with the history-navigation
+    flag; no text re-sends the POST. Chrome 157 passes only by its service worker
+    route restoring the entry with its POST; Firefox 159 and Safari 27.2 fail it at
+    its first assertion, implementing neither isReloadNavigation nor isHistoryNavigation
+    (wpt.fyi 8c04fb8d43). Related: whatwg/html#12760 (the step clears reload pending
+    before allowPOST reads it). Spec over Blink (as ursm 2026-10-29 for link-element-stylesheet-title);
+    re-check if HTML or the test changes.'
 - name: Service Worker responds to fetch event with an existing client id
   reason: 'The test holds a resolution the spec never adopted, and #1832''s review
     rejected (rule 1.3 in substance): it asserts "Client ID Not Found" for an iframe''s
@@ -73225,20 +73227,6 @@ service-workers/service-worker/fetch-event.https.html:
     gives a frame''s own later navigations an id, its first none; Firefox always none.
     The subtest''s second half, a subresource''s "Client ID Found", spec/sw_handle_fetch_outcome_spec.rb
     holds. Re-check when the test is updated.'
-- name: FetchEvent#request.isHistoryNavigation is true (POST + history.go(-1))
-  reason: 'Assumes a traversal back to an entry a POST made re-sends the POST, which a
-    service worker sees (method POST, isHistoryNavigation true). HTML "apply the history
-    step": ''Let allowPOST be targetEntry''s document state''s reload pending'' (false
-    for a traversal); "attempt to populate the history entry''s document" fetches only
-    where ''documentResource is null, or allowPOST is true'' — else no fetch, no fetch
-    event: an error document (navigation_commit.rs `posts_none`). The 2022 text ("traverse
-    the history", 0b273eaef5) made a bodyless GET with the history-navigation flag; no
-    text re-sends the POST. Chrome 157 passes only by its service worker route restoring
-    the entry with its POST; Firefox 159 and Safari 27.2 fail it at its first assertion,
-    implementing neither isReloadNavigation nor isHistoryNavigation (wpt.fyi 8c04fb8d43).
-    Related: whatwg/html#12760 (the step clears reload pending before allowPOST reads it).
-    Spec over Blink (as ursm 2026-10-29 for link-element-stylesheet-title); re-check if
-    HTML or the test changes.'
 service-workers/service-worker/partitioned-cookies.tentative.https.html:
 - name: 'Service Worker: Partitioned Cookies'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
