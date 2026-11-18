@@ -1513,6 +1513,13 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # s8_escaped: …and one whose `@import` is written with an escape, which the style engine's parse reads as one, does
+    # (Chrome and Firefox `st inl a.js-ran dcl`).
+    it 'holds back a script for a `<style>` whose `@import` is written with an escape' do
+      log = page_log(%(<style>@\\69mport url(/slow/150/x.css);</style><script async src="/slow/0/a.js"></script><script>L.push('inl')</script>), at: 600)
+      expect(log).to eq('inl a.js-ran dcl load rs:complete')
+    end
+
     # …and one whose `@import` follows a `@charset` and a `@layer` statement, which may come before it, does.
     it 'holds back a script for a `<style>` that imports after `@charset` and `@layer` statements' do
       log = page_log(%(<style>@charset "utf-8"; /* x */ @layer a, b; @import url(/slow/150/x.css);</style><script async src="/slow/0/a.js"></script><script>L.push('inl')</script>), at: 600)
