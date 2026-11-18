@@ -45,6 +45,11 @@ impl LoadGates {
     pub(crate) fn holding(&self) -> bool {
         self.gates.iter().any(|g| g.holds)
     }
+    // A frame `container`'s build held for its response (frame_response.rs `FRAME_LATER`) let go of: the navigation it was
+    // of superseded — another begun, a stop(), the frame removed — the load waiting for it no more.
+    pub(crate) fn forget_held_frame(&mut self, container: NodeId) {
+        self.gates.retain(|g| !(g.frame && g.holds && g.el == Some(container)));
+    }
     // Whether a fetch of the document's own is waiting on a gate, or one's work is under way: not a frame's.
     pub(crate) fn own_fetches(&self) -> bool {
         self.gates.iter().any(|g| !g.frame) || self.running.iter().any(|&(_, frame)| !frame)

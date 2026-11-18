@@ -1234,10 +1234,17 @@ impl RealmArena {
         }
         self.get(container).map(|node| node.realm)
     }
+    // (…a response held for it let go of, and the build that waited on it, which its document's load waits for no more)
     pub(crate) fn supersede_frame_nav(&mut self, container: NodeId) {
         let nav = self.frame_navigation(container);
         nav.generation = nav.generation.wrapping_add(1);
         nav.flags &= !(LOAD_OWED | BUILD_QUEUED);
+        if nav.held.take().is_some() {
+            let realm = self.get(container).map(|n| n.realm);
+            if let Some(state) = realm.and_then(|r| self.realm_state_mut(r)) {
+                state.load_gates.forget_held_frame(container);
+            }
+        }
     }
     // The navigation of the container whose response its build goes to wait on: its number, whether another has replaced it
     // by the time the response is in — none of it to load then (HTML "abort a document": "discarding any further data

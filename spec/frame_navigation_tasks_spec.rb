@@ -1437,6 +1437,18 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # rv-r13-probe `r3_fhnav`, `r3_fhstop`: a frame whose response is held for its server's time, its navigation superseded or
+    # stopped, delays its parent's load no more — the held build let go of (Chrome: `resrc c2 if-load load`).
+    {
+      'superseded' => ["setTimeout(() => { document.querySelector('iframe').src = '/c'; L.push('resrc'); }, 50)", 'dcl resrc sf? if-load load rs:complete'],
+      'stopped'    => ["setTimeout(() => { stop(); L.push('stopped'); }, 50)", 'dcl stopped load rs:complete']
+    }.each do |what, (script, logged)|
+      it "fires the load of a page whose frame's held navigation was #{what}" do
+        log = page_log(%(<iframe src="/slow/300/f.html" onload="L.push('if-load')"></iframe><script>#{script}</script>), at: 200, pages: {'/c' => '<title>c</title>'})
+        expect(log).to eq(logged.sub('sf? ', ''))
+      end
+    end
+
     # rv_css_dfr: "the end" waits for no style sheet to block scripts as it waits for a deferred one, the sheet's `load` first.
     it 'runs a deferred script after the load of a style sheet that blocks scripts' do
       log = page_log(%(<link rel="stylesheet" href="/slow/150/s.css" onload="L.push('css')"><script defer src="/slow/0/d.js"></script><script>setTimeout(() => L.push('t50'), 50)</script>), at: 600)
