@@ -351,6 +351,8 @@ struct Traversable {
     // The traversals the host applies (`Applying`), in the order begun, and the number the next is given.
     applying: Vec<Applying>,
     applying_tokens: u64,
+    #[cfg(test)]
+    fail_next: bool,
     steps_applied: u64,
     // Each frame's navigation under way, by its navigable — one at a time, a navigation begun ending the one before it
     // (HTML "navigate") — and the number the next one is given.
@@ -1155,10 +1157,19 @@ impl Traversable {
     }
     // …its next step for the host, which answered the last one with `answer` — none once it is done: its step standing as
     // the documents the host made leave it (`end_step`), its navigables traversing no more (`end_traversal`).
+    // (…one whose step panics let go as it unwinds — counted no more, its navigables traversing no more, the history as
+    // the step left it — the panic going on to the host's boundary: magnus's, a Ruby exception)
     fn next_command(&mut self, token: u64, answer: Answer) -> Option<Command> {
         let at = self.applying.iter().rposition(|a| a.token == token)?;
         let mut a = self.applying.remove(at);
-        let command = self.advance(&mut a, answer);
+        let command = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.advance(&mut a, answer))) {
+            Ok(command) => command,
+            Err(panic) => {
+                a.stepping = None;
+                self.applied(a);
+                std::panic::resume_unwind(panic);
+            }
+        };
         if command.is_some() {
             self.applying.insert(at, a);
         } else {
@@ -1197,6 +1208,10 @@ impl Traversable {
     // document it makes again asked whether it may be unloaded, one a handler removed traversed no more; the step applied
     // (`begin_step`); each navigable it moves within its document updated, then each frame's document made again.
     fn advance(&mut self, a: &mut Applying, answer: Answer) -> Option<Command> {
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_next) {
+            panic!("a step that fails");
+        }
         let makes_page = |changes: &[Change]| changes.iter().find(|c| c.0 == TOP && !c.2).map(|c| c.1);
         loop {
             match a.phase {
@@ -2679,6 +2694,25 @@ mod tests {
         let after = h.step();
         h.lock().end_step(outer, 1, &[1]);
         assert_eq!(h.step(), after);
+    }
+
+    // A traversal whose step panics is let go as the panic unwinds: none left applying, its navigable traversing no more.
+    #[test]
+    fn a_traversal_whose_step_panics_is_let_go() {
+        let h = history();
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
+        h.push(TOP, TOP, "/b".into(), false, Data::default());
+        let token = h.apply_by(-1);
+        let before = APPLYING.load(Ordering::Relaxed);
+        let mut t = h.lock();
+        t.begin_traversal(TOP);
+        t.fail_next = true;
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| t.next_command(token, Answer::Nothing)));
+        assert!(panicked.is_err());
+        assert!(t.applying.is_empty());
+        assert!(!t.traversing(TOP));
+        assert!(APPLYING.load(Ordering::Relaxed) < before || before == 0);
+        assert!(t.next_command(token, Answer::Nothing).is_none());
     }
 
     // …and one the user declines to unload the page for is aborted: no document made again.
