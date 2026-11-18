@@ -1,7 +1,8 @@
 // The work a document's load event waits for that is a task of its own (HTML "delay the load event"): a style sheet's
 // `load`, a frame's build, a plugin's — each queued as a task, so the window's `load` could otherwise beat it. Each is a
-// GATE: run at most once, whoever gets there first — its own task, or the flush that fires the window's load. The
-// bindings hold what each runs (bridge.entry.js `subresourceGate`); which gate is due, and when, is decided here.
+// GATE: run at most once, whoever gets there first — its own task, or the flush that fires the window's load. What each
+// runs is the bindings' (bridge.entry.js `subresourceGate`), kept with it here — let go of with it, run or not; which gate
+// is due, and when, is decided here.
 
 use crate::dom::{realm, realm_id, NodeId};
 
@@ -19,6 +20,8 @@ struct Gate {
     holds: bool,
     // Its place in the event loop's sequence as it was made, its task's: what the flush runs them in the order of.
     order: u64,
+    // What it runs.
+    work: v8::Global<v8::Function>,
 }
 // (…taken, its work is under way until it ends: a server's `sleep` in a script's fetch runs the event loop inside it, whose
 // `load` must not come before it, HTML "the end" spinning until the set of scripts that will execute as soon as possible
@@ -73,10 +76,12 @@ fn gates_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut
     realm(scope, cid).realm_state_mut(cid).map(|s| &mut s.load_gates)
 }
 
-// __dom.loadGate(el, delayed, holds, speculative) -> the number of a new gate of the calling realm's document for the
-// element `el` (null for none), `delayed` one late on purpose — that the load waits for all the same, `holds` — its place
-// in the event loop's sequence a speculative fetch's (`speculative`: timers.rs `SPECULATIVE`).
+// __dom.loadGate(el, delayed, holds, speculative, work) -> the number of a new gate of the calling realm's document for
+// the element `el` (null for none), running `work`, `delayed` one late on purpose — that the load waits for all the same,
+// `holds` — its place in the event loop's sequence a speculative fetch's (`speculative`: timers.rs `SPECULATIVE`).
 fn load_gate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(work) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return rv.set_uint32(0) };
+    let work = v8::Global::new(scope, work);
     let el = crate::node_handle::nid_of(scope, args.get(0));
     let delayed = args.get(1).is_true();
     let holds = delayed && args.get(2).is_true();
@@ -88,21 +93,25 @@ fn load_gate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some(gates) = gates_of(scope, cid) else { return rv.set_uint32(0) };
     gates.next += 1;
     let id = gates.next;
-    gates.gates.push(Gate { id, el, delayed, frame, holds, order });
+    gates.gates.push(Gate { id, el, delayed, frame, holds, order, work });
     rv.set_uint32(id);
 }
 
-// __dom.loadGateTake(id) -> whether the gate `id` is still to run — taken: it runs now, and never again.
+// __dom.loadGateTake(id) -> what the gate `id` runs, where it is still to run — taken: it runs now, and never again —
+// null where not.
 fn load_gate_take_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    rv.set_bool(gates_of(scope, cid).is_some_and(|g| take(g, id)));
+    match gates_of(scope, cid).and_then(|g| take(g, id)) {
+        Some(work) => rv.set(v8::Local::new(scope, work).into()),
+        None => rv.set_null(),
+    }
 }
-fn take(gates: &mut LoadGates, id: u32) -> bool {
-    let Some(at) = gates.gates.iter().position(|g| g.id == id) else { return false };
+fn take(gates: &mut LoadGates, id: u32) -> Option<v8::Global<v8::Function>> {
+    let at = gates.gates.iter().position(|g| g.id == id)?;
     let gate = gates.gates.remove(at);
     gates.running.push((id, gate.frame));
-    true
+    Some(gate.work)
 }
 // __dom.loadGateEnd(id) — the work of the gate `id` over: its document's load asked about again by the bindings.
 fn load_gate_end_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -113,7 +122,7 @@ fn load_gate_end_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     }
 }
 
-// __dom.flushLoadGates(run) — the gates of the calling realm's document run, `run(id)` each, in the order their tasks would
+// __dom.flushLoadGates(run) — the gates of the calling realm's document run, `run(id, work)` each, in the order their tasks would
 // run in, as its load is about to fire: those of THIS document's elements alone — an element a script built inside another document (a
 // `createHTMLDocument` context, a DOMParser result) has its own load to wait for, and forcing its work here reached a
 // frame a browser has not built yet — and none late on purpose; round after round while running some queued more.
@@ -140,13 +149,12 @@ pub(crate) fn flush(scope: &mut v8::PinScope<'_, '_>, cid: i32, run: v8::Local<'
             break;
         }
         for id in due {
-            if !gates_of(scope, cid).is_some_and(|g| take(g, id)) {
-                continue;
-            }
+            let Some(work) = gates_of(scope, cid).and_then(|g| take(g, id)) else { continue };
             let id = v8::Integer::new_from_unsigned(scope, id).into();
+            let work = v8::Local::new(scope, work).into();
             let undefined = v8::undefined(scope).into();
             v8::tc_scope!(let tc, scope);
-            run.call(tc, undefined, &[id]);
+            run.call(tc, undefined, &[id, work]);
             if tc.has_terminated() {
                 return;
             }
