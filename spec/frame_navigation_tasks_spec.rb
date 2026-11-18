@@ -1500,6 +1500,15 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # s5_impcomment, s5_impstring: a `<style>` whose `@import` is in a comment or a string imports nothing, and holds back
+    # no script, the parser's included (Chrome and Firefox `inl dcl a.js-ran`).
+    {'a comment' => '/* @import url(/slow/150/x.css); */ p { color: red }', 'a string' => 'p::before { content: "@import url(/slow/150/x.css)" }'}.each do |where, css|
+      it "holds back no script for a `<style>` with `@import` in #{where}" do
+        log = page_log(%(<style>#{css}</style><script async src="/slow/0/a.js"></script><script>L.push('inl')</script>), at: 600)
+        expect(log).to eq('inl dcl a.js-ran load rs:complete')
+      end
+    end
+
     # s4_alt, s4_badtype, s4_disabled: a link that contributes no script-blocking style sheet — an alternative one, one of a
     # `type` no styling language is (which fetches nothing and fires no event), a disabled one — holds back no script
     # (Chrome and Firefox `inl dcl a.js-ran`).
