@@ -252,4 +252,30 @@ RSpec.describe 'legacy platform objects' do
     JS
     expect(r).to eq(['[object HTMLImageElement]'] * 3)
   end
+
+  # A cross-origin frame's index is its child navigable's WindowProxy, or nothing — never a property its page defined.
+  context 'with a cross-origin frame' do
+    let(:app) {
+      lambda {|env|
+        body = if env['HTTP_HOST'].to_s.include?('other')
+                 '<!DOCTYPE html><meta charset="utf-8"><script>window.secret = "XO";' \
+                   'Object.defineProperty(window, "0", { value: { fn: Function }, configurable: true });</script>'
+               else
+                 '<!DOCTYPE html><meta charset="utf-8"><iframe id="fr" src="http://other.test/x"></iframe>'
+               end
+        [200, {'content-type' => 'text/html'}, [body]]
+      }
+    }
+
+    it "answers an index of the frame by its child navigables alone" do
+      session = simulated_session(app)
+      session.visit '/'
+      r = session.evaluate_script(<<~JS)
+        (() => {
+          try { return String(document.getElementById('fr').contentWindow[0]); } catch (e) { return e.name; }
+        })()
+      JS
+      expect(r).to eq('SecurityError')
+    end
+  end
 end
