@@ -59,6 +59,8 @@ pub(crate) struct Data {
     // (URL parser), which a traversal or a reload of it fetches again — not the document state's, a pushState's URL of
     // none.
     blob: Option<(Arc<[u8]>, String)>,
+    // Its scroll restoration mode "manual" — "auto" else (HTML session history entry; `history.scrollRestoration`).
+    scroll_manual: bool,
 }
 
 impl Data {
@@ -858,7 +860,9 @@ impl Traversable {
         let initial_name = self.state.initial_name.clone();
         let list = self.state.list_mut(nav, build)?;
         let (doc, data) = match (&leaving, same_document) {
-            (Some(e), true) => (e.doc, data.sharing_document_state(&e.data)),
+            // (…an entry of the same document's scroll restoration mode the active one's: HTML "URL and history update
+            // steps", "navigate to a fragment")
+            (Some(e), true) => (e.doc, Data { scroll_manual: e.data.scroll_manual, ..data.sharing_document_state(&e.data) }),
             // (…a top-level navigable's new document state its navigable target name the active one's: HTML "navigate",
             // which a navigation to another origin that leaves no opener clears as it finishes — the host's to say)
             (Some(e), false) if nav == TOP && data.name.is_none() => (fresh_doc, Data { name: e.data.name.clone(), ..data }),
@@ -2699,6 +2703,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "windowsTraversing", windows_traversing_op, context_id);
     crate::dom::register(scope, ns, "destroyNavigableHistory", destroy_navigable_history_op, context_id);
     crate::dom::register(scope, ns, "historyUpdate", history_update_op, context_id);
+    crate::dom::register(scope, ns, "historyScrollRestoration", history_scroll_restoration_op, context_id);
     crate::dom::register(scope, ns, "frameNavigable", frame_navigable_op, context_id);
     crate::dom::register(scope, ns, "frameEntry", frame_entry_op, context_id);
     crate::dom::register(scope, ns, "beginFrameEntry", begin_frame_entry_op, context_id);
@@ -3165,5 +3170,41 @@ fn history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         t.update(TOP, TOP, &url, state, push);
     } else if let Some((frame, _)) = frame_entry(arena, cid, true) {
         lock(&frame.traversable).update(frame.nav, frame.parent_nav, &url, state, push);
+    }
+}
+// __dom.historyScrollRestoration(manual) -> the scroll restoration mode of the active session history entry of the calling
+// realm's navigable — 'manual' or 'auto' — or, `manual` given, that one made it (HTML's History `scrollRestoration`: the
+// mode is the ENTRY's, which an entry of the same document takes of the one it comes after, and a traversal back to it
+// finds again: Chrome 157 and Firefox 159, measured 2026-11-19), true; null for a navigable of no entry yet — a document
+// at its initial about:blank, whose History keeps it (history.js).
+fn history_scroll_restoration_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let manual = args.get(0);
+    let manual = (!manual.is_undefined()).then(|| manual.is_true());
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let Some((traversable, window)) = traversable_of(arena, cid) else { return rv.set_null() };
+    let (traversable, id) = if window.map_or(cid == 0, |window| window == cid) {
+        let id = {
+            let t = lock(&traversable);
+            t.state.current_entry(TOP, t.build).map(|e| e.id)
+        };
+        (traversable, id)
+    } else {
+        match frame_entry(arena, cid, false) {
+            Some((frame, id)) => (frame.traversable, Some(id)),
+            None => (traversable, None),
+        }
+    };
+    let mut t = lock(&traversable);
+    let Some(entry) = id.and_then(|id| t.state.entry_mut(id)) else { return rv.set_null() };
+    match manual {
+        Some(manual) => {
+            Arc::make_mut(&mut entry.data).scroll_manual = manual;
+            rv.set_bool(true);
+        }
+        None => {
+            let Some(mode) = v8::String::new(scope, if entry.data.scroll_manual { "manual" } else { "auto" }) else { return };
+            rv.set(mode.into());
+        }
     }
 }
