@@ -231,7 +231,8 @@ module LayoutGolden
       session.visit '/'
       got = session.evaluate_script(SNAPSHOT_JS)
       # The answer is the RUST walk's, the one production lays out with — so it took the page.
-      expect(session.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}'), "#{body}: the Rust walk declined"
+      declines = session.driver.browser.instance_variable_get(:@runtime).call('nativeLayoutStats')['rustFellBack']
+      expect(declines).to eq({}), "#{body}: the Rust walk declined"
       if RECORD
         LayoutGolden.record(path, key, {'body' => body, 'variant' => variant, 'boxes' => got}.compact)
       else

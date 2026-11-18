@@ -1438,7 +1438,7 @@ module Capybara
       # with fresh ones). `Node` ran check_stale before calling here,
       # but that was BEFORE the tick — re-verify after so Capybara
       # catches the now-stale handle and retries the find. Otherwise
-      # `__csim*` lookups would return null and the operation would
+      # the steps' node lookups would return null and the operation would
       # silently no-op (or, in the case of `clickResolve`,
       # dispatch on a detached node whose listeners no longer matter).
       def ensure_alive_after_tick(handle)
@@ -4871,8 +4871,8 @@ module Capybara
       # hijack) or a `{'handle' => N}` token (deferred — middleware
       # hijacked the connection and a background thread is reading
       # the pipe). The JS-side XHR checks the return shape to pick
-      # between inline processing and waiting for `__csim_
-      # deliverHijackedFetches`.
+      # between inline processing and waiting for
+      # `deliverHijackedFetches`.
       # (…`request` an XHR's, described by name as a realm's every request to the host is: `rack_fetch_request`)
       def rack_fetch_async(request, body)
         request = request.to_h
@@ -7246,7 +7246,7 @@ module Capybara
         end
       end
 
-      # One navigation fetch for a FRAME load — the bridge's __csimFrameWindow build:
+      # One navigation fetch for a FRAME load — the bridge's realmHooks.frameWindow build:
       # per hop, consult the controlling SW across the whole window set (a redirect
       # out of one SW's scope can land in another registration's — or on the
       # network), then fall through to a network navigation request; FOLLOW
@@ -7990,7 +7990,7 @@ module Capybara
         end
         # A controlled fetch's respondWith result → resolve the pending client fetch in the
         # realm that issued it (fetch ids are per-realm, so realm_id disambiguates collisions).
-        # A NEGATIVE realm_id names a WORKER client (-worker handle, __csimSWInterceptFetch):
+        # A NEGATIVE realm_id names a WORKER client (-worker handle, realmHooks.swInterceptFetch):
         # its pendingFetch map lives in that worker's isolate, so the response rides its inbox.
         # (…a realm of another window's by the session's number for it: `sw_realm_key`)
         fetch_resps.each do |e|
@@ -9466,7 +9466,20 @@ module Capybara
         {'bytes' => bytes, 'tainted' => result['tainted'] == true, 'meta' => meta}
       end
 
+      # The session's virtual authenticators (webauthn.rb): what a test's CDP `WebAuthn.*` stand-in drives.
       def webauthn = (@webauthn ||= Webauthn.new(@session_partition))
+
+      # The network a test's CDP stand-in emulates (`Network.emulateNetworkConditions(offline:)`): the page online or
+      # not, `online` / `offline` fired where that changes (navigator.js `setOnline`).
+      def online=(online)
+        dom_call('setOnline', online == true)
+      end
+
+      # …and its uploads held, as a throttled network's are still being sent: an XMLHttpRequest sending a body waits until
+      # they are let go (xhr.js `slowUploads`).
+      def slow_uploads=(held)
+        dom_call('slowUploads', held == true)
+      end
 
       # Worker thread entry. Builds an isolate via `V8Runtime.build_worker`,
       # evaluates the worker script, then loops draining microtasks + timers +
@@ -9710,7 +9723,7 @@ module Capybara
         rt.call('realmIdentify', 'moduleWorker', true) if module_worker
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
-        # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a
+        # route through the SW (controllerHandle > 0) — the same pre-load wiring a
         # controlled frame realm gets (create_frame_realm).
         if !service && controller.to_i.positive? && (cw = sw_controller(controller))
           rt.call('swSetControllerDirect', *cw)
@@ -9725,7 +9738,7 @@ module Capybara
         # a data: worker gets a FRESH opaque origin, unique per worker, so it never cross-talks with
         # its creator or a sibling data: worker. An http(s) worker leaves this unset — the JS derives
         # its key from `location.origin` (the script's own origin, same as the creator when
-        # same-origin). See `__csimOriginKey`.
+        # same-origin). See `realmHooks.originKey`.
         worker_origin_key =
           if url.to_s.start_with?('blob:')
             creator_key
@@ -9789,8 +9802,6 @@ module Capybara
             sw_note_worker_client(handle, url, shared, controller)
           end
         end
-        # (…the hooks this host calls in it made read-only first: engine.js `sealHostHooks`)
-        rt.call('sealHostHooks')
         # Booted: its script runs from here, what a window's wait on it is counted against (`worker_deadline`).
         record[:running_since] = Process.clock_gettime(Process::CLOCK_MONOTONIC) if record
         # …and its clock from its time origin, the time it was made at — its high resolution time beginning a step of its
@@ -10104,7 +10115,7 @@ module Capybara
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_fetch_response'
               # THIS worker is a controlled CLIENT whose fetch went through its SW
-              # (__csimSWInterceptFetch tagged realm -handle): resolve the pending fetch in
+              # (realmHooks.swInterceptFetch tagged realm -handle): resolve the pending fetch in
               # this isolate, the mirror of deliver_worker_messages' realm_call for pages.
               # BUSY for the whole span (like the postMessage branch): the `.then` chain's
               # observable output isn't posted yet, and every other pending counter reads 0
@@ -10445,7 +10456,7 @@ module Capybara
 
       # The base a module specifier resolves against: the importer's URL — for a nested relative import, and for a
       # dynamic `import()` the referring script's. An inline script / module has no real URL — its pseudo-name is
-      # `<eval>` (no scheme, from V8) or `inline://<hash>` (from `__csim_runScript`) — and, its document's base URL out of
+      # `<eval>` (no scheme, from V8) or `inline://<hash>` (from `runScript`) — and, its document's base URL out of
       # reach, resolves against the PAGE URL.
       private def effective_module_base(base)
         module_base_url(base) || page_url || @default_host
@@ -13411,7 +13422,7 @@ module Capybara
         end
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
         # Its DOMContentLoaded and its `load` are tasks "the end" of its parse queued (bridge.entry.js
-        # `__csimTaskOfTheEnd`), which the page's due tasks run below — delayed, where its images are still in flight, until they land. Give their
+        # `realmHooks.taskOfTheEnd`), which the page's due tasks run below — delayed, where its images are still in flight, until they land. Give their
         # fetch threads a short GVL-yielding window to land first: they overlap the boot's JS (rusty releases the GVL) and
         # are usually done already, but one that is not would slip its page's `load` past the visit and leave what a
         # post-visit read sees to thread timing. Bounded — a genuinely slow endpoint delays `load` to a later step
@@ -13446,7 +13457,7 @@ module Capybara
       # `maxMs: 0` fires only what is ALREADY due, so a `setTimeout(fn, 50)` stays
       # pending and a test can still observe the state before it.
       # The document's DOMContentLoaded and `load` are among those tasks — "the end" queued them (bridge.entry.js
-      # `__csimTaskOfTheEnd`) — each ahead of a `setTimeout(0)` or a message its parse queued, the load where nothing
+      # `realmHooks.taskOfTheEnd`) — each ahead of a `setTimeout(0)` or a message its parse queued, the load where nothing
       # delays it (else in turn, once it no longer is), one its load handlers queue after it. (HTML leaves the order of
       # two task sources to the UA, and the engines differ by the page's shape, measured 2026-11-01: on a page whose
       # parse ends at once, Chrome 156 fires DOMContentLoaded and the load before a parse-time `setTimeout(0)` and a

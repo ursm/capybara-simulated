@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/raster'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # `letter-spacing` and `word-spacing` are part of an advance. The flow measured a run from the
 # face's own `hmtx` advances and read neither property, so a spaced heading measured at its unspaced
@@ -16,7 +17,7 @@ require_relative 'support/session_teardown'
 # characters it applies to — and never as an absolute number. The face's advance is the machine's:
 # 9.6px per glyph here, 9.6328 on CI, and an absolute assertion turned every CI job red on the first
 # push. The spacing is what the assertion is about, and it is exact whatever the face.
-RSpec.describe 'letter-spacing and word-spacing reach the flow' do
+RSpec.describe 'letter-spacing and word-spacing reach the flow', engine_global: true do
   def page(body, css = '')
     session = simulated_session(->(_env) {
       [200, {'content-type' => 'text/html; charset=utf-8'}, [<<~HTML]]
@@ -166,7 +167,7 @@ RSpec.describe 'letter-spacing and word-spacing reach the flow' do
     body = '<div style="letter-spacing:10%"><span id=t style="font-size:32px">abcd</span></div>'
     plain = '<div><span id=t style="font-size:32px">abcd</span></div>'
     expect(gain(body, plain)).to be_within(0.01).of(12.8)          # 4 x 10% of 32px
-    expect(page(body).evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(page(body).evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and a `min()` / `max()` / `clamp()` of a percentage is no line through the font size: it is resolved at each size,

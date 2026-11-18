@@ -7,7 +7,7 @@ module Capybara
   module Simulated
     # Process-wide + on-disk cache of V8 `ScriptCompiler::CachedData`
     # blobs keyed by `(version_tag, sha256(body))`. V8Runtime feeds
-    # every `__csim_runScript` body through here so the second visit
+    # every `runScript` body through here so the second visit
     # (and every subsequent process) skips the parse + JIT step on
     # large app bundles — Discourse's main chunk goes from ~140 ms of
     # recompile per visit to a deserialize + run path.

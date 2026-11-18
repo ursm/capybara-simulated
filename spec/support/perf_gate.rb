@@ -289,8 +289,8 @@ module PerfGate
   CALIB_JS = 'let s = 0; for (let i = 0; i < 3000000; i++) { s += (i * 7) % 13; } s'
 
   # The counters the hard gate holds — deliberately only the LAYOUT/REUSE hot-path
-  # signals. `__csimParserTreeGen` (essentially a node count) and
-  # `__csimCascadeVersion` (bumps on any rule-set change / reset) were left out on
+  # signals. The parser's tree generation (essentially a node count) and the
+  # cascade version (bumps on any rule-set change / reset) were left out on
   # purpose: they shift on parse5 bumps, UA-sheet edits and conformance-driven
   # invalidation changes that are NOT perf regressions, so holding them exactly
   # would red the gate on unrelated PRs and train everyone to reflexively regen —
@@ -301,9 +301,9 @@ module PerfGate
   # afresh and spliced back from the last pass.
   COUNTS_JS = <<~JS.freeze
     ({
-      passes:                 globalThis.__csimLayoutPasses(),
-      rust_passes:            globalThis.__csimNativeLayoutStats().rust,
-      rust_declines:          Object.values(globalThis.__csimNativeLayoutStats().rustFellBack).reduce((a, b) => a + b, 0),
+      passes:                 RustyRacer.steps.layoutPasses(),
+      rust_passes:            RustyRacer.steps.nativeLayoutStats().rust,
+      rust_declines:          Object.values(RustyRacer.steps.nativeLayoutStats().rustFellBack).reduce((a, b) => a + b, 0),
       rust_measures_put_back: globalThis.__dom.layoutMeasureCounts()[0],
       rust_records_walked:    globalThis.__dom.layoutMeasureCounts()[4],
       rust_records_spliced:   globalThis.__dom.layoutMeasureCounts()[3]

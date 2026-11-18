@@ -4,10 +4,11 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/layout_golden'
 require_relative 'support/chrome_figures'
+require_relative 'support/engine_global'
 
 # Shapes the Rust walk used to decline: it lays each out itself, held to Chrome's figures where a shape names them and
 # to its recorded geometry (`expect_layout_golden`) for the rest of the page.
-RSpec.describe 'Rust walk coverage' do
+RSpec.describe 'Rust walk coverage', engine_global: true do
   def app(body)
     ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]] }
   end
@@ -28,7 +29,7 @@ RSpec.describe 'Rust walk coverage' do
       document.getElementById('b').appendChild(u);
     JS
     expect(s.evaluate_script("(r => [r.width, r.height])(document.querySelector('#b > *').getBoundingClientRect())")).to match([be_within(0.02).of(28.81), 22])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and so is one NAMED as an HTML element: a `urn:x` `<img>`, `<br>`, `<div>` or `<option>` is an inline holding its
@@ -46,7 +47,7 @@ RSpec.describe 'Rust walk coverage' do
       expect(box[3]).to eq(chrome[3])
       [0, 2].each {|i| expect(box[i]).to be_within(0.05).of(chrome[i]) }
     end
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # Table boxes a block holds with no table around them are wrapped in an ANONYMOUS table (CSS 2.1 §17.2.1): a block's
@@ -73,7 +74,7 @@ RSpec.describe 'Rust walk coverage' do
       'r6' => [0, 154, 105.6, 22], 'r7' => [0, 176, 105.6, 0], 'c1' => [0, 198, 38.4, 22], 'c2' => [3, 245, 15.6, 28],
       'c3' => [21.6, 245, 19.2, 28], 'c4' => [0, 276, 50, 22]
     )
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and what makes no table box stays out of it: a replaced element or a control with a table display is an inline-level
@@ -93,7 +94,7 @@ RSpec.describe 'Rust walk coverage' do
     expect(rect.call('i1')[0, 1] + rect.call('i2')[0, 1]).to eq([0, 20])       # (…side by side: img at 0, canvas at 20)
     expect(rect.call('x3')[2]).to eq(19.2)
     expect(rect.call('w1')[3]).to eq(22)
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A row whose cells all span rows is as tall as it declares, or nothing, and what the spanning cells need past it goes
@@ -102,7 +103,7 @@ RSpec.describe 'Rust walk coverage' do
   it 'lays out a row of nothing but spanning cells' do
     s = page('<body style="font: 16px monospace; margin: 0"><table style="border-spacing: 0"><tr id="a"><td rowspan="2">a</td><td rowspan="2">b</td></tr><tr id="b"></tr></table></body>')
     expect(s.evaluate_script('[a.getBoundingClientRect().height, b.getBoundingClientRect().height]')).to eq([0, 24])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and a table of rows holding no cell at all has no columns, and spaces nothing (Chrome: a `border-spacing: 5px` table
@@ -113,7 +114,7 @@ RSpec.describe 'Rust walk coverage' do
       '<table id="c" style="border: 3px solid; border-spacing: 5px"><tr style="height: 20px"></tr></table></body>'
     )
     expect(s.evaluate_script("['b', 'c'].map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return [r.width, r.height]; })")).to eq([[0, 0], [6, 26]])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # An `<object>` is the default object size where it shows a resource and the box its style makes it where it shows its
@@ -171,7 +172,7 @@ RSpec.describe 'Rust walk coverage' do
     expect(rect.call('r')[2]).to be_within(0.01).of(38.4)
     expect(rect.call('f')[2]).to eq(rect.call('fi')[2])
     expect(s.evaluate_script('[b.offsetLeft, b.clientWidth >= 120, a.offsetLeft, a.offsetTop >= 120]')).to eq([128, true, 8, true])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and the viewport scrolls from where the root sits: a `vertical-rl` page wider than the viewport, or an rtl one, is
@@ -220,7 +221,7 @@ RSpec.describe 'Rust walk coverage' do
       '<fieldset><legend id="d" style="display: inline; margin-left: auto">rt</legend>c</fieldset></body>'
     )
     expect(s.evaluate_script("[a, c, d].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.x * 10) / 10, Math.round(r.width * 10) / 10]; })")).to eq([[24, 104], [24, 104], [976.8, 23.2]])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and the JS side's geometry readers take a ruby display for the inline box the walk lays it out as: a transform does
@@ -235,7 +236,7 @@ RSpec.describe 'Rust walk coverage' do
       'padding: 0"><span style="display: inline-block; width: 100px">x</span><span style="display: inline-block; width: 50px">x</span></button></div></body>'
     )
     expect(s.evaluate_script('[t.getBoundingClientRect().x, t.clientWidth, b.clientWidth]')).to eq([19.2, 0, 100])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and an element of another namespace named like an image, a video or an input is none of them to those readers
@@ -267,7 +268,7 @@ RSpec.describe 'Rust walk coverage' do
     expect(m1[0]).to eq(19.1)
     expect(m1[1]).to be_within(1).of(33.4)
     expect(m2).to eq([8, 1008])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and MathML Core's user-agent sheet as far as the style engine has its values: only the first child of a `semantics`
@@ -280,7 +281,7 @@ RSpec.describe 'Rust walk coverage' do
     )
     expect(s.evaluate_script('[getComputedStyle(an).display, getComputedStyle(mb).display, getComputedStyle(ph).visibility, getComputedStyle(t).display]')).to eq(%w[none none hidden inline-table])
     expect(s.evaluate_script('p.innerText')).not_to include('x^2', 'B')
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A value the walk has no model for is the one it falls back to, where the walk declined the page: an `anchor()` inset
@@ -297,7 +298,7 @@ RSpec.describe 'Rust walk coverage' do
     )
     rect = ->(id) { s.evaluate_script("(() => { const r = document.getElementById('#{id}').getBoundingClientRect(); return [r.x, r.y, r.width].map((v) => Math.round(v * 10) / 10); })()") }
     expect(%w[a1 a2 a3 a4].map(&rect)).to eq([[10, 0, 9.6], [0, 50, 50], [0, 72, 290.4], [0, 94, 300]])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and an anchor function's FALLBACK where it gives one (Chrome: `top: anchor(--a bottom, 30px); left: anchor(--a
@@ -316,7 +317,7 @@ RSpec.describe 'Rust walk coverage' do
     expect(%w[a b c].map {|id| rect.call(id)[0, 2] }).to eq([[40, 30], [0, 75], [25, 82]])
     expect(rect.call('d')[2]).to eq(300)
     expect(rect.call('e')[3]).to eq(44)
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and every `vertical-align` the style engine computes is a box the walk places: `central` / `center` the middle, the
@@ -328,7 +329,7 @@ RSpec.describe 'Rust walk coverage' do
       '<span style="alignment-baseline: alphabetic">d</span><span style="vertical-align: center">e</span>' \
       '<span style="alignment-baseline: middle; baseline-shift: 3px">f</span></div></body>'
     )
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A COMPRESSIBLE replaced box contributes nothing to min-content (CSS Sizing 3 §5.2.2): one sized by a percentage width,
@@ -361,7 +362,7 @@ RSpec.describe 'Rust walk coverage' do
     # (…a ZWJ between letters joins nothing — `abc‍def` keeps every advance, 57.6, and break-all breaks around one — where
     # one between pictographs binds the family into one unit, on one line, `x` on the next: Chrome's 2, 57.6, 2)
     expect(s.evaluate_script('[z.getClientRects().length, Math.round(y.getBoundingClientRect().width * 10) / 10, x.getClientRects().length]')).to eq([2, 57.6, 2])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and the two rules a joiner is broken by: LINE breaking never breaks after one (UAX #14 LB8a — `漢‍字‍か` and `c‍d` are
@@ -378,7 +379,7 @@ RSpec.describe 'Rust walk coverage' do
     sizes = s.evaluate_script("['a', 'b', 'c', 'd'].map((i) => { const r = document.getElementById(i).getBoundingClientRect(); return [Math.round(r.width * 10) / 10, r.height]; })")
     expect(sizes.map(&:first)).to eq([48, 19.2, 9.6, 30])
     expect(sizes.drop(1).map(&:last)).to eq([132, 264, 88])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …an emergency break falls at a grapheme boundary however the unit is cut — `漢‍字‍か な` under `overflow-wrap: anywhere`
@@ -392,7 +393,7 @@ RSpec.describe 'Rust walk coverage' do
       '<div style="float: left; letter-spacing: 3px; word-break: break-all" id="c">r abc s</div></body>'
     )
     expect(s.evaluate_script('[a.getClientRects().length, b.getBoundingClientRect().width, Math.round(c.getBoundingClientRect().width * 10) / 10, c.getBoundingClientRect().height]')).to eq([4, 16, 88.2, 22])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A LIST BOX is a flex item like any control — its own box from the control's data, its rows inside it, the width the
@@ -403,7 +404,7 @@ RSpec.describe 'Rust walk coverage' do
       '<div style="display: flex; flex-direction: column; width: 300px"><select id="b" size="2"><option>one</option><option>two</option></select></div></body>'
     )
     expect(s.evaluate_script('[Math.round(a.getBoundingClientRect().width * 10) / 10, b.getBoundingClientRect().width]')).to eq([43.2, 300])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A word running through an inline element is ONE word: under `word-break: break-all`, where every boundary between
@@ -417,7 +418,7 @@ RSpec.describe 'Rust walk coverage' do
       '<div style="width: min-content; word-break: break-all" id="b"><span>ab<b>cd</b>ef</span></div></body>'
     )
     expect(s.evaluate_script('[a.getClientRects().length, b.getBoundingClientRect().width]')).to eq([3, 9.6])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and a word that fits the band but not the ROOM left on the line is cut there too, filling the line: break-all never
@@ -435,7 +436,7 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script(<<~JS)).to eq([[48, 19.2], 44, [0, 110]])
       [[...a.getClientRects()].map((r) => +r.width.toFixed(2)), b.getBoundingClientRect().height, [c.getBoundingClientRect().x, c.getBoundingClientRect().y]]
     JS
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # break-all makes letters breakable, not punctuation (UAX #14 as CSS Text 3 §5.2 applies it): no break before a closing
@@ -456,7 +457,7 @@ RSpec.describe 'Rust walk coverage' do
         +d.getBoundingClientRect().width.toFixed(2)
       ]
     JS
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A line breaks after no no-break space — U+00A0, U+2007, U+202F — across an element's edge either (Chrome keeps
@@ -471,7 +472,7 @@ RSpec.describe 'Rust walk coverage' do
     expect(s.evaluate_script(<<~JS)).to eq([22, 22, 28.8])
       [a.getBoundingClientRect().height, b.getBoundingClientRect().height, +c.getBoundingClientRect().width.toFixed(2)]
     JS
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # What break-all glues it glues by the character a mark ATTACHES to (LB9: `"&#x301;` is a quotation mark), and a
@@ -502,7 +503,7 @@ RSpec.describe 'Rust walk coverage' do
         f.getBoundingClientRect().height
       ]
     JS
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A node of nothing but soft hyphens under `hyphens: none` is a zero-wide word that still makes its line (Chrome: 22
@@ -514,7 +515,7 @@ RSpec.describe 'Rust walk coverage' do
       '<div style="float: left"><pre style="text-indent: 20px; margin: 0">&#13;</pre></div></body>'
     )
     expect(s.evaluate_script('a.getBoundingClientRect().height')).to eq(22)
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A root element in a vertical writing mode is sized as every vertical block is — its auto width from its content —
@@ -529,7 +530,7 @@ RSpec.describe 'Rust walk coverage' do
     html, body = s.evaluate_script("['html', 'body'].map((t) => { const r = document.querySelector(t).getBoundingClientRect(); return [r.x, r.y, r.width]; })")
     expect(html[0, 2]).to eq([7, 5])
     expect(html[2]).to eq(body[2] + 6)
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …where it STARTS: a `vertical-rl` root against the right edge of the initial containing block (Chrome: 979 for a
@@ -540,7 +541,7 @@ RSpec.describe 'Rust walk coverage' do
   it 'places a vertical root at its start edge and fills it for an orthogonal child', :aggregate_failures do
     boxes = lambda {|html|
       s = page(html)
-      expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+      expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
       s.evaluate_script("[...document.querySelectorAll('html, body, div')].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.x * 100) / 100, Math.round(r.width * 100) / 100]; })")
     }
     expect(boxes.call('<html style="writing-mode: vertical-rl; font: 16px monospace"><body>abc</body></html>')).to eq([[979.2, 44.8], [987.2, 28.8]])
@@ -563,7 +564,7 @@ RSpec.describe 'Rust walk coverage' do
     s.visit '/'
     s.execute_script("document.fonts.add(new FontFace('custom-font', 'url(/Ahem.ttf)')); document.getElementById('t').style.color = 'red';")
     expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().width")).to eq(60)
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and an `@font-face` with metric descriptors: its `size-adjust` scales every advance (a face of its own natively,
@@ -579,7 +580,7 @@ RSpec.describe 'Rust walk coverage' do
     s.visit '/'
     s.execute_script("document.body.style.color = 'red'")
     expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().width")).to eq(180)
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A family whose `@font-face`s split a run by `unicode-range` — Ahem for A–Z, Lato at 120% for a–z, the system font for
@@ -599,7 +600,7 @@ RSpec.describe 'Rust walk coverage' do
     s.execute_script("document.body.style.color = 'red'")
     widths = s.evaluate_script("[...document.querySelectorAll('span')].map((e) => Math.round(e.getBoundingClientRect().width * 100) / 100)")
     expect(widths).to eq([132, 85.92, 118.98])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …and a split's faces RAISE the line a run's characters select them on, each laid out as a face of its own would be,
@@ -625,7 +626,7 @@ RSpec.describe 'Rust walk coverage' do
     s.execute_script("document.body.style.color = 'red'")
     sizes = s.evaluate_script("[...document.querySelectorAll('div')].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width * 100) / 100, r.height]; })")
     expect(sizes).to eq([[120, 60], [300, 29], [139.2, 0]])
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # …asked of each text node of its data as WRITTEN (a preserved CR, a soft hyphen under `hyphens:
@@ -656,7 +657,7 @@ RSpec.describe 'Rust walk coverage' do
     sizes = s.evaluate_script("[...document.body.children].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width * 100) / 100, r.height]; })")
     expect(sizes.map(&:last)[0, 3]).to eq([24, 60, 48])
     expect(sizes.last.first).to eq(150)
-    expect(s.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A face whose descriptors change after the first layout is the new face to the style engine's `ch` / `ex` too: the

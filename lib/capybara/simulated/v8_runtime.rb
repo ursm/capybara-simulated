@@ -212,7 +212,7 @@ module Capybara
         #
         # `to_h` dedups re-attached names to their latest proc, matching
         # attach's override semantics. NOTE: context-bound fns
-        # (`__csim_runScript*`, `evalEsmEntry`) get realm-bound
+        # (`runScript*`, `evalEsmEntry`) get realm-bound
         # overrides in `create_frame_realm` after this replay.
         def create_context
           realm = @iso.create_context
@@ -1172,11 +1172,11 @@ module Capybara
         # Rust walk lays the page out from it.
         V8Runtime.engine_call(c, 'enableStylo')
         # …and the check on the Rust walk's subtree reuse: every pass walked again without it, and any difference thrown.
-        c.eval_void('globalThis.__csimNativeLayoutVerifyReuse = true;') if ENV['CSIM_NL_REUSE_VERIFY'] == '1'
+        V8Runtime.engine_call(c, 'verifyLayoutReuse') if ENV['CSIM_NL_REUSE_VERIFY'] == '1'
         # …and the check on the arena: the whole JS tree held against it at every layout and cascade entry, what it finds
         # kept here — a page navigated away or a frame removed takes no record with it — for the harness to take.
         if ENV['CSIM_ARENA_VERIFY'] == '1'
-          c.eval_void('globalThis.__csimArenaVerify = true;')
+          V8Runtime.engine_call(c, 'verifyArena')
           c.attach('@arenaVerifyFailed', ->(message) { (@arena_verify_failures ||= []) << message.to_s; nil })
         end
       end
@@ -1320,7 +1320,7 @@ module Capybara
       # A frame whose document URL is opaque — about:blank (empty src), about:srcdoc,
       # or empty — has no scope of its own; its controller is inherited from the
       # creator. (create_frame_realm receives 'about:blank'/'about:srcdoc' as the url
-      # for these, seeded by __csimFrameWindow.)
+      # for these, seeded by realmHooks.frameWindow.)
       def opaque_frame_url?(url)
         u = url.to_s
         u.empty? || u.start_with?('about:')
@@ -1335,7 +1335,7 @@ module Capybara
       # (≥64KB, or `type=module`) would run against the main
       # document — rebind realm-executing variants on top, then reseed per-realm JS.
       def seed_realm_bridge(realm, group = nil)
-        has_bridge = realm.eval("typeof __csimTakeEngine === 'function' || typeof __csimRealmId === 'function'")
+        has_bridge = realm.eval("typeof HTMLElement === 'function'")
         realm.eval_void(RuntimeShared.snapshot_src) unless has_bridge
         attach_run_script_with_cache(realm)
         attach_realm_esm_entry(realm)
@@ -1393,7 +1393,7 @@ module Capybara
         # (…the host's clock's offset its parent's time origin holds: agent_clock.rs `TimeOrigin`)
         V8Runtime.engine_call(realm, 'timeTravelFrom', parent_id.to_i)
         # Wire `parent` / `top` to the realm that owns this iframe (its context
-        # id passed from `__csimFrameWindow`), BEFORE the frame's scripts run —
+        # id passed from `realmHooks.frameWindow`), BEFORE the frame's scripts run —
         # `top` propagates up the chain (the main realm's `top` is itself). A
         # nested frame thus reaches its TRUE parent, not unconditionally the
         # main frame — platform-globals.js `setParentRealm`, which answers nothing (a WindowProxy marshalled back would run
@@ -1831,8 +1831,8 @@ module Capybara
           return true if V8Runtime.engine_call(target, 'moduleCancelled') == true
 
           # (…its evaluation's rejection — a top-level throw, a top-level await's — reported at its window, `error`
-          # event and all, as HTML "run a module script" reports it: the realm's own `__csimReportError`)
-          m.evaluate(report: '__csimReportError')
+          # event and all, as HTML "run a module script" reports it: the realm's own `reportError` step)
+          m.evaluate(report: '@steps.reportError')
         rescue ModuleFetchFailed
           return false
         rescue ModuleParseFailed => e
@@ -2138,7 +2138,7 @@ module Capybara
         })
       end
 
-      # Override the JS-side `__csim_runScript` fallback with a Ruby host fn
+      # Override the JS-side `runScript` fallback with a Ruby host fn
       # that bytecode-caches each script body in a process-wide hash + on-disk
       # store (`Context#compile` + `Script#cached_data`). Discourse's main
       # chunk is ~140 ms of parse + JIT per visit otherwise; the cache reduces
@@ -2188,7 +2188,7 @@ module Capybara
           # run error raises RustyRacer::ParseError / RuntimeError, which rusty
           # throws on at the call site as the value the script threw (its
           # SyntaxError, its Error, its `42`), so bridge.entry.js's
-          # `try { __csim_runScript(…) } catch` reports it (`window.onerror`)
+          # `try { runScript(…) } catch` reports it (`window.onerror`)
           # as it does a small script's. Swallowed here, a big bundle that
           # threw at load fired no ErrorEvent at all.
           key = [label.to_s, src.bytesize]
@@ -2229,7 +2229,7 @@ module Capybara
         install_run_script_dispatcher(c)
       end
 
-      # The JS-side `__csim_runScript` dispatcher: a body past the bytecode-cache threshold to the cache path above, any
+      # The JS-side `runScript` dispatcher: a body past the bytecode-cache threshold to the cache path above, any
       # other run as a classic Script of the realm in the engine (script.rs `runClassicScript`: HTML "run a classic
       # script" — its top-level declarations the global ones, its `let` / `const` / `class` in the global lexical
       # environment the realm's scripts share, a redeclaration a SyntaxError before any of it runs; named its label, which
@@ -2244,7 +2244,7 @@ module Capybara
       # `globalThis.…` assignment csim ran *post-snapshot* in `build_ctx` is
       # missing (realm state). Re-seed the realm's own state
       # (`initRealm()`: its document, the Worker
-      # constructors); the `__csim_runScript` dispatcher comes from
+      # constructors); the `runScript` dispatcher comes from
       # `attach_run_script_with_cache` (realm-bound).
       def reseed_realm_js(c, group = nil)
         init_realm(c, group)
@@ -2275,7 +2275,7 @@ module Capybara
       end
 
       # Worker-isolate factory: fresh isolate from the shared
-      # snapshot, host fns attached, `__csim_isWorker` flag set, +
+      # snapshot, host fns attached, its worker scope installed, +
       # the per-worker postMessage host fn closed over `post_back`.
       # Returns the `WorkerRuntime` that `Browser#run_worker` drives.
       def self.build_worker(browser, post_back, broadcast_out = nil, sw_hooks = {}, kind:, name: '', isolated: false, secure: true)

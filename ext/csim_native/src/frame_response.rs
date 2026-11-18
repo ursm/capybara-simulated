@@ -3,7 +3,7 @@
 // `srcdoc`, an about:, data:, javascript: or blob: URL's, or the network's, a service worker's on the way — what that
 // response says of the document (its URL after redirects, its Content-Type, its Content-Security-Policy, Referrer-Policy
 // and Refresh, the Referer its request sent, the client it reserved), its Resource Timing entry, and the origins and
-// sandboxing flags the document is made with. The bindings (bridge.entry.js `__csimFrameWindow`) unload the frame's old
+// sandboxing flags the document is made with. The bindings (bridge.entry.js `realmHooks.frameWindow`) unload the frame's old
 // document and make the realm of what this answers.
 
 use crate::dom::{realm, realm_id, NodeId};

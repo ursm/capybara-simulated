@@ -806,7 +806,7 @@ mod tests {
         assert_eq!(stack_location("E\n    at f (http://a/x(1).js:3:4)"), Some((false, "http://a/x(1).js".to_owned(), 3, 4)));
         assert_eq!(stack_location("E\n    at Promise.all (index 0)\n    at http://a/s.js:1:2"), Some((false, "http://a/s.js".to_owned(), 1, 2)));
         assert_eq!(stack_location("E\n    at http://a/s.js:+1:2"), None);
-        assert_eq!(stack_location("E\n    at globalThis.__csim_runScript (<eval>:34:99)\n    at http://a/s.js:1:2"), Some((false, "http://a/s.js".to_owned(), 1, 2)));
+        assert_eq!(stack_location("E\n    at runScript (<eval>:34:99)\n    at http://a/s.js:1:2"), Some((false, "http://a/s.js".to_owned(), 1, 2)));
     }
 
     fn script(attrs: &[(&str, &str)]) -> NodeData {

@@ -1030,7 +1030,7 @@ pub(crate) fn take_owed_css_images(scope: &mut v8::PinScope<'_, '_>, args: &v8::
 }
 
 // __dom.cssImagesWaiting() -> whether the calling realm's restyles left images owed their fetch (`CssImages::owed`):
-// what wakes an idle event loop after a read's style flush (timers.js `__csimWakeForRendering`).
+// what wakes an idle event loop after a read's style flush (timers.js `realmHooks.wakeForRendering`).
 fn css_images_waiting_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).css_images.borrow().owed());

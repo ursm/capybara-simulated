@@ -2,18 +2,19 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # A key's caret move reads the laid-out text only where it moves by the text's lines — an editing host's or a
 # textarea's Home / End, Up / Down (caret_moves.rs `TEXT_WANTED`): Home / End in an input is an edit of its value, and
 # Control+Home / End's edge is no line's, so neither lays the page out. Laying it out for every move was ~13 ms a key on
 # a 3000-paragraph page.
-RSpec.describe 'a caret move that reads no line' do
+RSpec.describe 'a caret move that reads no line', engine_global: true do
   it 'lays nothing out' do
     paragraphs = Array.new(300) {|i| "<p>paragraph #{i}</p>" }.join
     html = %(<!DOCTYPE html><meta charset="utf-8"><input id=i value="abc"><textarea id=t>one\ntwo</textarea><div id=e contenteditable>edit me</div>#{paragraphs})
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
     s.visit '/'
-    passes = -> { s.evaluate_script('globalThis.__csimLayoutPasses()') }
+    passes = -> { s.evaluate_script('RustyRacer.steps.layoutPasses()') }
     input = s.find('#i')
     input.send_keys(:end)
     moves = [[:home], [:end], [:up], [:down]].map {|keys|

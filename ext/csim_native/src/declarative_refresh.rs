@@ -1,7 +1,7 @@
 // HTML's shared declarative refresh steps — a `<meta http-equiv=refresh>` inserted, a `Refresh` response header — the
 // engine's: what the value says (a delay in seconds and, optionally, a URL), whether the document refreshes at all (once,
 // the first that says it; its sandboxing may block a `<meta>`'s), and where to. The bindings wait out the delay from the
-// later of the document's load and the element's insertion, and navigate (location.js `__csimDeclarativeRefresh`).
+// later of the document's load and the element's insertion, and navigate (location.js `realmHooks.declarativeRefresh`).
 
 use crate::dom::{nid_arg, realm, realm_id, register, NodeId, RealmArena};
 

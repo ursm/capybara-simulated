@@ -2034,7 +2034,7 @@ impl RealmArena {
     }
 
     // …and what one shows moved too: `subtrees` boxes and what is under them to be laid out again — each a SUBTREE mark,
-    // which the diagnostics count (`__csimSubtreeMarks`). Each in the realm whose tree the node is in, whose memos of it
+    // which the diagnostics count (`hostSteps.subtreeMarks`). Each in the realm whose tree the node is in, whose memos of it
     // key on its generations (a node another realm's code writes: an adopted one).
     pub(crate) fn note_shown_changed(&mut self, subtrees: u32) {
         self.mark_shown(subtrees);
@@ -3076,6 +3076,15 @@ pub(crate) fn set_engine_global(on: bool) {
 pub(crate) fn realm_of_global(scope: &mut v8::PinScope<'_, '_>, global: v8::Local<'_, v8::Object>) -> Option<i32> {
     let key = realm_key(scope);
     global.get_private(scope, key).filter(|v| v.is_int32()).and_then(|v| v.int32_value(scope))
+}
+// The step `name` of the current realm's bindings that the engine calls (engine.js `hostSteps`, on the realm's host
+// object, which no script of a page's can reach): none where the realm has none of that name — no bindings, or none yet.
+pub(crate) fn host_step<'s>(scope: &mut v8::PinScope<'s, '_>, name: &str) -> Option<v8::Local<'s, v8::Function>> {
+    let host = rusty_racer::host_object(scope);
+    let key = v8::String::new(scope, "steps")?;
+    let steps = v8::Local::<v8::Object>::try_from(host.get(scope, key.into())?).ok()?;
+    let key = v8::String::new(scope, name)?;
+    v8::Local::<v8::Function>::try_from(steps.get(scope, key.into())?).ok()
 }
 
 // Install the realm's engine ops (`__dom`: the arena build / query / match surface + attrsView) into |ctx|, building
@@ -4481,9 +4490,7 @@ fn inspect_node(
         rv.set_null();
         return;
     };
-    const HEAD: usize = 7;
-    let out = v8::Array::new(scope, (HEAD + children.len()) as i32);
-    let vals: Vec<v8::Local<v8::Value>> = vec![
+    let mut vals: Vec<v8::Local<v8::Value>> = vec![
         v8::Integer::new(scope, kind).into(),
         v8::String::new(scope, &local_name).map_or_else(|| v8::undefined(scope).into(), |s| s.into()),
         utf16_value(scope, &data),

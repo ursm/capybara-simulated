@@ -280,7 +280,7 @@ fn direction_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackAr
 
 // __dom.selectionSet(selection, range, direction): the range is `range`, as the bindings set it, selected in `direction`
 // (`NONE` 0, `FORWARD` 1, `BACKWARD` 2) — none of a script's checks: the driver's selecting, as the user does, wherever
-// in the document (`__csimSelect`), and `modify`'s move.
+// in the document (`realmHooks.select`), and `modify`'s move.
 fn selection_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(sel), Some(range)) = (handle(scope, args.get(0)), object_arg(&args, 1)) else { return };
     let direction = direction_arg(scope, &args, 2);

@@ -8,6 +8,7 @@ require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/chrome_figures'
 require_relative 'support/layout_golden'
+require_relative 'support/engine_global'
 
 # Two shapes the JS walk once refused, kept as shapes the layout has to place: an inline-block holding a box of a VENDOR
 # `position` (`-webkit-sticky`, which declaration validation keeps), and an `inline-table` whose only column has no row
@@ -15,7 +16,7 @@ require_relative 'support/layout_golden'
 STICKY_ATOMIC = '<span style="display:inline-block"><div style="position:-webkit-sticky;width:9px;height:4px"></div>t</span>'
 COLUMN_ONLY_INLINE_TABLE = '<div>a<table style="display:inline-table"><colgroup><col style="width:30px"></colgroup></table></div>'
 
-RSpec.describe 'native layout L1 block-flow' do
+RSpec.describe 'native layout L1 block-flow', engine_global: true do
   def page(body)
     html = %(<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">#{body}</body></html>)
     Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [html]] } }.to_app
@@ -100,7 +101,7 @@ RSpec.describe 'native layout L1 block-flow' do
       session.visit '/'
       height, passes = session.evaluate_script(<<~JS)
         (() => {
-          const count = () => __csimNativeLayoutStats().rust;
+          const count = () => RustyRacer.steps.nativeLayoutStats().rust;
           const passes = count();
           document.body.appendChild(document.createComment(''));
           return [document.documentElement.getBoundingClientRect().height, count() - passes];
@@ -123,7 +124,7 @@ RSpec.describe 'native layout L1 block-flow' do
       session = simulated_session(Rack::Builder.new { run ->(_env) { [200, {'content-type' => 'text/html'}, [html]] } }.to_app)
       session.visit '/'
       width, fell_back = session.evaluate_script(<<~JS)
-        [document.getElementById('p').getBoundingClientRect().width, Object.keys(__csimNativeLayoutStats().rustFellBack)]
+        [document.getElementById('p').getBoundingClientRect().width, Object.keys(RustyRacer.steps.nativeLayoutStats().rustFellBack)]
       JS
       expect(fell_back).to eq([]), css
       expect(width).to eq(chrome), css

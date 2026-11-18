@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'zlib'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/engine_global'
 
 # Web fonts: a family the document declares an `@font-face` for is FETCHED the first time text
 # needs it (Chrome loads a web font on first use) and measured with the downloaded file's own
@@ -13,7 +14,7 @@ require_relative 'support/poll_until'
 # `check()` / `load()`, and a loading cycle's `loadingdone` / `loadingerror` events. A WOFF file
 # is unwrapped natively, a WOFF2 one Brotli-decoded, and either measures with the face's own
 # advances.
-RSpec.describe 'web fonts' do
+RSpec.describe 'web fonts', engine_global: true do
   AHEM = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
 
   # Ahem encoded as a WOFF2 (Brotli), generated once from Ahem.ttf with `woff2_compress`.
@@ -541,10 +542,10 @@ RSpec.describe 'web fonts' do
         const el = document.createElement('span');
         el.style.fontFamily = 'OnlyWoff2'; el.textContent = 'abcd';           // a face nothing has used yet
         document.body.appendChild(el);
-        const epoch = __csimLayoutEpoch();
+        const epoch = RustyRacer.steps.layoutEpoch();
         const w = el.getBoundingClientRect().width;
         document.body.getBoundingClientRect();
-        return [w, __csimLayoutEpoch() === epoch, document.fonts.check('12px OnlyWoff2')];
+        return [w, RustyRacer.steps.layoutEpoch() === epoch, document.fonts.check('12px OnlyWoff2')];
       })()
     JS
     expect(got).to eq([80, true, true])
@@ -553,14 +554,14 @@ RSpec.describe 'web fonts' do
   # A sheet's faces are read from the cascade's own parse — its `@import`s' first, each against its own URL — and not
   # from a CSSOM built for the purpose: the one that declared a Redmine page's Noto Sans cost 4 ms a load. A sheet a
   # script has built the CSSOM of is read from there, since the script may have edited it. (That none was built before is
-  # the driver's alone to see, `__csimOwnerSheetMade`: no page can.)
+  # the driver's alone to see, `hostSteps.ownerSheetMade`: no page can.)
   it 'finds a linked sheet\'s faces, and its imports\', without building its CSSOM' do
     s = session('/held.html')
     expect([width(s, 'imp'), width(s, 'outer')]).to eq([80, 80])
     got = s.evaluate_script(<<~JS)
       (() => {
         const link = document.querySelector('link');
-        const before = [__csimOwnerSheetMade(link), Array.from(document.fonts).map((f) => f.family).sort().join(',')];
+        const before = [RustyRacer.steps.ownerSheetMade(link), Array.from(document.fonts).map((f) => f.family).sort().join(',')];
         link.sheet.insertRule('@font-face { font-family: Late; src: url("ahem.ttf"); }', 1);
         return [before, Array.from(document.fonts).map((f) => f.family).sort().join(',')];
       })()

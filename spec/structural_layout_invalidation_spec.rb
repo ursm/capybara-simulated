@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # A mutation that flips a selector match on an element OTHER than the one written — a `:has()` above it, a position
 # among siblings, `:empty`, an attribute left of a sibling combinator — moves that element's boxes and, through what
@@ -11,7 +12,7 @@ require_relative 'support/session_teardown'
 # Each shape is measured before and after the change, in a 300px-wide box, against headless Chrome (in a 300px iframe,
 # the same figures): the height of a `<p>` reading `aa bb cc` in 16px monospace at 60px wide is 44 wrapped and 22
 # under `white-space: pre`.
-RSpec.describe 'layout invalidation through structural selectors' do
+RSpec.describe 'layout invalidation through structural selectors', engine_global: true do
   paragraph = '<p id="t" style="margin:0">aa bb cc</p>'
   shapes = [
     # name, css, body, change, [width, height] before, after
@@ -169,7 +170,7 @@ RSpec.describe 'layout invalidation through structural selectors' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
     s.visit '/'
     # …every reusing pass walked again fresh and compared (it throws on a difference).
-    s.execute_script('globalThis.__csimNativeLayoutVerifyReuse = true')
+    s.execute_script('RustyRacer.steps.verifyLayoutReuse(true)')
     before = rect(s)
     s.execute_script(change)
     [before, rect(s)]

@@ -583,10 +583,10 @@ RSpec.describe 'cascade invalidation', engine_global: true do
       (() => {
         const t = document.getElementById('host').shadowRoot.getElementById('t');
         t.getBoundingClientRect();
-        const before = globalThis.__csimLayoutEpoch();
+        const before = RustyRacer.steps.layoutEpoch();
         RustyRacer.steps.hoverElement(t);
         t.getBoundingClientRect();
-        return [before, globalThis.__csimLayoutEpoch()];
+        return [before, RustyRacer.steps.layoutEpoch()];
       })()
     JS
     expect(epochs.first).to eq(epochs.last), 'a paint-only shadow rule moved the LAYOUT epoch'
@@ -877,9 +877,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
     moved = s.evaluate_script(<<~JS)
       (() => {
         document.getElementById('after').getBoundingClientRect();   // prime a layout pass
-        const before = globalThis.__csimLayoutEpoch();
+        const before = RustyRacer.steps.layoutEpoch();
         document.getElementById('i').focus();
-        return globalThis.__csimLayoutEpoch() !== before;
+        return RustyRacer.steps.layoutEpoch() !== before;
       })()
     JS
     expect(moved).to be(false)
@@ -950,11 +950,11 @@ RSpec.describe 'cascade invalidation', engine_global: true do
       (() => {
         const after = document.getElementById('after');
         const before = after.getBoundingClientRect().y;
-        const epoch = globalThis.__csimLayoutEpoch(), marks = globalThis.__csimSubtreeMarks();
+        const epoch = RustyRacer.steps.layoutEpoch(), marks = RustyRacer.steps.subtreeMarks();
         document.getElementById('i').focus();
         const moved = after.getBoundingClientRect().y > before;
         // One subtree marked: the subject the flip restyled, not every element a dynamic rule names.
-        return [moved, globalThis.__csimLayoutEpoch() === epoch, globalThis.__csimSubtreeMarks() - marks];
+        return [moved, RustyRacer.steps.layoutEpoch() === epoch, RustyRacer.steps.subtreeMarks() - marks];
       })()
     JS
     expect(got).to eq([true, true, 1])
@@ -970,9 +970,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
       (() => {
         const after = document.getElementById('after');
         const before = after.getBoundingClientRect().y;
-        const epoch = globalThis.__csimLayoutEpoch();
+        const epoch = RustyRacer.steps.layoutEpoch();
         document.getElementById('in').focus();
-        return [after.getBoundingClientRect().y > before, globalThis.__csimLayoutEpoch() === epoch];
+        return [after.getBoundingClientRect().y > before, RustyRacer.steps.layoutEpoch() === epoch];
       })()
     JS
     expect(got).to eq([true, true])
@@ -1007,9 +1007,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
       (() => {
         const t = document.getElementById('t');
         const before = t.getBoundingClientRect().width;
-        const epoch = globalThis.__csimLayoutEpoch();
+        const epoch = RustyRacer.steps.layoutEpoch();
         t.focus();
-        return [before, t.getBoundingClientRect().width, globalThis.__csimLayoutEpoch() === epoch];
+        return [before, t.getBoundingClientRect().width, RustyRacer.steps.layoutEpoch() === epoch];
       })()
     JS
     expect(got).to eq([50, 200, true])
@@ -1022,9 +1022,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
     css = '.b { height: 20px } .a:hover .b { height: 200px }'
     s = simulated_session(styled_page('<div class="a"><div class="b" id="b">z</div></div><p id="after">after</p>', css: css))
     s.visit '/'
-    before = s.evaluate_script("[document.getElementById('b').getBoundingClientRect().height, globalThis.__csimLayoutEpoch()]")
+    before = s.evaluate_script("[document.getElementById('b').getBoundingClientRect().height, RustyRacer.steps.layoutEpoch()]")
     s.find('#b').hover
-    after = s.evaluate_script("[document.getElementById('b').getBoundingClientRect().height, globalThis.__csimLayoutEpoch()]")
+    after = s.evaluate_script("[document.getElementById('b').getBoundingClientRect().height, RustyRacer.steps.layoutEpoch()]")
     expect([before[0], after[0]]).to eq([20, 200])
     expect(after[1]).to eq(before[1])
   end
@@ -1037,9 +1037,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
       (() => {
         const b = document.getElementById('b');
         const before = b.getBoundingClientRect().width;
-        const epoch = globalThis.__csimLayoutEpoch();
+        const epoch = RustyRacer.steps.layoutEpoch();
         document.getElementById('a').focus();
-        return [before, b.getBoundingClientRect().width, globalThis.__csimLayoutEpoch() === epoch];
+        return [before, b.getBoundingClientRect().width, RustyRacer.steps.layoutEpoch() === epoch];
       })()
     JS
     expect(got).to eq([20, 200, true])
@@ -1108,10 +1108,10 @@ RSpec.describe 'cascade invalidation', engine_global: true do
       (() => {
         const f = document.getElementById('f');
         f.getBoundingClientRect();
-        const marks = globalThis.__csimSubtreeMarks();
+        const marks = RustyRacer.steps.subtreeMarks();
         f.focus();
         f.getBoundingClientRect();
-        return globalThis.__csimSubtreeMarks() - marks;
+        return RustyRacer.steps.subtreeMarks() - marks;
       })()
     JS
     expect(got).to eq(1)
@@ -1205,9 +1205,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
       (() => {
         document.querySelector('.dd').remove();
         document.getElementById('after').getBoundingClientRect();   // lay out with the widget gone
-        const before = globalThis.__csimLayoutEpoch();
+        const before = RustyRacer.steps.layoutEpoch();
         document.getElementById('i').focus();
-        return globalThis.__csimLayoutEpoch() !== before;
+        return RustyRacer.steps.layoutEpoch() !== before;
       })()
     JS
     expect(moved).to be(false)
@@ -1215,7 +1215,7 @@ RSpec.describe 'cascade invalidation', engine_global: true do
 
   # ── class writes ────────────────────────────────────────────────────────────────────────────
   # A class write marks the writer's subtree, and the style engine's restyle marks whatever else the
-  # flipped tokens reach. `__csimSubtreeMarks` is the observable for what is kept — geometry cannot
+  # flipped tokens reach. `hostSteps.subtreeMarks` is the observable for what is kept — geometry cannot
   # distinguish a surviving memo from an equal recompute.
 
   it 'relays out a descendant when a container gains a class a descendant rule reads' do
@@ -1263,9 +1263,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
       (() => {
         const p = document.getElementById('p');
         const before = p.getBoundingClientRect().height;
-        const marks = globalThis.__csimSubtreeMarks();
+        const marks = RustyRacer.steps.subtreeMarks();
         p.className = 'b a';
-        return [before, p.getBoundingClientRect().height, globalThis.__csimSubtreeMarks() > marks];
+        return [before, p.getBoundingClientRect().height, RustyRacer.steps.subtreeMarks() > marks];
       })()
     JS
     # (…the height is the writer's own box, marked whatever happens to its subtree; the count pins the subtree mark)
@@ -1315,7 +1315,7 @@ RSpec.describe 'cascade invalidation', engine_global: true do
   # perf gate's 400-row table, HALF the page's subtree reuse (`reuse_hit` 602 against 1200 for the
   # identical page without the host), which the wall could not see.
   #
-  # The examples below are the ways a shadow sheet crosses its boundary. **`__csimSubtreeMarks` is
+  # The examples below are the ways a shadow sheet crosses its boundary. **`hostSteps.subtreeMarks` is
   # the only observable that pins the marks themselves**: the walk's splice (`spliceable`) refuses a subtree
   # holding an escaping out-of-flow box on its own, so geometry heals every one of these
   # shapes either way. Where a geometry assertion appears beside the count it pins the MATCHING, not
@@ -1356,9 +1356,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
           '<style>::slotted(.red) { height: 120px }</style><slot></slot>';
         const c = document.getElementById('c');
         c.getBoundingClientRect();
-        const marks = globalThis.__csimSubtreeMarks();
+        const marks = RustyRacer.steps.subtreeMarks();
         c.classList.add('red');
-        return [globalThis.__csimSubtreeMarks() - marks, c.getBoundingClientRect().height];
+        return [RustyRacer.steps.subtreeMarks() - marks, c.getBoundingClientRect().height];
       })()
     JS
     expect(got).to eq([1, 120])
@@ -1380,9 +1380,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
         h.attachShadow({mode: 'open'}).innerHTML =
           '<style>:host(.red) { height: 120px }</style><p style="margin: 0; height: 20px">w</p>';
         h.getBoundingClientRect();
-        const marks = globalThis.__csimSubtreeMarks();
+        const marks = RustyRacer.steps.subtreeMarks();
         h.classList.add('red');
-        return [globalThis.__csimSubtreeMarks() - marks, h.getBoundingClientRect().height];
+        return [RustyRacer.steps.subtreeMarks() - marks, h.getBoundingClientRect().height];
       })()
     JS
     expect(got).to eq([1, 120])
@@ -1401,9 +1401,9 @@ RSpec.describe 'cascade invalidation', engine_global: true do
         h.attachShadow({mode: 'open'}).innerHTML =
           '<style>:host(.red) .p { height: 120px }</style><p class="p">w</p>';
         h.getBoundingClientRect();
-        const marks = globalThis.__csimSubtreeMarks();
+        const marks = RustyRacer.steps.subtreeMarks();
         h.classList.add('red');
-        return globalThis.__csimSubtreeMarks() - marks;
+        return RustyRacer.steps.subtreeMarks() - marks;
       })()
     JS
     expect(got).to eq(1)
@@ -1495,10 +1495,10 @@ RSpec.describe 'cascade invalidation', engine_global: true do
       (() => {
         const after = document.getElementById('after');
         const before = after.getBoundingClientRect().y;
-        const epoch = globalThis.__csimLayoutEpoch();
+        const epoch = RustyRacer.steps.layoutEpoch();
         document.querySelector('.dd').focus();
         const after2 = after.getBoundingClientRect().y;
-        return [after2 > before, globalThis.__csimLayoutEpoch() === epoch];
+        return [after2 > before, RustyRacer.steps.layoutEpoch() === epoch];
       })()
     JS
     expect(got).to eq([true, true])
@@ -1507,7 +1507,7 @@ RSpec.describe 'cascade invalidation', engine_global: true do
   it 'relays out a table grid when a dynamic display rule flips a row' do
     # A `display` flip on a row changes which rows the table's grid holds, with no child-list
     # change and no move of the layout epoch — so the restyle has to mark it as the structural
-    # change it is (`__csimMarkRestyled`): marked as none, the grid kept the hidden row.
+    # change it is (`realmHooks.markRestyled`): marked as none, the grid kept the hidden row.
     css = '.toggle:checked ~ table .maybe-row { display: none }'
     body = '<input type="checkbox" class="toggle" id="t">' \
            '<table><tbody><tr class="maybe-row"><td>a</td></tr><tr><td id="keep">b</td></tr></tbody></table>'

@@ -3,11 +3,12 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # A restyle that only repaints — a `:hover` / `:active` colour, a colour transition — lays nothing out again
 # (style.rs `layout_relevant_change`, `reconcile_animated`); one that moves a box does, and getComputedStyle reads the
 # new values either way.
-RSpec.describe 'paint-only restyles' do
+RSpec.describe 'paint-only restyles', engine_global: true do
   html = <<~HTML
     <!DOCTYPE html><meta charset=utf-8>
     <style>
@@ -20,7 +21,7 @@ RSpec.describe 'paint-only restyles' do
   HTML
   let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }) }
 
-  def passes = session.evaluate_script('__csimLayoutPasses()')
+  def passes = session.evaluate_script('RustyRacer.steps.layoutPasses()')
   def width(id) = session.evaluate_script("document.getElementById('#{id}').getBoundingClientRect().width")
   def style(id, prop) = session.evaluate_script("getComputedStyle(document.getElementById('#{id}')).#{prop}")
 

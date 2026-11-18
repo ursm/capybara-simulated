@@ -1,10 +1,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # getComputedStyle's resolved values (resolved.rs): a used value is read off the box the layout placed, so a read of one
 # lays the page out first — and a read whose answer the style alone gives lays out nothing. A page that dirties its
 # layout and reads a value every frame pays a layout pass per read otherwise.
-RSpec.describe 'resolved values' do
+RSpec.describe 'resolved values', engine_global: true do
   def session(body)
     app = ->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><html><body>#{body}</body></html>"]] }
     simulated_session(app).tap {|s| s.visit '/' }
@@ -16,10 +17,10 @@ RSpec.describe 'resolved values' do
     s.evaluate_script(<<~JS)
       (() => {
         const t = document.getElementById('t'), d = document.getElementById('dirty');
-        const before = globalThis.__csimLayoutPasses();
+        const before = RustyRacer.steps.layoutPasses();
         let v;
         for (let i = 0; i < 5; i++) { d.style.paddingLeft = i + 'px'; v = getComputedStyle(t)[#{property.to_json}]; }
-        return [globalThis.__csimLayoutPasses() - before, v];
+        return [RustyRacer.steps.layoutPasses() - before, v];
       })()
     JS
   end

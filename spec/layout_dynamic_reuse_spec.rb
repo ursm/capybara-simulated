@@ -700,12 +700,12 @@ RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
 
   # What the Rust walk keeps from one pass to the next — the records it splices back, the measures it puts back — read
   # where a kept answer the page no longer deserves would show. Each session walks every pass it reused again, fresh,
-  # and compares (`__csimNativeLayoutVerifyReuse`, which THROWS on a difference), so a stale kept answer fails twice:
+  # and compares (`hostSteps.verifyLayoutReuse`, which THROWS on a difference), so a stale kept answer fails twice:
   # as the throw, and as the figure. The ones that COUNT what is kept leave the check off, its fresh walk keeping nothing.
   describe 'what the Rust walk keeps' do
     def walk_session_for(body, css: '', verify: true)
       session_for("body { margin: 0 } #{css}", body).tap do |s|
-        s.execute_script("globalThis.__csimNativeLayoutVerifyReuse = #{verify}")
+        s.execute_script("RustyRacer.steps.verifyLayoutReuse(#{verify})")
       end
     end
 
@@ -805,7 +805,7 @@ RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
       width = "document.getElementById('l3').getBoundingClientRect().width"
       s.evaluate_script(width)
       s.execute_script("document.getElementById('p').firstChild.data = 'y'; document.body.offsetHeight")
-      passes = s.evaluate_script('__csimNativeLayoutStats().rust')
+      passes = s.evaluate_script('RustyRacer.steps.nativeLayoutStats().rust')
       # (…the first read in the task that starts it: the transition runs from then on, as in a browser)
       reads = [s.evaluate_script("(document.getElementById('l3').classList.add('wide'), #{width})")]
       while reads.last < 300 && reads.size < 30
@@ -815,7 +815,7 @@ RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
       # (…40px a 100ms read apart, from the rendering update a frame's interval after the read that started it — its
       # start time that frame's, a browser's alike — to 300)
       expect(reads).to eq([100, 136.66667, 176.66667, 216.66667, 256.66666, 296.66666, 300])
-      expect(s.evaluate_script('__csimNativeLayoutStats().rust') - passes).to be >= reads.size
+      expect(s.evaluate_script('RustyRacer.steps.nativeLayoutStats().rust') - passes).to be >= reads.size
     end
 
     # An inline box whose fragments the walk kept is answered with them — and one whose fragments moved is answered
@@ -855,7 +855,7 @@ RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
                            '<tr><td>x</td></tr></tbody></table></div></div>')
       got = s.evaluate_script(<<~JS)
         (() => {
-          const pass = () => { const n = __csimNativeLayoutStats().rust; const h = document.getElementById('t').getBoundingClientRect().height; return [__csimNativeLayoutStats().rust > n, h]; };
+          const pass = () => { const n = RustyRacer.steps.nativeLayoutStats().rust; const h = document.getElementById('t').getBoundingClientRect().height; return [RustyRacer.steps.nativeLayoutStats().rust > n, h]; };
           const out = [pass()];
           for (const h of ['50px', '50%', '60px']) {
             document.getElementById('g').style.height = h;
@@ -924,10 +924,10 @@ RSpec.describe 'layout reuse across dynamic style state', engine_global: true do
         (() => {
           document.body.offsetHeight;
           for (const id of ['s7', 's8']) { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; }
-          const [put0] = __dom.layoutMeasureCounts(), passes = __csimNativeLayoutStats().rust;
+          const [put0] = __dom.layoutMeasureCounts(), passes = RustyRacer.steps.nativeLayoutStats().rust;
           document.getElementById('s9').firstChild.data += '!';
           document.body.offsetHeight;
-          return [__dom.layoutMeasureCounts()[0] - put0, __csimNativeLayoutStats().rust - passes];
+          return [__dom.layoutMeasureCounts()[0] - put0, RustyRacer.steps.nativeLayoutStats().rust - passes];
         })()
       JS
       expect(got[1]).to eq(1)

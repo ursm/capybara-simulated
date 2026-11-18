@@ -8,8 +8,9 @@ require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/chrome_figures'
 require_relative 'support/layout_golden'
+require_relative 'support/engine_global'
 
-RSpec.describe 'native layout web-font' do
+RSpec.describe 'native layout web-font', engine_global: true do
   FONT_TTF   = File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
   FONT_WOFF2 = File.binread(File.expand_path('fixtures/fonts/Ahem.woff2', __dir__))
 
@@ -84,7 +85,7 @@ RSpec.describe 'native layout web-font' do
       document.body.offsetHeight;
     JS
     expect(session.evaluate_script(lines)).to eq(ahem), 'a stale native font handle?'
-    expect(session.evaluate_script('JSON.stringify(__csimNativeLayoutStats().rustFellBack)')).to eq('{}')
+    expect(session.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
 
   # A `local()` source names a face by its FULL name or its PostScript name (CSS Fonts 4 §4.3.1), and the layout

@@ -34,9 +34,9 @@ RSpec.describe 'the Rust walk puts back what did not change', engine_global: tru
         const edit = (id) => { document.getElementById(id).firstChild.data += '!'; document.body.offsetHeight; };
         document.body.offsetHeight;
         for (const id of ['s3', 'top', 's4', 'top']) edit(id);
-        const [p0] = __dom.layoutMeasureCounts(), passes = __csimNativeLayoutStats().rust;
+        const [p0] = __dom.layoutMeasureCounts(), passes = RustyRacer.steps.nativeLayoutStats().rust;
         edit('s5');
-        return [__dom.layoutMeasureCounts()[0] - p0, __csimNativeLayoutStats().rust - passes];
+        return [__dom.layoutMeasureCounts()[0] - p0, RustyRacer.steps.nativeLayoutStats().rust - passes];
       })()
     JS
     expect(got[1]).to eq(1)                  # …laid out by the Rust walk's pass, or the count says nothing
@@ -180,7 +180,7 @@ RSpec.describe 'the Rust walk puts back what did not change', engine_global: tru
     JS
     edited = session(%(<div id="top">top</div><div id="l">#{ROWS}</div>)).evaluate_script(script)
     fresh = session(%(<div id="top">top</div><div id="l">#{ROWS}</div>))
-    fresh.execute_script('globalThis.__csimNativeLayoutVerifyReuse = true')
+    fresh.execute_script('RustyRacer.steps.verifyLayoutReuse(true)')
     expect(fresh.evaluate_script(script)).to eq(edited)
   end
 end

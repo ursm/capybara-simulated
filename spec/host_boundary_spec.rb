@@ -7,9 +7,9 @@ require_relative 'support/poll_until'
 
 # What the host hands a realm and what it takes back go through nothing a page can replace: a host step reads the
 # engine's answers and the host's arguments by index, not by the iterator `Array.prototype` has (engine.js `listOf`);
-# the steps the host calls by name are no page's to call (`hostSteps`, on the realm's host object) and the functions the
-# bindings reach by a global's name read-only from the realm's first script on (`sealHostHooks`); and a window's parent
-# and top are the host's to set, kept where no script can name them (`realmHooks`).
+# the steps the host calls by name are no page's to call (`hostSteps`, on the realm's host object), nor are the hooks
+# one module of the bindings installs for another or another realm's (`realmHooks`), none a global's; and a window's
+# parent and top are the host's to set, kept where no script can name them (`realmHooks`).
 RSpec.describe 'the host boundary' do
   let(:pages) {
     {

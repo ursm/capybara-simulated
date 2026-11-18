@@ -667,7 +667,7 @@ RSpec.describe 'style engine animations', engine_global: true do
     read = s.evaluate_script(<<~JS)
       (() => {
         const a = document.getElementById('a');
-        const flushMarks = () => { const m = __csimSubtreeMarks(); __dom.styleFlush(); return __csimSubtreeMarks() - m; };
+        const flushMarks = () => { const m = RustyRacer.steps.subtreeMarks(); __dom.styleFlush(); return RustyRacer.steps.subtreeMarks() - m; };
         getComputedStyle(a).marginLeft;
         const before = flushMarks();
         a.style.color = 'red';

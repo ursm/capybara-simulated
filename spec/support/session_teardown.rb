@@ -45,7 +45,7 @@ module SimulatedSessionTeardown
     runtime = session.driver.browser.instance_variable_get(:@runtime)
     all = Hash.new(0)
     [0, *runtime.frame_realm_ids].each do |id|
-      stats = runtime.realm_call(id, '__csimNativeLayoutStats') rescue nil
+      stats = runtime.realm_call(id, 'nativeLayoutStats') rescue nil
       (stats && stats['rustFellBack'] || {}).each {|reason, n| all[reason] += n.to_i }
     end
     all.empty? ? nil : all.to_h.to_json

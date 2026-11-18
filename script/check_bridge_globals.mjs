@@ -8,10 +8,11 @@
 // name the WINDOW happens to carry: a stray `name`, `event`, `top` or `parent` resolves to a real
 // window property and the code quietly does the wrong thing.
 //
-// So the allowlist is deliberately SMALL and explicit. The bridge spells a global `globalThis.X`
-// almost everywhere; the handful of bare ones are listed below, and a new one costs a line here.
+// So the allowlist is deliberately SMALL and explicit — empty, now that the bridge reads none of its
+// own hooks off the global (engine.js `realmHooks`) nor any of the host's functions (engine.js
+// `hostObject`): it spells a global `globalThis.X`, and a bare one costs a line here.
 // (Deriving the list instead — from `globalThis.X = …` assignments and the host functions Ruby
-// attaches — admitted 872 names to cover these 16, including `name`, `event` and every worker-only
+// attaches — admitted 872 names to cover 16, including `name`, `event` and every worker-only
 // global, which is the bug class this exists to catch.)
 import { readFileSync, readdirSync } from 'node:fs';
 import { join }                      from 'node:path';
@@ -26,12 +27,7 @@ const PARSE_VERSION = 'latest';
 const SCOPE_VERSION = 2025;
 
 // Globals the bridge installs and then reads WITHOUT the `globalThis.` prefix.
-const BARE_GLOBALS = [
-  // Host functions Ruby attaches to the realm (runtime_shared.rb / v8_runtime.rb).
-  '__rackFetch', '__csim_runScript', '__csim_evalEsmEntry', '__csim_asyncIoPending',
-  // Bridge internals one module installs for another.
-  '__csimHasPendingRAF', '__isVisibleNode'
-];
+const BARE_GLOBALS = [];
 
 // The JS builtins, from a bare VM context — the host's V8, which is the engine the bridge targets.
 const builtins = runInNewContext('Object.getOwnPropertyNames(globalThis)');

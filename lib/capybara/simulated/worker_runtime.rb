@@ -57,7 +57,7 @@ module Capybara
 
           root.evaluate
         else
-          root.evaluate(report: '__csimReportError')
+          root.evaluate(report: '@steps.reportError')
         end
         nil
       end

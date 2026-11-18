@@ -2,12 +2,13 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # The style engine (stylo over the arena) restyles only what a change reached — the snapshots and hints its change
 # hooks leave, the selector flags matching left on a parent, the elements whose state moved. Each example makes one
 # kind of change and reads a value it moved; CSIM_STYLE_VERIFY holds every such restyle against styling the whole
 # document again, and a read throws when the two differ.
-RSpec.describe 'style engine invalidation' do
+RSpec.describe 'style engine invalidation', engine_global: true do
   around do |example|
     saved = ENV['CSIM_STYLE_VERIFY']
     ENV['CSIM_STYLE_VERIFY'] = '1'
@@ -276,7 +277,7 @@ RSpec.describe 'style engine invalidation' do
               '<input value="hello"><button>Go</button>', css: '')
     path = File.join(Dir.tmpdir, "csim-rustpaint-#{Process.pid}.png")
     s.driver.save_screenshot(path)
-    stats = s.evaluate_script('__csimNativeLayoutStats()')
+    stats = s.evaluate_script('RustyRacer.steps.nativeLayoutStats()')
     expect(stats['rustFellBack']).to eq({})
   ensure
     File.delete(path) if path && File.exist?(path)

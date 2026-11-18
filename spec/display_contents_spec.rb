@@ -25,8 +25,9 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
-RSpec.describe 'display: contents' do
+RSpec.describe 'display: contents', engine_global: true do
   def page(body)
     Rack::Builder.new {
       run ->(_env) {
@@ -49,7 +50,7 @@ RSpec.describe 'display: contents' do
   # because a page no pass laid out declines nothing either.
   def expect_rust_walk(session, body)
     session.evaluate_script 'document.body.offsetHeight'
-    stats = session.evaluate_script('__csimNativeLayoutStats()')
+    stats = session.evaluate_script('RustyRacer.steps.nativeLayoutStats()')
     expect(stats['rustFellBack']).to eq({}), "#{body}: the Rust walk declined: #{stats['rustFellBack'].inspect}"
     expect(stats['rust']).to be > 0, "#{body}: no pass laid the page out"
   end

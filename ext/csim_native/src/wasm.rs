@@ -1,7 +1,7 @@
 // The WebAssembly JS API's embedder hooks. `WebAssembly.compile` / `instantiate` settle their promise as a task of
 // the realm's event loop (the WebAssembly JS API's "asynchronously compile a WebAssembly module": resolve "in a
 // queued task") — V8 hands the embedder the resolution (`SetWasmAsyncResolvePromiseCallback`) and this queues it, a
-// timer task of the bindings (`__csimSetTimeout`), never inside the call that started it. (V8 compiles on the calling
+// timer task of the bindings (their `setTimeout` step), never inside the call that started it. (V8 compiles on the calling
 // thread, `--no-wasm-async-compilation` (v8_runtime.rb): its asynchronous compile finishes on platform tasks the
 // driver's event loop does not run.)
 
@@ -24,12 +24,7 @@ unsafe extern "C" fn resolve_later(
 ) {
     v8::callback_scope!(unsafe scope, context);
     let global = context.global(scope);
-    let realm = v8::String::new(scope, "__csimRealmId")
-        .and_then(|key| global.get(scope, key.into()))
-        .and_then(|f| v8::Local::<v8::Function>::try_from(f).ok())
-        .and_then(|f| f.call(scope, global.into(), &[]))
-        .and_then(|id| id.int32_value(scope))
-        .unwrap_or(0);
+    let realm = crate::dom::realm_of_global(scope, global).unwrap_or(0);
     let pending = (realm, v8::Global::new(scope, resolver), v8::Global::new(scope, result), success == v8::WasmAsyncSuccess::Success);
     let d = dom(scope);
     d.next_wasm_resolution = d.next_wasm_resolution.wrapping_add(1);
@@ -37,9 +32,9 @@ unsafe extern "C" fn resolve_later(
     d.wasm_resolutions.insert(id, pending);
     let data = v8::Integer::new_from_unsigned(scope, id).into();
     let queued = v8::Function::builder(settle).data(data).build(scope).and_then(|task| {
-        let key = v8::String::new(scope, "__csimSetTimeout")?;
-        let queue = v8::Local::<v8::Function>::try_from(global.get(scope, key.into())?).ok()?;
-        queue.call(scope, global.into(), &[task.into()])
+        let queue = crate::dom::host_step(scope, "setTimeout")?;
+        let recv = v8::undefined(scope).into();
+        queue.call(scope, recv, &[task.into()])
     });
     // (…a realm with no event loop of the bindings' — none to queue on — settles it now)
     if queued.is_none() {

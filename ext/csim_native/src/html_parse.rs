@@ -1154,16 +1154,15 @@ impl<'s> Build<'s> {
         if registry.is_some_and(|r| r == crate::ce_reactions::NULL || r == crate::ce_reactions::TRACKING) {
             return None;
         }
-        let hook = v8::String::new(scope, "__csimConstructParsedElement")?;
-        let global = scope.get_current_context().global(scope);
-        let hook = v8::Local::<v8::Function>::try_from(global.get(scope, hook.into())?).ok()?;
+        let hook = crate::dom::host_step(scope, "constructParsedElement")?;
         let name = page_string(scope, local, &self.standins)?;
         let doc: v8::Local<'_, v8::Value> = self.doc.map_or_else(|| v8::null(scope).into(), Into::into);
         let is: v8::Local<'_, v8::Value> = match is.filter(|_| !autonomous) {
             Some(is) => page_string(scope, is, &self.standins)?.into(),
             None => v8::null(scope).into(),
         };
-        let made = hook.call(scope, global.into(), &[name.into(), doc, is])?;
+        let recv = v8::undefined(scope).into();
+        let made = hook.call(scope, recv, &[name.into(), doc, is])?;
         let made = v8::Local::<v8::Array>::try_from(made).ok()?;
         let element = made.get_index(scope, 0)?;
         let custom = made.get_index(scope, 1).is_some_and(|c| c.is_true());
@@ -1180,15 +1179,14 @@ impl<'s> Build<'s> {
     // `attachDeclarativeShadow`): the shadow root they attached to `host`, as its attributes ask — none where the host
     // takes none.
     fn attach_shadow(&mut self, scope: &mut v8::PinScope<'s, '_>, host: crate::dom::NodeId, template: crate::dom::NodeId) -> Option<crate::dom::NodeId> {
-        let hook = v8::String::new(scope, "__csimAttachParsedShadow")?;
-        let global = scope.get_current_context().global(scope);
-        let hook = v8::Local::<v8::Function>::try_from(global.get(scope, hook.into())?).ok()?;
+        let hook = crate::dom::host_step(scope, "attachParsedShadow")?;
         let host = crate::dom::node_value(scope, Some(host));
         let template = crate::dom::node_value(scope, Some(template));
         if crate::dom::factory_threw(scope) {
             return None;
         }
-        let root = hook.call(scope, global.into(), &[host, template])?;
+        let recv = v8::undefined(scope).into();
+        let root = hook.call(scope, recv, &[host, template])?;
         crate::node_handle::nid_of(scope, root)
     }
     // …and the token's attributes appended to what its constructor made — attributes it set kept, the first of a name
@@ -1200,10 +1198,9 @@ impl<'s> Build<'s> {
             return;
         }
         let element = crate::dom::node_value(scope, Some(id));
-        let Some(hook) = v8::String::new(scope, "__csimParsedElementReactions") else { return };
-        let global = scope.get_current_context().global(scope);
-        let Some(hook) = global.get(scope, hook.into()).and_then(|h| v8::Local::<v8::Function>::try_from(h).ok()) else { return };
-        hook.call(scope, global.into(), &[element]);
+        let Some(hook) = crate::dom::host_step(scope, "parsedElementReactions") else { return };
+        let recv = v8::undefined(scope).into();
+        hook.call(scope, recv, &[element]);
     }
     // An HTML element's `is` attribute its `is` value — fixed as "create an element" makes it.
     pub(crate) fn is_value(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId) {

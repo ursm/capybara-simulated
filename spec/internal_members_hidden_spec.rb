@@ -164,11 +164,13 @@ RSpec.describe 'internal members' do
 
   # The engine's ops are no global of a page's, a frame's nor a worker's: the bindings hold them (engine.js), taken as the
   # realm is made, by a hook its global loses then — with the realm's host object, which no global holds either: on it
-  # rusty_racer's namespace, the host's procs and the steps the host calls.
+  # rusty_racer's namespace, the host's procs and the steps the host calls. Nor is any of the bindings' own hooks
+  # (`realmHooks`): the global has no own property of the driver's at all, `__`-named or other.
   it "gives a page's globals no engine" do
     procs = %w[windowOpen rackFetch createFrameRealm logConsole setTimersActive]
-    probe = "[typeof __dom, '__dom' in globalThis, typeof __csimTakeEngine, typeof RustyRacer, #{procs.to_json}.filter((n) => n in globalThis)]"
-    expected = ['undefined', false, 'undefined', 'undefined', []]
+    probe = "[typeof __dom, '__dom' in globalThis, typeof __csimTakeEngine, typeof RustyRacer, #{procs.to_json}.filter((n) => n in globalThis), " \
+            "Object.getOwnPropertyNames(globalThis).filter((n) => n.startsWith('__'))]"
+    expected = ['undefined', false, 'undefined', 'undefined', [], []]
     expect(outcome(probe)).to eq(expected)
     expect(outcome("document.getElementById('fr').contentWindow.eval(#{probe.to_json})")).to eq(expected)
     session.execute_script(<<~JS)
