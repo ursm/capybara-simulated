@@ -231,4 +231,25 @@ RSpec.describe 'legacy platform objects' do
     JS
     expect(r).to eq(['[object HTMLEmbedElement]', '[object HTMLEmbedElement]'])
   end
+
+  # A name set through another realm's method is the gate of the realm whose document the element is in (Chrome).
+  it "finds a name another realm's method gave a frame's element" do
+    session = simulated_session(app)
+    session.visit '/'
+    r = JSON.parse(session.evaluate_script(<<~JS))
+      (() => {
+        const frame = document.createElement('iframe');
+        document.body.append(frame);
+        const fd = frame.contentDocument;
+        const img = fd.body.appendChild(fd.createElement('img'));
+        Element.prototype.setAttribute.call(img, 'name', 'r1');
+        const adopted = fd.adoptNode(document.createElement('img'));
+        fd.body.append(adopted);
+        adopted.name = 'r2';
+        frame.contentWindow.eval("parent.document.body.appendChild(parent.document.createElement('img')).name = 'r3'");
+        return JSON.stringify([String(fd.r1), String(fd.r2), String(document.r3)]);
+      })()
+    JS
+    expect(r).to eq(['[object HTMLImageElement]'] * 3)
+  end
 end
