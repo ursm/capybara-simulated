@@ -238,6 +238,76 @@ struct Stepping {
     within: bool,
 }
 
+// A traversal the host applies (HTML "apply the history step"), its steps the engine's to take and the host's to run, one
+// at a time (`Command`, `Traversable::next_command`): one of the page's by `delta` — its document made again, judged anew
+// once the tasks due on the page ran — or one moving its frames, planned at its step with its changes (navigation_plan.rs
+// `FrameTraversal`). Its number, by which the host asks for its next step and lets it go (`end_apply`).
+// (…a host step of it may apply another, of this traversable or another's — a frame's load taking another window's — each
+// its own, the last begun the one a frame's navigation is asked about: `take_prompted`, `made_no_document`)
+struct Applying {
+    token: u64,
+    delta: Option<i64>,
+    step: i64,
+    changes: Vec<Change>,
+    phase: Phase,
+    // The frames whose documents it makes again, with the entries they are made of — those whose unloading no handler
+    // canceled — the ones of them asked (whose navigation asks them no second time), and those whose navigation made no
+    // document (a 204's, a download's): what the step comes to (`end_step`).
+    frames: Vec<(u32, u64)>,
+    prompted: HashSet<u32>,
+    none: Vec<u32>,
+    moves: std::collections::VecDeque<Move>,
+    stepping: Option<Stepping>,
+}
+
+// Where a traversal's application stands: the step it goes to planned (`Plan`), the tasks due on the page run
+// (`Flushed`), the page asked whether it may be unloaded (`Prompted`), the page's document made again (`Replayed`); or its
+// frames asked (`Unloading`), its navigables moved within their documents (`Moving`), its frames' documents made — up to
+// the one of that index (`Making`).
+enum Phase {
+    Plan,
+    Flushed,
+    Prompted,
+    Replayed(u64),
+    Frames,
+    Unloading,
+    Moving,
+    Making(usize),
+    Done,
+}
+
+// What the host does for a traversal's application, step by step (HTML "apply the history step"):
+// - `Flush`: run the tasks due on the page it leaves (browser.rb `flush_outgoing_page_init`) — answered whether it did;
+// - `PromptPage`: ask the page whether it may be unloaded ("check if unloading is canceled": its `beforeunload`);
+// - `Replay(entry, step)`: make the page's document of `entry` again, at `step` (a navigation from history);
+// - `RestoreFormState(entry)`: give the document made the state its entry's controls were left in ("persisted user state");
+// - `UnloadFrames(navigables)`: ask each frame whose document it makes again whether it may be unloaded, and snapshot the
+//   entry it leaves — answered, of each, nil where it has no document to ask, true where it was asked and may be, false
+//   where a handler removed it;
+// - `SameDocument(navigable, url, state, hashchange)`: move navigable within its document to an entry at `url` of classic
+//   history API state `state` ("update document for history step application": its location, `popstate`, `hashchange`);
+// - `MakeFrame(navigable, entry)`: make frame `navigable`'s document of `entry` again.
+pub(crate) enum Command {
+    Flush,
+    PromptPage,
+    Replay(u64, i64),
+    RestoreFormState(u64),
+    UnloadFrames(Vec<u32>),
+    SameDocument(Move),
+    MakeFrame(u32, u64),
+}
+// A navigable moved within its document by a step: its number, its entry's URL and classic history API state, and whether
+// its fragment changed.
+pub(crate) type Move = (u32, String, Option<Arc<[u8]>>, bool);
+// …and what the host answers of the step it ran.
+pub(crate) enum Answer {
+    Nothing,
+    Flushed(bool),
+    Unloaded(Vec<Option<bool>>),
+}
+// How many traversals the process's hosts are applying: the cheap gate a frame's navigation asks before it looks for one.
+static APPLYING: AtomicUsize = AtomicUsize::new(0);
+
 // A frame's navigation under way — HTML "navigate"'s history entry, which only the document it makes puts in the session
 // history ("finalize a cross-document navigation"): the URL it is made at, its navigable's parent, whether it takes the
 // place of the active entry (a `location.replace`, a navigation of a document not completely loaded yet, the first in
@@ -273,9 +343,9 @@ struct Traversable {
     state: State,
     made: u64,
     build: u32,
-    // A traversal's step applied that keeps its top-level navigable's document (`begin_step`), until the host has made
-    // the documents of the frames it moves, or none (`end_step`).
-    stepping: Option<Stepping>,
+    // The traversals the host applies (`Applying`), in the order begun, and the number the next is given.
+    applying: Vec<Applying>,
+    applying_tokens: u64,
     // Each frame's navigation under way, by its navigable — one at a time, a navigation begun ending the one before it
     // (HTML "navigate") — and the number the next one is given.
     navigations: HashMap<u32, FrameNavigation>,
@@ -355,6 +425,7 @@ struct Traversable {
 
 impl Drop for Traversable {
     fn drop(&mut self) {
+        self.forget_applying();
         if self.owns_storage {
             crate::storage_areas::clear(self.session_storage);
         }
@@ -1001,27 +1072,34 @@ impl Traversable {
     // moves (`plan`), each moved within its document or made the document of its entry again (HTML "apply the history
     // step"): the history as it stood kept for `end_step`; the moves within a document returned, each navigable's with
     // its entry's URL and classic history API state and whether its fragment changed (HTML "update document for history
-    // step application": the location the URL, `popstate` with the state, then a `hashchange`, the host's).
-    fn begin_step(&mut self, step: i64, changes: &[Change]) -> Vec<(u32, String, Option<Arc<[u8]>>, bool)> {
+    // step application": the location the URL, `popstate` with the state, then a `hashchange`, the host's) — the
+    // top-level document's URL, a traversable a Browser hosts, its traversable's from now (`url`).
+    fn begin_step(&mut self, step: i64, changes: &[Change]) -> (Vec<Move>, Stepping) {
         let build = self.build;
         let at = changes.iter().filter(|c| !c.2).filter_map(|&(nav, ..)| self.state.current_entry(nav, build).map(|e| (nav, e.id))).collect();
         let from: HashMap<u32, String> = changes.iter().filter(|c| c.2).filter_map(|&(nav, ..)| self.state.current_entry(nav, build).map(|e| (nav, e.url.clone()))).collect();
         let within = changes.iter().any(|c| c.2);
-        self.stepping = Some(Stepping { state: self.state.clone(), at, before: self.state.current, within });
+        let stepping = Stepping { state: self.state.clone(), at, before: self.state.current, within };
         self.go_to(step);
-        let entry = |id| self.state.entry(id);
-        changes
+        let moves: Vec<Move> = changes
             .iter()
             .filter(|c| c.2)
-            .filter_map(|&(nav, id, _)| entry(id).map(|e| (nav, e.url.clone(), e.data.state.clone(), from.get(&nav).is_none_or(|f| fragment(f) != fragment(&e.url)))))
-            .collect()
+            .filter_map(|&(nav, id, _)| {
+                let e = self.state.entry(id)?;
+                Some((nav, e.url.clone(), e.data.state.clone(), from.get(&nav).is_none_or(|f| fragment(f) != fragment(&e.url))))
+            })
+            .collect();
+        if let Some((_, url, ..)) = moves.iter().find(|m| m.0 == TOP).filter(|_| self.url.is_some()) {
+            self.url = Some(url.clone());
+        }
+        (moves, stepping)
     }
     // …and its frames' documents made but those of `none` — of the navigables `attempted` it was to make them of: the step
     // stands, a navigable whose document was not made held at the entry it was at (HTML "apply the history step": its
     // update-only, the navigable not updated) — but one none of whose documents was made, moving nothing within a
     // document, leaves the history as it stood (Chrome and Firefox stay where they were).
-    fn end_step(&mut self, attempted: usize, none: &[u32]) {
-        let Some(Stepping { state, at, before, within }) = self.stepping.take() else { return };
+    fn end_step(&mut self, stepping: Stepping, attempted: usize, none: &[u32]) {
+        let Stepping { state, at, before, within } = stepping;
         if !within && none.len() == attempted {
             self.state = state;
             return;
@@ -1030,6 +1108,149 @@ impl Traversable {
             if let Some(&id) = at.get(nav) {
                 self.hold(*nav, id, before);
             }
+        }
+    }
+
+    // A traversal applied by the host begun (`Applying`): one by `delta` of the page's, its step planned as it runs, or
+    // one moving its frames, `planned` its step and changes — its number.
+    fn begin_apply(&mut self, delta: Option<i64>, planned: Option<(i64, Vec<Change>)>) -> u64 {
+        self.applying_tokens += 1;
+        let (step, changes) = planned.unwrap_or_default();
+        let phase = if delta.is_some() { Phase::Plan } else { Phase::Frames };
+        self.applying.push(Applying {
+            token: self.applying_tokens,
+            delta,
+            step,
+            changes,
+            phase,
+            frames: Vec::new(),
+            prompted: HashSet::new(),
+            none: Vec::new(),
+            moves: Default::default(),
+            stepping: None,
+        });
+        APPLYING.fetch_add(1, Ordering::Relaxed);
+        self.applying_tokens
+    }
+    // …its next step for the host, which answered the last one with `answer` — none once it is done: its step standing as
+    // the documents the host made leave it (`end_step`), its navigables traversing no more (`end_traversal`).
+    fn next_command(&mut self, token: u64, answer: Answer) -> Option<Command> {
+        let at = self.applying.iter().rposition(|a| a.token == token)?;
+        let mut a = self.applying.remove(at);
+        let command = self.advance(&mut a, answer);
+        if command.is_some() {
+            self.applying.insert(at, a);
+        } else {
+            self.applied(a);
+        }
+        command
+    }
+    // …or let go, done or not (the host failing a step of it): its navigables traversing no more.
+    fn end_apply(&mut self, token: u64) {
+        if let Some(at) = self.applying.iter().rposition(|a| a.token == token) {
+            let a = self.applying.remove(at);
+            self.applied(a);
+        }
+    }
+    fn applied(&mut self, a: Applying) {
+        APPLYING.fetch_sub(1, Ordering::Relaxed);
+        if let Some(stepping) = a.stepping {
+            let none: Vec<u32> = a.none.into_iter().filter(|nav| a.frames.iter().any(|f| f.0 == *nav)).collect();
+            self.end_step(stepping, a.frames.len(), &none);
+        }
+        self.end_traversal();
+    }
+    // …every one let go, the traversable cleared.
+    fn forget_applying(&mut self) {
+        APPLYING.fetch_sub(self.applying.len(), Ordering::Relaxed);
+        self.applying.clear();
+    }
+    // HTML "apply the history step", up to its next step for the host. The page's traversal by a delta: its step planned
+    // — none where there is none — and, where it makes the page's document again, the tasks due on the page run first,
+    // its step planned anew as what they did to the history leaves it (a pushState dropping the forward steps), then the
+    // page asked whether it may be unloaded (what its handlers would do to the session history taken by none, as an
+    // unloading page's is: navigables.rs `session_history_takes` — the step stands; Chrome and Firefox both go to it, a
+    // pushState of a handler's dropping no forward step) — then its document made again, the state its controls were left
+    // in given it where it was made (none where its response made none: a 204's, a download's, which leave the page and
+    // its step where they are: navigation_commit.rs). Otherwise — a step that keeps the page's document — each frame whose
+    // document it makes again asked whether it may be unloaded, one a handler removed traversed no more; the step applied
+    // (`begin_step`); each navigable it moves within its document updated, then each frame's document made again.
+    fn advance(&mut self, a: &mut Applying, answer: Answer) -> Option<Command> {
+        let makes_page = |changes: &[Change]| changes.iter().find(|c| c.0 == TOP && !c.2).map(|c| c.1);
+        loop {
+            match a.phase {
+                Phase::Plan => {
+                    (a.step, a.changes) = self.traversal(a.delta?)?;
+                    if makes_page(&a.changes).is_none() {
+                        a.phase = Phase::Frames;
+                        continue;
+                    }
+                    a.phase = Phase::Flushed;
+                    return Some(Command::Flush);
+                }
+                Phase::Flushed => {
+                    if matches!(answer, Answer::Flushed(true)) {
+                        (a.step, a.changes) = self.traversal(a.delta?)?;
+                    }
+                    a.phase = Phase::Prompted;
+                    return Some(Command::PromptPage);
+                }
+                Phase::Prompted => match makes_page(&a.changes) {
+                    Some(id) => {
+                        a.phase = Phase::Replayed(id);
+                        return Some(Command::Replay(id, a.step));
+                    }
+                    None => a.phase = Phase::Frames,
+                },
+                Phase::Replayed(id) => {
+                    a.phase = Phase::Done;
+                    if self.state.current_entry(TOP, self.build).is_some_and(|e| e.id == id) {
+                        return Some(Command::RestoreFormState(id));
+                    }
+                }
+                Phase::Frames => {
+                    a.frames = a.changes.iter().filter(|c| !c.2).map(|c| (c.0, c.1)).collect();
+                    a.phase = Phase::Unloading;
+                    if !a.frames.is_empty() {
+                        return Some(Command::UnloadFrames(a.frames.iter().map(|f| f.0).collect()));
+                    }
+                }
+                Phase::Unloading => {
+                    if let Answer::Unloaded(asked) = &answer {
+                        let mut asked = asked.iter();
+                        a.frames.retain(|&(nav, _)| match asked.next().copied().flatten() {
+                            Some(false) => false,
+                            Some(true) => a.prompted.insert(nav) || true,
+                            None => true,
+                        });
+                    }
+                    let (moves, stepping) = self.begin_step(a.step, &a.changes);
+                    a.moves = moves.into();
+                    a.stepping = Some(stepping);
+                    a.phase = Phase::Moving;
+                }
+                Phase::Moving => match a.moves.pop_front() {
+                    Some(m) => return Some(Command::SameDocument(m)),
+                    None => a.phase = Phase::Making(0),
+                },
+                Phase::Making(i) => {
+                    let &(nav, id) = a.frames.get(i)?;
+                    a.phase = Phase::Making(i + 1);
+                    return Some(Command::MakeFrame(nav, id));
+                }
+                Phase::Done => return None,
+            }
+        }
+    }
+    // Whether frame `nav` was asked whether it may be unloaded by a traversal applied of it, the last begun first — taken:
+    // the navigation that makes its document again asks it no second time.
+    fn take_prompted(&mut self, nav: u32) -> bool {
+        self.applying.iter_mut().rev().any(|a| a.prompted.remove(&nav))
+    }
+    // …and frame `nav`'s navigation, one making its document again, made none: the traversal's step holds it at its entry.
+    fn made_no_document(&mut self, nav: u32) {
+        if let Some(a) = self.applying.iter_mut().rev().find(|a| matches!(a.phase, Phase::Making(_)) && a.frames.iter().any(|f| f.0 == nav)) {
+            a.none.push(nav);
         }
     }
     // Navigable `nav` left at `entry` — the one it was at at `step` — by the step just applied, its target entry's
@@ -1298,8 +1519,8 @@ impl SessionHistory {
         t.noting = on;
         std::mem::take(&mut t.passed)
     }
-    // #traversal(delta) -> [step, [[navigable, entry, same_document], …]] of a traversal by `delta` as the host applies
-    // it (`Traversable::traversal`), or nil for none.
+    // The plan of a traversal by `delta` as the host applies it (`Traversable::traversal`), which the tests read.
+    #[cfg(test)]
     fn traversal(&self, delta: i64) -> Option<(i64, Vec<Change>)> {
         self.lock().traversal(delta)
     }
@@ -1391,20 +1612,80 @@ impl SessionHistory {
     pub(crate) fn go_to(&self, step: i64) {
         self.lock().go_to(step);
     }
-    // #begin_step(step, changes) -> [[navigable, url, state, hashchange], …] / #end_step(attempted, none): a traversal's
-    // step that keeps the top-level navigable's document applied, and its frames' documents made but those of navigables
-    // `none` of the `attempted` ones (`Traversable::begin_step`, `end_step`; browser.rb `traverse_navigables`).
-    fn begin_step(ruby: &magnus::Ruby, rb_self: &Self, step: i64, changes: Vec<Change>) -> Result<RArray, magnus::Error> {
-        let moves = rb_self.lock().begin_step(step, &changes);
-        let out = ruby.ary_new();
-        for (nav, url, state, hashchange) in moves {
-            let state = state.map(|s| ruby.str_from_slice(&s));
-            out.push((nav, url, state, hashchange))?;
-        }
-        Ok(out)
+    // #apply_by(delta) / #apply_step(step, changes) -> the number of a traversal the host applies (`Applying`): the page's
+    // by `delta`, or one moving its frames planned at `step` with `changes`; #next_step(number, answer) -> its next step
+    // for the host (`Command`: [name, …]), which answered the last with `answer` — nil once it is done; #end_apply(number):
+    // let go, done or not (browser.rb `apply_history_step`).
+    fn apply_by(&self, delta: i64) -> u64 {
+        self.lock().begin_apply(Some(delta), None)
     }
-    fn end_step(&self, attempted: usize, none: Vec<u32>) {
-        self.lock().end_step(attempted, &none);
+    fn apply_step(&self, step: i64, changes: Vec<Change>) -> u64 {
+        self.lock().begin_apply(None, Some((step, changes)))
+    }
+    fn next_step(ruby: &magnus::Ruby, rb_self: &Self, token: u64, answer: magnus::Value) -> Result<Option<RArray>, magnus::Error> {
+        let answer = if answer.is_nil() {
+            Answer::Nothing
+        } else if let Some(list) = RArray::from_value(answer) {
+            Answer::Unloaded(list.to_vec::<Option<bool>>()?)
+        } else {
+            Answer::Flushed(answer.to_bool())
+        };
+        let Some(command) = rb_self.lock().next_command(token, answer) else { return Ok(None) };
+        let row = |name: &str| -> Result<RArray, magnus::Error> {
+            let row = ruby.ary_new();
+            row.push(name)?;
+            Ok(row)
+        };
+        let out = match command {
+            Command::Flush => row("flush")?,
+            Command::PromptPage => row("prompt_page")?,
+            Command::Replay(id, step) => {
+                let out = row("replay")?;
+                out.push(id)?;
+                out.push(step)?;
+                out
+            }
+            Command::RestoreFormState(id) => {
+                let out = row("restore_form_state")?;
+                out.push(id)?;
+                out
+            }
+            Command::UnloadFrames(navs) => {
+                let out = row("unload_frames")?;
+                out.push(navs)?;
+                out
+            }
+            Command::SameDocument((nav, url, state, hashchange)) => {
+                let out = row("same_document")?;
+                out.push(nav)?;
+                out.push(url)?;
+                out.push(state.map(|s| ruby.str_from_slice(&s)))?;
+                out.push(hashchange)?;
+                out
+            }
+            Command::MakeFrame(nav, id) => {
+                let out = row("make_frame")?;
+                out.push(nav)?;
+                out.push(id)?;
+                out
+            }
+        };
+        Ok(Some(out))
+    }
+    fn end_apply(&self, token: u64) {
+        self.lock().end_apply(token);
+    }
+    // #take_prompted(navigable) -> whether a traversal applied asked frame `navigable` whether it may be unloaded, taken
+    // (`Traversable::take_prompted`); #made_no_document(navigable): its navigation, one a traversal makes its document
+    // again by, made none (`made_no_document`); SessionHistory.applying? -> whether any host applies one, their gate.
+    fn take_prompted(&self, nav: u32) -> bool {
+        self.lock().take_prompted(nav)
+    }
+    fn made_no_document(&self, nav: u32) {
+        self.lock().made_no_document(nav);
+    }
+    fn is_applying() -> bool {
+        APPLYING.load(Ordering::Relaxed) > 0
     }
     #[cfg(test)]
     fn hold(&self, nav: u32, id: u64, step: i64) {
@@ -1503,7 +1784,7 @@ impl SessionHistory {
         t.state = State::new();
         t.url = None;
         t.passed.clear();
-        t.stepping = None;
+        t.forget_applying();
         t.leaving = None;
         t.navigations.clear();
         t.ongoing.clear();
@@ -1746,7 +2027,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("document_url", method!(SessionHistory::document_url, 0))?;
     class.define_method("document_url=", method!(SessionHistory::set_document_url, 1))?;
     class.define_method("note_url_changes", method!(SessionHistory::note_url_changes, 1))?;
-    class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
     class.define_method("flush_begin", method!(SessionHistory::flush_begin, 0))?;
     class.define_method("flush_end", method!(SessionHistory::flush_end, 0))?;
     class.define_method("hold_traversals", method!(SessionHistory::hold_traversals, 1))?;
@@ -1756,8 +2036,13 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
     class.define_method("clear_queued", method!(SessionHistory::clear_queued, 0))?;
     class.define_method("go_to", method!(SessionHistory::go_to, 1))?;
-    class.define_method("begin_step", method!(SessionHistory::begin_step, 2))?;
-    class.define_method("end_step", method!(SessionHistory::end_step, 2))?;
+    class.define_method("apply_by", method!(SessionHistory::apply_by, 1))?;
+    class.define_method("apply_step", method!(SessionHistory::apply_step, 2))?;
+    class.define_method("next_step", method!(SessionHistory::next_step, 2))?;
+    class.define_method("end_apply", method!(SessionHistory::end_apply, 1))?;
+    class.define_method("take_prompted", method!(SessionHistory::take_prompted, 1))?;
+    class.define_method("made_no_document", method!(SessionHistory::made_no_document, 1))?;
+    class.define_singleton_method("applying?", function!(SessionHistory::is_applying, 0))?;
     class.define_method("rebuilt", method!(SessionHistory::rebuilt, 0))?;
     class.define_method("take_leaving", method!(SessionHistory::take_leaving, 0))?;
     class.define_method("commit_frame_navigation", method!(SessionHistory::commit_frame_navigation_for_ruby, 2))?;
@@ -2066,12 +2351,13 @@ mod tests {
         let g2 = h.push(2, TOP, "/g2".into(), false, Data::default()).unwrap();
         let before = h.step();
         let (step, changes) = h.plan(-1).unwrap();
-        assert!(h.lock().begin_step(step, &changes).is_empty());
-        h.lock().end_step(1, &[2]);
+        let (moves, stepping) = h.lock().begin_step(step, &changes);
+        assert!(moves.is_empty());
+        h.lock().end_step(stepping, 1, &[2]);
         assert_eq!((h.step(), h.active(1), h.active(2)), (before, Some(f2), Some(g2)));
         let (step, changes) = h.plan(-2).unwrap();
-        h.lock().begin_step(step, &changes);
-        h.lock().end_step(2, &[1]);
+        let (_, stepping) = h.lock().begin_step(step, &changes);
+        h.lock().end_step(stepping, 2, &[1]);
         assert_eq!((h.active(1), h.active(2)), (Some(f2), Some(g1)));
         assert_ne!(h.step(), before);
         assert_ne!(f1, g1);
@@ -2086,11 +2372,12 @@ mod tests {
         h.push(TOP, TOP, "/a#x".into(), true, Data { state: Some(Arc::from(&b"s"[..])), ..Data::default() });
         h.push(TOP, TOP, "/a?q#x".into(), true, Data::default());
         let (step, changes) = h.plan(-1).unwrap();
-        let moves = h.lock().begin_step(step, &changes);
+        let (moves, _) = h.lock().begin_step(step, &changes);
         assert_eq!(moves, vec![(TOP, "/a#x".to_owned(), Some(Arc::from(&b"s"[..])), false)]);
         let (step, changes) = h.plan(-1).unwrap();
-        assert!(h.lock().begin_step(step, &changes)[0].3);
-        h.lock().end_step(0, &[]);
+        let (moves, stepping) = h.lock().begin_step(step, &changes);
+        assert!(moves[0].3);
+        h.lock().end_step(stepping, 0, &[]);
     }
 
     // A frame's navigation makes its entry as its document is made, and none where it makes none — the one it ended, its
@@ -2265,6 +2552,72 @@ mod tests {
         assert!(fresh.ask_close());
     }
 
+    // A traversal of the page by a delta the host applies: the tasks due run first, its step planned anew as they left the
+    // history (a pushState moving it within the document instead), the page asked, then its moves within the document.
+    #[test]
+    fn a_page_traversal_is_planned_anew_once_the_page_s_tasks_ran() {
+        let h = history();
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
+        h.push(TOP, TOP, "/b".into(), false, Data::default());
+        h.set_document_url(Some("/b".into()));
+        let token = h.apply_by(-1);
+        let mut t = h.lock();
+        assert!(matches!(t.next_command(token, Answer::Nothing), Some(Command::Flush)));
+        t.update(TOP, TOP, "/b#x", None, true);
+        assert!(matches!(t.next_command(token, Answer::Flushed(true)), Some(Command::PromptPage)));
+        let Some(Command::SameDocument((nav, url, _, hashchange))) = t.next_command(token, Answer::Nothing) else { panic!() };
+        assert_eq!((nav, url.as_str(), hashchange), (TOP, "/b", true));
+        assert_eq!(t.url.as_deref(), Some("/b"));
+        assert!(t.next_command(token, Answer::Nothing).is_none());
+        assert!(t.applying.is_empty());
+    }
+
+    // …and one that makes the page's document again: replayed at its step, then given its controls' state where it was made.
+    #[test]
+    fn a_page_traversal_makes_its_document_again() {
+        let h = history();
+        let a = h.push(TOP, TOP, "/a".into(), false, Data::default()).unwrap();
+        h.push(TOP, TOP, "/b".into(), false, Data::default());
+        let token = h.apply_by(-1);
+        let mut t = h.lock();
+        t.begin_traversal(TOP);
+        assert!(matches!(t.next_command(token, Answer::Nothing), Some(Command::Flush)));
+        assert!(matches!(t.next_command(token, Answer::Flushed(false)), Some(Command::PromptPage)));
+        let Some(Command::Replay(id, step)) = t.next_command(token, Answer::Nothing) else { panic!() };
+        assert_eq!(id, a);
+        t.go_to(step);
+        assert!(matches!(t.next_command(token, Answer::Nothing), Some(Command::RestoreFormState(id)) if id == a));
+        assert!(t.next_command(token, Answer::Nothing).is_none());
+        assert!(!t.traversing(TOP));
+    }
+
+    // A traversal moving frames: each asked, one a handler removed made no more, one of no document made all the same;
+    // one asked not asked again by its navigation; one whose navigation made no document leaving the history as it stood
+    // where none was made.
+    #[test]
+    fn a_frame_traversal_asks_its_frames_and_stands_as_their_documents_leave_it() {
+        let h = history();
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
+        h.seed(1, TOP, "/f1".into());
+        h.seed(2, TOP, "/g1".into());
+        h.push(1, TOP, "/f2".into(), false, Data::default());
+        let g2 = h.push(2, TOP, "/g2".into(), false, Data::default()).unwrap();
+        let before = h.step();
+        let (step, changes) = h.plan(-2).unwrap();
+        let token = h.apply_step(step, changes);
+        let mut t = h.lock();
+        let Some(Command::UnloadFrames(navs)) = t.next_command(token, Answer::Nothing) else { panic!() };
+        assert_eq!(navs.len(), 2);
+        let answers = navs.iter().map(|&nav| if nav == 1 { Some(false) } else { Some(true) }).collect();
+        let Some(Command::MakeFrame(nav, _)) = t.next_command(token, Answer::Unloaded(answers)) else { panic!() };
+        assert_eq!(nav, 2);
+        assert!(t.take_prompted(2));
+        assert!(!t.take_prompted(2));
+        t.made_no_document(2);
+        assert!(t.next_command(token, Answer::Nothing).is_none());
+        assert_eq!((t.state.current, t.state.current_entry(2, t.build).map(|e| e.id)), (before, Some(g2)));
+    }
+
     #[test]
     fn a_step_left_keeps_the_data_it_had() {
         let h = history();
@@ -2272,9 +2625,9 @@ mod tests {
         h.seed(1, TOP, "/f1".into());
         let a = h.push(1, TOP, "/f2".into(), false, Data { texts: [None, Some("/r".into()), None, None, None, None], ..Default::default() }).unwrap();
         let (step, changes) = h.plan(-1).unwrap();
-        h.lock().begin_step(step, &changes);
+        let (_, stepping) = h.lock().begin_step(step, &changes);
         Arc::make_mut(&mut h.lock().state.entry_mut(a).unwrap().data).texts[1] = Some("/changed".into());
-        h.lock().end_step(1, &[1]);
+        h.lock().end_step(stepping, 1, &[1]);
         assert_eq!(h.lock().state.entry(a).unwrap().data.text("referer"), Some("/r"));
     }
 }

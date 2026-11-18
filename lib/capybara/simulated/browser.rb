@@ -2450,9 +2450,9 @@ module Capybara
       end
 
       # The traversal of the page's session history the engine planned for the host (navigation_plan.rs `takeTraversal`) —
-      # one that makes the page's document again (`perform_history_traverse`), or one that moves a frame of it
-      # (`traverse_navigables_of`) — applied, then those queued after it, which waited for it, from the step it went to:
-      # round after round while one is planned. (…each failing alone)
+      # one that makes the page's document again (by its delta), or one that moves a frame of it (`traverse_navigables_of`)
+      # — applied (`apply_history_step`), then those queued after it, which waited for it, from the step it went to: round
+      # after round while one is planned. (…each failing alone)
       # One that moves a frame a task of the page's planned waits for the event loop's navigation turn, as the host's
       # navigations of frames do, the tasks due before it run first — those the host applied, the driver's own among them,
       # it takes at once (navigation_plan.rs `frame_traversal_due`). (…none asked of the page where none is planned:
@@ -2467,12 +2467,7 @@ module Capybara
             if kind == 'traverse_navigables'
               traverse_navigables_of(0, *plan)
             else
-              begin
-                perform_history_traverse(plan[0].to_i, by_user: plan[1] == true)
-              ensure
-                # (…its navigable traversing no more, whichever became of it: `end_traversal`)
-                @session_history.end_traversal
-              end
+              apply_history_step(@session_history, @session_history.apply_by(plan[0].to_i), by_user: plan[1] == true)
               @runtime.call('applyOwnTraversals', true)
             end
           rescue StandardError => e
@@ -2481,75 +2476,81 @@ module Capybara
         end
       end
 
-      # The step a traversal by `delta` goes to, and the navigables' changes it makes (session_history.rs `traversal`).
-      private def history_plan(delta) = @session_history.traversal(delta)
-
-      # A traversal of the page's session history by `delta` that makes its document again — judged anew once the tasks due
-      # on the page before it ran (`flush_outgoing_page_init`), as the history stands once what they did to it (a pushState
-      # dropping the forward steps) is in: the entry's document made again (a navigation from history, a re-POST its
-      # POST's), the page asked first whether it may be unloaded — or, those tasks having made it one that keeps the
-      # page's document, applied as such. (…`by_user` the user's, the driver's `go_back`: `replay_history_entry`)
-      private def perform_history_traverse(delta, by_user: false)
-        return unless (plan = history_plan(delta))
-
-        if plan[1].any? {|nav, _, same_document| nav.zero? && !same_document }
-          if @timers_active
-            flush_outgoing_page_init
-            flushed = true
-          end
-          plan = history_plan(delta) if flushed
-          # (…and the page asked whether it may be unloaded before the step is applied — HTML "apply the history step"
-          # checks if unloading is canceled for the step it applies — what its handlers would do to the session history
-          # taken by none, as an unloading page's is (navigables.rs `session_history_takes`): the step stands; Chrome and
-          # Firefox both go to it, a pushState of a handler's dropping no forward step)
-          prompt_page_to_unload(traversal: true)
+      # A traversal of the page's session history, or of that of a window `window.open` made in this isolate, realm `top` —
+      # `history` — applied: HTML "apply the history step", whose steps the engine takes (session_history.rs `Applying`)
+      # and the host runs, one at a time, each answered: the tasks due on the page it leaves run first (whether they ran),
+      # the page asked whether it may be unloaded and its document made again of its entry, the state its controls were
+      # left in given it; or its frames asked (`unload_traversed_frames`), its navigables moved within their documents
+      # (`update_document_for_history_step`), its frames' documents made again of their entries — the step what the
+      # documents made leave it, its navigables traversing no more, done or not. (…`by_user` the user's: the documents it
+      # makes made by no document's request, `replay_history_entry`)
+      # (…what the page's flushed tasks planned put back where its document was not made again after all — a step that
+      # keeps it, a response that makes none: the page stays, and what they planned still stands, taken once the traversal
+      # is in; a document made let it go: `boot_response_into_ctx`)
+      private def apply_history_step(history, applying, top: 0, by_user: false)
+        realms  = {}
+        flushed = answer = nil
+        while (step = history.next_step(applying, answer))
+          command, *args = step
+          answer = run_history_step(history, realms, command, *args, top: top, by_user: by_user)
+          flushed ||= command == 'flush' && answer
         end
-        step, changes = plan
-        if (page = changes&.find {|nav, _, same_document| nav.zero? && !same_document })
-          # (…the step applied as the entry's document is made — none where its response now makes none, a download's, a
-          # 204's, which leaves the page at the document it is at and its step with it: navigation_commit.rs)
-          replay_history_entry(page[1], step: step, by_user: by_user)
-          restore_form_state(page[1]) if @session_history.active(0) == page[1]
-          restore_flushed_nav_intents
-          return
-        end
-        return restore_flushed_nav_intents unless changes
-
-        traverse_navigables(@session_history, step, changes, by_user: by_user)
       ensure
-        # (…none of the page's documents made again, after all: the page stays, and what its flushed timers planned
-        # still stands — taken once the traversal is in)
-        restore_flushed_nav_intents if flushed
+        begin
+          restore_flushed_nav_intents if flushed
+        ensure
+          history.end_apply(applying)
+        end
       end
+      # …one of its steps (session_history.rs `Command`), run: its answer. (…`realms` its frames' realms, by navigable, as
+      # they were asked)
+      private def run_history_step(history, realms, command, *args, top:, by_user:)
+        case command
+        when 'flush'
+          flush_outgoing_page_init if (flushing = @timers_active)
+          flushing
+        when 'prompt_page'
+          prompt_page_to_unload(traversal: true)
+          nil
+        when 'replay'
+          replay_history_entry(args[0], step: args[1], by_user: by_user)
+          nil
+        when 'restore_form_state'
+          restore_form_state(args[0])
+          nil
+        when 'unload_frames'
+          unload_traversed_frames(args[0], realms)
+        when 'same_document'
+          update_document_for_history_step(*args, top: top)
+          nil
+        when 'make_frame'
+          realm = realms[args[0]]
+          reload_frame_to_entry(realm, history.entry(args[1]), by_user: by_user) if realm && @runtime.frame_realm_alive?(realm)
+          nil
+        end
+      end
+      # …the frames of navigables `navs` whose documents it makes again each asked whether it may be unloaded, before its
+      # step applies — what its handlers would do to the session history taken by none, as the page's are (Chrome and
+      # Firefox: the step stands) — and the entry it leaves snapshotted, so a traversal forward again restores it, keeping
+      # how it was reached (a POST entry re-POSTs), at the URL its document was at as they were asked (a handler may move
+      # its location): of each, nil where it has no document, true where it may be unloaded, false where a handler removed
+      # it — its navigation asking it no second time (`prompt_to_unload_frame`).
+      private def unload_traversed_frames(navs, realms)
+        navs.each {|nav| realms[nav] = navigable_realm(nav) }
+        urls  = navs.to_h {|nav| [nav, realms[nav] && frame_realm_url(realms[nav])] }
+        asked = navs.map {|nav| (realm = realms[nav]) && prompt_to_unload_frame(realm, traversal: true) && @runtime.frame_realm_alive?(realm) }
+        navs.zip(asked) {|nav, ok| leave_frame_entry(realms[nav], urls[nav]) if ok }
+        asked
+      end
+      # …navigable `nav` (0 its top-level one: the page's, or window realm `top`'s) moved within the document it is at to an
+      # entry at `url` of classic history API state `state` (HTML "update document for history step application", the
+      # bindings' `updateForHistoryStep`): its location the URL, a `popstate` with the state, and — `hashchange`, its
+      # fragment moved — a `hashchange` queued.
+      private def update_document_for_history_step(nav, url, state, hashchange, top: 0)
+        realm = nav.zero? ? top : navigable_realm(nav)
+        return unless realm && (realm.zero? || @runtime.frame_realm_alive?(realm))
 
-      # A traversal of session history `history` to `step` that keeps its top-level navigable's document — the page's, or
-      # that of a window `window.open` made in this isolate, realm `top` — applied: `changes` (session_history.rs
-      # `Change`) each navigable whose active entry it moves, one moved within its document by its location, a `popstate`
-      # and a `hashchange` (`traverse_same_document`), a frame's made again of its entry. What the step does to the
-      # session history is the engine's (session_history.rs `begin_step`, `end_step`): applied as it begins, and — once the
-      # frames' documents are made, or none — left standing, a frame whose document was not made held at its own entry, or
-      # taken back where none was (HTML "apply the history step").
-      private def traverse_navigables(history, step, changes, top: 0, by_user: false)
-        outer = [@traversing_frames, @prompted_frames]
-        # (…its frames' entries, each frame's document made again — the one it leaves snapshotted first, so a traversal
-        # forward again restores it, keeping how it was reached: a POST entry re-POSTs)
-        frames = changes.filter_map {|nav, id, same_document| [nav, id, navigable_realm(nav)] unless same_document }
-        # (…each asked first whether it may be unloaded, before the step applies — HTML "apply the history step" — what
-        # its handlers would do to the session history taken by none, as the page's are (Chrome and Firefox: the step
-        # stands); one a handler removed traversed no more, and its navigation asks it no second time:
-        # `prompt_to_unload_frame`)
-        urls = frames.to_h {|_, _, realm| [realm, realm && frame_realm_url(realm)] }
-        frames.select! {|_, _, realm| realm.nil? || (prompt_to_unload_frame(realm, traversal: true) && @runtime.frame_realm_alive?(realm)) }
-        @prompted_frames = frames.filter_map {|_, _, realm| realm }.to_set
-        frames.each {|_, _, realm| leave_frame_entry(realm, urls[realm]) if realm }
-        # (…a frame whose entry's response makes none — a 204's, a download's — told: `frame_navigation_made_no_document`)
-        @traversing_frames = {none: []}
-        history.begin_step(step, changes).each {|nav, url, state, hashchange| traverse_same_document(nav, url, state, hashchange, top: top) }
-        frames.each {|_, id, realm| reload_frame_to_entry(realm, history.entry(id), by_user: by_user) if realm && @runtime.frame_realm_alive?(realm) }
-        history.end_step(frames.size, frames.filter_map {|nav, _, realm| nav if @traversing_frames[:none].include?(realm) })
-      ensure
-        # (…those of a traversal it ran within — a frame's load taking another window's — as that one left them)
-        @traversing_frames, @prompted_frames = outer
+        @runtime.realm_call(realm, 'updateForHistoryStep', url, state, hashchange)
       end
       # …one the engine planned for the host of the page or a window of this isolate, realm `realm` (navigation_plan.rs
       # `FrameTraversal`: `changes` flat — the navigations of the frames whose documents it makes again let go of as it
@@ -2557,26 +2558,8 @@ module Capybara
       private def traverse_navigables_of(realm, by_user, step, *changes)
         return unless (history = realm.zero? ? @session_history : window_history(realm))
 
-        begin
-          traverse_navigables(history, step, changes.each_slice(3).to_a, top: realm, by_user: by_user)
-        ensure
-          history.end_traversal
-        end
+        apply_history_step(history, history.apply_step(step, changes.each_slice(3).to_a), top: realm, by_user: by_user)
         @runtime.realm_call(realm, 'applyOwnTraversals', true) if realm.zero? || @runtime.frame_realm_alive?(realm)
-      end
-
-      # Navigable `nav` (0 its top-level one: the page's, or window realm `top`'s) moved within the document it is at to an
-      # entry at `url` of classic history API state `state` (HTML "update document for history step application"): its
-      # location the URL, a `popstate` with the state, and — `hashchange`, its fragment moved — a `hashchange` queued.
-      private def traverse_same_document(nav, url, state, hashchange, top: 0)
-        realm = nav.zero? ? top : navigable_realm(nav)
-        return unless realm && (realm.zero? || @runtime.frame_realm_alive?(realm))
-
-        old_url = realm.zero? ? page_url : frame_realm_url(realm)
-        self.page_url = url if realm.zero?
-        @runtime.realm_call(realm, 'updateLocation', url)
-        @runtime.realm_call(realm, 'dispatchPopState', state)
-        @runtime.realm_call(realm, 'queueHashChange', old_url, url) if hashchange
       end
 
       # The history entry the page's document leaves — noted by the engine as a navigation of it begins, before its entry is
@@ -11701,7 +11684,7 @@ module Capybara
       # (session_history.rs) — the page's, or that of a window `window.open` made in this isolate: a nested history of its
       # parent's document state, by its navigable (navigables.rs's id for it: a container removed and inserted again has a
       # new one), each entry's form-control state captured for restoration (HTML "persisted user state" / bfcache). Its
-      # `history.back()` traverses that history, as its top-level document's does (`traverse_navigables`).
+      # `history.back()` traverses that history, as its top-level document's does (`apply_history_step`).
       #
       # Navigable of frame realm `realm_id`, its parent's (0 the top-level one), the parent realm, and the session history
       # its entries are in — nil for a realm that is no frame (session_history.rs `frame_navigable`).
@@ -11788,7 +11771,14 @@ module Capybara
       # (frame_navigation.rs `releaseFrameSandbox`), and a traversal applying its step told.
       def frame_navigation_made_no_document(realm_id)
         @runtime.call('releaseFrameSandbox', realm_id)
-        @traversing_frames[:none] << realm_id if @traversing_frames
+        traversed_frame(realm_id) {|history, nav| history.made_no_document(nav) }
+      end
+      # The session history and navigable of frame realm `realm_id`, yielded while a traversal is applied — whose navigation
+      # it is asked about (session_history.rs `take_prompted`, `made_no_document`) — nil while none is.
+      private def traversed_frame(realm_id)
+        return unless Native::SessionHistory.applying? && (nav, _, _, history = frame_navigable(realm_id))
+
+        yield history, nav
       end
       # The Referer and policy a reload or a traversal of frame realm `realm_id`'s `entry` refers by: its document state's
       # request referrer and policy (navigation_commit.rs `Commit::sent`) — an entry of a document the container loaded
@@ -11921,8 +11911,8 @@ module Capybara
           entered = @frame_stack.find {|e| e[:realm_id] == realm_id }
           return reload_current_frame_realm('about:blank', '', 'text/html', entry: entered) if entered
 
-          # (…not asked again where a traversal asked it before its step: `perform_history_traverse`)
-          prompted = @prompted_frames&.delete?(realm_id) ? true : false
+          # (…not asked again where a traversal asked it before its step: `unload_traversed_frames`)
+          prompted = traversed_frame(realm_id) {|history, nav| history.take_prompted(nav) } || false
           return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), 'navigateFrameByRealm', realm_id, url, nil, prompted)
         end
         # (…a data: URL's and a srcdoc's as a navigation to them is, no server's to answer — its markup the entry's)
@@ -12462,9 +12452,9 @@ module Capybara
       # A frame's navigation asks its document whether it may be unloaded before it fetches anything (HTML "check if
       # unloading is canceled": its `beforeunload`, and its frames' — `promptToUnloadFrame`): false when a handler
       # removed the frame, the navigation then going no further.
-      # (…none a second time of one a traversal asked as it applied its step: `perform_history_traverse`)
+      # (…none a second time of one a traversal asked as it applied its step: `unload_traversed_frames`)
       def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id), traversal: false)
-        return true if @prompted_frames&.delete?(realm_id)
+        return true if traversed_frame(realm_id) {|history, nav| history.take_prompted(nav) }
 
         frame_realm_host_call(parent, 'promptToUnloadFrame', realm_id, traversal) != false
       end
@@ -13001,7 +12991,7 @@ module Capybara
         # A replay already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if !replay && @timers_active
-        # (…a traversal's page asked as its step is applied: `perform_history_traverse`)
+        # (…a traversal's page asked as its step is applied: `apply_history_step`)
         prompt_page_to_unload unless history_handling == 'traverse'
         referrer_policy ||= main_document_referrer_policy if referer
         req_body = body&.b
