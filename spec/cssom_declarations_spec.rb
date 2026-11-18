@@ -197,8 +197,9 @@ RSpec.describe 'CSSOM declaration blocks' do
 
   # A declaration's supported property indices are its own properties (Web IDL's legacy platform object, CSSOM's
   # `getter item(index)`): listed first by [[OwnPropertyKeys]], each the name at it, enumerable, read-only and
-  # configurable, none definable — an inline style's, a computed style's, and a detached element's empty one. Its
-  # property attributes stay its prototype's accessors (Firefox; Chrome makes them own).
+  # configurable, none definable — an inline style's, a computed style's, and a detached element's empty one; an index
+  # past them an ordinary lookup, undefined (Chrome and Firefox). Its property attributes stay its prototype's accessors
+  # (Firefox; Chrome makes them own).
   it 'has its indices as own properties, read-only' do
     got = page.evaluate_script(<<~'JS')
       (() => {
@@ -212,7 +213,7 @@ RSpec.describe 'CSSOM declaration blocks' do
           Object.getOwnPropertyDescriptor(st, '2'), Object.hasOwn(st, 'color'), strictSet(), st[0], define(),
           delete st[0], delete st[2],
           Object.keys(computed).length === computed.length, Object.getOwnPropertyDescriptor(computed, '0').value === computed.item(0),
-          Object.keys(empty)
+          Object.keys(empty), st[2] === undefined, computed[computed.length] === undefined, 2 in st
         ];
       })()
     JS
@@ -221,7 +222,7 @@ RSpec.describe 'CSSOM declaration blocks' do
       nil, false, 'TypeError', 'color', 'TypeError',
       false, true,
       true, true,
-      []
+      [], true, true, false
     ])
   end
 end

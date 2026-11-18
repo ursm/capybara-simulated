@@ -40,9 +40,10 @@ RSpec.describe 'the custom properties a computed style lists' do
     expect(custom).to eq([[true, %w[--a --b --c --reg --regi --root --z]]] * 2)
   end
 
+  # (…an index past them none: undefined, where `item()` answers '' — Chrome and Firefox)
   it 'answers the same names by index, by item() and through length' do
     s = visit_page
-    expect(s.evaluate_script(<<~JS)).to eq([true, '', ''])
+    expect(s.evaluate_script(<<~JS)).to eq([true, nil, ''])
       (() => {
         const cs = getComputedStyle(document.getElementById('d'));
         const indexed = [];
@@ -61,7 +62,7 @@ RSpec.describe 'the custom properties a computed style lists' do
 
   it 'lists none for an element the engine does not style' do
     s = visit_page
-    expect(s.evaluate_script(<<~JS)).to eq([0, 0, ''])
+    expect(s.evaluate_script(<<~JS)).to eq([0, 0, nil])
       (() => {
         const d = document.getElementById('d'), cs = getComputedStyle(d);
         d.remove();
