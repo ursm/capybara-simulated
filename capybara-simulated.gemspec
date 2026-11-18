@@ -20,7 +20,7 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir[
     'lib/**/*.rb',
-    'lib/capybara/simulated/js/*.js',  # bridge.bundle.js + snapshot_stubs.js — NOT src/
+    'lib/capybara/simulated/js/*.js',  # bridge.bundle.js — NOT src/
     'lib/capybara/simulated/*.html',   # trace_viewer.html — the `trace` CLI's viewer template
     'vendor/js/*.js',
     'Cargo.toml', 'Cargo.lock',                     # the Rust workspace root (rb-sys builds from here)
