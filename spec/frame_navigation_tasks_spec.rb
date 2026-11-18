@@ -1545,6 +1545,18 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(log.scan('ce:b').size).to eq(1)
     end
 
+    # s5_open: a timer that runs as the parser waits on a parser-blocking script's server — its script nesting level zero
+    # — opens the document anew (HTML document open steps; Chrome and Firefox), where it used to run in "prepare the script
+    # element" and find a script running.
+    it 'opens the document anew from a timer the parser ran as it waited on a parser-blocking script' do
+      s = slow_session('/' => <<~HTML)
+        <title>x</title><p id="old">old</p><script>setTimeout(() => { document.open(); document.write('<title>done</title><p id="new">new</p>'); document.close(); }, 50)</script><script src="/slow/300/b.js"></script><p id="after">after</p>
+      HTML
+      s.visit '/'
+      expect(s).to have_title('done', wait: 10)
+      expect(s.evaluate_script("['old', 'new', 'after'].map((id) => !!document.getElementById(id)).join(' ')")).to eq('false true false')
+    end
+
     # ca4: …but not for one that came to block after it was prepared — Chrome runs the script first, Firefox after the sheet;
     # the spec's text holds it back for none.
     it 'runs an `async` script ahead of a style sheet that came to block scripts after it was prepared' do
