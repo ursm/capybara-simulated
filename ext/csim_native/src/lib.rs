@@ -446,6 +446,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("http_token", magnus::function!(fetch_rules::http_token_for_ruby, 1))?;
     native.define_module_function("javascript_content", magnus::function!(script::javascript_content_for_ruby, 1))?;
     native.define_module_function("module_content", magnus::function!(script::module_content_for_ruby, 2))?;
+    native.define_module_function("integrity_refuses", magnus::function!(integrity::integrity_refuses_for_ruby, 2))?;
     // A driver session's IndexedDB, Cache Storage, Web Locks, system clipboard and emulated position: a new partition of
     // their registries (idb_databases.rs, cache_storage.rs, web_locks.rs, system_clipboard.rs, geolocation.rs), cleared
     // as the session resets — and whether an agent of it has notices to take (agents.rs), its event loop work.

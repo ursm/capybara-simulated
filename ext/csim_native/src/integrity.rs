@@ -37,6 +37,12 @@ fn normalized(digest: &str) -> String {
     digest.trim_end_matches('=').replace('-', "+").replace('_', "/")
 }
 
+// …for the host — a module's response it fetched (v8_runtime.rb `native_module_for`), CORS, never opaque.
+pub(crate) fn integrity_refuses_for_ruby(bytes: magnus::RString, metadata: String) -> bool {
+    // SAFETY: the bytes are read here, no Ruby code running meanwhile to move or free them.
+    integrity_refuses(unsafe { bytes.as_slice() }, &metadata, false)
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "integrityRefuses", refuses_op, context_id);
 }

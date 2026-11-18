@@ -1823,7 +1823,8 @@ module Capybara
       # rethrow, `ModuleError#to_a`, which the bridge reports before the element's `load`. `options` its element's
       # fetch options (`ModuleFetchOptions`), which its graph's every fetch is made with (HTML "fetch the descendants of a
       # module script": the descendant script fetch options keep them).
-      def eval_esm_module(url, inline_src = nil, target: nil, handles: nil, options: ModuleFetchOptions::NONE, sw: nil)
+      # (…`integrity` its element's integrity metadata, its entry's response checked by it — none given, the import map's)
+      def eval_esm_module(url, inline_src = nil, target: nil, handles: nil, options: ModuleFetchOptions::NONE, sw: nil, integrity: nil)
         target  ||= ctx
         handles ||= native_module_handles
         # A CONTROLLED document's module-graph source fetches dispatch SW fetch
@@ -1836,7 +1837,7 @@ module Capybara
         # earlier script picks up the later script's credentials/root. Spec wants
         # per-referring-script options; no vendored test observes the difference.
         module_sw_ctxs[realm_key(target)] = sw&.merge(root: inline_src ? nil : url.to_s)
-        m = native_module_for(url, inline_src, target, handles, options: options)
+        m = native_module_for(url, inline_src, target, handles, options: options, integrity: integrity)
         return false unless m
         return m.to_a if m.is_a?(ModuleError)
         begin
@@ -1936,7 +1937,9 @@ module Capybara
       # imported one's request is referred by `referrer`, the base URL of the script importing it; a graph's entry by its
       # document ("client") — each with `options`, its graph's element's fetch options: its referrer policy and its
       # credentials mode.
-      def native_module_for(url, inline_src, target, handles, referrer: nil, options: ModuleFetchOptions::NONE)
+      # (…`integrity` the entry's element's metadata, none for an import, whose the import map's: HTML "resolve a module
+      # integrity metadata" — a response that does not match it no module, as a network error: SRI, Fetch "main fetch")
+      def native_module_for(url, inline_src, target, handles, referrer: nil, options: ModuleFetchOptions::NONE, integrity: nil)
         return handles[url] if !inline_src && handles.key?(url)
         url_s = url.to_s
         src   = inline_src
@@ -1976,8 +1979,10 @@ module Capybara
           # module's `json`, as a `modulepreload` of its `as` fetches it)
           dest = json_module?(url_s) ? 'json' : 'script'
           started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          src, meta = @browser.external_asset_response(url_s, asset_document_of(target), realm_key(target), options.policy, referrer: referrer, dest: dest, mode: 'cors',
-                                                                                                                       credentials: options.credentials, module_map: true)
+          src, meta, raw = @browser.external_asset_response(url_s, asset_document_of(target), realm_key(target), options.policy, referrer: referrer, dest: dest, mode: 'cors',
+                                                                                                                            credentials: options.credentials, module_map: true)
+          integ = integrity.nil? ? @browser.importmap_integrity(url_s, realm_key(target)).to_s : integrity.to_s
+          src = nil if src && !integ.empty? && Native.integrity_refuses((raw || src).b, integ)
           @browser.note_module_fetch(url_s, started) if src   # its Resource Timing entry ('script')
           content_type = meta&.dig('headers', 'content-type')
         end
@@ -2058,9 +2063,9 @@ module Capybara
       # realm-correctness as static `<script type=module>` via
       # `attach_realm_esm_entry`.
       def attach_native_module_loader(c)
-        c.attach('@evalEsmEntry', ->(url, inline, policy, credentials, *sw) {
+        c.attach('@evalEsmEntry', ->(url, inline, policy, credentials, integrity, *sw) {
           options = ModuleFetchOptions.of(policy, credentials)
-          esm_entry_result(RuntimeShared.safe_call { eval_esm_module(url, inline, options: options, sw: esm_sw_ctx(sw)) })
+          esm_entry_result(RuntimeShared.safe_call { eval_esm_module(url, inline, options: options, sw: esm_sw_ctx(sw), integrity: integrity) })
         })
         c.dynamic_import_resolver = lambda do |specifier, referrer, initiating|
           target, handles =
@@ -2144,9 +2149,10 @@ module Capybara
 
       # Frame-document `<script type=module>` entry, bound to the realm.
       def attach_realm_esm_entry(realm)
-        realm.attach('@evalEsmEntry', ->(url, inline, policy, credentials, *sw) {
+        realm.attach('@evalEsmEntry', ->(url, inline, policy, credentials, integrity, *sw) {
           esm_entry_result(RuntimeShared.safe_call {
-            eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id), options: ModuleFetchOptions.of(policy, credentials), sw: esm_sw_ctx(sw))
+            eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id), options: ModuleFetchOptions.of(policy, credentials), sw: esm_sw_ctx(sw),
+                                         integrity: integrity)
           })
         })
       end
