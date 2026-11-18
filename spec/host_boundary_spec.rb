@@ -7,7 +7,7 @@ require_relative 'support/poll_until'
 
 # What the host hands a realm and what it takes back go through nothing a page can replace: a host step reads the
 # engine's answers and the host's arguments by index, not by the iterator `Array.prototype` has (engine.js `listOf`);
-# the steps the host calls by name are no page's to call (`hostSteps`, behind the host's token) and the functions the
+# the steps the host calls by name are no page's to call (`hostSteps`, on the realm's host object) and the functions the
 # bindings reach by a global's name read-only from the realm's first script on (`sealHostHooks`); and a window's parent
 # and top are the host's to set, kept where no script can name them (`realmHooks`).
 RSpec.describe 'the host boundary' do
@@ -146,24 +146,14 @@ RSpec.describe 'the host boundary' do
     expect(session.evaluate_script('[window.seen, reacted.length]')).to eq([0, 1])
   end
 
-  # The steps the host calls a realm by — and whose answers it acts on — are no property of any global, and the
-  # namespace's way to them names them to no script: only the host's token, which no page has, opens it. A page neither
-  # calls nor replaces one.
+  # The steps the host calls a realm by — and whose answers it acts on — are no property of any global, nor is the
+  # namespace they are on: the realm's host object, which no script can name. A page neither calls nor replaces one.
   it 'lets no page call a step the host calls' do
     session.visit '/'
     names = %w[__csimTakeRoutedSubmission __csimSubmissionRoute __csimFlushRestore __csimApplyWindowTraversals
                __csimDiscardRealms __runLoopStep __csimSetValue __csimActivationNotify __csimDispatchTrusted]
-    expect(session.evaluate_script(<<~JS)).to eq([names.map { 'undefined' }, [], [false, false, false, true], 'undefined'])
-      [
-        #{names.to_json}.map((name) => typeof globalThis[name]),
-        Reflect.ownKeys(RustyRacer),
-        [
-          Reflect.defineProperty(RustyRacer, 'x', { value: 1 }), 'discardRealms' in RustyRacer,
-          Reflect.setPrototypeOf(RustyRacer, new Proxy({}, { get: (_, k) => { window.asked = k; } })),
-          Object.getPrototypeOf(RustyRacer) === null && Object.isExtensible(RustyRacer)
-        ],
-        typeof RustyRacer.engine
-      ]
+    expect(session.evaluate_script(<<~JS)).to eq([names.map { 'undefined' }, 'undefined'])
+      [#{names.to_json}.map((name) => typeof globalThis[name]), typeof RustyRacer]
     JS
   end
 
@@ -176,18 +166,6 @@ RSpec.describe 'the host boundary' do
     before = session.evaluate_script("[window.ticks, document.getElementById('f').contentWindow.ticks]")
     expect(poll_until { session.evaluate_script("[window.ticks, document.getElementById('f').contentWindow.ticks]").zip(before).all? { _1 > _2 } }).to be(true)
     expect(session.within_frame('x') { session.evaluate_script('window.active') }).to be(false)
-  end
-
-  # (…but none of the host's own procs is sealed in the snapshot, where the bindings have a stub of one: the host's
-  # attach over a read-only global would fail without a word — the bindings' list is the host's)
-  it "names the host's own procs as the host attaches them" do
-    lib = File.expand_path('../lib/capybara/simulated', __dir__)
-    shared = File.read(File.join(lib, 'runtime_shared.rb'))[/BROWSER_HOST_FNS = \{(.*?)^ {6}\}/m, 1]
-    attached = shared.scan(/^\s+['"]?(__[A-Za-z0-9_]+)['"]?\s*(?:=>|:)/).flatten +
-               Dir[File.join(lib, '*.rb')].flat_map { File.read(_1).scan(/attach\(['"](__[A-Za-z0-9_]+)/).flatten }
-    engine = File.read(File.join(lib, 'js/src/engine.js'))
-    procs = engine[/HOST_PROCS = new Set\(\[(.*?)\]\)/m, 1].scan(/'([^']+)'/).flatten
-    expect(procs.sort).to eq(attached.uniq.select { _1.start_with?('__csim') && !_1.start_with?('__csim_') }.sort)
   end
 
   # (…[LegacyUnforgeable] `parent` and `top`, and `ancestorOrigins`: the host's to set as it makes a frame — a page's

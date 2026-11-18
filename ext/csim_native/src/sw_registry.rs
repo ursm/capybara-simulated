@@ -934,7 +934,7 @@ pub(crate) fn soft_update_if_stale_for_ruby(partition: u64, handle: u32, now: f6
     };
     if stale { soft_update_for_ruby(partition, handle) } else { Vec::new() }
 }
-// The job `id` run (`__csim_swRunJob`): what the host does.
+// The job `id` run (`swRunJob`): what the host does.
 pub(crate) fn run_job_for_ruby(partition: u64, id: u32) -> Vec<Cmd> {
     let mut out = Vec::new();
     if let Some(p) = lock().existing(partition) {
@@ -1468,7 +1468,7 @@ impl Partition {
     }
 }
 
-// The worker `handle`'s queued step taken (`__csim_swStep`): what the host does.
+// The worker `handle`'s queued step taken (`swStep`): what the host does.
 pub(crate) fn step_for_ruby(partition: u64, handle: u32) -> Vec<Cmd> {
     let mut out = Vec::new();
     if let Some(p) = lock().existing(partition) {

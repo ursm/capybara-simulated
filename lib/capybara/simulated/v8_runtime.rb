@@ -106,25 +106,19 @@ module Capybara
         }
       end
 
-      # The host namespace rusty_racer installs into every context (main and
-      # per-frame): `globalThis.RustyRacer.drainMicrotasks()` (a native,
-      # rendezvous-free microtask checkpoint), `contextGlobal(id)` /
-      # `contextOf(value)` (the per-frame realm machinery), and
-      # `setPromiseRejectHandler`. The bridge JS hard-codes the same
-      # `globalThis.RustyRacer` literal (timers.js / platform-globals.js /
-      # unhandled-rejection.js / bridge.entry.js) — a rename must touch both
-      # sides.
-      HOST_NAMESPACE_NAME = 'RustyRacer'
-      # …and under it, the steps every call of the host's into a realm goes to, by name (engine.js `hostSteps`): none of
-      # them a property of any global, each under a name the host's token (`Native.host_token`) begins —
-      # `RustyRacer.<token><step>` — which no script of a page's has, so a page that reads the namespace makes none of the
-      # host's calls.
-      ENGINE_PATHS = Hash.new {|paths, step| paths[step] = "#{HOST_NAMESPACE_NAME}.#{Native.host_token}#{step}".freeze }
+      # The host namespace rusty_racer installs into every context (main and per-frame) — on the realm's host object
+      # (rusty_racer `HOST_OBJECT`), which no global holds: `drainMicrotasks()` (a native, rendezvous-free microtask
+      # checkpoint), `contextGlobal(id)` / `contextOf(value)` (the per-frame realm machinery), and
+      # `setPromiseRejectHandler`. The bindings take it as the realm is made (engine.js `hostNamespace`).
+      HOST_NAMESPACE_NAME = '@RustyRacer'
+      # …and on the same object, the steps every call of the host's into a realm goes to, by name (engine.js `hostSteps`):
+      # none of them a property of any global, nor of anything a page's script can reach.
+      ENGINE_PATHS = Hash.new {|paths, step| paths[step] = "@steps.#{step}".freeze }
       def self.engine_call(realm, step, *args) = step_of(realm, step).call(*args)
       # Step `step` of `realm` — a Ctx, or a frame realm's context — as a function (RustyRacer::Function) resolved once a
-      # realm: a call of it walks no path. A Ctx keeps its own until a reset makes its realm again, or its steps are
-      # published again (`Ctx#publishing`: a worker's); a frame realm's, published once as it is made, as long as its
-      # context object lives.
+      # realm: a call of it walks no path. A Ctx keeps its own until a reset makes its realm again; a frame realm's, as long
+      # as its context object lives. (…a step registered later — a worker's scope's — is on the host object as it is, and
+      # found as it is first called.)
       FRAME_STEPS = ObjectSpace::WeakKeyMap.new
       def self.step_of(realm, step)
         return realm.step(step) if realm.is_a?(Ctx)
@@ -158,14 +152,6 @@ module Capybara
         def eval_primitive(src, filename: '<eval>') = @ctx.eval_primitive(src, filename: filename)
         # The realm's step `name` (engine.js `hostSteps`), resolved as it is first called (`V8Runtime.step_of`).
         def step(name) = (@steps[name] ||= @ctx.function(ENGINE_PATHS[name]))
-
-        # Step `name` called, which publishes the realm's steps again (engine.js `publishHostSteps`: a worker's scope
-        # installs steps of its own) — each resolved anew from then on.
-        def publishing(name, *args)
-          step(name).call(*args)
-        ensure
-          @steps.clear
-        end
 
         # Record every attach so `create_context` can replay them: the bridge
         # in a per-frame realm reaches the same Ruby host fns as the main
@@ -226,7 +212,7 @@ module Capybara
         #
         # `to_h` dedups re-attached names to their latest proc, matching
         # attach's override semantics. NOTE: context-bound fns
-        # (`__csim_runScript*`, `__csim_evalEsmEntry`) get realm-bound
+        # (`__csim_runScript*`, `evalEsmEntry`) get realm-bound
         # overrides in `create_frame_realm` after this replay.
         def create_context
           realm = @iso.create_context
@@ -466,7 +452,7 @@ module Capybara
       def frame_realm_ids = frame_realms.keys
 
       # Is `realm_id` a live frame realm? A frame removed / re-navigated
-      # mid-block disposes its realm (`__csim_disposeFrameRealm`) while the
+      # mid-block disposes its realm (`disposeFrameRealm`) while the
       # Browser's `@current_realm_id` may still point at it; the Browser uses
       # this to raise a stale-element instead of running a frame handle op
       # against the main registry.
@@ -1172,7 +1158,7 @@ module Capybara
       def attach_host_fns(c)
         self.class.attach_host_fns(c, @browser)
         # The window's clock as a step moves it, where the tab has a worker to follow it (`clock_at_least`).
-        c.attach('__csim_windowClockAt', ->(ms) { clock_at_least(ms); nil })
+        c.attach('@windowClockAt', ->(ms) { clock_at_least(ms); nil })
         attach_run_script_with_cache(c)
         attach_native_module_loader(c)
         attach_frame_realm_loader(c)
@@ -1191,7 +1177,7 @@ module Capybara
         # kept here — a page navigated away or a frame removed takes no record with it — for the harness to take.
         if ENV['CSIM_ARENA_VERIFY'] == '1'
           c.eval_void('globalThis.__csimArenaVerify = true;')
-          c.attach('__csim_arenaVerifyFailed', ->(message) { (@arena_verify_failures ||= []) << message.to_s; nil })
+          c.attach('@arenaVerifyFailed', ->(message) { (@arena_verify_failures ||= []) << message.to_s; nil })
         end
       end
 
@@ -1202,7 +1188,7 @@ module Capybara
         failures
       end
 
-      # The bridge calls `__csim_createFrameRealm(url, body, contentType, parentId)`
+      # The bridge calls `createFrameRealm(url, body, contentType, parentId)`
       # (from `iframe.contentWindow`'s getter) to spin up a real per-iframe realm
       # whose `parent`/`top` point at the realm `parentId` identifies. This
       # runs re-entrantly inside the main ctx's eval — rusty services nested
@@ -1211,7 +1197,7 @@ module Capybara
       # nesting limit has none (navigables.rs `MAX_FRAME_DEPTH`).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(
+        c.attach('@createFrameRealm', ->(
           url,
           body,
           content_type,
@@ -1238,7 +1224,7 @@ module Capybara
         })
         # …and a frame's initial about:blank navigated to a document of its origin: loaded into the same realm, its Window
         # kept (`reuse_frame_realm`).
-        c.attach('__csim_reuseFrameRealm', ->(
+        c.attach('@reuseFrameRealm', ->(
           id,
           url,
           body,
@@ -1280,17 +1266,17 @@ module Capybara
         # linger in @frame_realms and get re-drained on every poll tick.
         # Disposing a non-executing child realm mid-callback is safe.
         # (…its WindowProxies kept where its navigable goes on to another document: `retarget_window_proxies`)
-        c.attach('__csim_disposeFrameRealm', ->(id, kept) {
+        c.attach('@disposeFrameRealm', ->(id, kept) {
           dispose_frame_realm(id, keep_proxies: kept == true)   # also revokes the realm's blob URLs
           nil
         })
         # …and a navigable given up on between two documents: the WindowProxies of it, over its last one's window, dropped
         # — or, those of every navigable destroyed so (navigables.rs `lost`).
-        c.attach('__csim_windowProxiesGone', ->(id) {
+        c.attach('@windowProxiesGone', ->(id) {
           evict_window_proxies(id.to_i)
           nil
         })
-        c.attach('__csim_lostWindowProxies', -> {
+        c.attach('@lostWindowProxies', -> {
           evict_lost_window_proxies
           nil
         })
@@ -1344,12 +1330,12 @@ module Capybara
       # frame and window realm constructors. Re-evaling the snapshot source would
       # redefine snapshot globals (e.g. the `scrollX` accessor) and throw, so only
       # eval it on a bare no-snapshot dev ctx where the realm boots empty. The
-      # replayed `__csim_runScriptCached` / `__csim_evalEsmEntry` close over the MAIN
+      # replayed `runScriptCached` / `evalEsmEntry` close over the MAIN
       # ctx they were first attached to, so a realm script routing through them
       # (≥64KB, or `type=module`) would run against the main
       # document — rebind realm-executing variants on top, then reseed per-realm JS.
       def seed_realm_bridge(realm, group = nil)
-        has_bridge = realm.eval("typeof __csimTakeEngine === 'function' || Reflect.ownKeys(#{HOST_NAMESPACE_NAME}).length === 0")
+        has_bridge = realm.eval("typeof __csimTakeEngine === 'function' || typeof __csimRealmId === 'function'")
         realm.eval_void(RuntimeShared.snapshot_src) unless has_bridge
         attach_run_script_with_cache(realm)
         attach_realm_esm_entry(realm)
@@ -2059,7 +2045,7 @@ module Capybara
       # realm-correctness as static `<script type=module>` via
       # `attach_realm_esm_entry`.
       def attach_native_module_loader(c)
-        c.attach('__csim_evalEsmEntry', ->(url, inline, policy, credentials, *sw) {
+        c.attach('@evalEsmEntry', ->(url, inline, policy, credentials, *sw) {
           options = ModuleFetchOptions.of(policy, credentials)
           esm_entry_result(RuntimeShared.safe_call { eval_esm_module(url, inline, options: options, sw: esm_sw_ctx(sw)) })
         })
@@ -2087,7 +2073,7 @@ module Capybara
       end
 
       # Per-realm module-handle caches, keyed by realm id (Module handles are
-      # context-bound). Shared by the realm's static `__csim_evalEsmEntry`
+      # context-bound). Shared by the realm's static `evalEsmEntry`
       # and the isolate resolver's dynamic-import routing; dropped with the
       # realm in the dispose paths.
       def realm_module_handles(realm_id)
@@ -2125,12 +2111,12 @@ module Capybara
         target.equal?(ctx) ? 0 : target.id
       end
 
-      # What `__csim_evalEsmEntry` answers the bridge, of `eval_esm_module`'s result: true where the graph ran, false where
+      # What `evalEsmEntry` answers the bridge, of `eval_esm_module`'s result: true where the graph ran, false where
       # it could not be fetched — a host failure (`safe_call`'s nil) alike — or its error to rethrow, `[name, message]`.
       def esm_entry_result(result) = result.is_a?(Array) ? result : result == true
 
       # The optional [handle, clientId, referrer, credentials, integrity] tail
-      # moduleSwCtx (bridge.entry.js) appends to __csim_evalEsmEntry, or nil.
+      # moduleSwCtx (bridge.entry.js) appends to evalEsmEntry, or nil.
       def esm_sw_ctx(sw)
         return nil unless sw && sw[0].to_i.positive?
         {
@@ -2145,7 +2131,7 @@ module Capybara
 
       # Frame-document `<script type=module>` entry, bound to the realm.
       def attach_realm_esm_entry(realm)
-        realm.attach('__csim_evalEsmEntry', ->(url, inline, policy, credentials, *sw) {
+        realm.attach('@evalEsmEntry', ->(url, inline, policy, credentials, *sw) {
           esm_entry_result(RuntimeShared.safe_call {
             eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id), options: ModuleFetchOptions.of(policy, credentials), sw: esm_sw_ctx(sw))
           })
@@ -2188,7 +2174,7 @@ module Capybara
         # Big bodies → Ruby-side bytecode cache. The dispatcher below
         # runs small bodies in the engine (`runClassicScript`) so they
         # don't pay the rendezvous round-trip.
-        c.attach('__csim_runScriptCached', ->(label, body) {
+        c.attach('@runScriptCached', ->(label, body) {
           src = body.to_s
           # No-cd warm path, mirroring `native_module_for`: once this
           # isolate has compiled a (label, bytesize), re-visits compile
@@ -2239,7 +2225,7 @@ module Capybara
         # declarations the global's wherever they sit — its completion value handed back only where it is a primitive:
         # a string replaces the document, and an object it ends with (`javascript:window.open(…)`'s Window) is never
         # walked. A throw is rethrown as the value thrown, which the caller reports.
-        c.attach('__csim_runJavascriptURL', ->(label, body) { c.eval_primitive(body.to_s, filename: label.to_s) })
+        c.attach('@runJavascriptURL', ->(label, body) { c.eval_primitive(body.to_s, filename: label.to_s) })
         install_run_script_dispatcher(c)
       end
 
@@ -2248,7 +2234,7 @@ module Capybara
       # script" — its top-level declarations the global ones, its `let` / `const` / `class` in the global lexical
       # environment the realm's scripts share, a redeclaration a SyntaxError before any of it runs; named its label, which
       # its errors' stacks and its `import()`s' referrer report): engine.js `installRunScript`. It snapshots the CURRENT
-      # `__csim_runScriptCached` host fn, so it must run after the attach it captures (`attach_run_script_with_cache`
+      # `runScriptCached` host fn, so it must run after the attach it captures (`attach_run_script_with_cache`
       # installs it last for exactly that reason).
       def install_run_script_dispatcher(c)
         V8Runtime.engine_call(c, 'installRunScript', SCRIPT_CACHE_MIN_BYTES)
@@ -2268,10 +2254,11 @@ module Capybara
       # Class-level attach so Worker isolates (Ruby-thread-owned
       # contexts that don't have a Runtime instance wrapping them)
       # reuse the same `BROWSER_HOST_FNS` table the main runtime wires up.
-      def self.attach_host_fns(c, browser)
+      def self.attach_host_fns(c, browser, except: nil)
         fns = {}
         RuntimeShared::BROWSER_HOST_FNS.each {|name, body|
-          fns[name] = ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } }
+          next if name == except
+          fns["@#{name}"] = ->(*a) { RuntimeShared.safe_call { body.call(browser, *a) } }
         }
         # One rendezvous for the whole table (~50 fns) — this runs per cold
         # build, per worker, and per warm realm reset.
@@ -2293,58 +2280,57 @@ module Capybara
       # Returns the `WorkerRuntime` that `Browser#run_worker` drives.
       def self.build_worker(browser, post_back, broadcast_out = nil, sw_hooks = {}, kind:, name: '', isolated: false, secure: true)
         c = Ctx.new(snapshot: snapshot)
-        attach_host_fns(c, browser)
         # (…but no hijackable fetch: a held response is delivered to a window's realm alone, so a worker's XHR goes the
         # way every request did before one could be held — answered at once)
-        c.eval_void('delete globalThis.__csim_rackFetchAsync;')
-        c.attach('__csim_workerPostMessage', ->(data) { post_back.call(data); nil })
+        attach_host_fns(c, browser, except: 'rackFetchAsync')
+        c.attach('@workerPostMessage', ->(data) { post_back.call(data); nil })
         # An exception the worker's script left unhandled, reported out to its Worker object (workers.js).
-        c.attach('__csim_workerReportError', ->(message, filename, lineno, colno) { sw_hooks[:report_error]&.call(message, filename, lineno, colno); nil })
-        # …its WebSockets, whose events are its own inbox's (Browser#run_worker) — `__csim_wsSend` is the window's as it is
-        c.attach('__csim_wsOpen',  ->(url, protocols, *) { sw_hooks[:ws_open].call(url, protocols) }) if sw_hooks[:ws_open]
-        c.attach('__csim_wsClose', ->(id, code, reason) { sw_hooks[:ws_close].call(id, code, reason); nil }) if sw_hooks[:ws_close]
+        c.attach('@workerReportError', ->(message, filename, lineno, colno) { sw_hooks[:report_error]&.call(message, filename, lineno, colno); nil })
+        # …its WebSockets, whose events are its own inbox's (Browser#run_worker) — `wsSend` is the window's as it is
+        c.attach('@wsOpen',  ->(url, protocols, *) { sw_hooks[:ws_open].call(url, protocols) }) if sw_hooks[:ws_open]
+        c.attach('@wsClose', ->(id, code, reason) { sw_hooks[:ws_close].call(id, code, reason); nil }) if sw_hooks[:ws_close]
         # …and its EventSources, likewise
-        c.attach('__csim_eventSourceOpen',  ->(request) { sw_hooks[:es_open].call(request) }) if sw_hooks[:es_open]
-        c.attach('__csim_eventSourceClose', ->(id) { sw_hooks[:es_close].call(id); nil }) if sw_hooks[:es_close]
+        c.attach('@eventSourceOpen',  ->(request) { sw_hooks[:es_open].call(request) }) if sw_hooks[:es_open]
+        c.attach('@eventSourceClose', ->(id) { sw_hooks[:es_close].call(id); nil }) if sw_hooks[:es_close]
         # Service-worker → main-thread signals route through the thread-safe outbox (delivered by
         # deliver_worker_messages): client.postMessage, clients.claim (set the client's controller),
         # and a controlled fetch's respondWith result. See run_worker for the closures.
-        c.attach('__csim_swPostToClient', ->(client_id, data) { sw_hooks[:post_to_client]&.call(client_id, data); nil }) if sw_hooks[:post_to_client]
-        c.attach('__csim_swNavigateClient', ->(client_id, url, nav_id) { sw_hooks[:navigate_client]&.call(client_id, url, nav_id); nil }) if sw_hooks[:navigate_client]
-        c.attach('__csim_swClaim',        ->                  { sw_hooks[:claim]&.call }) if sw_hooks[:claim]
+        c.attach('@swPostToClient', ->(client_id, data) { sw_hooks[:post_to_client]&.call(client_id, data); nil }) if sw_hooks[:post_to_client]
+        c.attach('@swNavigateClient', ->(client_id, url, nav_id) { sw_hooks[:navigate_client]&.call(client_id, url, nav_id); nil }) if sw_hooks[:navigate_client]
+        c.attach('@swClaim',        ->                  { sw_hooks[:claim]&.call }) if sw_hooks[:claim]
         # Its Clients, the host registry's as this worker sees them (Browser#run_worker).
-        c.attach('__csim_swClientRecord', ->(client_id) { sw_hooks[:client_record].call(client_id) }) if sw_hooks[:client_record]
-        c.attach('__csim_swMatchClients', ->(include_uncontrolled, type) { sw_hooks[:match_clients].call(include_uncontrolled, type) }) if sw_hooks[:match_clients]
-        c.attach('__csim_swSkipWaitingRequest', ->             { sw_hooks[:skip_waiting]&.call; nil }) if sw_hooks[:skip_waiting]
-        c.attach('__csim_swSoftUpdate',         ->             { sw_hooks[:soft_update]&.call; nil }) if sw_hooks[:soft_update]
-        c.attach('__csim_swNoteRouterRules',    ->             { sw_hooks[:router]&.call; nil }) if sw_hooks[:router]
-        c.attach('__csim_swRaceNetwork', ->(fetch_id, realm_id, url, accept) { sw_hooks[:race_network]&.call(fetch_id, realm_id, url, accept); nil }) if sw_hooks[:race_network]
-        c.attach('__csim_swExtendedChanged',    ->(n)          { sw_hooks[:extended]&.call(n); nil }) if sw_hooks[:extended]
-        c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id, spent = 0, took = 0) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id, spent, took); nil }) if sw_hooks[:fetch_respond]
-        c.attach('__csim_swFetchStream',  ->(fetch_id, kind, payload, realm_id, spent = 0, took = 0) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id, spent, took); nil }) if sw_hooks[:fetch_stream]
+        c.attach('@swClientRecord', ->(client_id) { sw_hooks[:client_record].call(client_id) }) if sw_hooks[:client_record]
+        c.attach('@swMatchClients', ->(include_uncontrolled, type) { sw_hooks[:match_clients].call(include_uncontrolled, type) }) if sw_hooks[:match_clients]
+        c.attach('@swSkipWaitingRequest', ->             { sw_hooks[:skip_waiting]&.call; nil }) if sw_hooks[:skip_waiting]
+        c.attach('@swSoftUpdate',         ->             { sw_hooks[:soft_update]&.call; nil }) if sw_hooks[:soft_update]
+        c.attach('@swNoteRouterRules',    ->             { sw_hooks[:router]&.call; nil }) if sw_hooks[:router]
+        c.attach('@swRaceNetwork', ->(fetch_id, realm_id, url, accept) { sw_hooks[:race_network]&.call(fetch_id, realm_id, url, accept); nil }) if sw_hooks[:race_network]
+        c.attach('@swExtendedChanged',    ->(n)          { sw_hooks[:extended]&.call(n); nil }) if sw_hooks[:extended]
+        c.attach('@swFetchRespond', ->(fetch_id, resp, realm_id, spent = 0, took = 0) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id, spent, took); nil }) if sw_hooks[:fetch_respond]
+        c.attach('@swFetchStream',  ->(fetch_id, kind, payload, realm_id, spent = 0, took = 0) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id, spent, took); nil }) if sw_hooks[:fetch_stream]
         # Cross-isolate MessagePort channels: the ends a worker's ports take and give up, and what they post.
-        c.attach('__csim_workerPortPost',    ->(end_id, data) { sw_hooks[:port_post]&.call(end_id, data); nil }) if sw_hooks[:port_post]
-        c.attach('__csim_workerPortEndHere', ->(end_id)       { sw_hooks[:port_here]&.call(end_id); nil }) if sw_hooks[:port_here]
-        c.attach('__csim_workerPortEndGone', ->(end_id, held) { sw_hooks[:port_gone]&.call(end_id, held); nil }) if sw_hooks[:port_gone]
-        c.attach('__csim_workerPortEndClosed', ->(end_id)     { sw_hooks[:port_closed]&.call(end_id); nil }) if sw_hooks[:port_closed]
-        c.attach('__csim_workerPortRedeliver', ->(end_id, data) { sw_hooks[:port_redeliver]&.call(end_id, data); nil }) if sw_hooks[:port_redeliver]
+        c.attach('@workerPortPost',    ->(end_id, data) { sw_hooks[:port_post]&.call(end_id, data); nil }) if sw_hooks[:port_post]
+        c.attach('@workerPortEndHere', ->(end_id)       { sw_hooks[:port_here]&.call(end_id); nil }) if sw_hooks[:port_here]
+        c.attach('@workerPortEndGone', ->(end_id, held) { sw_hooks[:port_gone]&.call(end_id, held); nil }) if sw_hooks[:port_gone]
+        c.attach('@workerPortEndClosed', ->(end_id)     { sw_hooks[:port_closed]&.call(end_id); nil }) if sw_hooks[:port_closed]
+        c.attach('@workerPortRedeliver', ->(end_id, data) { sw_hooks[:port_redeliver]&.call(end_id, data); nil }) if sw_hooks[:port_redeliver]
         # A worker is a SEPARATE isolate: its BroadcastChannel fan-out to the main + frame realms +
         # other workers can't run `browser.broadcast_to_windows` inline (that would mutate the main
         # browser's inbox from the worker thread). Route it through the thread-safe outbox instead
-        # (the shared BROWSER_HOST_FNS `__csimBroadcast` above, bound to `browser`, is overridden
+        # (the shared BROWSER_HOST_FNS `broadcast` above, bound to `browser`, is overridden
         # here). Same-worker-context delivery already happened in-VM via `_bcChannels`.
-        c.attach('__csimBroadcast', ->(name, data, _rid, origin) { broadcast_out&.call(name, data, origin); nil }) if broadcast_out
+        c.attach('@broadcast', ->(name, data, _rid, origin) { broadcast_out&.call(name, data, origin); nil }) if broadcast_out
         # (…and the channel names it listens on, which a post of the window's asks it to take at its time: Browser#broadcast_external)
-        c.attach('__csim_workerBcListen', ->(name, delta) { sw_hooks[:bc_listen]&.call(name, delta); nil }) if sw_hooks[:bc_listen]
+        c.attach('@workerBcListen', ->(name, delta) { sw_hooks[:bc_listen]&.call(name, delta); nil }) if sw_hooks[:bc_listen]
         # Worker's timer table is independent from main's; routing the
         # worker's `setTimersActive` through `browser.timers_active=`
         # races the main isolate's polling? gate, dropping main-thread
         # pending XHRs the moment the worker's queue empties. The settle
         # loop already polls `worker_pending?` for worker thread activity.
-        c.attach('__setTimersActive', ->(_flag) { nil })
+        c.attach('@setTimersActive', ->(_flag) { nil })
         # The worker's scope, of its KIND — 'dedicated', 'shared' or 'service' — and name (worker-globals.js).
         # (…cross-origin isolated as the context that made it is — a service worker by no document's headers: not)
-        c.publishing('installWorkerScope', kind, name.to_s, isolated, secure)
+        V8Runtime.engine_call(c, 'installWorkerScope', kind, name.to_s, isolated, secure)
         # …and the user agent a test set, which its navigator answers as its requests send it.
         V8Runtime.engine_call(c, 'setUserAgent', browser.default_user_agent) if browser.default_user_agent
         WorkerRuntime.new(c)

@@ -3071,21 +3071,6 @@ pub(crate) static ENGINE_GLOBAL: std::sync::atomic::AtomicBool = std::sync::atom
 pub(crate) fn set_engine_global(on: bool) {
     ENGINE_GLOBAL.store(on, std::sync::atomic::Ordering::Relaxed);
 }
-// The token the host's calls of a realm's engine carry (`Native.host_token`, engine.js `HOST_OPS`): made once a process
-// from the operating system's random bytes, handed to every realm's bindings as it is made, and to Ruby — and to no
-// script of a page's, which so cannot make the host's calls.
-pub(crate) fn host_token() -> String {
-    static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    TOKEN
-        .get_or_init(|| {
-            use rand_core::RngCore as _;
-            let mut bytes = [0u8; 16];
-            rand_core::OsRng.fill_bytes(&mut bytes);
-            bytes.iter().map(|b| format!("{b:02x}")).collect()
-        })
-        .clone()
-}
-
 // The realm whose global `global` is — a context's (`v8::Context::global`) — as `install` stamped it: none for a context
 // no realm's `__dom` was installed into.
 pub(crate) fn realm_of_global(scope: &mut v8::PinScope<'_, '_>, global: v8::Local<'_, v8::Object>) -> Option<i32> {
@@ -3462,17 +3447,18 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "isProxy", is_proxy, context_id);
     // The ops are no property of the global: the realm's bindings take them as the realm is made, before any script of a
     // page's runs (engine.js `__csimTakeEngine`, which the snapshot's global holds until then and loses as it is called),
-    // with the host's token and whether a spec asked for them on the global (`ENGINE_GLOBAL`); and its global keeps them
-    // under a private key, for another realm's code holding the window (`engine_of`).
+    // with the realm's host object — rusty_racer's namespace and the host's procs on it, no global's, where the bindings
+    // put the steps the host calls — and whether a spec asked for them on the global (`ENGINE_GLOBAL`); and its global
+    // keeps them under a private key, for another realm's code holding the window (`engine_of`).
     let global = context.global(scope);
     let key = engine_key(scope);
     global.set_private(scope, key, ns.into());
     let take = v8::String::new(scope, "__csimTakeEngine").expect("a short string");
     if let Some(take) = global.get(scope, take.into()).and_then(|f| v8::Local::<v8::Function>::try_from(f).ok()) {
-        let token = v8::String::new(scope, &host_token()).expect("a short string");
+        let host = rusty_racer::host_object(scope);
         let exposed = v8::Boolean::new(scope, ENGINE_GLOBAL.load(std::sync::atomic::Ordering::Relaxed));
         v8::tc_scope!(let tc, scope);
-        let _ = take.call(tc, global.into(), &[ns.into(), token.into(), exposed.into()]);
+        let _ = take.call(tc, global.into(), &[ns.into(), host.into(), exposed.into()]);
         if let Some(e) = tc.exception() {
             eprintln!("[csim] realm {context_id}'s bindings refused its engine: {}", e.to_rust_string_lossy(tc));
         }

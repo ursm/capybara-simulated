@@ -2984,7 +2984,7 @@ module Capybara
       # Capybara polls find / has_? via `synchronize` while
       # `Driver#wait?` is true. We stay true while there's any scheduled
       # timer (`@timers_active` is flipped by the JS bridge's
-      # `__setTimersActive` callback), plus a sticky grace window after
+      # `setTimersActive` callback), plus a sticky grace window after
       # the last timer fires so a `setTimeout` firing mid-loop doesn't
       # drop us off polling before Capybara's own retry deadline.
       #
@@ -4155,7 +4155,7 @@ module Capybara
       #
       # Mastodon (and any app using Server-Sent Events) opens an `EventSource` to a streaming endpoint and expects pushed
       # events to fire `message` / typed listeners on the live instance:
-      #   1. JS-side `new EventSource(url)` calls `__csim_eventSourceOpen` with its request, which returns an integer
+      #   1. JS-side `new EventSource(url)` calls `eventSourceOpen` with its request, which returns an integer
       #      handle and spawns a Ruby thread.
       #   2. The thread fetches the request as every request is fetched (`rack_fetch`, the engine's FetchPlan: its
       #      cookies, its CORS check, its redirects) over a connection of its own (`event_stream_transport`), and reads
@@ -4846,7 +4846,7 @@ module Capybara
       # `MessageBus.publish` (or any other middleware writing through
       # `rack.hijack`) lands on the open connection and the client
       # gets the response when the server is ready. Our default
-      # `__rackFetch` is purely sync — the middleware's hijack path
+      # `rackFetch` is purely sync — the middleware's hijack path
       # never engaged, so MessageBus's `subscribe(channel, -1)` +
       # `__status` reset chain dropped any publish that landed
       # between two scheduled polls.
@@ -4859,12 +4859,12 @@ module Capybara
       # `cleanup_timer` fired the empty-`[]` close after
       # `long_polling_interval`). Non-hijacking responses queue
       # immediately on the same thread — no thread spawn, no
-      # backpressure beyond the existing sync `__rackFetch` cost.
+      # backpressure beyond the existing sync `rackFetch` cost.
       #
       # The contract is generic: any middleware that follows the
       # Rack hijack protocol works, not just `message_bus`. JS-side
       # XHR's async path routes every request here; sync XHRs
-      # (`xhr.open(_, _, false)`, deprecated) stay on `__rackFetch`
+      # (`xhr.open(_, _, false)`, deprecated) stay on `rackFetch`
       # because the hijack contract can't satisfy a synchronous XHR
       # response anyway.
       # Returns a response hash or nil for a network error (immediate — middleware didn't
@@ -5046,7 +5046,7 @@ module Capybara
       # isolate, separate microtask queue and timer table), evals the
       # worker script there, and runs an event loop draining timers,
       # microtasks, and the inbox queue from the main thread. Each
-      # worker's `__csim_workerPostMessage` host fn closes over its
+      # worker's `workerPostMessage` host fn closes over its
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
       # (…`cluster_key` the agent cluster key of the context making it, which a dedicated worker's is: realm_location.rs
@@ -6068,7 +6068,7 @@ module Capybara
         sw_job_event({try_activate: true}) if Native.sw_fetch_event(@sw_partition, handle.to_i, realm, fid, false)
       end
 
-      # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
+      # The active worker handle at an EXACT scope (0 if none) — see swActiveHandleForScope.
       def sw_active_handle_for_scope(scope, site) = sw_serving(site)[scope.to_s].to_i
 
       # The registrations the session's map holds (sw_registry.rs), `[scope, registered, activating, serving, id, top-level
@@ -6211,7 +6211,7 @@ module Capybara
         sw_run_here(Native.sw_soft_update_if_stale(@sw_partition, handle.to_i, cookie_now))
       end
 
-      # …and run (`__csim_swRunJob`).
+      # …and run (`swRunJob`).
       def sw_run_job(id) = sw_run(Native.sw_run_job(@sw_partition, id.to_i))
 
       # …its script fetched and byte-checked (sw_update_fetch), and a changed one's worker spawned, the job
@@ -7253,7 +7253,7 @@ module Capybara
       # redirects by re-entering interception at each new URL (301/302 of a POST and
       # 303 of a non-GET/HEAD rewrite the next hop to a bodyless GET — Fetch
       # "HTTP-redirect fetch" — so a redirected form POST "must clear body"; 307/308
-      # re-POST). Returns __rackFetch's response wire shape (the JS frame builder
+      # re-POST). Returns rackFetch's response wire shape (the JS frame builder
       # reads body / headers / url / redirected / charset), or `{'error' => true, 'url'}`
       # for a failed navigation (respondWith network error / redirect loop / a blocked
       # opener policy), its URL the hop it failed at.
@@ -8649,7 +8649,7 @@ module Capybara
           @worker_host.owe(WorkerHost::BROADCAST, 1)
           w[:inbox] << {kind: 'broadcast', name: name.to_s, data: data, origin: origin}
           # (…taken at the time it was posted at, as a message to the worker itself is, where it has a channel of that name
-          # — `__csim_workerBcListen` — not by every worker of the window: one idle worker beside a page whose frames
+          # — `workerBcListen` — not by every worker of the window: one idle worker beside a page whose frames
           # chatter on a channel made each post a round trip to it)
           next unless w[:bc_names]&.fetch(name.to_s, 0).to_i.positive?
 
@@ -9750,7 +9750,7 @@ module Capybara
           # each once instead of fetching again) — the engine's (service_worker.rs `swGlobalInit`).
           args = [sw_registration, sw_scope.to_s, sw_uvc, sw_imports_map && JSON.generate(sw_imports_map)]
           rt.call('swGlobalInit', *args)
-          rt.publishing('installServiceWorkerScope')
+          rt.call('installServiceWorkerScope')
         end
         # A DEFERRED main script (worker_spawn found a controlling, fetch-handling SW for the
         # script URL): fetch it through the SW redirect chain NOW, on this worker's own thread
@@ -9948,7 +9948,7 @@ module Capybara
             # last tick passes for the timers already set — those due fire ahead of the message, the tasks queued
             # before it — and a timer the message sets starts from there, not owed what went by before it was set.
             # An AUTONOMOUS loop (the dispatcher executor-worker's receive→fetch→setTimeout retry, which has no inbox
-            # message) progresses by it alone; worker http fetch is setTimeout(0)+__rackFetch, resolved on this
+            # message) progresses by it alone; worker http fetch is setTimeout(0)+rackFetch, resolved on this
             # thread by the drain. Gated on a PENDING timer (any, not just due-now — the clock must advance to fire a
             # future randomDelay) so an idle message-driven worker with no timers stays lazy. Host CALLS, not string
             # `eval`, keep the per-tick cost off the V8 compile path (rule 3).
@@ -10472,7 +10472,7 @@ module Capybara
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
       DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
 
-      # A request a realm's script makes the host fetch (`__rackFetch(request, body)`: fetch(), an XMLHttpRequest, a
+      # A request a realm's script makes the host fetch (`rackFetch(request, body)`: fetch(), an XMLHttpRequest, a
       # worker's imported script), described by name (document-origin.js `hostRequest`) — its client the realm's own
       # document, its frame's ancestors given — and `body` its bytes.
       # (…`transport` and `stream` as `rack_fetch` takes them)
@@ -13254,7 +13254,7 @@ module Capybara
       # every code path that handles a full-page Rack response (`navigate`
       # for GETs, `navigate_post` for POSTs). `loadDocument` walks
       # importmaps + module scripts during `theEnd`; the bridge
-      # pushes the importmap back via `__csim_pushImportmap` before any
+      # pushes the importmap back via `pushImportmap` before any
       # module loads so resolver lookups agree with the JS side.
       #
       # The post-nav grace bridges Capybara's outer-synchronize gap when

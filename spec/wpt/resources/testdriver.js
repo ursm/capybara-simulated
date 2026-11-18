@@ -583,7 +583,7 @@
     // WebDriver "Delete All Cookies": the session's cookie store emptied (the host's, cookie_jar.rs) — every cookie, not
     // only those of the active document's address, which is all a test that starts from none tells apart.
     delete_all_cookies: function () {
-      try { globalThis.__csimDeleteAllCookies(); return Promise.resolve(); } catch (e) { return Promise.reject(e); }
+      try { W.RustyRacer.host.deleteAllCookies(); return Promise.resolve(); } catch (e) { return Promise.reject(e); }
     }
   };
 

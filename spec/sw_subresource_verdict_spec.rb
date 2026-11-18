@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/engine_global'
 
 # A subresource a controlling service worker answers uses the answer where Fetch allows it and its consumer takes its
 # status — the engine's one verdict (subresource_judge.rs `judge`): a `<link rel=prefetch>` loads whatever the status,
@@ -245,7 +246,7 @@ RSpec.describe 'Service Worker subresource verdict' do
 
   # A worker gone as the event is dispatched (no record of it, or redundant: browser.rb `sw_redundant?`) lets the request
   # through at once, before the dispatch returns: the network answers it, and its entry is filed.
-  it "has the network answer a poster's request a worker gone lets through at once" do
+  it "has the network answer a poster's request a worker gone lets through at once", :engine_global do
     session = simulated_session(app)
     session.visit '/'
     session.execute_script(<<~JS)
@@ -257,7 +258,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         f.src = '/scope/page.html';
         f.onload = () => {
           const d = f.contentDocument, W = f.contentWindow;
-          W.__csim_serviceWorkerControllerFetch = () => false;
+          W.RustyRacer.host.serviceWorkerControllerFetch = () => false;
           d.body.insertAdjacentHTML('beforeend', '<video poster="/scope/gone-poster.png" preload=none></video>');
           const poll = () => {
             const e = W.performance.getEntriesByType('resource').find((e) => e.name.endsWith('gone-poster.png'));

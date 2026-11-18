@@ -8,23 +8,17 @@ module Capybara
     # rusty_racer's `Context#attach` for the main realm and every
     # worker isolate alike.
     module RuntimeShared
-      BRIDGE_JS         = File.expand_path('js/bridge.bundle.js',                 __dir__).freeze
-      SNAPSHOT_STUBS_JS = File.expand_path('js/snapshot_stubs.js',                __dir__).freeze
-      VENDOR_BUNDLE_JS  = File.expand_path('../../../vendor/js/vendor.bundle.js', __dir__).freeze
+      BRIDGE_JS        = File.expand_path('js/bridge.bundle.js',                 __dir__).freeze
+      VENDOR_BUNDLE_JS = File.expand_path('../../../vendor/js/vendor.bundle.js', __dir__).freeze
 
-      def self.snapshot_stubs_src = File.read(SNAPSHOT_STUBS_JS)
-      def self.bridge_src         = File.read(BRIDGE_JS)
-      def self.vendor_bundle_src  = File.read(VENDOR_BUNDLE_JS)
+      def self.bridge_src        = File.read(BRIDGE_JS)
+      def self.vendor_bundle_src = File.read(VENDOR_BUNDLE_JS)
 
-      # Combined source baked into the V8 Snapshot.
-      # Order matters: stubs first (so bridge's IIFE can reference the
-      # `globalThis.__rackFetch` etc. slots), then the vendor bundle
-      # (so bridge can reference `globalThis.__csimVendor.cssTree`), then
-      # bridge proper.
+      # Combined source baked into the V8 Snapshot: the vendor bundle first (so bridge can reference
+      # `globalThis.__csimVendor.cssTree`), then bridge proper. The host's procs are no part of it: they land on each
+      # realm's host object as it is made (`Context#attach('@…')`), which the bindings take then (engine.js `hostObject`).
       def self.snapshot_src
-        snapshot_stubs_src +
-          vendor_bundle_src + ";\n" +
-          bridge_src
+        vendor_bundle_src + ";\n" + bridge_src
       end
 
       # Host fns whose body touches `Browser` — wrap with `safe_call`
@@ -32,16 +26,16 @@ module Capybara
       # JS exception that crashes the whole script chain. Bodies take
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
-        '__rackFetch'                => ->(b, *a) { b.rack_fetch_request(a[0], a[1]) },
-        '__csimExternalAsset'        => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4]) },
-        '__csimSubresourceFetch'     => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2]) },
-        '__csimAssetDocumentStarted' => ->(b, *_a) { b.asset_document_started },
+        'rackFetch'                          => ->(b, *a) { b.rack_fetch_request(a[0], a[1]) },
+        'externalAsset'                      => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4]) },
+        'subresourceFetch'                   => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2]) },
+        'assetDocumentStarted'               => ->(b, *_a) { b.asset_document_started },
         # fetch(…, {keepalive}) — eager detached-thread dispatch + one-shot result poll.
-        '__csim_keepaliveStart'      => ->(b, *a) { b.keepalive_start(a[0], a[1]) },
-        '__csim_keepaliveTake'       => ->(b, *a) { b.keepalive_take(a[0]) },
+        'keepaliveStart'                     => ->(b, *a) { b.keepalive_start(a[0], a[1]) },
+        'keepaliveTake'                      => ->(b, *a) { b.keepalive_take(a[0]) },
         # A controlled document's subresource → its controller's fetch event, synchronously, its
         # request the plan's (its destination too). See sw_script_subresource_fetch.
-        '__csim_swScriptFetch'       => lambda {|b, *a|
+        'swScriptFetch'                      => lambda {|b, *a|
           mode, credentials, _, _, destination = Native.subresource_plan_fields(a[4].to_i)
           b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], destination, mode, credentials, binary: a[5] == true, integrity: a[6] || '', referrer_policy: a[7])
         },
@@ -49,158 +43,158 @@ module Capybara
         # session-history entry it makes made now (snapshotting the OUTGOING document), so history.go(-1) can traverse
         # back — after the active one, or (a[3]) in its place: the navigation's history handling (frame_navigation.rs
         # `frameAttributesNavigate`). Must run while the outgoing realm (a[0]) is still alive.
-        '__csim_recordFrameNav'      => ->(b, *a) { b.commit_frame_entry(a[0].to_i, a[1], srcdoc: a[2], replace: a[3] == true); nil },
+        'recordFrameNav'                     => ->(b, *a) { b.commit_frame_entry(a[0].to_i, a[1], srcdoc: a[2], replace: a[3] == true); nil },
         # …and the outgoing document unloaded (a[0] its realm, alive still): the entry takes its form state as its
         # pagehide / unload handlers left it.
-        '__csim_frameUnloaded'       => ->(b, *a) { b.frame_document_unloaded(a[0].to_i); nil },
-        '__setTimersActive'          => ->(b, *a) { b.timers_active = !!a[0]; nil },
-        '__csim_navigationTurnQueued' => ->(b, *_a) { b.navigation_turn_queued = true; nil },
-        '__csimReadFilePick'         => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },
-        '__getDocumentCookie'        => ->(b, *a) { b.document_cookie(a[0], a[1], a[2]) },
-        '__setDocumentCookie'        => ->(b, *a) { b.write_document_cookie(a[0].to_s, a[1], a[2], a[3]); nil },
-        '__csimDeleteAllCookies'     => ->(b, *_) { b.delete_all_cookies; nil },
-        '__csimStoragePartitions'    => ->(b, *_a) { b.storage_partitions },
+        'frameUnloaded'                      => ->(b, *a) { b.frame_document_unloaded(a[0].to_i); nil },
+        'setTimersActive'                    => ->(b, *a) { b.timers_active = !!a[0]; nil },
+        'navigationTurnQueued'               => ->(b, *_a) { b.navigation_turn_queued = true; nil },
+        'readFilePick'                       => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },
+        'getDocumentCookie'                  => ->(b, *a) { b.document_cookie(a[0], a[1], a[2]) },
+        'setDocumentCookie'                  => ->(b, *a) { b.write_document_cookie(a[0].to_s, a[1], a[2], a[3]); nil },
+        'deleteAllCookies'                   => ->(b, *_) { b.delete_all_cookies; nil },
+        'storagePartitions'                  => ->(b, *_a) { b.storage_partitions },
         # A window `window.open` made in this isolate closing, or closed (window.js): its RealmWindow asks again.
-        '__csimWindowRealmsChanged'  => ->(b, *_a) { b.window_realms_changed; nil },
-        '__csimStorageChanged'       => ->(b, *a) { b.storage_changed(*a[0, 7]); nil },
-        '__modalDialog'              => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
-        '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0], a[1]); nil },
-        '__csim_logConsole'          => ->(b, *a) { b.log_console(a[0], a[1]); nil },
-        '__csim_eventSourceOpen'     => ->(b, *a) { b.event_source_open(a[0]) },
-        '__csim_eventSourceClose'    => ->(b, *a) { b.event_source_close(a[0]); nil },
-        '__csim_wsOpen'              => ->(b, *a) { b.ws_open(a[0], a[1], nil, client: a[2]) },
-        '__csim_wsSend'              => ->(b, *a) { b.ws_send(a[0], a[1], a[2]); nil },
-        '__csim_wsClose'             => ->(b, *a) { b.ws_close(a[0], a[1], a[2]); nil },
-        '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1]) },
-        '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
+        'windowRealmsChanged'                => ->(b, *_a) { b.window_realms_changed; nil },
+        'storageChanged'                     => ->(b, *a) { b.storage_changed(*a[0, 7]); nil },
+        'modalDialog'                        => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
+        'pushImportmap'                      => ->(b, *a) { b.set_importmap(a[0], a[1]); nil },
+        'logConsole'                         => ->(b, *a) { b.log_console(a[0], a[1]); nil },
+        'eventSourceOpen'                    => ->(b, *a) { b.event_source_open(a[0]) },
+        'eventSourceClose'                   => ->(b, *a) { b.event_source_close(a[0]); nil },
+        'wsOpen'                             => ->(b, *a) { b.ws_open(a[0], a[1], nil, client: a[2]) },
+        'wsSend'                             => ->(b, *a) { b.ws_send(a[0], a[1], a[2]); nil },
+        'wsClose'                            => ->(b, *a) { b.ws_close(a[0], a[1], a[2]); nil },
+        'rackFetchAsync'                     => ->(b, *a) { b.rack_fetch_async(a[0], a[1]) },
+        'rackFetchAsyncAbort'                => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
         # `window.open`: a new window of this window's browsing context group, a realm of this isolate (its number), or —
         # noopener — a browsing context group of its own (nil). a[2] is the opener's realm id (for wiring window.opener);
         # a[3] the opener document's base URL, which an about:blank popup inherits.
-        '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(*a[0, 6]) },
+        'windowOpen'                         => ->(b, *a) { b.open_child_window(*a[0, 6]) },
         # A `target=_blank`/named link/area activation from a frame or window realm:
         # open a new auxiliary window (the realm's VM isn't rebuilt — a fresh window
         # is). `opener` = rel=opener (target=_blank defaults to noopener); the Driver
         # forces noopener for a cross-partition blob: target.
-        '__csimOpenAuxFromRealm'     => ->(b, *a) { b.open_aux_from_realm(*a[0, 6]); nil },
-        '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]) == true },
+        'openAuxFromRealm'                   => ->(b, *a) { b.open_aux_from_realm(*a[0, 6]); nil },
+        'broadcast'                          => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]) == true },
         # BroadcastChannel's multi-realm path: the isolate queues one ordered delivery per channel (broadcast_channels.rs
         # `bcQueue`), the host the other windows' and the workers' (`broadcast_queued`). Only taken where a sibling
         # same-isolate realm exists (`bc_siblings_exist?`); single-window pages never touch it.
-        '__csimBroadcastQueued'      => ->(b, *a) { b.broadcast_queued(a[0], a[1], a[2]) == true },
-        '__csimBcSiblingsExist'      => ->(b, *_a) { b.bc_siblings_exist? },
+        'broadcastQueued'                    => ->(b, *a) { b.broadcast_queued(a[0], a[1], a[2]) == true },
+        'bcSiblingsExist'                    => ->(b, *_a) { b.bc_siblings_exist? },
         # The session's partition of the storage registries — IndexedDB's, which every realm and worker of it is an agent
         # of, and Cache Storage's (idb_databases.rs, cache_storage.rs).
-        '__csimSessionPartition'     => ->(b, *_a) { b.session_partition },
+        'sessionPartition'                   => ->(b, *_a) { b.session_partition },
         # …and the space the window's environment ids are minted in (Browser#client_space).
-        '__csimClientSpace'          => ->(b, *_a) { b.client_space },
+        'clientSpace'                        => ->(b, *_a) { b.client_space },
         # (…this window's page set closing by its script, its close a task of its own)
-        '__csimWindowClose'          => ->(b, *_a) { b.script_close; nil },
+        'windowClose'                        => ->(b, *_a) { b.script_close; nil },
         # a[3] is the CREATING realm (the worker dies when it is discarded); a[4] that context's
         # CURRENT controller handle, which a DEDICATED worker inherits rather than scope-matching
         # its own — often opaque (blob:/data:) — script URL. 0 when the creator is uncontrolled.
-        '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i, script_type: a[5], name: a[6].to_s, cluster_key: a[7], isolated: a[8] == true, at: a[9], epoch_at: a[10], shift: a[11], travel: a[12], credentials: a[13], secure: a[14] == true) },
+        'workerSpawn'                        => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i, script_type: a[5], name: a[6].to_s, cluster_key: a[7], isolated: a[8] == true, at: a[9], epoch_at: a[10], shift: a[11], travel: a[12], credentials: a[13], secure: a[14] == true) },
         # A register(), update() or unregister(), scheduled as a job at its scope (see sw_schedule_job), and the job run, the task
         # queued for it — and the registration's updateViaCache mode, REGISTRATION-wide state (a frame's
         # registration object must see the mode the top window set). (…each of the storage key whose top-level site the
         # last argument is, the caller's: sw_registry.rs)
-        '__csim_swScheduleJob'         => ->(b, *a) { b.sw_schedule_job(*a.first(11)) },
-        '__csim_swRunJob'              => ->(b, *a) { b.sw_run_job(a[0]); nil },
-        '__csim_swScopeUpdateViaCache' => ->(b, *a) { b.sw_scope_update_via_cache(a[0], a[1].to_s) },
-        '__csim_swNoteImport'          => ->(b, *a) { b.sw_note_import(a[0].to_i, a[1], a[2]) },
-        '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
+        'swScheduleJob'                      => ->(b, *a) { b.sw_schedule_job(*a.first(11)) },
+        'swRunJob'                           => ->(b, *a) { b.sw_run_job(a[0]); nil },
+        'swScopeUpdateViaCache'              => ->(b, *a) { b.sw_scope_update_via_cache(a[0], a[1].to_s) },
+        'swNoteImport'                       => ->(b, *a) { b.sw_note_import(a[0].to_i, a[1], a[2]) },
+        'workerPostToWorker'                 => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client, or a service worker → the SW's `message` event (source = the sender).
-        '__csim_serviceWorkerPostMessage' => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3], a[4].to_i); nil },
+        'serviceWorkerPostMessage'           => ->(b, *a) { b.service_worker_post_message(a[0], a[1], a[2], a[3], a[4].to_i); nil },
         # Cross-isolate MessagePort channels (a window or frame realm's side): the ends its ports take and give up, and
         # what they post.
-        '__csimClientPortEndHere'  => ->(b, *a) { b.port_end_here(a[0], [:realm, a[1].to_i]); nil },
-        '__csimClientPortEndGone'  => ->(b, *a) { b.port_end_gone(a[0], a[1], [:realm, a[2].to_i]); nil },
-        '__csimClientPortEndClosed' => ->(b, *a) { b.port_end_closed(a[0]); nil },
-        '__csimClientPortRedeliver' => ->(b, *a) { b.port_redeliver(a[0], a[1]); nil },
-        '__csimClientPortPost'     => ->(b, *a) { b.port_post(a[0], a[1]) == true },
+        'clientPortEndHere'                  => ->(b, *a) { b.port_end_here(a[0], [:realm, a[1].to_i]); nil },
+        'clientPortEndGone'                  => ->(b, *a) { b.port_end_gone(a[0], a[1], [:realm, a[2].to_i]); nil },
+        'clientPortEndClosed'                => ->(b, *a) { b.port_end_closed(a[0]); nil },
+        'clientPortRedeliver'                => ->(b, *a) { b.port_redeliver(a[0], a[1]); nil },
+        'clientPortPost'                     => ->(b, *a) { b.port_post(a[0], a[1]) == true },
         # The focus chain moved into this realm's browsing context (a focus() commit, or an
         # <iframe> focused in its container, which hands focus to the nested context).
-        '__csimFocusChanged'       => ->(b, *_) { b.focus_changed; nil },
+        'focusChanged'                       => ->(b, *_) { b.focus_changed; nil },
         # This realm is a service-worker client: reported at document load and again whenever
         # control is installed, by the realm, because only it knows its own URL, frame type and
         # controller. `a[3]` is the controlling worker's handle, 0 when uncontrolled.
-        '__csimNoteClient' => ->(b, *a) { b.sw_note_client(a[0], a[1], a[2], a[3], a[4], site: a[5].to_s); nil },
+        'noteClient'                         => ->(b, *a) { b.sw_note_client(a[0], a[1], a[2], a[3], a[4], site: a[5].to_s); nil },
         # A worker client's controller changed (claim adoption inside the worker isolate) —
         # update the HOST-owned record (a worker must not take the realm-style report path).
-        '__csim_workerNoteController' => ->(b, *a) { b.sw_note_worker_controller(a[0], a[1]); nil },
+        'workerNoteController'               => ->(b, *a) { b.sw_note_worker_controller(a[0], a[1]); nil },
         # A controlled worker's importScripts, through its SW's fetch event (synchronous
         # on the calling worker's thread — sw_import_script_fetch).
-        '__csim_swImportFetch' => ->(b, *a) { b.sw_import_script_fetch(a[0], a[1], a[2]) },
+        'swImportFetch'                      => ->(b, *a) { b.sw_import_script_fetch(a[0], a[1], a[2]) },
         # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
         # is gone (client falls back to the network).
-        '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2], a[3]) },
+        'serviceWorkerControllerFetch'       => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2], a[3]) },
         # …a synchronous request's (a sync XHR, a[3] its `timeout`), its answer awaited in place: the wire JSON, or nil for
         # the network.
-        '__csim_serviceWorkerSyncFetch'       => ->(b, *a) { b.service_worker_sync_fetch(a[0], a[1], a[2], a[3].to_i) },
+        'serviceWorkerSyncFetch'             => ->(b, *a) { b.service_worker_sync_fetch(a[0], a[1], a[2], a[3].to_i) },
         # A controlled client cancelled a streaming respondWith body → cancel the SW's source stream
         # (routed to the worker that owns this [realm, fetch] stream). See sw_stream_cancel.
-        '__csim_swStreamCancel'               => ->(b, *a) { b.sw_stream_cancel(a[0], a[1]); nil },
+        'swStreamCancel'                     => ->(b, *a) { b.sw_stream_cancel(a[0], a[1]); nil },
         # A registration's versions `[installing, waiting, active]` (each a worker's handle or null) — what every realm's
         # registration objects read — and a worker's `[script URL, type, state, registration]`.
-        '__csim_swVersions'           => ->(b, *a) { b.sw_versions(a[0]) },
-        '__csim_swWorker'             => ->(b, *a) { b.sw_worker(a[0]) },
+        'swVersions'                         => ->(b, *a) { b.sw_versions(a[0]) },
+        'swWorker'                           => ->(b, *a) { b.sw_worker(a[0]) },
         # A version's next lifecycle step, the task the host queued for it (see sw_step).
-        '__csim_swStep'               => ->(b, *a) { b.sw_step(a[0]); nil },
+        'swStep'                             => ->(b, *a) { b.sw_step(a[0]); nil },
         # The worker serving an EXACT scope (0 if none) — a service worker's own registration is live while it is one of
         # its versions.
-        '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0], a[1].to_s) },
+        'swActiveHandleForScope'             => ->(b, *a) { b.sw_active_handle_for_scope(a[0], a[1].to_s) },
         # The registration map as a client of an origin reads it — `[id, scope]` each, in registration order — the
         # registration a URL matches, and the one at a scope (see sw_registrations_of).
-        '__csim_swRegistrations'        => ->(b, *a) { b.sw_registrations_of(a[0], a[1].to_s) },
-        '__csim_swMatchRegistration'    => ->(b, *a) { b.sw_match_registration(a[0], a[1], a[2].to_s) },
-        '__csim_swRegisteredAt'         => ->(b, *a) { b.sw_registered_at(a[0], a[1].to_s) },
+        'swRegistrations'                    => ->(b, *a) { b.sw_registrations_of(a[0], a[1].to_s) },
+        'swMatchRegistration'                => ->(b, *a) { b.sw_match_registration(a[0], a[1], a[2].to_s) },
+        'swRegisteredAt'                     => ->(b, *a) { b.sw_registered_at(a[0], a[1].to_s) },
         # Navigation Preload state (NavigationPreloadManager), keyed by the registration's scope —
         # reached identically from the client's registration and the worker's own. Get returns
         # {enabled, headerValue}; set leaves a nil field as-is.
-        '__csim_swNavPreloadState'    => ->(b, *a) { b.nav_preload_state(a[0], a[1].to_s) },
-        '__csim_swNavPreloadSet'      => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2], a[3].to_s); nil },
+        'swNavPreloadState'                  => ->(b, *a) { b.nav_preload_state(a[0], a[1].to_s) },
+        'swNavPreloadSet'                    => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2], a[3].to_s); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
-        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], defer_ok: !!a[4], dest: a[5] || 'iframe', container_realm: a[6], referrer_policy: a[7], initiator_realm: a[8], sandbox: [a[9]], user_activated: a[10] == true, link_policy: a[11], replaces_realm: a[12]) },
-        '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
+        'frameNavigationFetch'               => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], defer_ok: !!a[4], dest: a[5] || 'iframe', container_realm: a[6], referrer_policy: a[7], initiator_realm: a[8], sandbox: [a[9]], user_activated: a[10] == true, link_policy: a[11], replaces_realm: a[12]) },
+        'workerTerminate'                    => ->(b, *a) { b.worker_terminate(a[0]); nil },
         # The font FILES native text metrics read (font.rs): a family's system face, as fontconfig resolves it;
         # an `@font-face` url's, fetched (WOFF-decoded, cached) with the fetch's facts for its Resource Timing
         # entry; the face installed under a `local()` name; a FontFace's own bytes — nil where there is none.
-        '__csim_fontFile'            => ->(b, *a) { b.font_file(a[0], a[1]) },
-        '__csim_webFontFetch'        => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i, a[2], a[3]) },
-        '__csim_localFontFile'       => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
-        '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1].to_i, a[2], a[3]) },
-        '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },
-        '__csim_takeWorkerRt'        => ->(b, *a) { b.take_worker_rt },
-        '__csim_fontFileFromBytes'   => ->(b, *a) { b.font_file_from_bytes(a[0]) },
-        '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], a[2], realm: a[1], referrer: a[3]) },
-        '__csim_imageLoadStart'      => ->(b, *a) { b.image_load_start(a[0], a[2], realm: a[1]) },
-        '__csimBlobWindow'           => ->(b, *_a) { b.blob_window },
-        '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0], a[1]); nil },
-        '__csim_partitionBlob'       => ->(b, *a) { b.partition_blob(a[0], a[1]) },
-        '__csim_blobShared'          => ->(b, *_a) { b.blob_shared? },
+        'fontFile'                           => ->(b, *a) { b.font_file(a[0], a[1]) },
+        'webFontFetch'                       => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i, a[2], a[3]) },
+        'localFontFile'                      => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
+        'resourceTimingFetch'                => ->(b, *a) { b.resource_timing_fetch(a[0], a[1].to_i, a[2], a[3]) },
+        'takeModuleRt'                       => ->(b, *a) { b.take_module_rt },
+        'takeWorkerRt'                       => ->(b, *a) { b.take_worker_rt },
+        'fontFileFromBytes'                  => ->(b, *a) { b.font_file_from_bytes(a[0]) },
+        'loadImage'                          => ->(b, *a) { b.load_image(a[0], a[2], realm: a[1], referrer: a[3]) },
+        'imageLoadStart'                     => ->(b, *a) { b.image_load_start(a[0], a[2], realm: a[1]) },
+        'blobWindow'                         => ->(b, *_a) { b.blob_window },
+        'blobUnregister'                     => ->(b, *a) { b.blob_unregister(a[0], a[1]); nil },
+        'partitionBlob'                      => ->(b, *a) { b.partition_blob(a[0], a[1]) },
+        'blobShared'                         => ->(b, *_a) { b.blob_shared? },
         # Any non-timer async channel (worker / SSE / hijacked fetch / window
         # message / websocket) still in flight — the WPT runner's drain consults
         # this so it doesn't bail before an async message (e.g. a freshly-spawned
         # worker's first postMessage) has had a chance to land.
-        '__csim_asyncIoPending'      => ->(b, *_a) { b.async_io_pending? },
-        '__csim_transferStash'       => ->(b, *a) { b.transfer_buffer_stash(a[0]) },
-        '__csim_transferFetch'       => ->(b, *a) { b.transfer_buffer_fetch(a[0]) },
+        'asyncIoPending'                     => ->(b, *_a) { b.async_io_pending? },
+        'transferStash'                      => ->(b, *a) { b.transfer_buffer_stash(a[0]) },
+        'transferFetch'                      => ->(b, *a) { b.transfer_buffer_fetch(a[0]) },
         # Zero-copy postMessage transfer-token bookkeeping (see Browser#drop_pending_transfers).
-        '__csim_transferIssued'      => ->(b, *a) { b.transfer_token_issued(a[0]); nil },
-        '__csim_moduleIssued'        => ->(b, *a) { b.module_token_issued(a[0]); nil },
+        'transferIssued'                     => ->(b, *a) { b.transfer_token_issued(a[0]); nil },
+        'moduleIssued'                       => ->(b, *a) { b.module_token_issued(a[0]); nil },
         # Universal-server context (WPT runner)? Gates cross-origin eager frame
         # building: only there is a cross-origin iframe's content served locally,
         # so an ordinary app leaves cross-origin frames lazy (= baseline) and never
         # eager-@app.calls a foreign URL (side effects: extra visit / log row).
-        '__csim_allHostsLocal'       => ->(b, *a) { b.send(:all_hosts_local?) },
-        '__csim_videoBytes'          => ->(b, *a) { b.video_bytes(a[0], a[2], realm: a[1]) },
+        'allHostsLocal'                      => ->(b, *a) { b.send(:all_hosts_local?) },
+        'videoBytes'                         => ->(b, *a) { b.video_bytes(a[0], a[2], realm: a[1]) },
         # The driver's WebAuthn commands, as a test's `with_virtual_authenticator` reaches them from its page.
-        '__csimWebauthnAddVirtualAuthenticator'    => ->(b, *a) { b.webauthn.add_virtual_authenticator(a[0]) },
-        '__csimWebauthnRemoveVirtualAuthenticator' => ->(b, *a) { b.webauthn.remove_virtual_authenticator(a[0]); nil },
-        '__csimWebauthnAddCredential'              => ->(b, *a) { b.webauthn.add_credential(a[0], a[1]); nil },
-        '__csimWebauthnRemoveCredential'           => ->(b, *a) { b.webauthn.remove_credential(a[0], a[1]); nil },
-        '__csimWebauthnGetCredentials'             => ->(b, *a) { b.webauthn.get_credentials(a[0]) },
-        '__csimWebauthnSetUserVerified'            => ->(b, *a) { b.webauthn.set_user_verified(a[0], a[1]); nil }
+        'webauthnAddVirtualAuthenticator'    => ->(b, *a) { b.webauthn.add_virtual_authenticator(a[0]) },
+        'webauthnRemoveVirtualAuthenticator' => ->(b, *a) { b.webauthn.remove_virtual_authenticator(a[0]); nil },
+        'webauthnAddCredential'              => ->(b, *a) { b.webauthn.add_credential(a[0], a[1]); nil },
+        'webauthnRemoveCredential'           => ->(b, *a) { b.webauthn.remove_credential(a[0], a[1]); nil },
+        'webauthnGetCredentials'             => ->(b, *a) { b.webauthn.get_credentials(a[0]) },
+        'webauthnSetUserVerified'            => ->(b, *a) { b.webauthn.set_user_verified(a[0], a[1]); nil }
       }.freeze
 
       def self.safe_call

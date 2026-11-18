@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
-# A realm's engine ops are no property of its global (engine.js): a page — an app's — reaches none of them. A spec that
-# reads the engine's own state off a page (`__dom.nidOf(node)`, `__dom.layoutMeasureCounts()`) has the realms made under
-# `EngineGlobal.within { … }` name them `__dom`, and their `RustyRacer` rusty_racer's whole host namespace besides
-# (`contextGlobal`: dom.rs `ENGINE_GLOBAL`, read as each realm is made, engine.js `__csimTakeEngine`); an example or a
-# group tagged `engine_global: true` runs whole under it.
+# A realm's engine ops are no property of its global (engine.js), nor is its host object — rusty_racer's namespace, the
+# host's procs and the steps the host calls: a page — an app's — reaches none of them. A spec that reads the engine's
+# own state off a page (`__dom.nidOf(node)`, `__dom.layoutMeasureCounts()`) has the realms made under
+# `EngineGlobal.within { … }` name them `__dom`, and their `RustyRacer` the namespace's functions (`contextGlobal`), the
+# steps (`steps`) and the host object (`host`) besides (dom.rs `ENGINE_GLOBAL`, read as each realm is made, engine.js
+# `__csimTakeEngine`); an example or a group tagged `engine_global: true` runs whole under it.
 module EngineGlobal
   @depth = 0
 

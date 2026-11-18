@@ -1,13 +1,15 @@
 require_relative 'spec_helper'
 require 'zlib'
 require_relative 'support/session_teardown'
+require_relative 'support/engine_global'
 
 # A `<video src>` served over http reaches the decoder as its raw bytes: the host fetch
-# (`__csim_videoBytes`) hands JS a BINARY String, which crosses as a Uint8Array. The fetched
-# body is not always BINARY-tagged on the Ruby side — undoing a Content-Encoding tags it UTF-8,
-# and so may an app — and a UTF-8-tagged String crosses as TEXT, where bytes that are not
-# valid UTF-8 raise. Both shapes must arrive as the same five bytes.
-RSpec.describe 'media bytes across the host boundary' do
+# (`videoBytes`, on the realm's host object: `RustyRacer.host` in a spec's realm) hands JS a
+# BINARY String, which crosses as a Uint8Array. The fetched body is not always BINARY-tagged on
+# the Ruby side — undoing a Content-Encoding tags it UTF-8, and so may an app — and a
+# UTF-8-tagged String crosses as TEXT, where bytes that are not valid UTF-8 raise. Both shapes
+# must arrive as the same five bytes.
+RSpec.describe 'media bytes across the host boundary', :engine_global do
   let(:bytes) { "\x00\xff\x80ab".b }
 
   let(:app) {
@@ -30,7 +32,7 @@ RSpec.describe 'media bytes across the host boundary' do
     it "carries #{path} as a Uint8Array of the body's bytes" do
       got = session.evaluate_script(<<~JS)
         (() => {
-          const r = __csim_videoBytes(new URL('#{path}', location.href).href);
+          const r = RustyRacer.host.videoBytes(new URL('#{path}', location.href).href);
           return r && r.bytes instanceof Uint8Array ? Array.from(r.bytes) : null;
         })()
       JS

@@ -233,14 +233,14 @@ RSpec.describe 'User action events', engine_global: true do
   # A drop from outside the page: its effects "uninitialized" (HTML's start for any drag) and its dropEffect set per
   # event — "copy" over the page, the drag operation at the drop; getAsFile() a new File over the pick's data, read
   # only when read; a format given twice the last one, as setData has it.
-  it "runs a drop's drag operation, and gives its files unread" do
+  it "runs a drop's drag operation, and gives its files unread", :engine_global do
     session.visit '/'
     file = File.expand_path(__FILE__)
     session.execute_script(<<~JS)
       window.__drop = [];
       window.__reads = 0;
-      const read = globalThis.__csimReadFilePick;
-      globalThis.__csimReadFilePick = function () { __reads++; return read.apply(this, arguments); };
+      const host = RustyRacer.host, read = host.readFilePick;
+      host.readFilePick = function () { __reads++; return read.apply(this, arguments); };
       const z = document.getElementById('z');
       for (const type of ['dragenter', 'dragover', 'drop']) {
         z.addEventListener(type, (e) => {
