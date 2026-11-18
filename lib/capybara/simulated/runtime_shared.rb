@@ -140,9 +140,6 @@ module Capybara
         'swWorker'                     => ->(b, *a) { b.sw_worker(a[0]) },
         # A version's next lifecycle step, the task the host queued for it (see sw_step).
         'swStep'                       => ->(b, *a) { b.sw_step(a[0]); nil },
-        # The worker serving an EXACT scope (0 if none) — a service worker's own registration is live while it is one of
-        # its versions.
-        'swActiveHandleForScope'       => ->(b, *a) { b.sw_active_handle_for_scope(a[0], a[1].to_s) },
         # The registration map as a client of an origin reads it — `[id, scope]` each, in registration order — the
         # registration a URL matches, and the one at a scope (see sw_registrations_of).
         'swRegistrations'              => ->(b, *a) { b.sw_registrations_of(a[0], a[1].to_s) },

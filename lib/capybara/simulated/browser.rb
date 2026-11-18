@@ -6071,17 +6071,12 @@ module Capybara
         sw_job_event({try_activate: true}) if Native.sw_fetch_event(@sw_partition, handle.to_i, realm, fid, false)
       end
 
-      # The active worker handle at an EXACT scope (0 if none) — see swActiveHandleForScope.
-      def sw_active_handle_for_scope(scope, site) = sw_serving(site)[scope.to_s].to_i
-
       # The registrations the session's map holds (sw_registry.rs), `[scope, registered, activating, serving, id, top-level
-      # site]` in the order made — and the worker serving each scope of the storage keys of top-level site `site` that has
-      # one, and the scope the worker `handle` serves or activates at.
+      # site]` in the order made — and the scope the worker `handle` serves or activates at.
       private def sw_regs = Native.sw_registrations(@sw_partition)
       # (…and whether there is any: none, and no navigation has a registration to match — what it asks before working
       # out the storage key it would match by, rule 3)
       private def sw_registered? = Native.sw_any(@sw_partition)
-      private def sw_serving(site) = sw_regs.each_with_object({}) {|(scope, _, _, serving, _, s), out| out[scope] = serving if serving && s == site }
       private def sw_scope_of(handle) = sw_regs.find {|_, _, activating, serving| serving == handle || activating == handle }&.first
 
       # Whether a service worker's response `r` (its wire form) may answer a request in `mode` with `redirect` (Fetch
@@ -10048,15 +10043,15 @@ module Capybara
               # One of this worker's WebSockets: its event delivered here, as the window's are at settle — a handshake
               # cookie stored in the jar, not handed to the script.
               ev = msg[:event]
-            elsif msg.is_a?(Hash) && msg[:kind] == 'network'
-              # The network the browser emulates, changed (#online=, #slow_uploads=).
-              rt.call('setOnline', msg[:online])
-              rt.call('slowUploads', msg[:held])
               if ev[:type] == '__setcookie'
                 store_set_cookies({'set-cookie' => ev[:cookies]}, ev[:url], ev[:cookie_context])
               else
                 rt.call('deliverWebSocketEvents', [ev])
               end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'network'
+              # The network the browser emulates, changed (#online=, #slow_uploads=).
+              rt.call('setOnline', msg[:online])
+              rt.call('slowUploads', msg[:held])
             elsif msg.is_a?(Hash) && msg[:kind] == 'es'
               # One of this worker's EventSources: its event delivered here, as the window's are at settle.
               rt.call('deliverEventSourceEvents', [msg[:event]])

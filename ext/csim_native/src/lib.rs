@@ -243,8 +243,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // Define RustyRacer::Isolate / Context / Snapshot / … exactly as the standalone
     // gem would — the engine code is the same, only the cdylib owner differs.
     rusty_racer::install_classes(ruby)?;
-    // Install the native DOM (globalThis.__dom + its templates) into every realm,
-    // main and frames alike, via the engine's DOM-agnostic seam.
+    // Install the native DOM (its ops, handed to the realm's bindings + its templates)
+    // into every realm, main and frames alike, via the engine's DOM-agnostic seam.
     rusty_racer::set_realm_init_hook(dom::install);
     // Build the Unicode class tables now: a regex-syntax feature missing at build time has to surface HERE, at
     // `require`, where magnus turns the panic into a Ruby-level failure that names it — not later on the

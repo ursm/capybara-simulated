@@ -1341,17 +1341,13 @@ module Capybara
         u.empty? || u.start_with?('about:')
       end
 
-      # Bring a freshly-created realm context up to a runnable bridge, shared by the
-      # frame and window realm constructors. Re-evaling the snapshot source would
-      # redefine snapshot globals (e.g. the `scrollX` accessor) and throw, so only
-      # eval it on a bare no-snapshot dev ctx where the realm boots empty. The
+      # Bring a freshly-created realm context — made from the snapshot, its bindings in it already — up to a runnable
+      # bridge, shared by the frame and window realm constructors. The
       # replayed `runScriptCached` / `evalEsmEntry` close over the MAIN
       # ctx they were first attached to, so a realm script routing through them
       # (≥64KB, or `type=module`) would run against the main
       # document — rebind realm-executing variants on top, then reseed per-realm JS.
       def seed_realm_bridge(realm, group = nil)
-        has_bridge = realm.eval("typeof HTMLElement === 'function'")
-        realm.eval_void(RuntimeShared.snapshot_src) unless has_bridge
         attach_run_script_with_cache(realm)
         attach_realm_esm_entry(realm)
         reseed_realm_js(realm, group)
@@ -2344,11 +2340,11 @@ module Capybara
         # loop already polls `worker_pending?` for worker thread activity.
         c.attach('@setTimersActive', ->(_flag) { nil })
         # The worker's scope, of its KIND — 'dedicated', 'shared' or 'service' — and name (worker-globals.js).
-        network_conditions(c, browser)
         # (…cross-origin isolated as the context that made it is — a service worker by no document's headers: not)
         V8Runtime.engine_call(c, 'installWorkerScope', kind, name.to_s, isolated, secure)
         # …and the user agent a test set, which its navigator answers as its requests send it.
         V8Runtime.engine_call(c, 'setUserAgent', browser.default_user_agent) if browser.default_user_agent
+        network_conditions(c, browser)
         WorkerRuntime.new(c)
       end
     end

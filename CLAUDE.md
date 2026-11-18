@@ -225,7 +225,7 @@ still let same-origin code read the old Window's: realm 0's number and global
 are the next document's, so the proxy answers as a discarded browsing context's
 (`closed`, no `parent` / `top` / `opener`, `postMessage`, `close()` and its
 Location's navigations doing nothing) and reaches nothing of it
-(`__csimEvictWindowProxy`'s successor, platform-globals.js); and a window
+(`realmHooks.evictWindowProxy`'s successor, platform-globals.js); and a window
 `window.open` made in its opener's isolate — or a frame, whose initial about:blank
 was read while its `src`'s navigation was under way — keeps its Window when its initial
 about:blank navigates to a document of its origin, as HTML says, but keeps its
@@ -240,7 +240,7 @@ the initial about:blank of a frame with no `src`, which loaded as it was inserte
 is not kept for a later navigation's document, where HTML keeps it — Chrome and
 Firefox make a new Window there too (measured 2026-11-01), and keeping it would
 give the common script-written frame the Document gap above (bridge.entry.js
-`__csimFrameWindow`); and a service
+`realmHooks.frameWindow`); and a service
 worker runs on the event loop of the Browser that hosts the session's
 (the primary window's, `Browser#sw_host`), so its clock is that window's
 virtual clock — another window's controlled fetch, answered there, holds no
