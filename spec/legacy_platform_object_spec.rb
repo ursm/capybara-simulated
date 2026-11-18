@@ -253,6 +253,15 @@ RSpec.describe 'legacy platform objects' do
     expect(r).to eq(['[object HTMLImageElement]'] * 3)
   end
 
+  # A CSS declaration's implementation is no property a page can name (it was `Symbol.for(…)`'s).
+  it "keeps a declaration's implementation out of reach" do
+    r = probe(<<~JS)
+      const key = Symbol.for('capybara-simulated.declarationImplementation'), style = document.body.style;
+      return [style[key] === undefined, key in style, typeof style.getPropertyValue('color')];
+    JS
+    expect(r).to eq([true, false, 'string'])
+  end
+
   # A cross-origin frame's index is its child navigable's WindowProxy, or nothing — never a property its page defined.
   context 'with a cross-origin frame' do
     let(:app) {
