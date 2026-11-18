@@ -275,9 +275,13 @@ RSpec.describe 'legacy platform objects' do
   it "keeps a declaration's implementation out of reach" do
     r = probe(<<~JS)
       const key = Symbol.for('capybara-simulated.declarationImplementation'), style = document.body.style;
-      return [style[key] === undefined, key in style, typeof style.getPropertyValue('color')];
+      const { proxy, revoke } = Proxy.revocable(style, {});
+      revoke();
+      let revoked;
+      try { CSSStyleDeclaration.prototype.getPropertyValue.call(proxy, 'color'); } catch (e) { revoked = e.message; }
+      return [style[key] === undefined, key in style, typeof style.getPropertyValue('color'), revoked];
     JS
-    expect(r).to eq([true, false, 'string'])
+    expect(r).to eq([true, false, 'string', 'Illegal invocation'])
   end
 
   # A cross-origin frame's index is its child navigable's WindowProxy, or nothing — never a property its page defined.
