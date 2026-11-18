@@ -3927,7 +3927,7 @@ module Capybara
       # (…`answer` a controlling service worker's, which its entry is made of where it answered)
       def note_module_fetch(url, started, answer: nil)
         meta = Thread.current[:csim_asset_meta] unless answer
-        # (…its fetch's own times where it was answered by one made as its script was prepared: `asset_request`'s "once")
+        # (…its fetch's own times where its document's module map answered it: `asset_request`)
         times, Thread.current[:csim_asset_times] = Thread.current[:csim_asset_times], nil
         return unless meta || answer
 
@@ -4125,16 +4125,17 @@ module Capybara
       # …a page's request of one — its client realm `realm`'s, as the engine's `plan` of it says, its destination too;
       # `referrer` where it names one of its own (an `@import`'s, its importing sheet's location) — answered as
       # `external_asset_response` answers it.
-      def planned_external_asset(url, document, realm, plan, referrer = nil)
+      # (…a module's — a modulepreload's, `module` — its document's module map's: `asset_request`)
+      def planned_external_asset(url, document, realm, plan, referrer = nil, module_map: false)
         mode, credentials, policy, dest = request_of_plan(plan)
         referrer = nil if referrer.to_s.empty?
-        external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials)
+        external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
       end
       # …answered as [its text, nil where the load failed; the facts of the response it came from (`resource_timing_meta`,
       # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of
       # one URL two responses — or nil where the URL resolves to none.
-      def external_asset_response(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin')
-        request = asset_request(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials)
+      def external_asset_response(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin', module_map: false)
+        request = asset_request(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
         return request unless request.is_a?(AssetRequest)
 
         asset_answer(request, asset_fetch(request))
@@ -4142,9 +4143,11 @@ module Capybara
       # What an asset's request comes to before any fetch (`external_asset_response`): its answer from memory — the
       # document's memo of it, else the process-wide cache's — nil where its URL resolves to none, or the request to fetch
       # (`asset_fetch`), its client `pinned` where it is fetched off the main thread.
-      AssetRequest = Struct.new(:key, :memo, :memo_key, :shared_key, :client, :realm, :policy, :referrer, :dest, :mode, :credentials)
+      AssetRequest = Struct.new(:key, :memo, :memo_key, :shared_key, :client, :realm, :policy, :referrer, :dest, :mode, :credentials, :module_map)
       # (…`joins` false: none of a fetch under way taken, its asker one to take it itself: `script_fetch_start`)
-      private def asset_request(url, document, realm, policy, referrer:, dest:, mode:, credentials:, pinned: false, joins: true)
+      # (…`module_map`: a module script's — its graph's, a modulepreload's — which its document's module map answers, filled
+      # by the first fetch of it that loaded, whatever its response's freshness: HTML "fetch a single module script")
+      private def asset_request(url, document, realm, policy, referrer:, dest:, mode:, credentials:, pinned: false, joins: true, module_map: false)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4167,14 +4170,12 @@ module Capybara
         # fetch it was, for the sheet it obtains (sheet_fetch.rs `asset`).
         # (A body served from memory carries the facts of the response it came from, for whoever files its Resource
         # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
-        # (…and, first, the answer a module script's fetch brought as it was prepared, for its graph's fetch of it alone, whatever
-        # its freshness: `script_fetch_start`)
         memo = document && @page_asset_src&.[](document.to_i)
-        if memo && (once = memo.delete("once #{memo_key}"))
+        if module_map && memo && (entry = memo["module #{memo_key}"])
           # (…its fetch's real start and end with it, which its Resource Timing entry reports: `note_module_fetch`)
-          Thread.current[:csim_asset_meta]  = once[1]
-          Thread.current[:csim_asset_times] = once[3]
-          return once.take(3)
+          Thread.current[:csim_asset_meta]  = entry[1]
+          Thread.current[:csim_asset_times] = entry[3]
+          return entry.take(3)
         end
         if memo && (e = memo[memo_key])
           Thread.current[:csim_asset_meta] = e[1]
@@ -4200,7 +4201,7 @@ module Capybara
           end
         end
         client = pinned_client(client) if pinned
-        AssetRequest.new(key, memo, memo_key, shared_key, client, realm.to_i, policy, referrer, dest, mode, credentials)
+        AssetRequest.new(key, memo, memo_key, shared_key, client, realm.to_i, policy, referrer, dest, mode, credentials, module_map)
       end
       # …its fetch, on whichever thread: `durable_source`'s spec-compliant fetch and header-driven freshness (RFC 9111
       # max-age → absolute deadline), with what the fetch left of the response beside the body.
@@ -4216,7 +4217,13 @@ module Capybara
       private def asset_answer(request, fetched)
         meta = Thread.current[:csim_asset_meta] = fetched[:meta]
         body = fetched[:body]
-        return [nil, meta, nil] unless body
+        answered = body ? asset_kept(request, fetched, meta, body) : [nil, meta, nil]
+        # (…a module's its document's module map's, a failed one's none: Chrome and Firefox fetch again for a module script
+        # what a modulepreload failed to load, csim-bench r13 `rv2_mpflip`)
+        request.memo["module #{request.memo_key}"] = [*answered, fetched[:times]] if body && request.module_map && request.memo
+        answered
+      end
+      private def asset_kept(request, fetched, meta, body)
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
         # arrives BINARY-tagged (see `RuntimeShared.utf8_text`). (…its bytes kept beside it where the text is not them:
         # `rack_fetch_body`)
@@ -8888,8 +8895,8 @@ module Capybara
       # response brings stored as it lands, when Fetch processes its headers in this model — `script_fetch_take`)
       # (…the time its server took is its sleeps — `SleepHook` counts them in its `:csim_server_slept` rather than moving the
       # clock — which the event loop lands it that far after it began by)
-      # (…a module script's graph's entry's, `graph_entry`, its answer kept for the graph's fetch of it — as the module map's
-      # entry its fetch fills — answered true for it, its destination its module type's as that fetch's: V8Runtime#json_module?)
+      # (…a module script's graph's entry's, `graph_entry`, its answer its document's module map's, which the graph's fetch
+      # of it takes — answered true for it, its destination its module type's as that fetch's: V8Runtime#json_module?)
       # (…and one the document's same request under way already shares that one's slot, as the graph's fetch, or a
       # modulepreload's, waits for it: `asset_request`)
       def script_fetch_start(url, realm, plan, document, referrer, graph_entry = false)
@@ -8898,7 +8905,7 @@ module Capybara
           mode, credentials, policy, dest = request_of_plan(plan)
           dest = 'json' if graph_entry && @runtime.json_module?(url)
           request = asset_request(url, document, realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, dest: dest, mode: mode, credentials: credentials,
-                                                                pinned: true, joins: false)
+                                                                pinned: true, joins: false, module_map: graph_entry)
           return request unless request.is_a?(AssetRequest)
 
           # (…one under way of the same request for the same document: its slot shared, one fetch)
@@ -8911,10 +8918,7 @@ module Capybara
           work   = -> { asset_fetch(request) }
           answer = lambda {|fetched|
             answered = asset_answer(request, fetched)
-            next answered unless graph_entry
-
-            request.memo["once #{request.memo_key}"] = [*answered, fetched[:times]] if request.memo
-            true
+            graph_entry || answered
           }
         else
           mode, credentials, policy, dest, accept = request_of_plan(plan)

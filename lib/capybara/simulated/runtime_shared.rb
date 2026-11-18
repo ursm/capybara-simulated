@@ -28,7 +28,7 @@ module Capybara
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
         'rackFetch'                    => ->(b, *a) { b.rack_fetch_request(a[0], a[1]) },
-        'externalAsset'                => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4]) },
+        'externalAsset'                => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4], module_map: a[5] == true) },
         'subresourceFetch'             => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2]) },
         'assetDocumentStarted'         => ->(b, *_a) { b.asset_document_started },
         # fetch(…, {keepalive}) — eager detached-thread dispatch + one-shot result poll.

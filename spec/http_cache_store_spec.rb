@@ -260,12 +260,28 @@ RSpec.describe 'one fetch per asset per document' do
     expect(hits.values_at('/s.css', '/t.css')).to eq([2, 1])
   end
 
-  # …but a module's: its modulepreload and its script take the one fetch of it, as its module map's entry is one whatever
-  # its response's freshness (HTML "fetch a single module script"), the script's begun as it is prepared.
+  # …but a module's: its modulepreload and its script take the one fetch of it, whichever comes first, as its document's
+  # module map's entry is one whatever its response's freshness (HTML "fetch a single module script").
   it 'fetches a no-store one every time it is asked, a module once a document' do
     hits = Hash.new(0)
     visit_twice(hits, 'cache-control' => 'no-store')
     expect(hits['/s.css']).to be > 2
     expect(hits['/m.js']).to eq(2)
+  end
+
+  it 'fetches a module and its modulepreload once a document, a script between them' do
+    hits = Hash.new(0)
+    app = ->(env) {
+      hits[env['PATH_INFO']] += 1
+      case env['PATH_INFO']
+      when '/m.js' then [200, {'content-type' => 'text/javascript', 'cache-control' => 'no-store'}, ['document.title += "m"']]
+      when '/b.js' then [200, {'content-type' => 'text/javascript'}, ['1']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><title>t</title><link rel="modulepreload" href="/m.js"><script src="/b.js"></script><script type="module" src="/m.js"></script><script type="module">import "/m.js"; document.title += "i"</script>']]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    expect(s).to have_title('tmi')
+    expect(hits['/m.js']).to eq(1)
   end
 end

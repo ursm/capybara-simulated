@@ -1975,7 +1975,7 @@ module Capybara
           dest = json_module?(url_s) ? 'json' : 'script'
           started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           src, meta = @browser.external_asset_response(url_s, asset_document_of(target), realm_key(target), options.policy, referrer: referrer, dest: dest, mode: 'cors',
-                                                                                                                       credentials: options.credentials)
+                                                                                                                       credentials: options.credentials, module_map: true)
           @browser.note_module_fetch(url_s, started) if src   # its Resource Timing entry ('script')
           content_type = meta&.dig('headers', 'content-type')
         end

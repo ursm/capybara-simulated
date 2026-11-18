@@ -608,7 +608,9 @@ fn modulepreload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Funct
     if crate::fetch_rules::fetch_route(&r.url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
         return link_from_network(scope, host, r, module_destination);
     }
-    let args = request_args(scope, r);
+    // (…its document's module map's entry, which a module script of the URL takes: browser.rb `asset_request`)
+    let mut args = request_args(scope, r).to_vec();
+    args.push(v8::Boolean::new(scope, true).into());
     let got = call(scope, host, H_ASSET, &args)?.map(|g| v8::Local::new(scope, g));
     let got = got.and_then(|g| v8::Local::<v8::Array>::try_from(g).ok());
     let mut at = [None; 3];
