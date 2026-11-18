@@ -2176,7 +2176,7 @@ function overloadsOf(iface, name, group) {
 // …and the switch that resolves it over `source` (`arguments`, or a constructor's `args`), `call(m)` the statement
 // that runs overload `m`: a count of arguments no overload takes a TypeError after `prefix` (Chrome's message).
 function overloadSwitch(iface, name, { cases, most, required }, source, checks, call, prefix) {
-  const lines = [`switch (Math.min(${source}.length, ${most})) {`];
+  const lines = [`switch (mathMin(${source}.length, ${most})) {`];
   // (…the counts one overload takes falling through to its one call)
   cases.forEach(([n, m], i) => {
     if (i + 1 < cases.length && cases[i + 1][1] === m) { lines.push(`  case ${n}:`); return; }
@@ -2446,7 +2446,7 @@ ${wrap(REFLECTION)}
 } from '../reflect.js';
 import { EventState, initEventSteps } from '../event-state.js';
 import {
-  objectDefineProperties, objectDefineProperty, objectGetOwnPropertyDescriptors, objectGetPrototypeOf, objectKeys,
+  mathMin, objectDefineProperties, objectDefineProperty, objectGetOwnPropertyDescriptors, objectGetPrototypeOf, objectKeys,
   objectSetPrototypeOf, reflectOwnKeys
 } from '../intrinsics.js';
 
