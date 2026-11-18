@@ -1621,7 +1621,7 @@ function generateInterface(def, options = {}) {
       } else if ((m.extAttrs || []).some((e) => e.name === 'Replaceable')) {
         // [Replaceable] (Web IDL §3.7.6): a write to the read-only attribute replaces it with a data property of the
         // object — a page's `innerWidth = 1024` keeps its own value, and the attribute is gone for it
-        out.push(`    set ${key}(v) { const self = ${self}; Object.defineProperty(self, '${m.name}', { __proto__: null, value: v, writable: true, enumerable: true, configurable: true }); }`);
+        out.push(`    set ${key}(v) { const self = ${self}; objectDefineProperty(self, '${m.name}', { __proto__: null, value: v, writable: true, enumerable: true, configurable: true }); }`);
       } else if ((m.extAttrs || []).some((e) => e.name === 'LegacyLenientSetter')) {
         // [LegacyLenientSetter] (Web IDL §3.4.2): a read-only attribute with a setter that does nothing — but check its
         // `this` — so a page's own assignment to it (an old polyfill's) is no error
@@ -1680,7 +1680,7 @@ function generateInterface(def, options = {}) {
           const o = interfaceOptions(d.name);
           return regular(membersOf(d, o.omit, o.omitMembers)).map((a) => a.name);
         });
-        if (inherited.length) preamble.push(`  const inheritedJSON = defaultJSONOf(Object.getPrototypeOf(iface.prototype), ${JSON.stringify(inherited)});`);
+        if (inherited.length) preamble.push(`  const inheritedJSON = defaultJSONOf(objectGetPrototypeOf(iface.prototype), ${JSON.stringify(inherited)});`);
         const attrs = regular(memberList);
         members.push('toJSON');
         const own = attrs.map((a) => {
@@ -1845,11 +1845,11 @@ function installInterface(def, { shell, body, statics, unforgeables, checks, uns
   else if (!shell && constructors.length && constructors[0].arguments.length) lines.unshift(constructorArguments(name, constructors[0]), '');
   if (global) {
     // (…each of no prototype: nothing a page put on Object.prototype is read off it as it defines them)
-    lines.push(`  const descriptors = Object.getOwnPropertyDescriptors(members);`);
-    lines.push(`  for (const key of Reflect.ownKeys(descriptors)) Object.setPrototypeOf(descriptors[key], null);`);
+    lines.push(`  const descriptors = objectGetOwnPropertyDescriptors(members);`);
+    lines.push(`  for (const key of reflectOwnKeys(descriptors)) objectSetPrototypeOf(descriptors[key], null);`);
     lines.push(`  return {`);
-    lines.push(`    names: Object.keys(descriptors),`);
-    lines.push(`    defineMembers: (global) => Object.defineProperties(global, descriptors),`);
+    lines.push(`    names: objectKeys(descriptors),`);
+    lines.push(`    defineMembers: (global) => objectDefineProperties(global, descriptors),`);
     lines.push(`    defineUnforgeables: ${unforgeables.length ? 'unforgeableMembers(Unforgeables.prototype)' : '() => {}'}`);
     lines.push(`  };`);
   } else if (unforgeables.length) {
@@ -2445,6 +2445,10 @@ import {
 ${wrap(REFLECTION)}
 } from '../reflect.js';
 import { EventState, initEventSteps } from '../event-state.js';
+import {
+  objectDefineProperties, objectDefineProperty, objectGetOwnPropertyDescriptors, objectGetPrototypeOf, objectKeys,
+  objectSetPrototypeOf, reflectOwnKeys
+} from '../intrinsics.js';
 
 ${Object.entries(REFLECT_ENUM_SETS).map(([name, keywords]) => `export const REFLECT_KEYWORDS_${name} = ${keywordTable(keywords)};`).join('\n')}
 
