@@ -252,8 +252,12 @@ impl Commit {
     // `made_again`); the entry the leaving document is at noted (a reload's none: its document is the entry's own); the
     // origin its document state is of kept; and the navigable's target name, but an opened window's, cleared where that
     // origin is not the one of the document it leaves (HTML "finalize a cross-document navigation").
+    // …the document it makes starting with the classic history API state its entry has once the step is applied — a
+    // replay's (`made_again`), none of another (HTML "update document for history step application": "restore the history
+    // object state"), taken by the host as it makes the document (`SessionHistory::start_with_state_of`).
     fn commit(&mut self, origin: Option<&str>) {
         let active = self.history.active(0);
+        self.history.start_with_state_of(None);
         if self.handling.replays() {
             let Some(id) = self.replayed() else { return };
             if let Handling::Traverse(step, _) = self.handling {
@@ -266,7 +270,8 @@ impl Commit {
             } else {
                 self.history.set_leaving(None);
             }
-            return self.made_again(id, origin);
+            self.made_again(id, origin);
+            return self.history.start_with_state_of(Some(id));
         }
         self.history.set_leaving(active);
         let initial = active.is_none();

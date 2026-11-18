@@ -384,6 +384,9 @@ struct Traversable {
     // How many same-document updates — pushState, replaceState, a fragment's — its navigables made (`update`): what a
     // traversal judges the history it began with by (`Kept`).
     same_document: u64,
+    // The classic history API state the next document of its top-level navigable starts with — a replay's, its entry's
+    // as the step left it (navigation_commit.rs `Commit::commit`) — until the host makes that document (`#take_starting_state`).
+    starting_state: Option<Arc<[u8]>>,
     // Whether it closed: its window's browsing context discarded, which no opener of another window is then
     // (navigables.rs `opener_now`).
     closed: bool,
@@ -1738,6 +1741,15 @@ impl SessionHistory {
             Arc::make_mut(&mut e.data).set_text(key, value);
         }
     }
+    // The next document of its top-level navigable made with entry `id`'s classic history API state — none where `id` is
+    // none — and #take_starting_state -> that state, taken as the host makes the document (nil for none).
+    pub(crate) fn start_with_state_of(&self, id: Option<u64>) {
+        let mut t = self.lock();
+        t.starting_state = id.and_then(|id| t.state.entry(id)).and_then(|e| e.data.state.clone());
+    }
+    fn take_starting_state(ruby: &magnus::Ruby, rb_self: &Self) -> Option<RString> {
+        rb_self.lock().starting_state.take().map(|s| ruby.str_from_slice(&s))
+    }
     // …and its classic history API state none (HTML "apply the history step": StructuredSerializeForStorage(null)).
     pub(crate) fn forget_state_of(&self, id: u64) {
         let mut guard = self.lock();
@@ -1786,6 +1798,7 @@ impl SessionHistory {
         t.passed.clear();
         t.forget_applying();
         t.leaving = None;
+        t.starting_state = None;
         t.navigations.clear();
         t.ongoing.clear();
         (t.closed, t.by_web_content, t.popup_sandbox) = (false, false, 0);
@@ -2045,6 +2058,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_singleton_method("applying?", function!(SessionHistory::is_applying, 0))?;
     class.define_method("rebuilt", method!(SessionHistory::rebuilt, 0))?;
     class.define_method("take_leaving", method!(SessionHistory::take_leaving, 0))?;
+    class.define_method("take_starting_state", method!(SessionHistory::take_starting_state, 0))?;
     class.define_method("commit_frame_navigation", method!(SessionHistory::commit_frame_navigation_for_ruby, 2))?;
     class.define_method("abandon_frame_navigation", method!(SessionHistory::abandon_frame_navigation, 2))?;
     class.define_method("begin_navigation", method!(SessionHistory::begin_navigation, 1))?;

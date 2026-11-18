@@ -343,8 +343,6 @@ module Capybara
         @idle_settle_polls            = 0
         @ticking                      = false
         @event_loop_running           = false
-        # The classic history API state the document a reload or traversal makes starts with (replay_history_entry).
-        @restoring_history_state      = nil
         @cors_preflight_cache         = Native.cors_preflight_cache_new
         @modal_handlers               = []
         # Per-test action trace. `@trace` is the live recorder; `reset!`
@@ -2334,12 +2332,12 @@ module Capybara
       # …and its top-level traversable, whose session history it is (session_history.rs): whether it closed, and what was
       # asked of it (the navigation it was opened for, its close).
       def traversable = @session_history
-      # The origin and base URL of the document that initiated the page's navigation to about:blank, which that document
-      # takes (HTML "determine the origin": a URL matching about:blank takes the initiator origin) as the window boots it
-      # — an opaque one none: a new opaque origin is what it would be otherwise.
-      # (…its URL that document's referrer)
-      def inherit_creator(origin:, base:, url: nil)
-        @creator = {origin: origin.to_s, base: base.to_s, url: url.to_s} unless origin.to_s.empty? || origin.to_s.start_with?('null')
+      # The document that initiated a navigation of the page to about:blank, as the document it makes takes it
+      # (`boot_response_into_ctx`'s `creator`): its origin (HTML "determine the origin": a URL matching about:blank takes
+      # the initiator origin) and its base URL ("about base URL") — none for an opaque one: a new opaque origin is what the
+      # document is of otherwise. (…its URL that document's referrer)
+      private def about_blank_creator(origin, base, url = nil)
+        {origin: origin.to_s, base: base.to_s, url: url.to_s} unless origin.to_s.empty? || origin.to_s.start_with?('null')
       end
       # HTML "create a new top-level traversable": a new window's initial about:blank, made with the window — a new opaque
       # origin, of no creator (a window this one opens without its opener) — and completely loaded as it is, no parse run
@@ -8312,7 +8310,7 @@ module Capybara
       # (…`made[:content_type]` the type it is made as, which its body may have said: mime.rs `load`; `made[:blob]` the blob a
       # `blob:` URL's document is made of, its type its document's: `boot_blob_document`; an
       # about:blank one's its initiator's origin and base URL, as the page's takes them: `navigate_top_level`; a replay's
-      # `made[:history_state]` the classic history API state its entry left it with)
+      # classic history API state the traversable's, as the page's: `boot_response_into_ctx`)
       def adopt_navigation_response(url, response, body, made, traversable: nil)
         if traversable
           Native.storage_clear(@session_storage)
@@ -8320,16 +8318,13 @@ module Capybara
           @session_storage = traversable.session_storage
         end
         @current_referer = made[:referrer].to_s
-        @restoring_history_state = made[:history_state]
         blob = made[:blob]
         return boot_blob_document(url, blob[:bytes], blob[:type], coop_switch: true) if blob
 
-        inherit_creator(origin: made[:doc_origin], base: made[:about_base]) if about_blank_url?(url)
+        creator = about_blank_creator(made[:doc_origin], made[:about_base]) if about_blank_url?(url)
         self.page_url = url.to_s
         record_response(*response)
-        boot_response_into_ctx(body.to_s, opaque_origin: made[:doc_origin] == 'null', coop_switch: true, content_type: made[:content_type], client_id: made[:client_id])
-      ensure
-        @restoring_history_state = nil
+        boot_response_into_ctx(body.to_s, opaque_origin: made[:doc_origin] == 'null', coop_switch: true, content_type: made[:content_type], client_id: made[:client_id], creator: creator)
       end
 
 
@@ -11097,13 +11092,13 @@ module Capybara
         return restore_flushed_nav_intents if @runtime.call('flushedLocation')
 
         @session_history.commit_javascript_document(url.to_s)
-        inherit_creator(origin: document_origin(0), base: @runtime.realm_direct_call(0, 'baseURL')) if about_blank_url?(url)
+        creator = about_blank_creator(document_origin(0), @runtime.realm_direct_call(0, 'baseURL')) if about_blank_url?(url)
         opaque  = document_origin_opaque?(0) == true
         headers = javascript_document_headers(0, url, @last_response_headers)
         self.page_url = url
         record_response(200, headers)
         @current_referer = ''
-        boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy, controlled: false, keep_traversals: true)
+        boot_response_into_ctx(markup, opaque_origin: opaque, inherited_coop: @session_history.opener_policy, controlled: false, keep_traversals: true, creator: creator)
         @session_history.hold_traversals(false)
         @runtime.call('applyOwnTraversals', true)
         consume_planned_traversal
@@ -11450,14 +11445,14 @@ module Capybara
         # (…a blob's origin its URL's, as its policy is judged, though its viewer's document for inline content is opaque)
         response_origin = blob ? url_origin(url.to_s.sub(/\Ablob:/i, '')) : made[:doc_origin] || url_origin(url)
         switch, = history.commit_opener_policy(opener_policy || 'unsafe-none', response_origin.to_s, fetch.coop_switch?) { coop_leaving_facts(realm_id) }
-        # (…a replay's document made with its entry's classic history API state — `history.state` before its scripts run,
-        # HTML "update document for history step application" — as the step left it: none where its origin changed)
-        state = history.entry(history.active(0))[:state] unless kind == 'location'
         if switch && @driver.respond_to?(:move_window_to_new_group)
-          moved = made.merge(content_type: ctype, blob: (blob.merge(type: ctype) if step == 'blob_document'), history_state: state)
+          moved = made.merge(content_type: ctype, blob: (blob.merge(type: ctype) if step == 'blob_document'))
           return @driver.move_window_to_new_group(self, realm_id, url, response || [200, {'content-type' => ctype.to_s}], body, moved)
         end
-        new_id = replace_window_document(realm_id, url, body, ctype, made, reuses: kind == 'location', history_state: state)
+        # (…a replay's document made with its entry's classic history API state — `history.state` before its scripts run,
+        # HTML "update document for history step application" — as the step left it: none where its origin changed,
+        # navigation_commit.rs; the window's next Browser's to take where it leaves for one: `boot_response_into_ctx`)
+        new_id = replace_window_document(realm_id, url, body, ctype, made, reuses: kind == 'location', history_state: history.take_starting_state)
         return unless new_id
 
         @runtime.window_realm_meta[new_id][:response] = response || ABOUT_BLANK_RESPONSE
@@ -13093,14 +13088,10 @@ module Capybara
             @current_referer = fetch.referrer.to_s
             step = fetch.response_commit(hop.command)
           end
-          # (…a replay's document made with its entry's classic history API state — `history.state` before its scripts run,
-          # HTML "update document for history step application" — as the step left it: none where its origin changed)
-          @restoring_history_state = @session_history.entry(@session_history.active(0))[:state] if replay
           commit_page_navigation(fetch, step, hop, document, blob, initiator)
         ensure
           # (…what it holds let go however it ended: another navigation ending it, a failure of this host's)
           fetch.close
-          @restoring_history_state = nil
           @navigating = prior_navigating
           note_url_changes
           # No document committed (a download, a raise mid-fetch) → the page that
@@ -13140,10 +13131,10 @@ module Capybara
         # here — a gap); its referrer the request's, under the initiator's policy — the initiator's, though the window be at
         # its initial about:blank still (that one made with the window, its creator's: `open_initial_document`).
         when 'about_blank'
-          inherit_creator(origin: type, base: initiator == page_url ? @runtime.realm_direct_call(0, 'baseURL').to_s : initiator.to_s) if type
+          creator = about_blank_creator(type, initiator == page_url ? @runtime.realm_direct_call(0, 'baseURL').to_s : initiator.to_s) if type
           self.page_url = url
           record_response(*ABOUT_BLANK_RESPONSE)
-          boot_response_into_ctx('', inherited_coop: payload)
+          boot_response_into_ctx('', inherited_coop: payload, creator: creator)
         when 'blob_document'
           boot_blob_document(url, blob[:bytes], type, flushed: true, inherited_coop: payload)
         # Full-reload navigation rebuilds the JS Context from the warm
@@ -13177,10 +13168,10 @@ module Capybara
       private def navigation_mark(history, realm)
         [history.ongoing_navigation(0), @runtime.realm_call(realm, 'navigationAwaited')]
       end
-      # The origin of the page's document a navigation leaves, serialized — `null` an opaque one's — a window's of no entry
-      # yet its initial about:blank's, its creator's (`inherit_creator`), none where it does not know one (a `noopener`
-      # window's: navigation_commit.rs `Leaving::Initial`).
-      private def leaving_document_origin = @session_history.active(0) ? document_origin(0) : @creator&.fetch(:origin)
+      # The origin of the page's document a navigation leaves, serialized — `null` an opaque one's — none for a window of no
+      # entry yet, at its initial about:blank, which no creator made: a window a Browser hosts is the driver's or a
+      # `noopener` one's (navigation_commit.rs `Commit::leaving_origin`).
+      private def leaving_document_origin = (document_origin(0) if @session_history.active(0))
       # The origin of realm `realm`'s document, serialized — `null` an opaque one's: the origin of the client a traversal
       # of its navigable is made by (HTML "apply the history step": its active document's source snapshot params).
       private def document_origin(realm)
@@ -13284,7 +13275,8 @@ module Capybara
       # (…`client_id` the reserved client id of the navigation whose response it is: `run_navigation_fetch`)
       # (…`controlled` false for one no fetch made, which Handle Fetch sets no worker of — and `keep_traversals`, the
       # traversals the document it replaces queued going on after it: `commit_javascript_document`'s)
-      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: false, inherited_coop: nil, content_type: nil, inline: false, client_id: nil, controlled: true, keep_traversals: false)
+      # (…`creator` an about:blank one's, the document that initiated its navigation: `about_blank_creator`)
+      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: false, inherited_coop: nil, content_type: nil, inline: false, client_id: nil, controlled: true, keep_traversals: false, creator: nil)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -13317,7 +13309,7 @@ module Capybara
         # a new one where it needs, and what that makes it cross-origin isolated: `commit_coop`)
         unless initial
           # (…a blob's origin its URL's, as its policy is judged, though its viewer's document for inline content is opaque)
-          response_origin = opaque_origin && !(inline && inherited_coop) ? 'null' : (about_blank_url?(page_url) ? @creator&.fetch(:origin) : url_origin(page_url.to_s.sub(/\Ablob:/i, '')))
+          response_origin = opaque_origin && !(inline && inherited_coop) ? 'null' : (about_blank_url?(page_url) ? creator&.fetch(:origin) : url_origin(page_url.to_s.sub(/\Ablob:/i, '')))
           commit_coop(inherited_coop || opener_policy, response_origin, coop_switch)
         end
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
@@ -13372,7 +13364,11 @@ module Capybara
           opts['viewportH'] = @viewport_height
         end
         opts['touch'] = true if @touch_input
-        opts['historyState'] = @restoring_history_state unless @restoring_history_state.nil?
+        # (…a replay's its entry's classic history API state as the step left it — `history.state` before its scripts run,
+        # HTML "update document for history step application" — none where its origin changed: navigation_commit.rs)
+        if (state = @session_history.take_starting_state)
+          opts['historyState'] = state
+        end
         # (…and its referrer, its navigation's request's: `@current_referer`)
         opts['referrer'] = @current_referer unless @current_referer.to_s.empty?
         # (…and the referrer policy its response's header sets, its policy container's)
@@ -13388,10 +13384,6 @@ module Capybara
           opts['controller'] = controller if controller
         end
         opts['opaqueOrigin'] = true if opaque_origin
-        # (…kept while the window is at its initial about:blank: the origin the navigation that replaces it leaves —
-        # `leaving_document_origin`)
-        creator = @creator
-        @creator = nil unless initial
         if creator && about_blank_url?(page_url)
           opts['creatorOrigin'] = creator[:origin]
           opts['aboutBase']     = creator[:base]
