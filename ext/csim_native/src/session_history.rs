@@ -307,7 +307,7 @@ pub(crate) type Move = (u32, String, Option<Arc<[u8]>>, bool);
 // …and what the host answers of the step it ran.
 pub(crate) enum Answer {
     Nothing,
-    Flushed(bool),
+    Bool(bool),
     Unloaded(Vec<Option<bool>>),
 }
 // How many traversals the process's hosts are applying: the cheap gate a frame's navigation asks before it looks for one.
@@ -1201,12 +1201,14 @@ impl Traversable {
                     return Some(Command::Flush);
                 }
                 Phase::Flushed => {
-                    if matches!(answer, Answer::Flushed(true)) {
+                    if matches!(answer, Answer::Bool(true)) {
                         (a.step, a.changes) = self.traversal(a.delta?)?;
                     }
                     a.phase = Phase::Prompted;
                     return Some(Command::PromptPage);
                 }
+                // (…none where the user declined to unload the page: "if the user did not choose to unload, abort")
+                Phase::Prompted if matches!(answer, Answer::Bool(false)) => a.phase = Phase::Done,
                 Phase::Prompted => match makes_page(&a.changes) {
                     Some(id) => {
                         a.phase = Phase::Replayed(id);
@@ -1226,6 +1228,11 @@ impl Traversable {
                     if !a.frames.is_empty() {
                         return Some(Command::UnloadFrames(a.frames.iter().map(|f| f.0).collect()));
                     }
+                }
+                // (…none where the user declined to unload a frame's document)
+                Phase::Unloading if matches!(answer, Answer::Bool(false)) => {
+                    a.frames.clear();
+                    a.phase = Phase::Done;
                 }
                 Phase::Unloading => {
                     if let Answer::Unloaded(asked) = &answer {
@@ -1641,7 +1648,7 @@ impl SessionHistory {
         } else if let Some(list) = RArray::from_value(answer) {
             Answer::Unloaded(list.to_vec::<Option<bool>>()?)
         } else {
-            Answer::Flushed(answer.to_bool())
+            Answer::Bool(answer.to_bool())
         };
         let Some(command) = rb_self.lock().next_command(token, answer) else { return Ok(None) };
         let row = |name: &str| -> Result<RArray, magnus::Error> {
@@ -2588,7 +2595,7 @@ mod tests {
         let mut t = h.lock();
         assert!(matches!(t.next_command(token, Answer::Nothing), Some(Command::Flush)));
         t.update(TOP, TOP, "/b#x", None, true);
-        assert!(matches!(t.next_command(token, Answer::Flushed(true)), Some(Command::PromptPage)));
+        assert!(matches!(t.next_command(token, Answer::Bool(true)), Some(Command::PromptPage)));
         let Some(Command::SameDocument((nav, url, _, hashchange))) = t.next_command(token, Answer::Nothing) else { panic!() };
         assert_eq!((nav, url.as_str(), hashchange), (TOP, "/b", true));
         assert_eq!(t.url.as_deref(), Some("/b"));
@@ -2606,7 +2613,7 @@ mod tests {
         let mut t = h.lock();
         t.begin_traversal(TOP);
         assert!(matches!(t.next_command(token, Answer::Nothing), Some(Command::Flush)));
-        assert!(matches!(t.next_command(token, Answer::Flushed(false)), Some(Command::PromptPage)));
+        assert!(matches!(t.next_command(token, Answer::Bool(false)), Some(Command::PromptPage)));
         let Some(Command::Replay(id, step)) = t.next_command(token, Answer::Nothing) else { panic!() };
         assert_eq!(id, a);
         t.go_to(step);

@@ -2505,8 +2505,7 @@ module Capybara
           flush_outgoing_page_init if (flushing = @timers_active)
           flushing
         when 'prompt_page'
-          prompt_page_to_unload(traversal: true)
-          nil
+          prompt_page_to_unload(traversal: true) != false
         when 'replay'
           replay_history_entry(args[0], step: args[1], by_user: by_user)
           nil
@@ -2529,11 +2528,15 @@ module Capybara
       # Firefox: the step stands) — and the entry it leaves snapshotted, so a traversal forward again restores it, keeping
       # how it was reached (a POST entry re-POSTs), at the URL its document was at as they were asked (a handler may move
       # its location): of each, nil where it has no document, true where it may be unloaded, false where a handler removed
-      # it — its navigation asking it no second time (`prompt_to_unload_frame`).
+      # it — its navigation asking it no second time (`prompt_to_unload_frame`); or false for all of them, the user having
+      # declined to unload one (HTML "check if unloading is canceled": the step aborted).
       private def unload_traversed_frames(navs, realms)
         navs.each {|nav| realms[nav] = navigable_realm(nav) }
         urls  = navs.to_h {|nav| [nav, realms[nav] && frame_realm_url(realms[nav])] }
-        asked = navs.map {|nav| (realm = realms[nav]) && prompt_to_unload_frame(realm, traversal: true) && @runtime.frame_realm_alive?(realm) }
+        asked = navs.map {|nav| (realm = realms[nav]) && prompt_to_unload_frame(realm, traversal: true) }
+        return false if asked.include?(:canceled)
+
+        asked.map!.with_index {|ok, i| ok && @runtime.frame_realm_alive?(realms[navs[i]]) }
         navs.zip(asked) {|nav, ok| leave_frame_entry(realms[nav], urls[nav]) if ok }
         asked
       end
@@ -8362,8 +8365,10 @@ module Capybara
       # The page asked whether it may be unloaded as a navigation of it begins (HTML "navigate" — a reload's too — "check
       # if unloading is canceled"), as a traversal applies its step (`traversal`), or as its close runs (HTML "definitely
       # close"): `beforeunload` at its document, then at its frames' documents, its unload counter raised while each runs
-      # (dom-nodes.js `promptDocumentToUnload`). The navigation or the close goes on whatever a handler says: HTML cancels
-      # it only where the user, prompted, declines — none here to ask, the driver one who confirms the prompt.
+      # (dom-nodes.js `promptDocumentToUnload`). Whether it may: false where the user declined the prompt a handler asked
+      # for — the driver's dialog policy the user (`handle_modal`: confirmed, but in a `dismiss_confirm` block). A
+      # traversal stops there (HTML "apply the history step": `apply_history_step`); a navigation and a close go on, for
+      # now, whatever the answer.
       def prompt_page_to_unload(traversal: false) = (@runtime.call('promptToUnload', traversal) rescue nil)
       # The document-teardown pair (pagehide+unload), this window AND its nested
       # frames, theirs first — fired as a navigation replaces the page's document
@@ -12450,12 +12455,18 @@ module Capybara
       # Call a host fn in the realm that OWNS an iframe (main realm for 0/nil).
       # A frame's navigation asks its document whether it may be unloaded before it fetches anything (HTML "check if
       # unloading is canceled": its `beforeunload`, and its frames' — `promptToUnloadFrame`): false when a handler
-      # removed the frame, the navigation then going no further.
+      # removed the frame, the navigation then going no further — :canceled where the user declined the prompt a handler
+      # asked for (`handle_modal`), which a traversal stops at (`unload_traversed_frames`) and a navigation, for now, does
+      # not.
       # (…none a second time of one a traversal asked as it applied its step: `unload_traversed_frames`)
       def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id), traversal: false)
         return true if traversed_frame(realm_id) {|history, nav| history.take_prompted(nav) }
 
-        frame_realm_host_call(parent, 'promptToUnloadFrame', realm_id, traversal) != false
+        case frame_realm_host_call(parent, 'promptToUnloadFrame', realm_id, traversal)
+        when false then false
+        when 'canceled' then :canceled
+        else true
+        end
       end
       # …and, its response in, its document unloaded (pagehide and unload, its frames' after it) while still the frame's
       # — false when a handler of them removed the frame, the response then having nowhere to go: what is left of the old
@@ -12614,7 +12625,7 @@ module Capybara
         else
           case type.to_s
           when 'alert'   then nil
-          when 'confirm' then true
+          when 'confirm', 'beforeunload' then true
           when 'prompt'  then default_value.to_s
           end
         end

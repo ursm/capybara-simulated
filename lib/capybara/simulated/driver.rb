@@ -1081,7 +1081,7 @@ module Capybara
           captured = msg
           case actual_type.to_sym
           when :alert   then nil
-          when :confirm then accept
+          when :confirm, :beforeunload then accept
           when :prompt  then accept ? (with.nil? ? default_value.to_s : with.to_s) : nil
           end
         }
