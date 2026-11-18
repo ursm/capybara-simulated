@@ -50,7 +50,7 @@ module Capybara
     Kernel.prepend(SleepHook)
 
     class Driver < Capybara::Driver::Base
-      attr_reader :app, :owner_thread, :modal_handlers
+      attr_reader :app, :owner_thread
 
       @@live_lock = Mutex.new
       @@live      = []  # [WeakRef<Driver>] — dead refs filtered on read.
@@ -96,8 +96,9 @@ module Capybara
         # run sees, or every `await`-on-animation close path (FloatKit's menu) parks
         # on a full-length animation-fallback timer no user action waits for.
         @app             = Capybara.disable_animation ? Capybara::Server::AnimationDisabler.new(app) : app
-        # The modal handlers of the `accept_*` / `dismiss_*` blocks open, the innermost last: the session's, whichever of
-        # its windows raises the dialog (Browser#handle_modal).
+        # The modal handlers of the `accept_*` / `dismiss_*` blocks open, the innermost last, each with the window it is for
+        # — the current one as its block opened, by its traversable's number — the session's: whichever Browser hosts the
+        # window that raises the dialog (Browser#handle_modal, `take_modal_handler`).
         @modal_handlers  = []
         # Cookies + localStorage are origin-shared across windows
         # (real browser semantics), so we own the jars at the Driver
@@ -915,11 +916,19 @@ module Capybara
 
         w = @aux_windows.find {|win| win[:handle] == h } or return
         window = w[:window]
-        # (…its page asked first, as a browser's tab closing asks it: none closed where the user declines)
-        return unless window.discard_due? || window.may_close?
+        # (…its page asked first, as a browser's tab closing asks it: none closed where the user declines — as the window
+        # it is, its prompt answered by the block the close was asked in: `take_modal_handler`)
+        return unless window.discard_due? || closing_as(window) { window.may_close? }
 
         window.close! unless window.discard_due?
         discard_window(w)
+      end
+
+      private def closing_as(window)
+        was, @closing_as = @closing_as, [window.traversable_id, (active_browser || window).traversable_id]
+        yield
+      ensure
+        @closing_as = was
       end
 
       # Discard the windows whose close ran (Browser#discard_due?) — as the driver is between calls, none of their own
@@ -1091,7 +1100,9 @@ module Capybara
           when :prompt  then accept ? (with.nil? ? default_value.to_s : with.to_s) : nil
           end
         }
-        current_browser.with_modal(handler) do
+        entry = [current_browser.traversable_id, handler]
+        @modal_handlers.push(entry)
+        begin
           yield if block_given?
           # Pump timers so a setTimeout-driven alert can land.
           timeout = (wait || Capybara.default_max_wait_time).to_f
@@ -1100,6 +1111,8 @@ module Capybara
             sleep 0.01
             current_browser.send(:tick_real_time)
           end
+        ensure
+          @modal_handlers.delete(entry)
         end
         if captured.nil?
           raise Capybara::ModalNotFound, "Unable to find modal dialog with #{text.inspect}"
@@ -1109,6 +1122,16 @@ module Capybara
             "Unable to find modal dialog with #{text.inspect} (got #{captured.inspect})"
         end
         captured
+      end
+
+      # The handler of the innermost block open for the window of top-level traversable `window` — taken: none where none
+      # is (selenium's `switch_to.alert` finds the current window's dialog alone; another window's takes the default
+      # policy). A window being closed by the driver is the current one as it closes (`closing_as`), as selenium's
+      # `close_window` switches to the window it closes: its `beforeunload` prompt answered by the block that closes it.
+      def take_modal_handler(window)
+        window = @closing_as[1] if @closing_as && @closing_as[0] == window
+        at = @modal_handlers.rindex {|(tag, _)| tag == window } or return nil
+        @modal_handlers.delete_at(at)[1]
       end
 
       private def modal_text_matches?(matcher, message)

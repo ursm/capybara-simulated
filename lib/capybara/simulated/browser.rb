@@ -344,7 +344,6 @@ module Capybara
         @ticking                      = false
         @event_loop_running           = false
         @cors_preflight_cache         = Native.cors_preflight_cache_new
-        @modal_handlers               = []
         # Per-test action trace. `@trace` is the live recorder; `reset!`
         # moves it to `@pending_trace` so an after-hook running after
         # session reset still has access. `@trace_mode` is cached at
@@ -12632,26 +12631,21 @@ module Capybara
       # one page for the next).
       def storage_partitions = [@local_storage, @session_storage]
 
-      # Push a one-shot handler onto the modal-dialog stack — the next
-      # modal that fires consumes the topmost handler. Block exit pops
-      # in case the dialog never fired.
-      # (…the session's, its driver's: a dialog of any window of it — another window's close a block asked for, its
-      # `beforeunload` prompt in that window's Browser — finds the handler of the block it was raised in)
-      def with_modal(handler)
-        modal_handlers.push(handler)
-        yield if block_given?
-      ensure
-        modal_handlers.delete(handler)
-      end
-      private def modal_handlers = @driver.respond_to?(:modal_handlers) ? @driver.modal_handlers : @modal_handlers
+      # The top-level traversable a modal handler is for — this window's, whose dialogs it answers (Driver#run_modal) —
+      # and that of realm `realm`'s document: the page's, a frame's of it, or a window's `window.open` made in this
+      # isolate, by its session history's number.
+      def traversable_id = @session_history.id
+      def traversable_id_of(realm) = realm.to_i.zero? ? @session_history.id : @runtime.frame_realm_tree(realm)[4]
 
       # JS-side `alert(...)` / `confirm(...)` / `prompt(...)` route here.
       # If no handler is pushed (typical of apps under test), accept
       # the dialog (Rails system-test default) so `data-turbo-confirm`
       # / similar progress without an explicit `accept_confirm` in
       # the test.
-      def handle_modal(type, message, default_value)
-        handler = modal_handlers.pop
+      # (…a dialog of realm `realm`'s document answered by a handler of its window's alone, as selenium's
+      # `switch_to.alert` finds the current window's: Driver#take_modal_handler — another window's taking the default)
+      def handle_modal(type, message, default_value, realm = 0)
+        handler = @driver&.take_modal_handler(traversable_id_of(realm))
         if handler
           handler.call(type, message, default_value)
         else

@@ -77,8 +77,8 @@ module Capybara
       def close!   = host.close_window_realm(key)
       def discard! = host.discard_window_realm(key)
 
-      # The modal handler its isolate's, the commands of the block each in the scope of the window it addresses.
-      def with_modal(handler, &block) = host.with_modal(handler, &block)
+      # The top-level traversable its dialogs are of, by its session history's number (Browser#traversable_id).
+      def traversable_id = (r = realm) ? host.traversable_id_of(r) : -1
 
       # ── What it shares with its host: its isolate's busy-ness
       def window_busy? = host.window_busy?

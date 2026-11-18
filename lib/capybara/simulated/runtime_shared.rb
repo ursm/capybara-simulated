@@ -58,7 +58,7 @@ module Capybara
         # A window `window.open` made in this isolate closing, or closed (window.js): its RealmWindow asks again.
         'windowRealmsChanged'          => ->(b, *_a) { b.window_realms_changed; nil },
         'storageChanged'               => ->(b, *a) { b.storage_changed(*a[0, 7]); nil },
-        'modalDialog'                  => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
+        'modalDialog'                  => ->(b, *a) { b.handle_modal(a[0], a[1], a[2], a[3]) },
         'pushImportmap'                => ->(b, *a) { b.set_importmap(a[0], a[1]); nil },
         'logConsole'                   => ->(b, *a) { b.log_console(a[0], a[1]); nil },
         'eventSourceOpen'              => ->(b, *a) { b.event_source_open(a[0]) },
