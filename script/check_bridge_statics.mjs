@@ -1,6 +1,8 @@
-// Every static of Reflect / Object / JSON / Array / Promise / Symbol / ArrayBuffer / Number / String / Math the bindings
-// call — and every method of one's prototype — read as the bundle loads, never once a page runs; and no function of the
-// bindings' handed to a method of Array.prototype's that takes one.
+// Every static of Reflect / Object / JSON / Array / Promise / Symbol / ArrayBuffer / Number / String / Math / the typed
+// arrays the bindings call — and every method of one's prototype — read as the bundle loads, never once a page runs; and
+// nothing of the bindings' — a function, a list, a typed array — handed to a method of Array.prototype's, of
+// %TypedArray%.prototype's or of %ArrayIteratorPrototype%'s: no such method called by name, and no for…of, spread or
+// array destructuring, which walk an array by `Array.prototype[Symbol.iterator]` and the iterator's `next`.
 
 // (…`Date` is none of them: a bare `Date` in the bindings is the platform's own, the virtual clock's that timers.js
 // installs, meant to be read as the global; `Intl`'s one constructor the bindings use, `DateTimeFormat`, is taken by
@@ -18,17 +20,29 @@ import { join }                      from 'node:path';
 import * as acorn                    from 'acorn';
 
 const SRC = 'lib/capybara/simulated/js/src';
-const NAMESPACES = new Set(['Reflect', 'Object', 'JSON', 'Array', 'Promise', 'Symbol', 'ArrayBuffer', 'Number', 'String', 'Math']);
+const TYPED_ARRAYS = ['Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array',
+  'Float32Array', 'Float64Array', 'BigInt64Array', 'BigUint64Array'];
+const NAMESPACES = new Set(['Reflect', 'Object', 'JSON', 'Array', 'Promise', 'Symbol', 'ArrayBuffer', 'Number', 'String', 'Math', ...TYPED_ARRAYS]);
 // (…what no page can replace: a well-known symbol, a constructor's `prototype`, a number constant — each non-writable)
 const FIXED = new Set(['iterator', 'asyncIterator', 'hasInstance', 'isConcatSpreadable', 'match', 'matchAll', 'replace',
   'search', 'species', 'split', 'toPrimitive', 'toStringTag', 'unscopables', 'prototype', 'MAX_SAFE_INTEGER',
   'MIN_SAFE_INTEGER', 'MAX_VALUE', 'MIN_VALUE', 'EPSILON', 'POSITIVE_INFINITY', 'NEGATIVE_INFINITY', 'NaN', 'PI', 'E',
-  'LN2', 'LN10', 'LOG2E', 'LOG10E', 'SQRT2', 'SQRT1_2']);
+  'LN2', 'LN10', 'LOG2E', 'LOG10E', 'SQRT2', 'SQRT1_2', 'BYTES_PER_ELEMENT']);
 // The methods of Array.prototype's that take a function — called by the bindings, a page's replacement of one would be
 // handed theirs, and the list it walks — and `push`, which would be handed the list and what it adds: engine.js's list
 // helper of the name is called instead (`listMap`, `listSort`, `listPush`, …).
 const CALLBACK_METHODS = new Set(['map', 'filter', 'forEach', 'some', 'every', 'find', 'findIndex', 'findLast',
   'findLastIndex', 'flatMap', 'reduce', 'reduceRight', 'sort', 'toSorted', 'push']);
+// …and the methods of theirs that take none, each called by name on a list the bindings hold handed the list: engine.js's
+// list helper, or for a typed array intrinsics.js's (`listSlice`, `listIncludes`, `typedArraySubarray`, …). Some are a
+// string's too, by the same name — no build check tells a string from a list — and a string's is called through
+// intrinsics.js's (`stringSlice`, `stringIndexOf`, …); a Map's `keys` / `values` / `entries` through engine.js's
+// `keysOf` / `valuesOf` / `entriesOf`, which make a list of them.
+const LIST_METHODS = new Set(['at', 'concat', 'copyWithin', 'entries', 'fill', 'flat', 'includes', 'indexOf', 'join', 'keys',
+  'lastIndexOf', 'pop', 'reverse', 'shift', 'slice', 'splice', 'subarray', 'toReversed', 'toSpliced', 'unshift', 'values',
+  'with']);
+// (…and the statics that walk a list by its iterator: `arrayFrom` — engine.js's `listFrom` is called instead)
+const ITERATING_CALLS = new Set(['arrayFrom', 'objectFromEntries']);
 
 const sources = readdirSync(SRC, { recursive: true }).filter((entry) => entry.endsWith('.js') && entry !== 'intrinsics.js').sort();
 let failures = 0;
@@ -59,12 +73,40 @@ for (const entry of sources) {
       console.error(`${path}:${node.loc.start.line}:${node.loc.start.column + 1}: \`${node.init.name}\` destructured at call time — take intrinsics.js's`);
       failures++;
     }
-    // (…`impl`, a generated binding's implementation object, is none: its `sort` is URLSearchParams')
-    if (inFunction && node.type === 'CallExpression' && node.callee.type === 'MemberExpression' && !node.callee.computed
-        && CALLBACK_METHODS.has(node.callee.property.name)
-        && !(node.callee.object.type === 'Identifier' && node.callee.object.name === 'impl')) {
-      console.error(`${path}:${node.loc.start.line}:${node.loc.start.column + 1}: \`.${node.callee.property.name}(…)\` — call engine.js's list helper`);
+    const at = `${path}:${node.loc.start.line}:${node.loc.start.column + 1}`;
+    // (…`impl`, a generated binding's implementation object, is none: its `sort` is URLSearchParams'; nor an engine's —
+    // `engineOf(…)`, a canvas's context's ops — whose `fill` is a 2D context's)
+    const receiver = node.type === 'CallExpression' && node.callee.type === 'MemberExpression' ? node.callee.object : null;
+    if (inFunction && receiver && !node.callee.computed
+        && (CALLBACK_METHODS.has(node.callee.property.name) || LIST_METHODS.has(node.callee.property.name))
+        && !(receiver.type === 'Identifier' && receiver.name === 'impl')
+        && !(receiver.type === 'CallExpression' && receiver.callee.type === 'Identifier' && receiver.callee.name === 'engineOf')) {
+      console.error(`${at}: \`.${node.callee.property.name}(…)\` — call engine.js's list helper`);
       failures++;
+    }
+    if (inFunction && node.type === 'CallExpression' && node.callee.type === 'Identifier' && ITERATING_CALLS.has(node.callee.name)) {
+      console.error(`${at}: \`${node.callee.name}(…)\` walks its argument by its iterator — call engine.js's list helper`);
+      failures++;
+    }
+    if (inFunction && node.type === 'ForOfStatement') {
+      console.error(`${at}: for…of — walk the list by index`);
+      failures++;
+    }
+    if (inFunction && node.type === 'YieldExpression' && node.delegate) {
+      console.error(`${at}: yield* — yield the list's elements by index`);
+      failures++;
+    }
+    if (inFunction && node.type === 'ArrayPattern') {
+      console.error(`${at}: array destructuring — read the list by index`);
+      failures++;
+    }
+    if (inFunction && (node.type === 'ArrayExpression' || node.type === 'CallExpression' || node.type === 'NewExpression')) {
+      const elements = node.type === 'ArrayExpression' ? node.elements : node.arguments;
+      for (const element of elements) {
+        if (element?.type !== 'SpreadElement') continue;
+        console.error(`${path}:${element.loc.start.line}:${element.loc.start.column + 1}: a spread — engine.js's \`listConcat\` / \`listFrom\`, or \`reflectApply\``);
+        failures++;
+      }
     }
     if (inFunction && node.type === 'MemberExpression' && !node.computed) {
       const object = node.object;
@@ -86,7 +128,7 @@ for (const entry of sources) {
   walk(ast, false);
 }
 if (failures) {
-  console.error(`\n${failures} statics read at call time in ${SRC}.`);
+  console.error(`\n${failures} statics read, or lists walked through a page's methods, at call time in ${SRC}.`);
   process.exit(1);
 }
-console.log(`${sources.length} bridge sources: no static of ${[...NAMESPACES].join(' / ')} read at call time`);
+console.log(`${sources.length} bridge sources: no static of ${[...NAMESPACES].join(' / ')} read at call time, no list walked through a page's methods`);

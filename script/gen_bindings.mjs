@@ -1846,7 +1846,7 @@ function installInterface(def, { shell, body, statics, unforgeables, checks, uns
   if (global) {
     // (…each of no prototype: nothing a page put on Object.prototype is read off it as it defines them)
     lines.push(`  const descriptors = objectGetOwnPropertyDescriptors(members);`);
-    lines.push(`  for (const key of reflectOwnKeys(descriptors)) objectSetPrototypeOf(descriptors[key], null);`);
+    lines.push(`  for (let i = 0, keys = reflectOwnKeys(descriptors); i < keys.length; i++) objectSetPrototypeOf(descriptors[keys[i]], null);`);
     lines.push(`  return {`);
     lines.push(`    names: objectKeys(descriptors),`);
     lines.push(`    defineMembers: (global) => objectDefineProperties(global, descriptors),`);
@@ -2379,7 +2379,7 @@ export const WINDOW_EVENT_HANDLERS = ${JSON.stringify(windowHandlers)};
 
 // The event handlers a body or frameset forwards to its Window (HTML §8.1.8.2): WindowEventHandlers' and the
 // "Window-reflecting body element event handler set" of GlobalEventHandlers'.
-export const FORWARDED_EVENT_HANDLERS = new Set(${JSON.stringify(FORWARDED_EVENT_HANDLERS)});
+export const FORWARDED_EVENT_HANDLERS = new InternalSet(${JSON.stringify(FORWARDED_EVENT_HANDLERS)});
 
 // The event type of each event handler whose type is not its name past \`on\` (HTML's legacy WebKit-prefixed four).
 export const LEGACY_HANDLER_EVENT_TYPES = ${JSON.stringify(LEGACY_HANDLER_EVENT_TYPES)};
@@ -2401,7 +2401,7 @@ ${htmlElementInstalls.map((n) => `  ${n}: install${n}`).join(',\n')}
 ${crossOriginTables.map(([n, table]) => `
 // ${n}'s CrossOriginProperties (HTML §7.2.1.3.1): what an object of it answers to a script of another origin — by name,
 // and each one's kind, an operation's 'method', an attribute's what of it is exposed ('get', 'set' or 'get set').
-export const CROSS_ORIGIN_${n.toUpperCase()}_PROPERTIES = Object.freeze(new Set(${JSON.stringify(Object.keys(table))}));
+export const CROSS_ORIGIN_${n.toUpperCase()}_PROPERTIES = new InternalSet(${JSON.stringify(Object.keys(table))});
 export const CROSS_ORIGIN_${n.toUpperCase()}_KINDS = Object.freeze({ __proto__: null, ${JSON.stringify(table).slice(1, -1)} });`).join('\n')}`;
 
 // The dictionaries an implementation converts itself — an `any` argument's, as the type its steps name: a canvas's
@@ -2446,8 +2446,8 @@ ${wrap(REFLECTION)}
 } from '../reflect.js';
 import { EventState, initEventSteps } from '../event-state.js';
 import {
-  mathMin, objectDefineProperties, objectDefineProperty, objectGetOwnPropertyDescriptors, objectGetPrototypeOf, objectKeys,
-  objectSetPrototypeOf, reflectOwnKeys
+  InternalSet, mathMin, objectDefineProperties, objectDefineProperty, objectGetOwnPropertyDescriptors, objectGetPrototypeOf,
+  objectKeys, objectSetPrototypeOf, reflectOwnKeys
 } from '../intrinsics.js';
 
 ${Object.entries(REFLECT_ENUM_SETS).map(([name, keywords]) => `export const REFLECT_KEYWORDS_${name} = ${keywordTable(keywords)};`).join('\n')}

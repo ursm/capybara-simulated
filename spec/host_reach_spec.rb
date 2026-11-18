@@ -141,7 +141,7 @@ RSpec.describe "the host's reach into a page" do
             return R(o, this, args); };
         }
       };
-      spyAll(Array.prototype, 'Array', ['push', 'map', 'forEach', 'filter', 'slice', 'concat', 'splice', 'indexOf', 'includes', 'join', 'some', 'every', 'find', 'findIndex', 'reduce', 'flat', 'flatMap', 'fill', 'keys', 'values', 'entries', 'at', 'pop', 'shift', 'unshift', 'reverse', 'sort', 'toSorted', 'reduceRight', 'findLast', 'findLastIndex', Symbol.iterator]);
+      spyAll(Array.prototype, 'Array', ['push', 'map', 'forEach', 'filter', 'slice', 'concat', 'splice', 'indexOf', 'includes', 'join', 'some', 'every', 'find', 'findIndex', 'reduce', 'flat', 'flatMap', 'fill', 'keys', 'values', 'entries', 'at', 'pop', 'shift', 'unshift', 'reverse', 'sort', 'toSorted', 'reduceRight', 'findLast', 'findLastIndex', 'lastIndexOf', 'with', 'toReversed', 'toSpliced', 'copyWithin', Symbol.iterator]);
       spyAll(Map.prototype, 'Map', ['get', 'set', 'has', 'delete', 'forEach', 'keys', 'values', 'entries', 'clear', Symbol.iterator]);
       spyAll(Set.prototype, 'Set', ['add', 'has', 'delete', 'forEach', 'keys', 'values', 'entries', 'clear', Symbol.iterator]);
       spyAll(WeakMap.prototype, 'WeakMap', ['get', 'set', 'has', 'delete']);
@@ -149,9 +149,12 @@ RSpec.describe "the host's reach into a page" do
       spyAll(Promise.prototype, 'Promise', ['then', 'catch', 'finally']);
       spyAll(String.prototype, 'String', ['replace', 'replaceAll', 'split', 'match', 'matchAll']);
       spyAll(Object.getPrototypeOf([][Symbol.iterator]()), 'ArrayIterator', ['next']);
+      spyAll(Object.getPrototypeOf(Uint8Array.prototype), 'TypedArray', ['subarray', 'set', 'slice', 'fill', 'join', 'map', 'filter', 'every', 'some', 'forEach', 'indexOf', 'includes', 'values', Symbol.iterator]);
+      spyAll(Object.getPrototypeOf(function* () {}).prototype, 'Generator', ['next']);
       // (…and no static of Math's, Number's, String's or ArrayBuffer's a page replaced is called at all: none's answer is
       // the page's to make up)
-      for (const [holder, label, names] of [[Math, 'Math', ['min', 'max', 'floor', 'ceil', 'round', 'trunc', 'abs']], [Number, 'Number', ['isFinite', 'isNaN', 'isSafeInteger']], [String, 'String', ['fromCharCode']], [ArrayBuffer, 'ArrayBuffer', ['isView']]]) {
+      // (…nor a static of a typed array's, nor a method of String.prototype's an array's shares the name of)
+      for (const [holder, label, names] of [[Math, 'Math', ['min', 'max', 'floor', 'ceil', 'round', 'trunc', 'abs']], [Number, 'Number', ['isFinite', 'isNaN', 'isSafeInteger']], [String, 'String', ['fromCharCode']], [ArrayBuffer, 'ArrayBuffer', ['isView']], [Float64Array, 'Float64Array', ['from', 'of']], [Uint8Array, 'Uint8Array', ['from', 'of']], [String.prototype, 'String.prototype', ['slice', 'indexOf', 'lastIndexOf', 'includes', 'at', 'concat']]]) {
         for (const m of names) { const o = holder[m]; saved.push([holder, m, o]); holder[m] = function (...args) { /*PAGE*/ if (!busy) leaks.push(label + '.' + m + ' called'); return R(o, this, args); }; }
       }
       window.restore = () => { for (const [p, m, o] of saved) p[m] = o; };
