@@ -140,6 +140,37 @@ for (const entry of sources) {
     }
   };
   walk(ast, false);
+  // …and no element written into a plain array a function made (`const out = []`, then `out[out.length] = v`, `out[i] =
+  // v`), which a setter a page defined on Array.prototype's index meets: a list the bindings build is engine.js's
+  // `newList()` / `listBuild`, of no prototype as it grows, or grows by `listPush`.
+  // (…the module's own such lists too, written by its functions)
+  const scope = (fn, outer) => {
+    const plain = new Set(outer);
+    const visit = (node, top) => {
+      if (!node || typeof node.type !== 'string') return;
+      if (!top && /Function/.test(node.type)) { scope(node, plain); return; }
+      if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.init?.type === 'ArrayExpression'
+          && node.init.elements.length === 0) plain.add(node.id.name);
+      if (node.type === 'AssignmentExpression' && node.left.type === 'MemberExpression' && node.left.computed
+          && node.left.object.type === 'Identifier' && plain.has(node.left.object.name)) {
+        console.error(`${path}:${node.loc.start.line}:${node.loc.start.column + 1}: an element written into \`${node.left.object.name}\`, a plain array — make it engine.js's \`newList()\``);
+        failures++;
+      }
+      if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && (node.callee.name === 'listPush' || node.callee.name === 'listAppend')
+          && node.arguments[0]?.type === 'Identifier' && plain.has(node.arguments[0].name)) {
+        console.error(`${path}:${node.loc.start.line}:${node.loc.start.column + 1}: \`${node.callee.name}\` onto \`${node.arguments[0].name}\`, a plain array — make it engine.js's \`newList()\``);
+        failures++;
+      }
+      for (const key in node) {
+        if (key === 'loc') continue;
+        const value = node[key];
+        if (Array.isArray(value)) value.forEach((child) => visit(child, false));
+        else if (value && typeof value.type === 'string') visit(value, false);
+      }
+    };
+    visit(fn, true);
+  };
+  scope(ast, []);
 }
 if (failures) {
   console.error(`\n${failures} statics read, or lists walked through a page's methods, at call time in ${SRC}.`);
