@@ -6523,6 +6523,12 @@ module Capybara
       # What it returns is the real time the wait took of workers RUNNING their scripts — the step's round-trip budget
       # (`worker_due_within`'s `waited`) — a booting worker's none of it.
       # (…`start` when the wait began: a pass of several runs one wait — `worker_due_within`)
+      # …those a task of a spin of the event loop asked something — "the end"'s wait on a deferred script (timers.js
+      # `spinUntil`) — run to `now`, the clock the spin moved on to, as a step's caller runs them (V8Runtime#run_loop_step).
+      def spin_serve_workers(now)
+        @runtime.clock_at(now)
+        run_workers_due
+      end
       def run_workers_due(start = Process.clock_gettime(Process::CLOCK_MONOTONIC))
         now = @runtime.clock
         due = @workers.each_value.select {|w| (at = worker_due_at(w)) && at <= now }

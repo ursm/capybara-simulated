@@ -1462,6 +1462,19 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(log).to eq('inl dcl a.js-ran cb.js-ran ca.js-ran cdcl cload load rs:complete')
     end
 
+    # rv2_stopins: …its `error` a task queued as the document aborts — HTML "abort a document" cancels its fetch, a network
+    # error at once — not as late as its server would have answered (Chrome; Firefox fires it later).
+    it "fires an inserted script's error as a stop() cancels its fetch" do
+      log = page_log(<<~HTML, at: 600)
+        <script>onload = () => {
+          #{format(INSERT, 300, 'x', "s.onload = () => L.push('sl'); s.onerror = () => L.push('se');")}
+          setTimeout(() => { stop(); L.push('stopped'); }, 20);
+          setTimeout(() => L.push('t50'), 50);
+        }</script>
+      HTML
+      expect(log).to eq('dcl load stopped se t50 rs:complete')
+    end
+
     # z3_dyn_after: …inserted by a timer the load's task set — a `stop()` as its server takes its time cancels it, its `error`
     # after.
     it "cancels an inserted script's fetch a timer began as its server takes its time" do

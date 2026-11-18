@@ -175,6 +175,7 @@ module Capybara
         'scriptFetchTake'              => ->(b, *a) { b.script_fetch_take(a[0]) },
         'scriptFetchForget'            => ->(b, *a) { b.script_fetch_forget(a[0]) },
         'scriptFetchesForgetRealm'     => ->(b, *a) { b.script_fetches_forget_realm(a[0]) },
+        'spinServeWorkers'             => ->(b, *a) { b.spin_serve_workers(a[0]); nil },
         'blobWindow'                   => ->(b, *_a) { b.blob_window },
         'blobUnregister'               => ->(b, *a) { b.blob_unregister(a[0], a[1]); nil },
         'partitionBlob'                => ->(b, *a) { b.partition_blob(a[0], a[1]) },

@@ -552,6 +552,8 @@ module Capybara
       # The window's virtual clock as its last event-loop step left it (ms), which a worker's clock follows — read from
       # the worker's own thread (Browser#run_worker).
       def clock = @clock || 0.0
+      # …as a spin inside a host call left it, which no step's result told (Browser#spin_serve_workers).
+      def clock_at(now) = (@clock = now.to_f)
       # …and what its `Date` read then, before any offset — its own time, which a worker catching up with it takes, and
       # where it was held (timers.js `clockAtLeast`), which the worker's is held at with it (Browser#run_worker) — on the
       # agent's `Date` scale, the one every message's time is on (timers.js `agentShift`).
