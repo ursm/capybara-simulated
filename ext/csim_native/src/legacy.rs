@@ -4,7 +4,7 @@
 // [[Delete]], [[Set]] and [[OwnPropertyKeys]] have them: each supported index an own data property, read-only,
 // enumerable and configurable (V8 makes its descriptor of the getter's value and the query's attributes), which can be
 // neither defined nor deleted; no index set, supported or not. Unlike the
-// Proxy `withIndexedGetter` makes (webidl.js), it is no exotic JS object to V8's serializer, which hands it to the
+// Proxy `legacyPlatformObject` makes (webidl.js), it is no exotic JS object to V8's serializer, which hands it to the
 // bindings' hook (clone.rs) as the platform object it is.
 
 use crate::dom::{dom, register};

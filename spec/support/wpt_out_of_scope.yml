@@ -60618,6 +60618,35 @@ html/dom/documents/dom-tree-accessors/nameditem-names.html:
     The subtest asserts the opposite, so it matches no real browser; our output (include
     it) matches Chrome. Independent of the named-properties machinery. The other 9
     subtests in this file now PASS."
+html/dom/documents/dom-tree-accessors/nameditem-no-shadowing.tentative.html:
+- name: document.__proto__ is not shadowed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.constructor is not shadowed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.currentScript is not shadowed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.firstChild is not shadowed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.forms is not shadowed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.isSameNode() is not shadowed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: document.onreadystatechange is not shadowed
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - name: <audio> contents ignored ("<audio style='display:block'>abc")
   reason: 'The TEST contradicts the spec and both engines: HTML''s UA sheet has `audio:not([controls])

@@ -28,12 +28,13 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // makes stay the hand-written code's, which registers the test that tells its objects apart. `omit`: what another spec
 // adds to it that no implementation here answers yet, and why — a mixin it includes, by name; a partial interface of
 // it, or a partial of a mixin it includes, by the spec's name. Anything else added is merged. `omitMembers`: single
-// members no implementation answers, by name (and why). `namedProperties` / `indexedProperties`: how an installed
-// interface's objects answer its named / indexed property getter themselves (a Proxy of the class's). `namedGetter`: an
-// interface with an indexed getter whose named getter the Proxy `withIndexedGetter` makes answers too — by the
-// implementation's `supportedNames(slots)` and its named getter's steps (`namedItem`). `nativeIndexed`:
+// members no implementation answers, by name (and why). An interface that supports indexed or named properties — its
+// special operations' and its extended attributes' to say how — is a legacy platform object (`legacyKind`): its objects
+// made by `legacy<Name>(impl)`, the binding's where it makes them, the installing class's otherwise. `nativeIndexed`:
 // an interface the binding makes whose objects with an indexed getter are made natively (webidl.js
-// `nativeIndexedObject`), not as the Proxy `withIndexedGetter` makes. `crossOrigin`: the interface's
+// `nativeIndexedObject`), not as a Proxy; `native`: one whose objects the engine makes, its interceptors answering its
+// indices and names (and why). `notSpecial`: a member its IDL declares a special operation that is none (and why).
+// `crossOrigin`: the interface's
 // CrossOriginProperties (HTML §7.2.1.3.1), what an object of it answers to another origin's script — each member by its
 // name, an operation `'method'`, an attribute what of it is exposed (`'get'`, `'set'`, `'get set'`, the table's
 // [[NeedsGet]] / [[NeedsSet]]) — emitted as `CROSS_ORIGIN_<NAME>_PROPERTIES`, a Set of the names, and
@@ -103,7 +104,6 @@ const INTERFACES = [
   }],
   ['dom', 'Document', {
     install: true,
-    namedProperties: 'the DocumentNamedProps Proxy spliced into its prototype chain (dom-nodes.js)',
     omit: {
       ...NO_TOUCH,
       SVG: 'rootElement: the SVG document is not modelled',
@@ -216,12 +216,8 @@ const INTERFACES = [
   ['html', 'HTMLButtonElement', { install: true }],
   ['html', 'HTMLOptionElement', { install: true }],
   ['html', 'HTMLTextAreaElement', { install: true }],
-  ['html', 'HTMLSelectElement', { install: true, indexedProperties: 'the Proxy its prototype chain holds (dom-nodes.js `SelectProto`)' }],
-  ['html', 'HTMLFormElement', {
-    install: true,
-    namedProperties: 'the Proxy each form is (dom-nodes.js `FORM_HANDLER`)',
-    indexedProperties: 'the same Proxy'
-  }],
+  ['html', 'HTMLSelectElement', { install: true }],
+  ['html', 'HTMLFormElement', { install: true }],
   ['html', 'HTMLInputElement', {
     install: true,
     omitMembers: { webkitEntries: 'the Entries API\'s file system entries are not implemented' }
@@ -265,7 +261,6 @@ const INTERFACES = [
   ['mathml-core', 'MathMLElement', { install: true, omit: { ...NO_TOUCH, 'css-typed-om': 'attributeStyleMap: the Typed OM is not implemented' } }],
   ['html', 'Window', {
     install: true,
-    namedProperties: true,
     omit: {
       ...NO_TOUCH,
       ...NO_WINDOW_HANDLERS,
@@ -344,7 +339,7 @@ const INTERFACES = [
   ['touch-events', 'TouchList'],
   ['touch-events', 'TouchEvent', {
     event: { init: ['touches', 'targetTouches', 'changedTouches'] },
-    namedProperties: 'none: getModifierState is the plain operation Chrome and Firefox have, no named property of the event'
+    notSpecial: { getModifierState: 'the plain operation Chrome and Firefox have, no named property of the event' }
   }],
   ['html', 'DataTransfer', { shell: true, slots: [{ items: 'list', files: 'filesView' }] }],
   ['html', 'DataTransferItemList'],
@@ -371,35 +366,26 @@ const INTERFACES = [
   // names)
   ['html', 'HTMLAllCollection', {
     shell: true,
-    namedProperties: "the undetectable object's interceptors (legacy.rs)",
-    indexedProperties: 'the same interceptors'
+    native: "the undetectable object's interceptors (legacy.rs)"
   }],
   // (…the PDF viewer plugins and their MIME types, HTML §8.9.1.6's fixed lists where the user agent views PDFs inline —
   // this one, whose `pdfViewerEnabled` is true: each named by its name or type, [LegacyUnenumerableNamedProperties])
-  ['html', 'PluginArray', { namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
-  ['html', 'MimeTypeArray', { namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
-  ['html', 'Plugin', { slots: ['name'], namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
+  ['html', 'PluginArray'],
+  ['html', 'MimeTypeArray'],
+  ['html', 'Plugin', { slots: ['name'] }],
   ['html', 'MimeType', { slots: ['type'] }],
   ['html', 'External'],
   ['html', 'CustomElementRegistry', { install: true }],
   ['html', 'ValidityState'],
   ['html', 'CustomStateSet', { shell: true, platform: 1 }],
   ['html', 'ElementInternals', { shell: true, platform: 1, slots: ['states'] }],
-  ['html', 'DOMStringMap', { shell: true, namedProperties: 'the Proxy each element\'s dataset is (dom-nodes.js)' }],
-  ['dom', 'HTMLCollection', {
-    install: true,
-    namedProperties: 'the Proxy each collection is (dom-collections.js `legacyCollection`)',
-    indexedProperties: 'the same Proxy'
-  }],
-  ['html', 'HTMLOptionsCollection', { install: true, indexedProperties: 'the Proxy each collection is' }],
-  ['html', 'HTMLFormControlsCollection', { install: true, namedProperties: 'the Proxy each collection is' }],
-  ['dom', 'NodeList', { install: true, indexedProperties: 'the Proxy `withIndexedGetter` makes of each (dom-collections.js `makeNodeList`)' }],
+  ['html', 'DOMStringMap', { shell: true }],
+  ['dom', 'HTMLCollection', { install: true }],
+  ['html', 'HTMLOptionsCollection', { install: true }],
+  ['html', 'HTMLFormControlsCollection', { install: true }],
+  ['dom', 'NodeList', { install: true }],
   ['html', 'RadioNodeList', { install: true }],
-  ['dom', 'NamedNodeMap', {
-    shell: true,
-    namedProperties: 'the Proxy each element\'s attributes are (dom-collections.js)',
-    indexedProperties: 'the same Proxy'
-  }],
+  ['dom', 'NamedNodeMap', { shell: true }],
   ['html', 'CanvasGradient'],
   ['html', 'TextMetrics'],
   ['html', 'CanvasPattern'],
@@ -476,7 +462,7 @@ const INTERFACES = [
   ['urlpattern', 'URLPattern', { install: true }],
   ['fetch', 'Headers', { install: true }],
   ['xhr', 'FormData', { shell: true }],
-  ['html', 'Storage', { shell: true, namedProperties: 'the Proxy each storage area is (storage.js)' }],
+  ['html', 'Storage', { shell: true }],
   ['dom', 'XMLDocument', { install: true }],
   ['webcrypto', 'CryptoKey', { shell: true, platform: 1 }],
   ['webcrypto', 'SubtleCrypto', { shell: true }],
@@ -596,7 +582,7 @@ const INTERFACES = [
   ['dom', 'StaticRange', { shell: true }],
   ['dom', 'Range', { install: true }],
   ['selection-api', 'Selection', { shell: true, platform: 1 }],
-  ['cssom', 'CSSStyleDeclaration', { install: true, indexedProperties: 'the Proxy each declaration is (style-proxy.js `makeDeclProxy`)' }],
+  ['cssom', 'CSSStyleDeclaration', { install: true }],
   ['cssom', 'CSSStyleProperties', { install: true }],
   ['cssom', 'CSSPageDescriptors', { install: true }],
   ['css-fonts-5', 'CSSFontFaceDescriptors', { install: true }],
@@ -626,7 +612,7 @@ const INTERFACES = [
   ['css-fonts', 'CSSFontFeatureValuesMap', { shell: true, platform: 0 }],
   ['css-fonts', 'CSSFontPaletteValuesRule', { shell: true, platform: 4 }],
   ['css-animations', 'CSSKeyframeRule', { shell: true, platform: 4 }],
-  ['css-animations', 'CSSKeyframesRule', { shell: true, platform: 4, indexedProperties: 'the Proxy each @keyframes rule is (cssom.js `withIndexedGetter`)' }],
+  ['css-animations', 'CSSKeyframesRule', { shell: true, platform: 4 }],
   ['css-counter-styles', 'CSSCounterStyleRule', { shell: true, platform: 4 }],
   ['css-properties-values-api', 'CSSPropertyRule', { shell: true, platform: 4 }],
   ['css-nesting', 'CSSNestedDeclarations', { shell: true, platform: 4 }],
@@ -748,7 +734,7 @@ const RUNTIME = [
   'PLATFORM', 'createObject', 'rootInterface', 'inheritInterface', 'checkPlatformSteps', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
-  'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
+  'defineConstants', 'legacyPlatformObject', 'namedPropertiesObject', 'requireSteps', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike', 'defineMaplike',
   'ceEnter', 'ceLeave'
 ];
@@ -856,8 +842,8 @@ for (const [spec, text] of Object.entries(EDITORS_DRAFT_REDEFINITIONS)) {
 const HANDLED = {
   // ([Serializable] / [Transferable]: the structured clone's to honour — platform-globals.js `cloneInto` — no member's;
   // [LegacyWindowAlias]: the Window's other names for the interface object, its implementation's to put there;
-  // [LegacyOverrideBuiltIns]: its named properties answered over the prototype chain, by the implementation that
-  // answers them — `namedProperties`; [LegacyFactoryFunction]: `Audio` / `Image` / `Option`, whose steps are prose, defined
+  // [LegacyOverrideBuiltIns] / [LegacyUnenumerableNamedProperties]: how a legacy platform object's names are seen —
+  // `legacyKind`; [LegacyFactoryFunction]: `Audio` / `Image` / `Option`, whose steps are prose, defined
   // beside the interface object by its implementation — dom-class-aliases.js)
   interface: [
     'Exposed', 'SecureContext', 'Global', 'LegacyUnenumerableNamedProperties', 'Serializable', 'Transferable', 'LegacyWindowAlias',
@@ -1043,6 +1029,9 @@ function reflectionOf(iface, m, where) {
 // time) — then `text`.
 function failure(where, text = '') {
   if (where.dictionary) return `prefix + ${JSON.stringify(`Failed to read the '${where.member}' property from '${where.dictionary}': ${text}`)}`;
+  // (…a value a special operation's setter is given, whose name or index is `name` / `i` where it is converted: Chrome's)
+  if (where.special === 'named') return `${JSON.stringify("Failed to set a named property '")} + name + ${JSON.stringify(`' on '${where.iface}': ${text}`)}`;
+  if (where.special === 'indexed') return `${JSON.stringify('Failed to set an indexed property [')} + i + ${JSON.stringify(`] on '${where.iface}': ${text}`)}`;
   return JSON.stringify((where.index === undefined
     ? `Failed to set the '${where.member}' property on '${where.iface}': `
     : where.member === undefined
@@ -1059,6 +1048,7 @@ function typeName(t) {
 // What a conversion's TypeError says, by where the value comes from (Chrome's messages): an operation's argument
 // (`index`, from 0), or an attribute's value.
 function conversionError(where, what) {
+  if (where.special) return failure(where, `The provided value is not of type '${what}'.`);
   return failure(where, where.index === undefined
     ? `Failed to convert value to '${what}'.`
     : `parameter ${where.index + 1} is not of type '${what}'.`);
@@ -1494,6 +1484,128 @@ function crossOriginTable(name, members, table) {
   return table;
 }
 
+// The named properties object of a [Global] interface that supports named properties (Web IDL §3.7.4) — the function its
+// install answers that makes it, of the prototype it is given (and what stands in for the global's WindowProxy at an
+// index: webidl.js `namedPropertiesObject`) — or null.
+function globalNamedProperties(def) {
+  if (!(def.extAttrs || []).some((e) => e.name === 'Global')) return null;
+  const { specials, extAttrs } = specialsOf(def);
+  if (!specials['named getter']) return null;
+  if (specials['named setter'] || specials['named deleter'] || specials['indexed getter']) throw new Error(`${def.name}: a [Global] interface's indexed properties or named setter / deleter are not generated yet`);
+  const kind = [`named: (global, name) => impl.${specialStep(specials['named getter'], 'named getter')}(global, name)`];
+  if (extAttrs.has('LegacyUnenumerableNamedProperties')) kind.push('unenumerable: true');
+  return `(proto, standIn) => namedPropertiesObject(proto, globalThis, { __proto__: null, ${kind.join(', ')} }, '${def.name}Properties', standIn)`;
+}
+// A legacy platform object (Web IDL §3.9): an interface that supports indexed or named properties — an indexed or
+// named property getter of its own or of an interface it inherits, the derived-most one of each kind the one there is,
+// and its setters and deleter likewise — and the extended attributes that say how its names are seen, on it or on an
+// interface it inherits, a partial among them ([LegacyOverrideBuiltIns], [LegacyUnenumerableNamedProperties]). Null for
+// an interface that supports neither, or whose objects answer their indices and names otherwise: `nativeIndexed` (made
+// natively), `native` (an object of the engine's own, why), [Global] (its named properties object answers its names —
+// `namedPropertiesObject`). Each special operation's steps the implementation's `impl.<its name>` — an anonymous one's
+// `getter` / `setter` (indexed), `namedGetter` / `namedSetter` / `namedDeleter` — and a named getter's supported
+// property names `impl.supportedNames`. `notSpecial` names a member its IDL declares a special operation that is none
+// (TouchEvent's getModifierState: a plain operation in Chrome and Firefox), with why.
+function specialsOf(def) {
+  const specials = {};
+  const extAttrs = new Set(), unforgeable = new Set();
+  for (let d = def; d; d = definitions.get(d.inheritance)) {
+    const o = interfaceOptions(d.name);
+    const added = (additions.get(d.name) || []).filter((a) => a.partial && !Object.hasOwn(o.omit || {}, a.partial));
+    for (const x of [d, ...added.map((a) => a.def)]) for (const e of x.extAttrs || []) extAttrs.add(e.name);
+    for (const m of membersOf(d, o.omit, o.omitMembers)) {
+      if ((m.extAttrs || []).some((e) => e.name === 'LegacyUnforgeable') && m.name) unforgeable.add(m.name);
+      if (m.type !== 'operation' || !['getter', 'setter', 'deleter'].includes(m.special)) continue;
+      if (Object.hasOwn(o.notSpecial || {}, m.name)) continue;
+      const key = m.arguments[0].idlType.idlType;
+      if (key !== 'unsigned long' && key !== 'DOMString') throw new Error(`${d.name}.${m.name || m.special}: a ${m.special} keyed by ${key} is not generated yet`);
+      const slot = `${key === 'unsigned long' ? 'indexed' : 'named'} ${m.special}`;
+      if (key === 'unsigned long' && m.special === 'deleter') throw new Error(`${d.name}: an indexed deleter is no Web IDL`);
+      // (…the derived-most one of each kind)
+      specials[slot] ??= { def: d, m };
+    }
+  }
+  return { specials, extAttrs, unforgeable };
+}
+// …the impl step a special operation's steps are: its name, or an anonymous one's.
+const ANONYMOUS_SPECIAL = { 'indexed getter': 'getter', 'indexed setter': 'setter', 'named getter': 'namedGetter', 'named setter': 'namedSetter', 'named deleter': 'namedDeleter' };
+const specialStep = ({ m }, slot) => m.name || ANONYMOUS_SPECIAL[slot];
+// The `kind` of webidl.js `legacyPlatformObject` an interface's objects are made by, as `legacy<Name>(impl)` — the
+// function that makes one of its objects — or null for an interface that is no legacy platform object. `arg` the
+// implementation's view of the object its steps take ('slots' where the binding makes it, else the object).
+function legacyKind(def, options) {
+  const name = def.name;
+  const { specials, extAttrs, unforgeable } = specialsOf(def);
+  const indexedGetter = specials['indexed getter'], namedGetter = specials['named getter'];
+  if (!indexedGetter && !namedGetter) {
+    if (specials['indexed setter'] || specials['named setter'] || specials['named deleter']) throw new Error(`${name}: a setter or deleter with no getter is no Web IDL`);
+    return null;
+  }
+  if (options.nativeIndexed || options.native || extAttrs.has('Global')) return null;
+  // (…made by the function of the interface it inherits them from where it declares none of its own: RadioNodeList's
+  // NodeList's, XMLDocument's Document's — but where the binding makes its objects, which the binding has to make so)
+  if (!Object.values(specials).some((s) => s.def === def)) {
+    if (!options.install || options.shell) throw new Error(`${name}: an inherited legacy platform object the binding makes is not generated yet`);
+    return null;
+  }
+  const checks = new Set();
+  const steps = [], entries = [];
+  const step = (slot) => {
+    const n = specialStep(specials[slot], slot);
+    if (!steps.includes(n)) steps.push(n);
+    return n;
+  };
+  if (indexedGetter) {
+    const item = step('indexed getter');
+    steps.push('get_length');
+    // (…a supported index one below `length`: a getter whose type is nullable answers null past it, any other is asked
+    // nothing there)
+    entries.push(indexedGetter.m.idlType.nullable
+      ? `item: (o, i) => impl.${item}(o, i)`
+      : `item: (o, i) => (i < impl.get_length(o) ? impl.${item}(o, i) : null)`);
+    entries.push('length: (o) => impl.get_length(o)');
+    const setter = specials['indexed setter'];
+    if (setter) {
+      const v = conversion(setter.m.arguments[1].idlType, 'v', { iface: name, special: 'indexed' }, checks);
+      entries.push(`setIndex: (o, i, v) => { v = ${v}; ${withCEReactions(setter.m, `impl.${step('indexed setter')}(o, i, v);`)} }`);
+    }
+  }
+  if (namedGetter) {
+    // (…asked first whether the name is supported where the getter answers others too — `isSupportedName(o, name)`:
+    // NamedNodeMap's getNamedItem, which finds `foo` by `FOO` in an HTML document, no name of its own)
+    const getter = step('named getter');
+    entries.push(`named: impl.isSupportedName === undefined ? (o, name) => impl.${getter}(o, name) : (o, name) => (impl.isSupportedName(o, name) ? impl.${getter}(o, name) : null)`);
+    steps.push('supportedNames');
+    entries.push('names: (o) => impl.supportedNames(o)');
+    const setter = specials['named setter'], deleter = specials['named deleter'];
+    if (setter) {
+      const v = conversion(setter.m.arguments[1].idlType, 'v', { iface: name, special: 'named' }, checks);
+      entries.push(`setNamed: (o, name, v) => { v = ${v}; ${withCEReactions(setter.m, `impl.${step('named setter')}(o, name, v);`)} }`);
+    }
+    if (deleter) {
+      // (…a deleter declared to return a boolean the one whose `false` says the deletion failed)
+      const returns = deleter.m.idlType.idlType === 'boolean' ? 'return ' : '';
+      entries.push(`deleteNamed: (o, name) => ${withCEReactions(deleter.m, `{ ${returns}impl.${step('named deleter')}(o, name); }`)}`);
+    }
+    if (extAttrs.has('LegacyOverrideBuiltIns')) entries.push('overrideBuiltIns: true');
+    if (extAttrs.has('LegacyUnenumerableNamedProperties')) entries.push('unenumerable: true');
+    if (unforgeable.size) entries.push(`unforgeable: ${JSON.stringify([...unforgeable])}`);
+  } else if (specials['named setter'] || specials['named deleter']) {
+    throw new Error(`${name}: a named setter or deleter with no named getter is no Web IDL`);
+  }
+  const lines = [];
+  const what = [indexedGetter && 'indexed', namedGetter && 'named'].filter(Boolean).join(' and ');
+  lines.push(`// interface ${name}: a legacy platform object (Web IDL §3.9), of ${what} properties`);
+  lines.push(`export function legacy${name}(impl, own) {`);
+  lines.push(`  requireSteps('${name}', impl, ${JSON.stringify(steps)});`);
+  for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
+  lines.push(`  return legacyPlatformObject({ __proto__: null,`);
+  lines.push(entries.map((e) => `    ${e}`).join(',\n'));
+  lines.push(`  }, own);`);
+  lines.push(`}`);
+  return lines.join('\n');
+}
+
 function generateInterface(def, options = {}) {
   const name = def.name;
   if (def.inheritance && !options.install && !options.event) throw new Error(`${name}: an inherited interface is not generated yet`);
@@ -1643,11 +1755,12 @@ function generateInterface(def, options = {}) {
       continue;
     }
     if (m.type === 'operation') {
-      // (…a named property getter / setter / deleter the installing class's objects answer themselves: `namedProperties`
-      // says how — but one with a name is an ordinary operation too: Storage's getItem / setItem / removeItem)
-      const namedProperty = options.namedProperties && ['getter', 'setter', 'deleter'].includes(m.special) &&
-        m.arguments.length >= 1 && m.arguments[0].idlType.idlType === 'DOMString';
-      if (namedProperty && !m.name) continue;
+      // (…a special operation the object's legacy platform object steps — `legacyKind` — and, one with a name, an ordinary
+      // operation too: Storage's getItem / setItem / removeItem, HTMLCollection's item / namedItem)
+      const special = ['getter', 'setter', 'deleter'].includes(m.special) && !Object.hasOwn(options.notSpecial || {}, m.name);
+      // (…an indexed getter of its own the one its @@iterator walks: an anonymous one's steps `getter`, DataTransferItemList's)
+      if (special && m.special === 'getter' && m.arguments[0].idlType.idlType === 'unsigned long') indexed = m.name || 'getter';
+      if (special && !m.name) continue;
       if (m.special === 'static') {
         // (…a static operation the interface object's own, of no object: `DeviceMotionEvent.requestPermission()`)
         if (!options.install && !options.event) throw new Error(`${label}: a static operation of an interface the binding makes is not generated yet`);
@@ -1691,19 +1804,7 @@ function generateInterface(def, options = {}) {
         body.push(`    toJSON() { const self = ${self}; return { ${(inherited.length ? ['...inheritedJSON(self)'] : []).concat(own).join(', ')} }; }`);
         continue;
       }
-      if (namedProperty) {
-        // (…its ordinary operation below)
-      } else if (m.special === 'getter') {
-        if (m.arguments.length !== 1 || m.arguments[0].idlType.idlType !== 'unsigned long') throw new Error(`${label}: only an indexed getter is generated`);
-        // (…an anonymous one the object's indices alone, which the implementation's `getter` answers: DataTransferItemList)
-        indexed = m.name || 'getter';
-        if (!m.name) continue;
-      } else if (m.special === 'setter' && options.indexedProperties && m.arguments[0].idlType.idlType === 'unsigned long') {
-        // (…an indexed setter the installing class's exotic object answers, as its indices: HTMLOptionsCollection's)
-        if (!m.name) continue;
-      } else if (m.special) {
-        throw new Error(`${label}: a ${m.special} operation is not generated yet`);
-      }
+      if (!special && m.special && !Object.hasOwn(options.notSpecial || {}, m.name)) throw new Error(`${label}: a ${m.special} operation is not generated yet`);
       if (!m.name) throw new Error(`${label}: an anonymous operation is not generated yet`);
       // (…an overloaded one written once, where its first overload stands)
       if (members.includes(m.name)) continue;
@@ -1726,17 +1827,18 @@ function generateInterface(def, options = {}) {
   if (stringifier && stringifier !== 'toString') stringifierOut.push(`    toString() { return impl.get_${stringifier}(${self}); }`);
   if (options.event) return eventInterface(def, options.event, { memberList, body, statics, unforgeables, checks, constants, constructors });
   const enumerated = JSON.stringify([...new Set(members)].concat(stringifier ? ['toString'] : []));
+  // (…its objects legacy platform objects where it supports indexed or named properties: `legacy<Name>(impl)`, which the
+  // binding makes them by where it makes them, and the hand-written class that makes them otherwise)
+  const legacy = legacyKind(def, options);
+  if (valueIterator && !indexed) throw new Error(`${name}: a value iterator with no indexed getter is not generated yet`);
   if (options.install) {
-    // (…an indexed getter the implementation's exotic object answers — `indexedProperties`, NamedNodeMap's Proxy — its
-    // @@iterator, %Array.prototype.values% over the integer `length` checked above, the interface's; and a value
-    // iterator's members %Array.prototype%'s, NodeList's)
-    if ((valueIterator || indexed) && !options.indexedProperties) {
-      throw new Error(`${name}: an installed interface with an indexed getter or an iterator its objects do not answer is not generated yet`);
-    }
+    // (…an indexed getter's @@iterator, %Array.prototype.values% over the integer `length` checked above, the
+    // interface's; and a value iterator's members %Array.prototype%'s, NodeList's)
     if (setlike) setlike.declared = memberList.filter((o) => o.type === 'operation' && ['add', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
     if (maplike) maplike.declared = memberList.filter((o) => o.type === 'operation' && ['set', 'delete', 'clear'].includes(o.name)).map((o) => o.name);
-    const installed = installInterface(def, { shell: options.shell, body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed, valueIterator });
-    return options.shell ? `${installed}\n${shellClass(def, constructors)}` : installed;
+    const installed = installInterface(def, { shell: options.shell, body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed, valueIterator, namedProperties: globalNamedProperties(def) });
+    const made = options.shell ? `${installed}\n${shellClass(def, constructors, legacy !== null)}` : installed;
+    return legacy ? `${legacy}\n${made}` : made;
   }
   if (unforgeables.length) throw new Error(`${name}: [LegacyUnforgeable] members of an interface the binding makes are not generated yet`);
   if (handlers.length) throw new Error(`${name}: event handlers of an interface the binding makes are not generated yet`);
@@ -1768,24 +1870,22 @@ function generateInterface(def, options = {}) {
   lines.push(`  enumerable(${name}.prototype, ${enumerated});`);
   if (unscopables.length) lines.push(`  defineUnscopables(${name}.prototype, ${JSON.stringify(unscopables)});`);
   if (valueIterator) {
-    if (!indexed) throw new Error(`${name}: a value iterator with no indexed getter is not generated yet`);
     lines.push(`  defineValueIterator(${name}.prototype);`);
   } else if (indexed) {
     lines.push(`  defineIndexedIterator(${name}.prototype);`);
   }
-  // …and its objects, as the platform makes them (`create(a, …)`, each `init`'s state by position), exotic where it has an
-  // indexed getter.
+  // …and its objects, as the platform makes them (`create(a, …)`, each `init`'s state by position), a legacy platform
+  // object of its slots where it supports indexed or named properties.
   const made = `new ${name}(PLATFORM, a, b, c, d, e, f)`;
-  const make = !indexed
-    ? made
-    : options.nativeIndexed
-      ? `{ const s = nativeIndexedObject(${name}.prototype, KEY, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s)); impl.init(s, a, b, c, d, e, f); return s.owner; }`
-      : options.namedGetter
-        ? `withIndexedGetter(${made}, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s), (s) => impl.supportedNames(s), (s, n) => impl.namedItem(s, n))`
-        : `withIndexedGetter(${made}, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s))`;
+  if (legacy) lines.push(`  const legacyObject = legacy${name}(impl);`);
+  const make = options.nativeIndexed
+    ? `{ const s = nativeIndexedObject(${name}.prototype, KEY, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s)); impl.init(s, a, b, c, d, e, f); return s.owner; }`
+    : legacy
+      ? `{ const o = ${made}; return legacyObject(o, slotsOf(o, KEY)); }`
+      : made;
   lines.push(`  return { interface: ${name}, create: (a, b, c, d, e, f) => ${make} };`);
   lines.push(`}`);
-  return lines.join('\n');
+  return legacy ? `${legacy}\n${lines.join('\n')}` : lines.join('\n');
 }
 
 // An installed interface: its members generated in a class of their own, then put on the prototype of the hand-written
@@ -1799,7 +1899,7 @@ function generateInterface(def, options = {}) {
 // The event handler IDL attributes each installed interface has, by its name — the elements' the engine's table of
 // event handler content attributes is made from (`rustSource`).
 const EVENT_HANDLERS_OF = new Map();
-function installInterface(def, { shell, body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed, valueIterator }) {
+function installInterface(def, { shell, body, statics, unforgeables, checks, unscopables, constructors, constants, handlers, pairIterator, setlike, maplike, preamble, indexed, valueIterator, namedProperties }) {
   const name = def.name;
   EVENT_HANDLERS_OF.set(name, handlers);
   const global = (def.extAttrs || []).some((e) => e.name === 'Global');
@@ -1850,7 +1950,8 @@ function installInterface(def, { shell, body, statics, unforgeables, checks, uns
     lines.push(`  return {`);
     lines.push(`    names: objectKeys(descriptors),`);
     lines.push(`    defineMembers: (global) => objectDefineProperties(global, descriptors),`);
-    lines.push(`    defineUnforgeables: ${unforgeables.length ? 'unforgeableMembers(Unforgeables.prototype)' : '() => {}'}`);
+    lines.push(`    defineUnforgeables: ${unforgeables.length ? 'unforgeableMembers(Unforgeables.prototype)' : '() => {}'}${namedProperties ? ',' : ''}`);
+    if (namedProperties) lines.push(`    namedPropertiesObject: ${namedProperties}`);
     lines.push(`  };`);
   } else if (unforgeables.length) {
     lines.push(`  return unforgeableMembers(Unforgeables.prototype);`);
@@ -1861,7 +1962,7 @@ function installInterface(def, { shell, body, statics, unforgeables, checks, uns
 
 // An interface's class, of a `shell`: what `install<Name>` puts its members on (see `shell` above). No `super` makes its object
 // (`class extends Object` makes it none before its body): webidl.js `createObject`.
-function shellClass(def, constructors) {
+function shellClass(def, constructors, legacy = false) {
   const name = def.name;
   if (constructors.length > 1) throw new Error(`${name}: an overloaded constructor of a shell is not generated yet`);
   const [ctor] = constructors;
@@ -1877,10 +1978,13 @@ function shellClass(def, constructors) {
   lines.push(`  checkPlatformSteps('${name}', impl, ${platform});`);
   lines.push(`  registerInterface('${name}', (o) => slotsOf(o, '${name}') !== undefined);`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
+  if (legacy) lines.push(`  const legacyObject = legacy${name}(impl);`);
   // (…its object made after its arguments are converted: webidl.js `createObject`; `slots.owner` what it answers, a Proxy
   // of it where its `init` made one)
+  // (…a legacy platform object made of it, its slots' owner then, before its `init` sees them)
   const made = [`      const slots = makeSlots(createObject(new.target), '${chain[0]}');`];
   for (const n of chain.slice(1)) made.push(`      slots.${n} = true;`);
+  if (legacy) made.push(`      legacyObject(slots.owner);`);
   lines.push(`  const ${name} = ({ ${name}: class extends Object {`);
   lines.push(`    constructor() {`);
   // (…a script's construction, in an `if` where the platform has one of its own too)

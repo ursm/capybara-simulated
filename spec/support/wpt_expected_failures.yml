@@ -2174,7 +2174,6 @@ dom/events/webkit-transition-end-event.html:
 dom/idlharness.window.js:
 - 'Document interface: attribute fullscreen'
 - 'Document interface: attribute fullscreenEnabled'
-- 'Document interface: existence and properties of interface prototype object'
 - 'Document interface: new Document() must inherit property "fullscreen" with the
   proper type'
 - 'Document interface: new Document() must inherit property "fullscreenEnabled" with
@@ -65283,11 +65282,6 @@ html/browsers/the-window-object/named-access-on-the-window-object/navigated-name
   with browsing ccontext via same-origin <iframe)>
 - Window's associated Document object is used for finding named objects (<object>
   with browsing ccontext via srcdoc <iframe)>
-html/browsers/the-window-object/named-access-on-the-window-object/prototype.html:
-- Property on EventTarget.prototype.
-- Property on Object.prototype.
-html/browsers/the-window-object/named-access-on-the-window-object/window-named-properties.html:
-- constructor
 html/browsers/the-window-object/open-close/close_script_defer.html:
 - Running defer script in window.close()
 html/browsers/the-window-object/open-close/no_window_open_when_term_nesting_level_nonzero.window.js:
