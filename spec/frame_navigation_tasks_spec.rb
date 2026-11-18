@@ -1502,11 +1502,21 @@ RSpec.describe 'a frame navigation as tasks' do
 
     # s5_impcomment, s5_impstring: a `<style>` whose `@import` is in a comment or a string imports nothing, and holds back
     # no script, the parser's included (Chrome and Firefox `inl dcl a.js-ran`).
-    {'a comment' => '/* @import url(/slow/150/x.css); */ p { color: red }', 'a string' => 'p::before { content: "@import url(/slow/150/x.css)" }'}.each do |where, css|
+    {
+      'a comment' => '/* @import url(/slow/150/x.css); */ p { color: red }',
+      'a string' => 'p::before { content: "@import url(/slow/150/x.css)" }',
+      'a place after a rule, where none imports' => 'p { color: red } @import url(/slow/150/x.css);'
+    }.each do |where, css|
       it "holds back no script for a `<style>` with `@import` in #{where}" do
         log = page_log(%(<style>#{css}</style><script async src="/slow/0/a.js"></script><script>L.push('inl')</script>), at: 600)
         expect(log).to eq('inl dcl a.js-ran load rs:complete')
       end
+    end
+
+    # …and one whose `@import` follows a `@charset` and a `@layer` statement, which may come before it, does.
+    it 'holds back a script for a `<style>` that imports after `@charset` and `@layer` statements' do
+      log = page_log(%(<style>@charset "utf-8"; /* x */ @layer a, b; @import url(/slow/150/x.css);</style><script async src="/slow/0/a.js"></script><script>L.push('inl')</script>), at: 600)
+      expect(log).to eq('inl a.js-ran dcl load rs:complete')
     end
 
     # s4_alt, s4_badtype, s4_disabled: a link that contributes no script-blocking style sheet — an alternative one, one of a
