@@ -332,6 +332,16 @@ RSpec.describe 'legacy platform objects' do
     expect(r).to eq(['[object HTMLImageElement]', '[object HTMLImageElement]', '[object HTMLInputElement]'])
   end
 
+  # getComputedStyle makes a new declaration each call (CSSOM; Chrome), so an expando on one is no other's.
+  it "makes a new computed style each call" do
+    r = probe(<<~JS)
+      const a = getComputedStyle(document.body), b = getComputedStyle(document.body);
+      a.foo = 1;
+      return [a === b, b.foo === undefined, a.display === b.display];
+    JS
+    expect(r).to eq([false, true, true])
+  end
+
   # No list of the bindings' is grown through Array.prototype: a page's index setter there sees none of their values.
   it "hands a page's Array.prototype index setters nothing of the bindings'" do
     r = probe(<<~JS)
