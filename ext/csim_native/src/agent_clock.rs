@@ -29,13 +29,15 @@ use crate::dom::{dom, realm_id, register, register_fast, Dom, RealmArena, RealmS
 
 // An agent's script time: the turns closed, in milliseconds; the turn open, from when
 // it opened; and the synchronous host calls it waits inside, since when the outermost began, and the event loop's clock
-// as each began with the number it was begun as (unload_walks.rs `next_mark`).
+// as each began with the number it was begun as (unload_walks.rs `next_mark`) and when; and the real time of those nested
+// in the outermost that were none of the script's at all (`agentWait`'s `whole`), which its end takes out with the rest.
 #[derive(Default)]
 pub(crate) struct AgentTime {
     closed: f64,
     open: Option<Instant>,
-    waits: Vec<(f64, u32)>,
+    waits: Vec<(f64, u32, Instant)>,
     wait_began: Option<Instant>,
+    excused: f64,
 }
 
 impl AgentTime {
@@ -50,11 +52,12 @@ impl AgentTime {
     // `mark`, as the host's entry that failed was made (unload_walks.rs `end_left_open_since`), not one under way below
     // it, which another entry began. How many.
     pub(crate) fn end_waits_since(&mut self, mark: u32) -> usize {
-        let kept = self.waits.iter().take_while(|&&(_, id)| !crate::unload_walks::begun_after(id, mark)).count();
+        let kept = self.waits.iter().take_while(|&&(_, id, _)| !crate::unload_walks::begun_after(id, mark)).count();
         let ended = self.waits.len() - kept;
         self.waits.truncate(kept);
         if self.waits.is_empty() {
             self.wait_began = None;
+            self.excused = 0.0;
         }
         ended
     }
@@ -567,21 +570,36 @@ fn agent_wait(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let clock = d.arena.event_loop.clock;
     let time = &mut d.agent_time;
     if begins {
-        if time.waits.is_empty() {
-            time.wait_began = Some(at);
+        time.begin_wait(at, clock);
+    } else {
+        time.end_wait(at, clock, whole);
+    }
+}
+impl AgentTime {
+    fn begin_wait(&mut self, at: Instant, clock: f64) {
+        if self.waits.is_empty() {
+            self.wait_began = Some(at);
         }
-        time.waits.push((clock, crate::unload_walks::next_mark()));
-        return;
+        self.waits.push((clock, crate::unload_walks::next_mark(), at));
     }
-    let moved = time.waits.pop().map_or(0.0, |(began, _)| if whole { f64::MAX } else { clock - began });
-    if !time.waits.is_empty() {
-        return;
+    // (…a nested one none of the script's — a wait on another agent, a script's fetch — its real time taken out with the
+    // outermost's: one inside a parser-blocking fetch whose server's sleep ran the event loop counted as script time else)
+    fn end_wait(&mut self, at: Instant, clock: f64, whole: bool) {
+        let ended = self.waits.pop();
+        if !self.waits.is_empty() {
+            if let (true, Some((_, _, began))) = (whole, ended) {
+                self.excused += at.saturating_duration_since(began).as_secs_f64() * 1000.0;
+            }
+            return;
+        }
+        let excused = std::mem::take(&mut self.excused);
+        let moved = ended.map_or(0.0, |(began, _, _)| if whole { f64::MAX } else { clock - began + excused });
+        let moved = if moved.is_finite() && moved > 0.0 { moved } else { 0.0 };
+        let (Some(began), Some(open)) = (self.wait_began.take(), self.open) else { return };
+        let waited = at.saturating_duration_since(began.max(open));
+        let cut = std::time::Duration::from_secs_f64((moved / 1000.0).min(waited.as_secs_f64()));
+        self.open = Some(open + cut);
     }
-    let moved = if moved.is_finite() && moved > 0.0 { moved } else { 0.0 };
-    let (Some(began), Some(open)) = (time.wait_began.take(), time.open) else { return };
-    let waited = at.saturating_duration_since(began.max(open));
-    let cut = std::time::Duration::from_secs_f64((moved / 1000.0).min(waited.as_secs_f64()));
-    time.open = Some(open + cut);
 }
 
 // __dom.agentIdle() — the calling agent's event loop step is over: a turn still open closes, whether or not a checkpoint
@@ -601,16 +619,35 @@ mod tests {
     use super::*;
     use crate::unload_walks::{last_mark, next_mark};
 
+    // A wait none of the script's nested in one the clock moved by part of: its real time no script time either.
+    #[test]
+    fn a_nested_whole_wait_is_no_script_time() {
+        let start = Instant::now();
+        let mut time = AgentTime { open: Some(start), ..Default::default() };
+        let ms = |n: u64| start + std::time::Duration::from_millis(n);
+        time.begin_wait(ms(0), 0.0);
+        time.begin_wait(ms(10), 5.0);
+        time.end_wait(ms(60), 5.0, true);
+        time.end_wait(ms(70), 20.0, false);
+        // 70 ms waited: 20 the clock moved, 50 the nested whole wait — none of it script time.
+        assert!((time.now(ms(70)) - 0.0).abs() < 1e-6, "{}", time.now(ms(70)));
+        // …and without the nested one, only what the clock moved is cut.
+        let mut plain = AgentTime { open: Some(start), ..Default::default() };
+        plain.begin_wait(ms(0), 0.0);
+        plain.end_wait(ms(70), 20.0, false);
+        assert!((plain.now(ms(70)) - 50.0).abs() < 1e-6, "{}", plain.now(ms(70)));
+    }
+
     // A failed entry ends the waits begun since it was made, not one an outer entry began and is still inside.
     #[test]
     fn a_failed_entry_ends_only_its_own_waits() {
         let mut time = AgentTime::default();
         let first = next_mark();
-        time.waits.push((0.0, first));
+        time.waits.push((0.0, first, Instant::now()));
         time.wait_began = Some(Instant::now());
         let mark = last_mark();
-        time.waits.push((10.0, next_mark()));
-        time.waits.push((20.0, next_mark()));
+        time.waits.push((10.0, next_mark(), Instant::now()));
+        time.waits.push((20.0, next_mark(), Instant::now()));
         assert_eq!(time.end_waits_since(mark), 2);
         assert_eq!(time.waits.len(), 1);
         assert!(time.wait_began.is_some());
