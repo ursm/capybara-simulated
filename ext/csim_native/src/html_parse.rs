@@ -427,6 +427,9 @@ struct Parse {
     // and until it has, nothing past it is tokenized — a node of this parse's, which `held` keeps.
     // (…a parse a panic dropped drops it: what it would have run with it — a parser bug's cost, not a script's)
     blocking: Option<crate::dom::NodeId>,
+    // Whether what it tokenizes now is input a script wrote — a `document.write`'s at an insertion point, a script-created
+    // parser's — rather than what the network delivered, which a preload scanner sees as the parse begins.
+    written: bool,
 }
 
 impl Parse {
@@ -444,8 +447,9 @@ impl Parse {
         }
         // (…the input it takes all `document.write`'s while the document's own is set aside, a script-created parse's
         // all of it)
+        self.written = self.script_created || !self.set_aside.is_empty();
         if let Some(lines) = &self.tokenizer.sink.sink.lines {
-            lines.in_written.set(self.script_created || !self.set_aside.is_empty());
+            lines.in_written.set(self.written);
         }
         loop {
             match self.tokenizer.feed(&self.input) {
@@ -603,6 +607,7 @@ fn begin_parse(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: crate::dom::Node
         tokenizer,
         input,
         set_aside: Vec::new(),
+        written: false,
         standins,
         ended: false,
         doc,
@@ -675,6 +680,7 @@ pub(crate) struct ActiveParser {
     pub(crate) script_running: bool,
     pub(crate) script_created: bool,
     pub(crate) streaming: bool,
+    pub(crate) written: bool,
 }
 pub(crate) fn active_parser(scope: &mut v8::PinScope<'_, '_>, doc: crate::dom::NodeId, id: u32) -> ActiveParser {
     parses(scope).active(doc, id).map_or_else(ActiveParser::default, |p| ActiveParser {
@@ -682,6 +688,7 @@ pub(crate) fn active_parser(scope: &mut v8::PinScope<'_, '_>, doc: crate::dom::N
         script_running: !p.set_aside.is_empty(),
         script_created: p.script_created && !p.ended,
         streaming: p.script_created && p.streaming,
+        written: p.written,
     })
 }
 

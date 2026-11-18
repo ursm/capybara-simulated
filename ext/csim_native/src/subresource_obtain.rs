@@ -905,13 +905,17 @@ fn link_scheme(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Functio
 // script" for the script element `el` (of its preparation-time document `doc`) whose src is `src` (resolved; null where
 // it does not resolve, the raw attribute its URL then), its request as it was prepared — its `plan` (subresource_plan.rs)
 // and its `integrity` metadata, a later change of the element's attributes no part of it; none given, the element's now,
-// a parser's script fetched as it is prepared — begun and landed at once (`classic_script_begin`, `classic_script_land`):
-// a parser-blocking script's, the parser waiting inside the host's fetch (a server's `sleep` runs the event loop on
-// meanwhile, Browser#server_slept_ms).
+// a parser's script fetched as the parser waits on it — begun and landed at once (`classic_script_begin`,
+// `classic_script_land`): a parser-blocking script's, the parser waiting inside the host's fetch, which dates it as the
+// parser's other fetches are (script_fetch.rs `began_at`: as its parse began where it is markup the parse took from the
+// network) — its server's sleeps counted as the request is made and only what is left of them past that date waited
+// (a server's `sleep` runs the event loop on meanwhile, Browser#planned_external_asset).
 fn fetch_classic_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return };
-    let Some(request) = classic_request(scope, &args) else { return };
+    let Some(mut request) = classic_request(scope, &args) else { return };
     let cid = realm_id(scope, &args);
+    let scanned = crate::script_fetch::parser_input_scanned(scope, cid);
+    request.began = Some(crate::script_fetch::began_at(realm(scope, cid), cid, scanned));
     let Ok(fetch) = classic_script_begin(scope, cid, host, request, false) else { return };
     let Ok(landed) = classic_script_land(scope, cid, host, fetch) else { return };
     rv.set(landed_value(scope, landed).into());
@@ -982,7 +986,8 @@ pub(crate) struct ClassicFetch {
 // resolves to none).
 pub(crate) enum Leg {
     Answered(Landed),
-    Worker,
+    // (…a dated one's — a parser-blocking script's — how long ago, in virtual time, it is dated to have begun)
+    Worker(Option<f64>),
     Slot(u32, f64),
     Host(Option<v8::Global<v8::Value>>),
 }
@@ -1037,8 +1042,8 @@ pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, h
     }
     // (…its Resource Timing entry begun as it began — a scanned one's as its parse did — on the page's clock)
     let clock = realm(scope, cid).event_loop.clock;
-    let began = began.unwrap_or(clock);
-    r.started = now(scope, host)? - (clock - began);
+    let since = began.map(|began| (clock - began).max(0.0));
+    r.started = now(scope, host)? - since.unwrap_or(0.0);
     if let Some(preloaded) = crate::preload_map::consume(scope, cid, (doc, &r.url, "script", plan), &r.integrity, host)? {
         let landed = match preloaded {
             Some(resp) => {
@@ -1051,14 +1056,14 @@ pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, h
         return Ok(ClassicFetch { request: r, parser, leg: Leg::Answered(landed) });
     }
     if !parallel || controlled(scope, host)? {
-        return Ok(ClassicFetch { request: r, parser, leg: Leg::Worker });
+        return Ok(ClassicFetch { request: r, parser, leg: Leg::Worker(since.filter(|_| !parallel)) });
     }
     // (…the parser's from the cross-visit asset cache, an inserted one's from the network: the host's slot's, or its
     // memory's answer at once)
     let mut args = request_args(scope, &r).to_vec();
     let id = next_slot();
     let (parser_arg, began_arg, id_arg): (v8::Local<v8::Value>, v8::Local<v8::Value>, v8::Local<v8::Value>) =
-        (v8::Boolean::new(scope, parser).into(), v8::Number::new(scope, began).into(), v8::Integer::new_from_unsigned(scope, id).into());
+        (v8::Boolean::new(scope, parser).into(), v8::Number::new(scope, clock - since.unwrap_or(0.0)).into(), v8::Integer::new_from_unsigned(scope, id).into());
     args.extend([parser_arg, began_arg, id_arg]);
     let leg = match call(scope, host, H_SCRIPT_START, &args)? {
         Some(slept) if v8::Local::new(scope, &slept).is_number() => Leg::Slot(id, slept_ms(scope, v8::Local::new(scope, &slept))),
@@ -1106,7 +1111,7 @@ pub(crate) fn classic_script_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, ho
             let id = v8::Integer::new_from_unsigned(scope, id).into();
             call(scope, host, H_SCRIPT_TAKE, &[id])?
         }
-        Leg::Worker => {
+        Leg::Worker(since) => {
             let mut sw_args = request_args(scope, &r).to_vec();
             let (binary, integrity_value) = (v8::Boolean::new(scope, true).into(), text(scope, &r.integrity));
             sw_args.extend([binary, integrity_value]);
@@ -1124,7 +1129,11 @@ pub(crate) fn classic_script_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, ho
                 let content_type = header_of(scope, sw_obj, "content-type");
                 return classic_answer(scope, cid, host, &r, (v, content_type, Some(Answered::Worker(answer))), (true, Some(bytes), None));
             }
-            let args = request_args(scope, &r);
+            let mut args = request_args(scope, &r).to_vec();
+            if let (true, Some(since)) = (parser, since) {
+                let (module, since): (v8::Local<v8::Value>, v8::Local<v8::Value>) = (v8::Boolean::new(scope, false).into(), v8::Number::new(scope, since).into());
+                args.extend([module, since]);
+            }
             call(scope, host, if parser { H_ASSET } else { H_FETCH }, &args)?
         }
     };

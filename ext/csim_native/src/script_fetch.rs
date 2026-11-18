@@ -42,7 +42,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "scriptFetchLand", land_op, context_id);
     register(scope, ns, "scriptFetchDrop", drop_op, context_id);
     register(scope, ns, "parserBegins", parser_begins_op, context_id);
-    register(scope, ns, "scriptFetchBeganAt", began_at_op, context_id);
+    register(scope, ns, "parserInputScanned", parser_input_scanned_op, context_id);
 }
 
 // __dom.parserBegins() — the calling realm's document's parser begins: the fetches it begins as it scans ahead of what it
@@ -63,7 +63,7 @@ fn parser_begins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 }
 // When a fetch the realm `cid` begins now began: one the parser's preload scanner saw (`scanned`: markup the parse took
 // from the network, none a `document.write` wrote) as its parse did (`parserBegins`), any other now.
-fn began_at(arena: &mut crate::dom::RealmArena, cid: i32, scanned: bool) -> f64 {
+pub(crate) fn began_at(arena: &mut crate::dom::RealmArena, cid: i32, scanned: bool) -> f64 {
     let now = arena.event_loop.clock;
     match arena.realm_state(cid) {
         Some(state) if scanned && state.speculative.is_some() => state.parse_began_at.min(now),
@@ -71,12 +71,18 @@ fn began_at(arena: &mut crate::dom::RealmArena, cid: i32, scanned: bool) -> f64 
     }
 }
 
-// __dom.scriptFetchBeganAt(scanned) -> when a fetch the calling realm begins now began (`began_at`): a parser-blocking
-// script's, whose request the parser makes as it waits on it (bridge.entry.js `waitOnFetch`), dated as any other.
-fn began_at_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// …and whether a fetch the calling realm's document's parser begins now is one a preload scanner saw: of markup the
+// parse took from the network, none a script wrote (html_parse.rs `Parse::written`) — none where no parser is active.
+pub(crate) fn parser_input_scanned(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> bool {
+    let Some(doc) = realm(scope, cid).realm_document(cid) else { return false };
+    let parser = crate::dom::dom(scope).arena.document_states.markup(doc).parser;
+    let active = crate::html_parse::active_parser(scope, doc, parser);
+    active.live && !active.written
+}
+// __dom.parserInputScanned() -> `parser_input_scanned` of the calling realm.
+fn parser_input_scanned_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let scanned = args.get(0).is_true();
-    rv.set_double(began_at(realm(scope, cid), cid, scanned));
+    rv.set_bool(parser_input_scanned(scope, cid));
 }
 
 fn fetches_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut ScriptFetches> {

@@ -3543,28 +3543,17 @@ module Capybara
       # loop (`SleepHook`'s thread variable): its answer, a Hash, with how long they came to, `'slept'` (none for none) — a
       # frame navigation's whose build waits for that much virtual time as a script's fetch lands (frame_response.rs).
       def server_timed
+        result, slept = server_timed_sleeps { yield }
+        result.is_a?(Hash) && slept.positive? ? result.merge('slept' => slept) : result
+      end
+      # …the block's answer, and what its server's sleeps came to.
+      def server_timed_sleeps
         outer = Thread.current.thread_variable_get(:csim_server_slept)
         slept = {slept: 0.0}
         Thread.current.thread_variable_set(:csim_server_slept, slept)
-        result = yield
-        result.is_a?(Hash) && slept[:slept].positive? ? result.merge('slept' => slept[:slept]) : result
+        [yield, slept[:slept]]
       ensure
         Thread.current.thread_variable_set(:csim_server_slept, outer)
-      end
-      # …or the sleeps of a request the bindings make counted rather than run, from `begins` on until its end (`begins`
-      # false), which answers what they came to — a parser-blocking script's, whose server's time the parser's wait takes
-      # from when the fetch is dated (bridge.entry.js `waitOnFetch`, `serverTimeWaited`).
-      def server_time_counted(begins)
-        if begins
-          (@server_time_counts ||= []) << [Thread.current.thread_variable_get(:csim_server_slept), {slept: 0.0}]
-          Thread.current.thread_variable_set(:csim_server_slept, @server_time_counts.last[1])
-          return 0.0
-        end
-        outer, slept = @server_time_counts&.pop
-        return 0.0 unless slept
-
-        Thread.current.thread_variable_set(:csim_server_slept, outer)
-        slept[:slept]
       end
       # Whether the app is answering a request of `driver`'s session on this thread — its body read too, which an app streams
       # as it goes (`in_app_call`). A thread's, not a fiber's: an app's sleep in a fiber of its own is the app's all the same.
@@ -4150,10 +4139,20 @@ module Capybara
       # `referrer` where it names one of its own (an `@import`'s, its importing sheet's location) — answered as
       # `external_asset_response` answers it.
       # (…a module's — a modulepreload's, `module` — its document's module map's: `asset_request`)
-      def planned_external_asset(url, document, realm, plan, referrer = nil, module_map: false)
+      # (…`since`, a parser-blocking script's: how long ago, in virtual ms, its fetch is dated to have begun — its server's
+      # sleeps counted as the request is made, and only what is left of them past that date waited on the event loop: one a
+      # preload scanner saw dated as its parse began, Chrome and Firefox `b b2 inl a.js-ran`, rv-r13-probe `s6_dating`)
+      def planned_external_asset(url, document, realm, plan, referrer = nil, module_map: false, since: nil)
         mode, credentials, policy, dest = request_of_plan(plan)
         referrer = nil if referrer.to_s.empty?
-        external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
+        return external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map) unless since
+
+        answer, slept = server_timed_sleeps {
+          external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
+        }
+        left = slept - since.to_f
+        server_slept_ms(left) if left.positive?
+        answer
       end
       # …answered as [its text, nil where the load failed; the facts of the response it came from (`resource_timing_meta`,
       # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of
