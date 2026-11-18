@@ -1380,6 +1380,41 @@ RSpec.describe 'a frame navigation as tasks' do
       'inserted ones of `async` false, the first a server takes its time over'     => [
         "<script>#{format(INSERT, 60, 'o1', 's.async = false;')}#{format(INSERT, 0, 'o2', 's.async = false;')}#{format(INSERT, 0, 'fa', '')} L.push('ins')</script>",
         'ins dcl fa.js-ran o1.js-ran o2.js-ran load rs:complete'
+      ],
+      # s2_asy_t: the timers due before it run as its server takes its time
+      'an `async` one, timers due as its server takes its time and after'          => [
+        %(<script async src="/slow/60/a.js"></script><script>setTimeout(() => L.push('t30'), 30); setTimeout(() => L.push('t90'), 90)</script><script>L.push('inl')</script>),
+        'inl dcl t30 a.js-ran load t90 rs:complete'
+      ],
+      # s2_ins_t
+      'an inserted one, timers due as its server takes its time and after'         => [
+        "<script>#{format(INSERT, 60, 'x', '')} setTimeout(() => L.push('t30'), 30); setTimeout(() => L.push('t90'), 90); L.push('ins')</script>",
+        'ins dcl t30 x.js-ran load t90 rs:complete'
+      ],
+      # s2_dfr_dfr: "the end" spins as the first deferred one's server takes its time
+      'deferred ones, a timer due as the first one\'s server takes its time'       => [
+        %(<script defer src="/slow/60/d1.js"></script><script defer src="/slow/0/d2.js"></script><script>setTimeout(() => L.push('t30'), 30)</script><script>L.push('inl')</script>),
+        'inl t30 d1.js-ran d2.js-ran dcl load rs:complete'
+      ],
+      # s2m_asyblk_50_0: a module script's graph's entry fetched as it is prepared, its answer kept for the graph
+      'an `async` module one a server takes its time over, before a parser-blocking one' => [
+        %(<script type="module" async src="/slow/50/m.js"></script><script src="/slow/0/b.js"></script><script>L.push('inl')</script>),
+        'b.js-ran inl dcl m.js-ran load rs:complete'
+      ],
+      # s2m_dfr_50_asy0
+      'an `async` one after a module one a server takes its time over'             => [
+        %(<script type="module" src="/slow/50/m.js"></script><script async src="/slow/0/a.js"></script><script>L.push('inl')</script>),
+        'inl a.js-ran m.js-ran dcl load rs:complete'
+      ],
+      # s2m_t0chain
+      'a module one before a zero timer that sets a zero timer'                    => [
+        %(<script type="module" src="/slow/0/m.js"></script><script>setTimeout(() => { L.push('t0'); setTimeout(() => L.push('t00')); })</script><script>L.push('inl')</script>),
+        'inl t0 t00 m.js-ran dcl load rs:complete'
+      ],
+      # s2m_ins
+      'an inserted module one a server takes its time over, a classic one after'   => [
+        "<script>#{format(INSERT, 60, 'm1', "s.type = 'module';")}#{format(INSERT, 0, 'c1', '')} L.push('ins')</script>",
+        'ins dcl c1.js-ran m1.js-ran load rs:complete'
       ]
     }.each do |what, (markup, logged)|
       it "lands a script's fetch as far after it began as its server took: #{what}" do

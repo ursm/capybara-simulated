@@ -40,10 +40,10 @@ pub(crate) const H_IMPORT_NETWORK: u32 = 23;
 pub(crate) const H_SW_NOTE_IMPORT: u32 = 24;
 const H_LOAD_IMAGE: u32 = 25;
 const H_IMAGE_BLOB: u32 = 26;
-const H_SCRIPT_START: u32 = 27;
-const H_SCRIPT_WAIT: u32 = 28;
-const H_SCRIPT_TAKE: u32 = 29;
-const H_SCRIPT_FORGET: u32 = 30;
+pub(crate) const H_SCRIPT_START: u32 = 27;
+pub(crate) const H_SCRIPT_WAIT: u32 = 28;
+pub(crate) const H_SCRIPT_TAKE: u32 = 29;
+pub(crate) const H_SCRIPT_FORGET: u32 = 30;
 
 // What a link's fetch came to (`linkObtain`, `linkPreloadRun`): its resource loads or not — or it has no preload planned
 // (`linkPreloadRun`), or it is a controlling service worker's to answer, the engine's then to fire its event

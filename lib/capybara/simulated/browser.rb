@@ -501,6 +501,7 @@ module Capybara
         # Scripts' fetches (`script_fetch_start`): each one's slot, by number, until its realm takes it.
         @script_fetch_seq   = 0
         @script_fetches     = {}
+        @asset_flights      = {}
         # EVERY background thread that runs a Rack request into the host app (async
         # <img> loads, keepalive fetches) registers here via spawn_app_request_thread;
         # drain_app_request_threads joins them at the session boundary — see reset!
@@ -3714,6 +3715,7 @@ module Capybara
           @image_load_pending = 0
         end
         @script_fetches.clear
+        @asset_flights.clear
         @sticky_headers.clear
         # The driver-side resize buffer has to clear too — without
         # this the previous test's `driver.resize(425, …)` leaks into
@@ -4116,7 +4118,8 @@ module Capybara
       # document's memo of it, else the process-wide cache's — nil where its URL resolves to none, or the request to fetch
       # (`asset_fetch`), its client `pinned` where it is fetched off the main thread.
       AssetRequest = Struct.new(:key, :memo, :memo_key, :shared_key, :client, :realm, :policy, :referrer, :dest, :mode, :credentials)
-      private def asset_request(url, document, realm, policy, referrer:, dest:, mode:, credentials:, pinned: false)
+      # (…`joins` false: none of a fetch under way taken, its asker one to take it itself: `script_fetch_start`)
+      private def asset_request(url, document, realm, policy, referrer:, dest:, mode:, credentials:, pinned: false, joins: true)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4139,10 +4142,18 @@ module Capybara
         # fetch it was, for the sheet it obtains (sheet_fetch.rs `asset`).
         # (A body served from memory carries the facts of the response it came from, for whoever files its Resource
         # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
+        # (…and, first, the answer a module script's fetch brought as it was prepared, for its graph's fetch of it alone, whatever
+        # its freshness: `script_fetch_start`)
         memo = document && @page_asset_src&.[](document.to_i)
-        if memo && (e = memo[memo_key])
+        if memo && (e = memo.delete("once #{memo_key}") || memo[memo_key])
           Thread.current[:csim_asset_meta] = e[1]
           return e
+        end
+        # (…or the answer the fetch of it under way on a thread brings — a script's, as it was prepared — waited for: one
+        # fetch, as the module map's entry being fetched is one, whoever asks next — a modulepreload, a module graph)
+        if joins && memo && (slot = @asset_flights[[document.to_i, memo_key]])
+          script_fetch_slot_wait(slot)
+          return asset_answer(slot[:request], slot[:result]) if slot[:result]
         end
         client     = client_for(realm.to_i, policy, referrer: referrer)
         shared_key = "#{memo_key} #{client_origin_of(client)}"
@@ -8842,16 +8853,34 @@ module Capybara
       # thread's timing)
       # (…the time its server took is its sleeps — `SleepHook` counts them in its `:csim_server_slept` rather than moving the
       # clock — which the event loop lands it that far after it began by)
-      def script_fetch_start(url, realm, plan, document, referrer)
+      # (…a module script's graph's entry's, `graph_entry`, its answer kept for the graph's fetch of it — as the module map's
+      # entry its fetch fills — answered true for it, its destination its module type's as that fetch's: V8Runtime#json_module?)
+      # (…and one the document's same request under way already shares that one's slot, as the graph's fetch, or a
+      # modulepreload's, takes it: `asset_request`)
+      def script_fetch_start(url, realm, plan, document, referrer, graph_entry = false)
         realm = realm.to_i
         if document
           mode, credentials, policy, dest = request_of_plan(plan)
+          dest = 'json' if graph_entry && url.to_s.match?(/\.json(?:\?|$)/)
           request = asset_request(url, document, realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, dest: dest, mode: mode, credentials: credentials,
-                                                                pinned: true)
+                                                                pinned: true, joins: false)
           return request unless request.is_a?(AssetRequest)
 
+          # (…one under way of the same request for the same document: its slot shared, one fetch)
+          flight = [document.to_i, request.memo_key]
+          if (under_way = @asset_flights[flight])
+            @script_fetches[@script_fetch_seq += 1] = under_way
+            return @script_fetch_seq
+          end
+
           work   = -> { asset_fetch(request) }
-          answer = ->(fetched) { asset_answer(request, fetched) }
+          answer = lambda {|fetched|
+            answered = asset_answer(request, fetched)
+            next answered unless graph_entry
+
+            request.memo["once #{request.memo_key}"] = answered if request.memo
+            true
+          }
         else
           mode, credentials, policy, dest, accept = request_of_plan(plan)
           client = pinned_client(client_for(realm, policy))
@@ -8859,15 +8888,21 @@ module Capybara
             rack_fetch('GET', url.to_s, '', {'Accept' => accept}, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer],
                                                                                 client_url: client[:url], dest: dest, client_origin: client[:origin], ancestors: client[:ancestors])
           }
-          answer = nil
+          answer = request = flight = nil
         end
-        @script_fetches[@script_fetch_seq += 1] = {done: false, work: work, result: nil, slept: 0.0, answer: answer}
+        slot = {done: false, work: work, result: nil, slept: 0.0, answer: answer, request: request, flight: flight}
+        @asset_flights[flight] = slot if flight
+        @script_fetches[@script_fetch_seq += 1] = slot
         @script_fetch_seq
       end
       # How long, in virtual milliseconds, the server took over the fetch in slot `id` — its sleeps — the fetch made now
       # where it is still to be: 0 for a slot gone (its session reset).
       def script_fetch_wait(id)
         slot = @script_fetches[id.to_i] or return 0.0
+        script_fetch_slot_wait(slot)
+      end
+      # …the fetch made where it is still to be, its server's sleeps counted (`SleepHook`).
+      private def script_fetch_slot_wait(slot)
         unless slot[:done]
           slot[:done] = true
           slept = [0.0]
@@ -8889,14 +8924,20 @@ module Capybara
       def script_fetch_take(id)
         script_fetch_wait(id)
         slot = @script_fetches.delete(id.to_i) or return nil
+        script_fetch_landed(slot)
         return slot[:result] unless slot[:answer]
 
         slot[:result] && slot[:answer].call(slot[:result])
       end
       # …or let go of, unanswered: its fetch cancelled (its document aborted), never made where it was still to be.
       def script_fetch_forget(id)
-        @script_fetches.delete(id.to_i)
+        slot = @script_fetches.delete(id.to_i)
+        script_fetch_landed(slot) if slot
         nil
+      end
+      # …no fetch under way that another request of the document's takes from then on: what it answered is the memo's.
+      private def script_fetch_landed(slot)
+        @asset_flights.delete(slot[:flight]) if slot[:flight] && @asset_flights[slot[:flight]].equal?(slot)
       end
 
       def image_loads_pending?

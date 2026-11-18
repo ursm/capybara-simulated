@@ -260,10 +260,12 @@ RSpec.describe 'one fetch per asset per document' do
     expect(hits.values_at('/s.css', '/t.css')).to eq([2, 1])
   end
 
-  it 'fetches a no-store one every time it is asked' do
+  # …but a module's: its modulepreload and its script take the one fetch of it, as its module map's entry is one whatever
+  # its response's freshness (HTML "fetch a single module script"), the script's begun as it is prepared.
+  it 'fetches a no-store one every time it is asked, a module once a document' do
     hits = Hash.new(0)
     visit_twice(hits, 'cache-control' => 'no-store')
     expect(hits['/s.css']).to be > 2
-    expect(hits['/m.js']).to be > 2
+    expect(hits['/m.js']).to eq(2)
   end
 end
