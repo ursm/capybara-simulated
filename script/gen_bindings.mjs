@@ -1552,7 +1552,7 @@ function legacyKind(def, options) {
     return null;
   }
   const checks = new Set();
-  const steps = [], entries = [], locals = [];
+  const steps = [], entries = [], locals = new Map();
   // (…a special operation's steps, a local of the function's: the operation's where it has a name — but the steps the
   // implementation gives under the anonymous one's name where they differ from the operation's, as a property access
   // does them: NamedNodeMap's `namedGetter`, of its supported names alone, where `getNamedItem` finds `foo` by `FOO`;
@@ -1561,18 +1561,17 @@ function legacyKind(def, options) {
     const n = specialStep(specials[slot], slot), anonymous = ANONYMOUS_SPECIAL[slot];
     if (!steps.includes(n)) steps.push(n);
     const local = `${anonymous}Steps`;
-    if (!locals.some((l) => l.startsWith(`const ${local} `))) {
-      locals.push(`const ${local} = ${n === anonymous ? `impl.${n}` : `impl.${anonymous} ?? impl.${n}`};`);
-    }
+    if (!locals.has(local)) locals.set(local, n === anonymous ? `impl.${n}` : `impl.${anonymous} ?? impl.${n}`);
     return local;
   };
   if (indexedGetter) {
     const item = step('indexed getter');
     steps.push('get_length');
-    // (…a supported index one below `length`: a getter whose type is nullable answers null past it, any other is asked
-    // nothing there)
+    // (…a supported index one below `length`: a getter whose type is nullable answers null past it, and so does an
+    // anonymous one's steps, the implementation's own — any other, an operation of a non-nullable type, is asked
+    // nothing there: CSSStyleDeclaration's `item`, '' past it)
     // (…each step the implementation's own function where it is the step, called with no `this`)
-    entries.push(indexedGetter.m.idlType.nullable
+    entries.push(indexedGetter.m.idlType.nullable || !indexedGetter.m.name
       ? `item: ${item}`
       : `item: (o, i) => (i < impl.get_length(o) ? ${item}(o, i) : null)`);
     entries.push('length: impl.get_length');
@@ -1607,7 +1606,7 @@ function legacyKind(def, options) {
   lines.push(`// interface ${name}: a legacy platform object (Web IDL §3.9), of ${what} properties`);
   lines.push(`export function legacy${name}(impl, own) {`);
   lines.push(`  requireSteps('${name}', impl, ${JSON.stringify(steps)});`);
-  for (const l of locals) lines.push(`  ${l}`);
+  for (const [local, value] of locals) lines.push(`  const ${local} = ${value};`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
   lines.push(`  return legacyPlatformObject({ __proto__: null,`);
   lines.push(entries.map((e) => `    ${e}`).join(',\n'));
