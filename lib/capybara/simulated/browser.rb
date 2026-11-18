@@ -3886,12 +3886,10 @@ module Capybara
         rack_fetch('GET', url, '', {'Accept' => accept}, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
                                                   client_origin: client[:origin], client_realm: client[:realm])
       end
-      # (…`ancestors` its client's ancestors' origins, where it is pinned for a fetch off the main thread: `pinned_client`)
       def rack_fetch_body(url, cors_mode: nil, credentials: 'same-origin', client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil,
-                          initiator: nil, dest: nil, ancestors: nil)
+                          initiator: nil, dest: nil)
         result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, credentials: credentials, client_url: client_url, client_origin: client_origin, referrer: referrer,
-                                                                     referrer_policy: referrer_policy, client_realm: client_realm, initiator: initiator, dest: dest,
-                                                                     ancestors: ancestors)
+                                                                     referrer_policy: referrer_policy, client_realm: client_realm, initiator: initiator, dest: dest)
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
@@ -4035,8 +4033,7 @@ module Capybara
       def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin',
                          client: client_for(realm, element_policy, referrer: referrer))
         body = rack_fetch_body(url, cors_mode: mode, credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
-                                    client_origin: client[:origin], client_realm: client[:realm], initiator: client[:initiator], dest: dest,
-                                    ancestors: client[:ancestors])
+                                    client_origin: client[:origin], client_realm: client[:realm], initiator: client[:initiator], dest: dest)
         return [nil, nil] unless body
         # (…fresh as long as its every hop's stored response is — a fresh redirect lends no lifetime to the response it
         # leads to, nor that response to an uncacheable redirect)
@@ -4142,12 +4139,12 @@ module Capybara
       end
       # What an asset's request comes to before any fetch (`external_asset_response`): its answer from memory — the
       # document's memo of it, else the process-wide cache's — nil where its URL resolves to none, or the request to fetch
-      # (`asset_fetch`), its client `pinned` where it is fetched off the main thread.
+      # (`asset_fetch`).
       AssetRequest = Struct.new(:key, :memo, :memo_key, :shared_key, :client, :realm, :policy, :referrer, :dest, :mode, :credentials, :module_map)
       # (…`joins` false: none of a fetch under way taken, its asker one to take it itself: `script_fetch_start`)
       # (…`module_map`: a module script's — its graph's, a modulepreload's — which its document's module map answers, filled
       # by the first fetch of it that loaded, whatever its response's freshness: HTML "fetch a single module script")
-      private def asset_request(url, document, realm, policy, referrer:, dest:, mode:, credentials:, pinned: false, joins: true, module_map: false)
+      private def asset_request(url, document, realm, policy, referrer:, dest:, mode:, credentials:, joins: true, module_map: false)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4181,12 +4178,13 @@ module Capybara
           Thread.current[:csim_asset_meta] = e[1]
           return e
         end
-        # (…or the answer the fetch of it under way brings — a script's, as it was prepared — made now: one
-        # fetch, as the module map's entry being fetched is one, whoever asks next — a modulepreload, a module graph)
-        # (…its server's time the joiner's wait's, on the clock as a server's sleep in its own fetch would be)
+        # (…or the answer the fetch of it under way brings — a script's, made as it was prepared: one fetch, as the module
+        # map's entry being fetched is one, whoever asks next — a modulepreload, a module graph — what is left of its
+        # server's time, past the clock now, the joiner's wait's, on the clock as a server's sleep in its own fetch would
+        # be; none of it where it has passed)
         if joins && memo && (slot = @asset_flights[[document.to_i, memo_key]])
-          slept = script_fetch_slot_wait(slot)
-          server_slept_ms(slept.round) if slept.positive?
+          left = slot[:began] + slot[:slept] - @runtime.realm_direct_call(0, 'virtualNow').to_f
+          server_slept_ms(left) if left.positive?
           return asset_answer(slot[:request], slot[:result]) if slot[:result]
         end
         client     = client_for(realm.to_i, policy, referrer: referrer)
@@ -4200,10 +4198,9 @@ module Capybara
             @@asset_src.delete(shared_key)
           end
         end
-        client = pinned_client(client) if pinned
         AssetRequest.new(key, memo, memo_key, shared_key, client, realm.to_i, policy, referrer, dest, mode, credentials, module_map)
       end
-      # …its fetch, on whichever thread: `durable_source`'s spec-compliant fetch and header-driven freshness (RFC 9111
+      # …its fetch: `durable_source`'s spec-compliant fetch and header-driven freshness (RFC 9111
       # max-age → absolute deadline), with what the fetch left of the response beside the body.
       private def asset_fetch(request)
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = Thread.current[:csim_asset_no_store] = nil
@@ -4213,7 +4210,7 @@ module Capybara
         {body: body, fresh_until: fresh_until, meta: Thread.current[:csim_asset_meta], bytes: Thread.current[:csim_asset_bytes],
          no_store: Thread.current[:csim_asset_no_store], times: [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]}
       end
-      # …and what it answers, kept by the memos it may be kept by — on the main thread, which alone writes them.
+      # …and what it answers, kept by the memos it may be kept by.
       private def asset_answer(request, fetched)
         meta = Thread.current[:csim_asset_meta] = fetched[:meta]
         body = fetched[:body]
@@ -8890,28 +8887,28 @@ module Capybara
       # ── Script fetches ──────────────────────────────────────────────
       #
       # A script's fetch as "prepare the script element" begins it — an inserted script's, the parser's `async` and `defer`
-      # ones, a module script's graph's entry (script_fetch.rs) — made when its task first asks how long its server took
-      # (`script_fetch_wait`): the network's answer to `url` as the engine's `plan` requests it for realm `realm`'s document,
-      # its client as it was prepared, or, its `document`'s (a parser's script, `docToken`), the asset cache's —
-      # `[text, facts, bytes]` (`external_asset_response`), answered at once where a memo has it, `referrer` the one it
-      # names of its own. The number of its slot, by which the engine takes its answer (`script_fetch_take`) as it lands —
-      # its server's time later, the virtual clock's to come to; nil for a URL that resolves to none.
-      # (…on this thread, in the event loop's order: what the server sees of it, and what its cookies are, the page's tasks'
-      # order decides — never a thread's timing; the Cookie its request sends the jar's as it is made, the Set-Cookie its
-      # response brings stored as it lands, when Fetch processes its headers in this model — `script_fetch_take`)
+      # ones, a module script's graph's entry (script_fetch.rs) — made now, on this thread, the requests the server sees in
+      # the order their fetches began: the network's answer to `url` as the engine's `plan` requests it for realm `realm`'s
+      # document, or, its `document`'s (a parser's script, `docToken`), the asset cache's — `[text, facts, bytes]`
+      # (`external_asset_response`), answered at once where a memo has it, `referrer` the one it names of its own. The
+      # number of its slot, by which the engine asks how long its server took (`script_fetch_wait`) and takes its answer
+      # (`script_fetch_take`) as it lands — its server's time after `began`, the virtual clock's to come to; nil for a URL
+      # that resolves to none.
+      # (…the Cookie its request sends the jar's as it is made, the Set-Cookie its last response brings stored as it lands,
+      # when Fetch processes its headers in this model — `script_fetch_take`; a redirect's at once, which the next hop sends)
       # (…the time its server took is its sleeps — `SleepHook` counts them in its `:csim_server_slept` rather than moving the
       # clock — which the event loop lands it that far after it began by)
       # (…a module script's graph's entry's, `graph_entry`, its answer its document's module map's, which the graph's fetch
       # of it takes — answered true for it, its destination its module type's as that fetch's: V8Runtime#json_module?)
       # (…and one the document's same request under way already shares that one's slot, as the graph's fetch, or a
-      # modulepreload's, waits for it: `asset_request`)
-      def script_fetch_start(url, realm, plan, document, referrer, graph_entry = false)
+      # modulepreload's, takes it, the rest of its server's time its own: `asset_request`)
+      def script_fetch_start(url, realm, plan, document, referrer, graph_entry = false, began = 0.0)
         realm = realm.to_i
         if document
           mode, credentials, policy, dest = request_of_plan(plan)
           dest = 'json' if graph_entry && @runtime.json_module?(url)
           request = asset_request(url, document, realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, dest: dest, mode: mode, credentials: credentials,
-                                                                pinned: true, joins: false, module_map: graph_entry)
+                                                                joins: false, module_map: graph_entry)
           return request unless request.is_a?(AssetRequest)
 
           # (…one under way of the same request for the same document: its slot shared, one fetch)
@@ -8928,50 +8925,46 @@ module Capybara
           }
         else
           mode, credentials, policy, dest, accept = request_of_plan(plan)
-          client = pinned_client(client_for(realm, policy))
+          client = client_for(realm, policy)
           work   = lambda {
             rack_fetch('GET', url.to_s, '', {'Accept' => accept}, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer],
-                                                                                client_url: client[:url], dest: dest, client_origin: client[:origin], ancestors: client[:ancestors])
+                                                                                client_url: client[:url], dest: dest, client_origin: client[:origin], client_realm: client[:realm])
           }
           answer = request = flight = nil
         end
-        slot = {done: false, work: work, result: nil, slept: 0.0, cookies: [], answer: answer, request: request, flight: flight, realm: realm}
+        slot = {began: began.to_f, slept: 0.0, cookies: [], answer: answer, request: request, flight: flight, realm: realm}
         @asset_flights[flight] = slot if flight
+        script_fetch_make(slot, work)
         @script_fetches[@script_fetch_seq += 1] = slot
         @script_fetch_seq
       end
-      # How long, in virtual milliseconds, the server took over the fetch in slot `id` — its sleeps — the fetch made now
-      # where it is still to be: 0 for a slot gone (its session reset).
+      # …the request made, its server's sleeps counted (`SleepHook`), the cookies its responses set kept for its landing.
+      private def script_fetch_make(slot, work)
+        slept = [0.0]
+        outer_slept   = Thread.current.thread_variable_get(:csim_server_slept)
+        outer_cookies = Thread.current[:csim_cookie_writes]
+        Thread.current.thread_variable_set(:csim_server_slept, slept)
+        Thread.current[:csim_cookie_writes] = slot[:cookies]
+        begin
+          slot[:result] = work.call
+        rescue StandardError
+          slot[:result] = nil
+        ensure
+          Thread.current.thread_variable_set(:csim_server_slept, outer_slept)
+          Thread.current[:csim_cookie_writes] = outer_cookies
+          slot[:slept] = slept[0]
+        end
+      end
+      # How long, in virtual milliseconds, the server took over the fetch in slot `id` — its sleeps — 0 for a slot gone (its
+      # session reset).
       def script_fetch_wait(id)
         slot = @script_fetches[id.to_i] or return 0.0
-        script_fetch_slot_wait(slot)
-      end
-      # …the fetch made, its server's sleeps counted (`SleepHook`) and the cookies its responses set kept for its landing.
-      private def script_fetch_slot_wait(slot)
-        unless slot[:done]
-          slot[:done] = true
-          slept = [0.0]
-          outer_slept   = Thread.current.thread_variable_get(:csim_server_slept)
-          outer_cookies = Thread.current[:csim_cookie_writes]
-          Thread.current.thread_variable_set(:csim_server_slept, slept)
-          Thread.current[:csim_cookie_writes] = slot[:cookies]
-          begin
-            slot[:result] = slot[:work].call
-          rescue StandardError
-            slot[:result] = nil
-          ensure
-            Thread.current.thread_variable_set(:csim_server_slept, outer_slept)
-            Thread.current[:csim_cookie_writes] = outer_cookies
-            slot[:slept] = slept[0]
-          end
-        end
         slot[:slept].to_f
       end
-      # …and its answer, taken as it lands (the slot let go of), the cookies its responses set stored now: the network's
-      # response, or the asset cache's answer — kept by the memos it is kept by — nil for a network error.
+      # …and its answer, taken as it lands (the slot let go of), the cookies its responses set stored now: the
+      # network's response, or the asset cache's answer — kept by the memos it is kept by — nil for a network error.
       def script_fetch_take(id)
         slot = @script_fetches.delete(id.to_i) or return nil
-        script_fetch_slot_wait(slot)
         script_fetch_landed(slot)
         store_kept_cookies(slot[:cookies])
         return slot[:result] unless slot[:answer]
@@ -13932,11 +13925,17 @@ module Capybara
 
       # A request's `Cookie`, as its cookie context lets the jar give it (cookie_jar.rs) — none for nil, a request that
       # includes no credentials.
-      # (…a script's fetch's earlier hops' Set-Cookie stored first — Fetch stores each hop's as its response comes, which the
-      # next hop's request carries — its last response's alone kept for it to store as it lands: `script_fetch_take`)
+      # (…a script's fetch's carrying its earlier hops' Set-Cookie — Fetch stores each hop's as its response comes, which the
+      # next hop's request carries — though the jar has them only as the fetch lands, as its responses come on the event
+      # loop's clock: `script_fetch_take`; a script that runs before then reads none of them)
       def attach_cookies(env, url, context)
-        store_kept_cookies(Thread.current[:csim_cookie_writes])
-        cookies = context && Native.cookie_jar_get(@cookie_jar, url.to_s, context, cookie_now)
+        kept = Thread.current[:csim_cookie_writes]
+        cookies =
+          if context && kept && !kept.empty?
+            Native.cookie_jar_get_with(@cookie_jar, url.to_s, context, cookie_now, kept)
+          elsif context
+            Native.cookie_jar_get(@cookie_jar, url.to_s, context, cookie_now)
+          end
         if cookies.nil? || cookies.empty?
           env.delete('HTTP_COOKIE')
         else

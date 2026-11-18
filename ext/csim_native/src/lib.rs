@@ -343,6 +343,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("document_cookie_context", magnus::function!(cookie_jar::document_context_for_ruby, 1))?;
     native.define_module_function("cookie_jar_set", magnus::function!(cookie_jar::set_for_ruby, 5))?;
     native.define_module_function("cookie_jar_get", magnus::function!(cookie_jar::get_for_ruby, 4))?;
+    native.define_module_function("cookie_jar_get_with", magnus::function!(cookie_jar::get_with_for_ruby, 5))?;
     native.define_module_function("cookie_jar_list", magnus::function!(cookie_jar::list_for_ruby, 3))?;
     native.define_module_function("cookie_public_suffix", magnus::function!(cookie_jar::public_suffix_for_ruby, 1))?;
     // The length a response's body is framed by (headers.rs).

@@ -1454,6 +1454,34 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(log).to end_with('ma.js:true md.js:true mx.js:true rs:complete')
     end
 
+    # rv-r13-probe `r3_rt7`: a parser-blocking script's fetch whose server's sleep runs the event loop, which lands an
+    # `async` one whose server took longer — the virtual clock and the blocking script's Resource Timing entry show the
+    # servers' time, none of the real time that `async` one's request took (agent_clock.rs `agentWait`'s `excused`).
+    it "counts none of a nested script fetch's real time as script time" do
+      log = page_log(<<~HTML, at: 600)
+        <script async src="/slow/150/a.js"></script><script src="/slow/20/b.js"></script>
+        <script>onload = () => { const e = performance.getEntriesByName(new URL('/slow/20/b.js', location).href)[0]; L.push('b:' + (e.duration < 100)); }</script>
+      HTML
+      expect(log).to include('b:true')
+    end
+
+    # rv-r13-probe `r3_dw5`: a script `document.write` wrote is no markup a preload scanner saw: its fetch begins as it is
+    # written, after a parser-blocking script's wait (Chrome and Firefox).
+    it "dates the fetch of an `async` script document.write wrote as it is written" do
+      log = page_log(%(<script src="/slow/200/b.js"></script><script>setTimeout(() => L.push('t50'), 50); document.write('<script async src="/slow/100/wa.js"><\\/script>'); L.push('w')</script><script>L.push('inl')</script>), at: 600)
+      expect(log).to eq('b.js-ran w inl dcl t50 wa.js-ran load rs:complete')
+    end
+
+    # rv-r13-probe `r3_stopasy`: a parser `async` script's fetch a stop() cancels — its document aborted after
+    # DOMContentLoaded — a network error: its `error` (Chrome and Firefox).
+    it "fires the error of an `async` script whose fetch a stop() cancels" do
+      log = page_log(<<~HTML, at: 600)
+        <script async src="/slow/300/a.js" onload="L.push('a:l')" onerror="L.push('a:e')"></script>
+        <script>addEventListener('DOMContentLoaded', () => setTimeout(() => { stop(); L.push('stopped'); }, 20))</script>
+      HTML
+      expect(log).to eq('dcl stopped a:e rs:complete')
+    end
+
     # y_frame_flag2: …ahead of a frame's document, which the parse inserted before it.
     it "lands an `async` script's fetch ahead of a frame's document inserted before it" do
       child = "<script>document.addEventListener('DOMContentLoaded', () => top.L.push('cdcl')); addEventListener('load', () => top.L.push('cload'))</script>" \

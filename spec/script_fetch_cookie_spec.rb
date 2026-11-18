@@ -37,6 +37,33 @@ RSpec.describe 'a script fetch and cookies' do
     expect(s.evaluate_script('R.join(" ")')).to eq('inl: sent:hop=1 doc:hop=1; last=1')
   end
 
+  # …and the requests made in the order the fetches began, each Cookie header the jar's then (Chrome and Firefox,
+  # rv-r13-probe `r3_ck5`, `r3_ck3`): no `async` script's request carries a cookie an earlier one's response set, nor one a
+  # deferred script's redirect set, which "the end" waits on first.
+  def log_of(markup)
+    app = ->(env) {
+      if (m = env['PATH_INFO'].match(%r{\A/(ck|echo|rd)/(\w+)\.js\z}))
+        kind, name = m[1], m[2]
+        next [302, {'location' => "/echo/#{name}x.js", 'set-cookie' => "rd#{name}=1; path=/"}, []] if kind == 'rd'
+        headers = {'content-type' => 'text/javascript'}
+        headers['set-cookie'] = "#{name}=1; path=/" if kind == 'ck'
+        next [200, headers, [kind == 'ck' ? "R.push('#{name}:' + document.cookie)" : "R.push('#{name}<' + #{(env['HTTP_COOKIE'] || '').inspect} + '>')"]]
+      end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><title>t</title><script>window.R = []</script>#{markup}"]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    s.evaluate_async_script('const done = arguments[0]; setTimeout(() => done(R.join(" ")), 50)')
+  end
+
+  it 'makes the requests of `async` scripts in the order their fetches began' do
+    expect(log_of('<script async src="/echo/e1.js"></script><script async src="/ck/c.js"></script><script async src="/echo/e2.js"></script>')).to eq('e1<> c:c=1 e2<>')
+  end
+
+  it "makes an `async` script's request ahead of a deferred one's after it" do
+    expect(log_of('<script async src="/echo/e1.js"></script><script defer src="/rd/r.js"></script>')).to eq('e1<> rx<rdr=1>')
+  end
+
   [0, 150].each do |busy|
     it "stores an `async` script's cookie as it lands, its server busy #{busy} ms" do
       expect(log_with(busy)).to eq('inl: sc:s=1')

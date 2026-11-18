@@ -32,7 +32,7 @@ struct Cookie {
     same_site: SameSite,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Jar {
     cookies: Vec<Cookie>,
     created: u64,
@@ -502,6 +502,19 @@ pub(crate) fn get_for_ruby(ruby: &magnus::Ruby, jar: u64, url: magnus::RString, 
     let url = url_text(url);
     let found = lock().jars.get_mut(&jar).map_or_else(String::new, |j| j.retrieve(&url, context, now));
     bytes(ruby, &found)
+}
+// …and the cookie-string a request takes that comes after responses not yet in the jar, `pending` — `[url, line, context]`
+// each — as though they were: a script's fetch's earlier redirect hops', which its next hop's request carries (Fetch
+// "HTTP-redirect fetch"), stored in the jar itself only as the fetch lands, as its response comes on the event loop's
+// clock (Browser#script_fetch_take). The jar's cookies' last-access times are left as they were.
+pub(crate) fn get_with_for_ruby(ruby: &magnus::Ruby, jar: u64, url: magnus::RString, context: u32, now: f64, pending: magnus::RArray) -> magnus::RString {
+    let url = url_text(url);
+    let Some(mut view) = lock().jars.get(&jar).cloned() else { return bytes(ruby, "") };
+    for entry in pending.into_iter() {
+        let Ok((at, line, ctx)) = <(magnus::RString, magnus::RString, u32) as magnus::TryConvert>::try_convert(entry) else { continue };
+        view.store(&url_text(at), &text(line), ctx, now);
+    }
+    bytes(ruby, &view.retrieve(&url, context, now))
 }
 
 #[cfg(test)]

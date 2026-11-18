@@ -170,7 +170,7 @@ module Capybara
         'fontFileFromBytes'            => ->(b, *a) { b.font_file_from_bytes(a[0]) },
         'loadImage'                    => ->(b, *a) { b.load_image(a[0], a[2], realm: a[1], referrer: a[3]) },
         'imageLoadStart'               => ->(b, *a) { b.image_load_start(a[0], a[2], realm: a[1]) },
-        'scriptFetchStart'             => ->(b, *a) { b.script_fetch_start(a[0], a[1], a[2], a[3], a[4], a[5] == true) },
+        'scriptFetchStart'             => ->(b, *a) { b.script_fetch_start(a[0], a[1], a[2], a[3], a[4], a[5] == true, a[6].to_f) },
         'scriptFetchWait'              => ->(b, *a) { b.script_fetch_wait(a[0]) },
         'scriptFetchTake'              => ->(b, *a) { b.script_fetch_take(a[0]) },
         'scriptFetchForget'            => ->(b, *a) { b.script_fetch_forget(a[0]) },

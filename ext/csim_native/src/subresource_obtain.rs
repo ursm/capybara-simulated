@@ -930,7 +930,7 @@ pub(crate) fn classic_request(scope: &mut v8::PinScope<'_, '_>, args: &v8::Funct
         let integrity = arena.get(el).and_then(|n| n.plain_attr("integrity")).unwrap_or("").to_owned();
         (plan_in(arena, crate::subresource_judge::J_CLASSIC_SCRIPT, Some(el), Some(doc), None), integrity)
     };
-    Some(ClassicRequest { el, doc, src, parser, plan, integrity })
+    Some(ClassicRequest { el, doc, src, parser, plan, integrity, began: 0.0 })
 }
 // …and what a landing hands the bindings: `[ok, body, entry]`.
 pub(crate) fn landed_value<'s>(scope: &mut v8::PinScope<'s, '_>, (ok, body, entry): Landed) -> v8::Local<'s, v8::Array> {
@@ -968,6 +968,8 @@ pub(crate) struct ClassicRequest {
     parser: bool,
     plan: u32,
     integrity: String,
+    // (…when on the event loop's clock it began: script_fetch.rs `began_at`)
+    pub(crate) began: f64,
 }
 // …its fetch begun (`classic_script_begin`): the request the engine made of it, and the leg that answers it.
 pub(crate) struct ClassicFetch {
@@ -1013,7 +1015,7 @@ pub(crate) fn scheme_facts(content_type: String) -> crate::subresource_judge::Fa
 pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, request: ClassicRequest, parallel: bool) -> Result<ClassicFetch, Terminated> {
     use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_DATA};
     use crate::subresource_judge::{J_CLASSIC_SCRIPT, SRC_NETWORK, SRC_SCHEME};
-    let ClassicRequest { el, doc, src, parser, plan, integrity } = request;
+    let ClassicRequest { el, doc, src, parser, plan, integrity, began } = request;
     let url = match &src {
         Some(u) => u.clone(),
         None => realm(scope, cid).get(el).and_then(|n| n.plain_attr("src")).unwrap_or("").to_owned(),
@@ -1052,7 +1054,8 @@ pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, h
     // (…the parser's from the cross-visit asset cache, an inserted one's from the network: the host's slot's, or its
     // memory's answer at once)
     let mut args = request_args(scope, &r).to_vec();
-    args.push(v8::Boolean::new(scope, parser).into());
+    let (parser_arg, began_arg): (v8::Local<v8::Value>, v8::Local<v8::Value>) = (v8::Boolean::new(scope, parser).into(), v8::Number::new(scope, began).into());
+    args.extend([parser_arg, began_arg]);
     let leg = match call(scope, host, H_SCRIPT_START, &args)? {
         Some(started) if v8::Local::new(scope, &started).is_number() => Leg::Slot(v8::Local::new(scope, &started).uint32_value(scope).unwrap_or(0)),
         answer => Leg::Host(answer),

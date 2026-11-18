@@ -75,11 +75,12 @@ fn parser_begins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         state.parse_began_at = clock;
     }
 }
-// When a fetch the realm `cid` begins now began: the parser's as its parse did (`parserBegins`), any other now.
-fn began_at(arena: &mut crate::dom::RealmArena, cid: i32, parser: bool) -> f64 {
+// When a fetch the realm `cid` begins now began: one the parser's preload scanner saw (`scanned`: markup the parse took
+// from the network, none a `document.write` wrote) as its parse did (`parserBegins`), any other now.
+fn began_at(arena: &mut crate::dom::RealmArena, cid: i32, scanned: bool) -> f64 {
     let now = arena.event_loop.clock;
     match arena.realm_state(cid) {
-        Some(state) if parser && state.speculative.is_some() => state.parse_began_at.min(now),
+        Some(state) if scanned && state.speculative.is_some() => state.parse_began_at.min(now),
         _ => now,
     }
 }
@@ -96,14 +97,16 @@ fn take(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) -> Option<ScriptFet
     Some(fetches.list.remove(at))
 }
 
-// __dom.scriptFetchBegin(el, doc, src, parser, host, plan, integrity) -> the number of the fetch of the classic script `el`
-// begun (`classic_script_begin`, its arguments `fetchClassicScript`'s), 0 where none began.
+// __dom.scriptFetchBegin(el, doc, src, parser, host, plan, integrity, scanned) -> the number of the fetch of the classic
+// script `el` begun (`classic_script_begin`, its arguments `fetchClassicScript`'s), 0 where none began — one the parser's
+// preload scanner saw, `scanned`, begun as its parse did (`began_at`).
 fn begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return rv.set_uint32(0) };
-    let Some(request) = classic_request(scope, &args) else { return rv.set_uint32(0) };
+    let Some(mut request) = classic_request(scope, &args) else { return rv.set_uint32(0) };
     let cid = realm_id(scope, &args);
     let el = request.el;
-    let began = began_at(realm(scope, cid), cid, args.get(3).is_true());
+    let began = began_at(realm(scope, cid), cid, args.get(7).is_true());
+    request.began = began;
     let Ok(fetch) = classic_script_begin(scope, cid, host, request, true) else { return rv.set_uint32(0) };
     rv.set_uint32(file(scope, cid, el, began, Fetch::Classic(fetch)));
 }
@@ -115,7 +118,7 @@ fn file(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, began: f64, fetc
     id
 }
 
-// __dom.scriptFetchBeginModule(el, url, host, plan, parser) -> the number of the fetch of the module script `el`'s graph's
+// __dom.scriptFetchBeginModule(el, url, host, plan, scanned) -> the number of the fetch of the module script `el`'s graph's
 // entry `url` (resolved), its request the engine's `plan` of it — a CORS one — begun through the asset cache (browser.rb
 // `script_fetch_start`), whose document's module map answers the graph's fetch of it as the script runs; `url` null, one
 // the host makes nothing of, landing at once (a service worker's to answer as its graph runs, a scheme's, none); 0 where
@@ -131,7 +134,7 @@ fn begin_module_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         None => v8::undefined(scope).into(),
     };
     let slot = if args.get(1).is_string() {
-        let start = [args.get(1), args.get(3), v8::null(scope).into(), client, v8::Integer::new(scope, 2).into()];
+        let start = [args.get(1), args.get(3), v8::null(scope).into(), client, v8::Integer::new(scope, 2).into(), v8::Number::new(scope, began).into()];
         let Ok(started) = call(scope, host, H_SCRIPT_START, &start) else { return };
         started.map(|s| v8::Local::new(scope, s)).filter(|s| s.is_number()).and_then(|s| s.uint32_value(scope))
     } else {
