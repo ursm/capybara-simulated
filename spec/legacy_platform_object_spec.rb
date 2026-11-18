@@ -179,4 +179,18 @@ RSpec.describe 'legacy platform objects' do
       expect(r).to eq(['[object HTMLImageElement]', '[object HTMLAudioElement]', 'string', 'string'])
     end
   end
+
+  # A resolved-value declaration refuses a property attribute's write, but keeps an expando and an own property defined
+  # on it, which its reads then answer (Firefox; Chrome refuses the definition).
+  it "writes a computed style's expandos as onto any object" do
+    r = probe(<<~JS)
+      const cs = getComputedStyle(document.body);
+      cs.foo = 1;
+      let refused;
+      try { cs.color = 'red'; } catch (e) { refused = e.name; }
+      Object.defineProperty(cs, 'color', { value: 1 });
+      return [cs.foo, refused, cs.color];
+    JS
+    expect(r).to eq([1, 'NoModificationAllowedError', 1])
+  end
 end
