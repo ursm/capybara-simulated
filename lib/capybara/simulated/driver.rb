@@ -50,7 +50,7 @@ module Capybara
     Kernel.prepend(SleepHook)
 
     class Driver < Capybara::Driver::Base
-      attr_reader :app, :owner_thread
+      attr_reader :app, :owner_thread, :modal_handlers
 
       @@live_lock = Mutex.new
       @@live      = []  # [WeakRef<Driver>] — dead refs filtered on read.
@@ -96,6 +96,9 @@ module Capybara
         # run sees, or every `await`-on-animation close path (FloatKit's menu) parks
         # on a full-length animation-fallback timer no user action waits for.
         @app             = Capybara.disable_animation ? Capybara::Server::AnimationDisabler.new(app) : app
+        # The modal handlers of the `accept_*` / `dismiss_*` blocks open, the innermost last: the session's, whichever of
+        # its windows raises the dialog (Browser#handle_modal).
+        @modal_handlers  = []
         # Cookies + localStorage are origin-shared across windows
         # (real browser semantics), so we own the jars at the Driver
         # level and inject them into every per-window Browser. Each

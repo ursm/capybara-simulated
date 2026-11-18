@@ -102,4 +102,17 @@ RSpec.describe 'a navigation, a close and beforeunload' do
     session.within_window(popup) { session.accept_confirm { session.click_on('closeme') } }
     expect(session.windows.size).to eq(1)
   end
+
+  # …and a window of the session's other than the current one, a Browser of its own, its prompt answered by the block
+  # the close was asked in: the session's handlers, whichever window raises the dialog.
+  it "answers another window's prompt by the block its close was asked in" do
+    other = session.open_new_window
+    session.within_window(other) do
+      session.visit('/a')
+      session.click_on('touch')
+    end
+    session.dismiss_confirm { other.close }
+    expect(session.windows.size).to eq(2)
+    expect(other.closed?).to be(false)
+  end
 end

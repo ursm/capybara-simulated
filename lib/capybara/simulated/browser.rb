@@ -12635,12 +12635,15 @@ module Capybara
       # Push a one-shot handler onto the modal-dialog stack — the next
       # modal that fires consumes the topmost handler. Block exit pops
       # in case the dialog never fired.
+      # (…the session's, its driver's: a dialog of any window of it — another window's close a block asked for, its
+      # `beforeunload` prompt in that window's Browser — finds the handler of the block it was raised in)
       def with_modal(handler)
-        @modal_handlers.push(handler)
+        modal_handlers.push(handler)
         yield if block_given?
       ensure
-        @modal_handlers.delete(handler)
+        modal_handlers.delete(handler)
       end
+      private def modal_handlers = @driver.respond_to?(:modal_handlers) ? @driver.modal_handlers : @modal_handlers
 
       # JS-side `alert(...)` / `confirm(...)` / `prompt(...)` route here.
       # If no handler is pushed (typical of apps under test), accept
@@ -12648,7 +12651,7 @@ module Capybara
       # / similar progress without an explicit `accept_confirm` in
       # the test.
       def handle_modal(type, message, default_value)
-        handler = @modal_handlers.pop
+        handler = modal_handlers.pop
         if handler
           handler.call(type, message, default_value)
         else
