@@ -293,6 +293,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "timeTravelSet", time_travel_set, context_id);
     register(scope, ns, "timeTravelFrom", time_travel_from, context_id);
     register(scope, ns, "agentWait", agent_wait, context_id);
+    register(scope, ns, "agentExcuse", agent_excuse, context_id);
     register(scope, ns, "agentIdle", agent_idle, context_id);
     register(scope, ns, "agentShift", agent_shift, context_id);
     // SAFETY: a live context's handle, which the shim reads its microtask queue from.
@@ -602,6 +603,30 @@ impl AgentTime {
     }
 }
 
+// __dom.agentExcuse(ms) — `ms` of the real time just past none of the calling agent's script time: a server's sleeps the
+// host counted rather than ran on the event loop, in a fetch the page's script made no wait of (a parser-blocking
+// script's, Browser#planned_external_asset), which the virtual clock shows as far as it shows them at all.
+fn agent_excuse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let ms = args.get(0).number_value(scope).filter(|ms| ms.is_finite() && *ms > 0.0).unwrap_or(0.0);
+    let time = &mut dom(scope).agent_time;
+    time.excuse(ms, Instant::now());
+}
+impl AgentTime {
+    fn excuse(&mut self, ms: f64, at: Instant) {
+        if ms <= 0.0 {
+            return;
+        }
+        if !self.waits.is_empty() {
+            self.excused += ms;
+            return;
+        }
+        if let Some(open) = self.open {
+            let cut = std::time::Duration::from_secs_f64(ms / 1000.0).min(at.saturating_duration_since(open));
+            self.open = Some(open + cut);
+        }
+    }
+}
+
 // __dom.agentIdle() — the calling agent's event loop step is over: a turn still open closes, whether or not a checkpoint
 // completed after it (a realm's queue let go of undrained, a context reset). (Not a step the host runs inside a script's
 // synchronous wait — a server's sleep it moves the clock by — whose turn the wait's end takes what the clock showed out
@@ -636,6 +661,18 @@ mod tests {
         plain.begin_wait(ms(0), 0.0);
         plain.end_wait(ms(70), 20.0, false);
         assert!((plain.now(ms(70)) - 50.0).abs() < 1e-6, "{}", plain.now(ms(70)));
+    }
+
+    // Real time excused outright is no script time, but never more than has passed since the turn opened.
+    #[test]
+    fn excused_real_time_is_no_script_time() {
+        let start = Instant::now();
+        let ms = |n: u64| start + std::time::Duration::from_millis(n);
+        let mut time = AgentTime { open: Some(start), ..Default::default() };
+        time.excuse(30.0, ms(40));
+        assert!((time.now(ms(40)) - 10.0).abs() < 1e-6, "{}", time.now(ms(40)));
+        time.excuse(500.0, ms(50));
+        assert!(time.now(ms(50)).abs() < 1e-6, "{}", time.now(ms(50)));
     }
 
     // A failed entry ends the waits begun since it was made, not one an outer entry began and is still inside.

@@ -4150,6 +4150,8 @@ module Capybara
         answer, slept = server_timed_sleeps {
           external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
         }
+        # (…none of its sleeps' real time the page's script time — the virtual clock shows the server's: `agentExcuse`)
+        @runtime.call('agentExcuse', slept) if slept.positive?
         left = slept - since.to_f
         server_slept_ms(left) if left.positive?
         answer
