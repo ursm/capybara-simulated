@@ -1145,6 +1145,21 @@ module Capybara
         V8Runtime.engine_call(c, 'setSessionHistory', @browser.session_history_id)
         V8Runtime.engine_call(c, 'initRealm', isolated == true)
         V8Runtime.engine_call(c, 'setUserAgent', @browser.default_user_agent) if @browser.default_user_agent
+        V8Runtime.network_conditions(c, @browser)
+      end
+
+      # The network the browser emulates (Browser#online=, #slow_uploads=), told a realm as it is made — no event for it.
+      def self.network_conditions(c, browser)
+        V8Runtime.engine_call(c, 'setOnline', false, false) unless browser.online?
+        V8Runtime.engine_call(c, 'slowUploads', true) if browser.uploads_held?
+      end
+
+      # …and as it changes, to each live realm.
+      def network_changed(online, held)
+        [@ctx, *frame_realms.values].compact.each do |realm|
+          V8Runtime.engine_call(realm, 'setOnline', online)
+          V8Runtime.engine_call(realm, 'slowUploads', held)
+        end
       end
 
       # …and a user agent set once the realms are made: each live one's navigator answers it from then on.
@@ -2329,6 +2344,7 @@ module Capybara
         # loop already polls `worker_pending?` for worker thread activity.
         c.attach('@setTimersActive', ->(_flag) { nil })
         # The worker's scope, of its KIND — 'dedicated', 'shared' or 'service' — and name (worker-globals.js).
+        network_conditions(c, browser)
         # (…cross-origin isolated as the context that made it is — a service worker by no document's headers: not)
         V8Runtime.engine_call(c, 'installWorkerScope', kind, name.to_s, isolated, secure)
         # …and the user agent a test set, which its navigator answers as its requests send it.

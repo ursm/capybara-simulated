@@ -428,6 +428,9 @@ module Capybara
         # cross-isolate messaging is JSON-marshalled.
         @worker_seq    = 0
         @workers       = {}
+        # (…the network it emulates: online, its uploads let through — #online=, #slow_uploads=)
+        @offline       = false
+        @uploads_held  = false
         @worker_outbox = Thread::Queue.new
         # …and what of a service worker job a worker's thread leaves to the main one (`run_sw_job_events`), in a queue of its
         # own: a window waiting in place for that worker's answer takes it, and none of what the outbox holds, which waits
@@ -9469,16 +9472,27 @@ module Capybara
       # The session's virtual authenticators (webauthn.rb): what a test's CDP `WebAuthn.*` stand-in drives.
       def webauthn = (@webauthn ||= Webauthn.new(@session_partition))
 
-      # The network a test's CDP stand-in emulates (`Network.emulateNetworkConditions(offline:)`): the page online or
-      # not, `online` / `offline` fired where that changes (navigator.js `setOnline`).
+      # The network a test's CDP stand-in emulates (`Network.emulateNetworkConditions(offline:)`), the browser's: online
+      # or not, and its uploads held, as a throttled network's are still being sent — an XMLHttpRequest sending a body
+      # waits until they are let go. Every realm reads it: each told as it is made (V8Runtime#init_realm, the worker's
+      # boot) and every live one as it changes — its frames', its windows', its workers' — `online` / `offline` fired
+      # where it changed (navigator.js `setOnline`, xhr.js `slowUploads`).
+      def online? = !@offline
+      def uploads_held? = @uploads_held == true
+
       def online=(online)
-        dom_call('setOnline', online == true)
+        @offline = online != true
+        network_changed
       end
 
-      # …and its uploads held, as a throttled network's are still being sent: an XMLHttpRequest sending a body waits until
-      # they are let go (xhr.js `slowUploads`).
       def slow_uploads=(held)
-        dom_call('slowUploads', held == true)
+        @uploads_held = held == true
+        network_changed
+      end
+
+      def network_changed
+        @runtime&.network_changed(online?, uploads_held?)
+        @workers.each_value {|w| w[:inbox] << {kind: 'network', online: online?, held: uploads_held?} if w[:thread]&.alive? }
       end
 
       # Worker thread entry. Builds an isolate via `V8Runtime.build_worker`,
@@ -10034,6 +10048,10 @@ module Capybara
               # One of this worker's WebSockets: its event delivered here, as the window's are at settle — a handshake
               # cookie stored in the jar, not handed to the script.
               ev = msg[:event]
+            elsif msg.is_a?(Hash) && msg[:kind] == 'network'
+              # The network the browser emulates, changed (#online=, #slow_uploads=).
+              rt.call('setOnline', msg[:online])
+              rt.call('slowUploads', msg[:held])
               if ev[:type] == '__setcookie'
                 store_set_cookies({'set-cookie' => ev[:cookies]}, ev[:url], ev[:cookie_context])
               else
