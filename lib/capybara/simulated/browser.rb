@@ -10592,7 +10592,7 @@ module Capybara
       # origin's), nil for a URL of another scheme.
       def local_module_source(url, realm)
         if url.start_with?('blob:')
-          blob = host_blob(@runtime.realm_direct_call(realm, 'resolveBlobForHost', url))
+          blob = host_blob(@runtime.realm_direct_call(realm, 'resolveModuleBlob', url))
           [blob&.[](:bytes), blob&.[](:type)]
         elsif url.start_with?('data:')
           Native.data_url(url)&.reverse || [nil, nil]
