@@ -253,6 +253,10 @@ impl StorageEventInbox {
     fn is_pending(&self) -> bool {
         self.count.load(std::sync::atomic::Ordering::Acquire) > 0
     }
+    // #clear — none: the window's documents, which they were to fire at, gone (a reset's).
+    fn clear(&self) {
+        drop(self.take());
+    }
 }
 
 impl crate::dom::RealmArena {
@@ -298,6 +302,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     use magnus::{function, method, Module, Object};
     let class = native.define_class("StorageEventInbox", ruby.class_object())?;
     class.define_singleton_method("new", function!(StorageEventInbox::new, 0))?;
+    class.define_method("clear", method!(StorageEventInbox::clear, 0))?;
     class.define_method("push", method!(StorageEventInbox::push, 7))?;
     class.define_method("take", method!(StorageEventInbox::take, 0))?;
     class.define_method("pending?", method!(StorageEventInbox::is_pending, 0))?;

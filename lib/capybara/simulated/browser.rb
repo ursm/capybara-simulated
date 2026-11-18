@@ -3712,6 +3712,7 @@ module Capybara
         # next test back on the main document.
         reset_frame_scope
         @session_history.clear
+        @frame_leaving_entries = nil   # (…the entries the last test's frames were leaving: `leave_frame_entry`)
         Native.cors_preflight_cache_clear(@cors_preflight_cache)   # the window's CORS-preflight cache: a test's grants none of the next's
         @file_picks      = {} if @file_picks
         # Hand the live trace off to `@pending_trace` so an after-hook
@@ -3736,8 +3737,14 @@ module Capybara
         Native.storage_clear(@local_storage)
         Native.session_partition_clear(@session_partition)
         Native.storage_clear(@session_storage)
-        # (…and the isolate's BroadcastChannel queue, with the realms the rebuild drops: `forgetRealmObjects`)
+        # (…and the isolate's BroadcastChannel queue, with the realms the rebuild drops: `forgetRealmObjects` — and the
+        # `storage` events its documents were still to fire, none of which the next test's documents were there for)
         @broadcast_inbox.clear
+        @storage_inbox.clear
+        # (…and the navigations deferred on a worker activating, which the next test's workers are none of — each of a
+        # navigable whose session history is cleared, a closure over the page it left: `await_sw_activation`)
+        @sw_deferred_navigations.clear
+        @sw_navigations_due.clear
         # Free any zero-copy transfer backing stores that went unimported
         # (worker killed before draining its inbox, etc.) before the rebuild.
         drop_pending_transfers
