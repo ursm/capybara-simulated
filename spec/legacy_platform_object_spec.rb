@@ -193,4 +193,20 @@ RSpec.describe 'legacy platform objects' do
     JS
     expect(r).to eq([1, 'NoModificationAllowedError', 1])
   end
+
+  # A Storage area's named setter fails as a named property's set (Chrome's message), its setItem as the operation's.
+  it "names a named property's quota failure as Chrome does" do
+    r = probe(<<~JS)
+      const big = 'a'.repeat(12 * 1024 * 1024), out = [];
+      localStorage.clear();
+      try { localStorage.huge = big; } catch (e) { out.push(e.name + ' ' + e.message); }
+      try { localStorage.setItem('huge', big); } catch (e) { out.push(e.name + ' ' + e.message); }
+      localStorage.clear();
+      return out;
+    JS
+    expect(r).to eq([
+      "QuotaExceededError Failed to set a named property 'huge' on 'Storage': Setting the value of 'huge' exceeded the quota.",
+      "QuotaExceededError Failed to execute 'setItem' on 'Storage': Setting the value of 'huge' exceeded the quota."
+    ])
+  end
 end

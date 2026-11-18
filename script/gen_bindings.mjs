@@ -1552,11 +1552,19 @@ function legacyKind(def, options) {
     return null;
   }
   const checks = new Set();
-  const steps = [], entries = [];
+  const steps = [], entries = [], locals = [];
+  // (…a special operation's steps, a local of the function's: the operation's where it has a name — but the steps the
+  // implementation gives under the anonymous one's name where they differ from the operation's, as a property access
+  // does them: NamedNodeMap's `namedGetter`, of its supported names alone, where `getNamedItem` finds `foo` by `FOO`;
+  // Storage's `namedSetter`, whose error is a named property's)
   const step = (slot) => {
-    const n = specialStep(specials[slot], slot);
+    const n = specialStep(specials[slot], slot), anonymous = ANONYMOUS_SPECIAL[slot];
     if (!steps.includes(n)) steps.push(n);
-    return n;
+    const local = `${anonymous}Steps`;
+    if (!locals.some((l) => l.startsWith(`const ${local} `))) {
+      locals.push(`const ${local} = ${n === anonymous ? `impl.${n}` : `impl.${anonymous} ?? impl.${n}`};`);
+    }
+    return local;
   };
   if (indexedGetter) {
     const item = step('indexed getter');
@@ -1565,31 +1573,28 @@ function legacyKind(def, options) {
     // nothing there)
     // (…each step the implementation's own function where it is the step, called with no `this`)
     entries.push(indexedGetter.m.idlType.nullable
-      ? `item: impl.${item}`
-      : `item: (o, i) => (i < impl.get_length(o) ? impl.${item}(o, i) : null)`);
+      ? `item: ${item}`
+      : `item: (o, i) => (i < impl.get_length(o) ? ${item}(o, i) : null)`);
     entries.push('length: impl.get_length');
     const setter = specials['indexed setter'];
     if (setter) {
       const v = conversion(setter.m.arguments[1].idlType, 'v', { iface: name, special: 'indexed' }, checks);
-      entries.push(`setIndex: (o, i, v) => { v = ${v}; ${withCEReactions(setter.m, `impl.${step('indexed setter')}(o, i, v);`)} }`);
+      entries.push(`setIndex: (o, i, v) => { v = ${v}; ${withCEReactions(setter.m, `${step('indexed setter')}(o, i, v);`)} }`);
     }
   }
   if (namedGetter) {
-    // (…asked first whether the name is supported where the getter answers others too — `isSupportedName(o, name)`:
-    // NamedNodeMap's getNamedItem, which finds `foo` by `FOO` in an HTML document, no name of its own)
-    const getter = step('named getter');
-    entries.push(`named: impl.isSupportedName === undefined ? impl.${getter} : (o, name) => (impl.isSupportedName(o, name) ? impl.${getter}(o, name) : null)`);
+    entries.push(`named: ${step('named getter')}`);
     steps.push('supportedNames');
     entries.push('names: impl.supportedNames');
     const setter = specials['named setter'], deleter = specials['named deleter'];
     if (setter) {
       const v = conversion(setter.m.arguments[1].idlType, 'v', { iface: name, special: 'named' }, checks);
-      entries.push(`setNamed: (o, name, v) => { v = ${v}; ${withCEReactions(setter.m, `impl.${step('named setter')}(o, name, v);`)} }`);
+      entries.push(`setNamed: (o, name, v) => { v = ${v}; ${withCEReactions(setter.m, `${step('named setter')}(o, name, v);`)} }`);
     }
     if (deleter) {
       // (…a deleter declared to return a boolean the one whose `false` says the deletion failed)
       const returns = deleter.m.idlType.idlType === 'boolean' ? 'return ' : '';
-      entries.push(`deleteNamed: (o, name) => ${withCEReactions(deleter.m, `{ ${returns}impl.${step('named deleter')}(o, name); }`)}`);
+      entries.push(`deleteNamed: (o, name) => ${withCEReactions(deleter.m, `{ ${returns}${step('named deleter')}(o, name); }`)}`);
     }
     if (extAttrs.has('LegacyOverrideBuiltIns')) entries.push('overrideBuiltIns: true');
     if (extAttrs.has('LegacyUnenumerableNamedProperties')) entries.push('unenumerable: true');
@@ -1602,6 +1607,7 @@ function legacyKind(def, options) {
   lines.push(`// interface ${name}: a legacy platform object (Web IDL §3.9), of ${what} properties`);
   lines.push(`export function legacy${name}(impl, own) {`);
   lines.push(`  requireSteps('${name}', impl, ${JSON.stringify(steps)});`);
+  for (const l of locals) lines.push(`  ${l}`);
   for (const c of checks) lines.push(`  const IS_${c} = interfaceCheck('${c}');`);
   lines.push(`  return legacyPlatformObject({ __proto__: null,`);
   lines.push(entries.map((e) => `    ${e}`).join(',\n'));
