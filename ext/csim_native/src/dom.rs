@@ -1170,10 +1170,8 @@ pub(crate) struct RealmState {
     // Its parse's list of scripts to execute after parsing (script.rs `list_parser_script`), until "the end" takes it,
     // and the source text an inline one of them had at its end tag, until it runs.
     pub(crate) parser_list: Vec<NodeId>,
-    // Whether the parser has waited on a fetch (script.rs `parserWaits`), and how many of the list's `async` scripts were
-    // listed before the one "the end" last took from it (`takeParserNext`).
+    // Whether the parser has waited on a fetch (script.rs `parserWaits`).
     pub(crate) parser_waited: bool,
-    pub(crate) parser_ahead: usize,
     pub(crate) parser_sources: std::collections::HashMap<NodeId, Vec<u16>>,
     // The fetches of classic scripts its document's elements began (script_fetch.rs), and the places in the event loop's
     // sequence its document's parse kept for their responses as it began (`parserBegins`).
@@ -1867,7 +1865,6 @@ impl RealmArena {
         // (…nor is a list of scripts to execute after the old page's parse, one it left before its end, the new one's)
         self.parser_list.clear();
         self.parser_waited = false;
-        self.parser_ahead = 0;
         self.parser_sources.clear();
         // (…nor its script fetches, which land in no document now (the host's slots left to the session's end) — its parse's
         // speculative places its own, `parserBegins`, which the new parse takes before this runs)

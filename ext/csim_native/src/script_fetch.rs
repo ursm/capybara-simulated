@@ -115,16 +115,14 @@ fn file(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, began: f64, fetc
     id
 }
 
-// __dom.scriptFetchBeginModule(el, url, host, plan, parser) -> the number of the fetch of the module script `el`'s graph's entry
-// `url` (resolved), its request the engine's `plan` of it — a CORS one — begun through the asset cache (browser.rb
-// `script_fetch_start`), which keeps its answer for the graph's fetch of it as the script runs; 0 where none began.
-// (…none of a document a service worker controls: its graph's fetches are the worker's, as it runs)
+// __dom.scriptFetchBeginModule(el, url, host, plan, parser) -> the number of the fetch of the module script `el`'s graph's
+// entry `url` (resolved), its request the engine's `plan` of it — a CORS one — begun through the asset cache (browser.rb
+// `script_fetch_start`), whose document's module map answers the graph's fetch of it as the script runs; `url` null, one
+// the host makes nothing of, landing at once (a service worker's to answer as its graph runs, a scheme's, none); 0 where
+// none began.
 fn begin_module_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(2)) else { return rv.set_uint32(0) };
-    if !args.get(1).is_string() {
-        return rv.set_uint32(0);
-    }
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     let (began, client) = (began_at(arena, cid, args.get(4).is_true()), arena.get(el).map(|n| n.realm));
@@ -132,9 +130,13 @@ fn begin_module_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         Some(realm) => v8::Integer::new(scope, realm).into(),
         None => v8::undefined(scope).into(),
     };
-    let start = [args.get(1), args.get(3), v8::null(scope).into(), client, v8::Integer::new(scope, 2).into()];
-    let Ok(started) = call(scope, host, H_SCRIPT_START, &start) else { return };
-    let slot = started.map(|s| v8::Local::new(scope, s)).filter(|s| s.is_number()).and_then(|s| s.uint32_value(scope));
+    let slot = if args.get(1).is_string() {
+        let start = [args.get(1), args.get(3), v8::null(scope).into(), client, v8::Integer::new(scope, 2).into()];
+        let Ok(started) = call(scope, host, H_SCRIPT_START, &start) else { return };
+        started.map(|s| v8::Local::new(scope, s)).filter(|s| s.is_number()).and_then(|s| s.uint32_value(scope))
+    } else {
+        None
+    };
     rv.set_uint32(file(scope, cid, el, began, Fetch::Module(slot)));
 }
 

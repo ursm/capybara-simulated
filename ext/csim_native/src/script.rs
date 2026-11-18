@@ -690,30 +690,25 @@ fn take_parser_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 }
 
 // __dom.takeParserNext() -> the first of the realm's list of scripts to execute after parsing, in the order their end tags
-// put them on it, taken — or null — from what its end tags listed, which leaves the `async` ones (`takeParserAsync`):
-// those listed before it noted, the ones its fetch lands ahead of it (`ASYNC_AHEAD`).
+// put them on it, taken — or null — from what its end tags listed, which leaves the `async` ones (`takeParserAsync`).
 fn take_parser_next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let Some(at) = arena.realm_state(cid).and_then(|state| state.parser_list.iter().position(|&id| !listed_async(arena, id))) else { return rv.set_null() };
     let Some(state) = arena.realm_state_mut(cid) else { return rv.set_null() };
-    state.parser_ahead = at;
     let next = state.parser_list.remove(at);
     rv.set(crate::dom::node_value(scope, Some(next)));
 }
 // What of the `async` external scripts its end tags listed — the realm's parser's "set of scripts that will execute as soon
 // as possible" — `takeParserAsync(which, host)` takes: every one (`ASYNC_ALL`); where its parser has waited on a fetch, every
-// one whose fetch has landed by now (`ASYNC_WAITED`: `parserWaits`, script_fetch.rs `due_now`), none where it has not;
-// those listed before the script `takeParserNext` last took (`ASYNC_AHEAD`). A fetch takes no time here unless its server's
-// does, so with the parser's first wait every one of the document's has landed whose server took none — as a browser's
-// parser waiting has fetched ahead (Chrome and Firefox: one listed after a parser-blocking script still runs before
-// DOMContentLoaded, csim-bench rvfn `y_after_block`) — and one whose server took time lands as its task comes, after
-// DOMContentLoaded where that is later (both: `b inl dcl a`, r13 `q_asyblk_150_0`, `p_asyblk_50_0`). A deferred
-// module's fetch, its graph's fetched as it runs, lands those listed before it, the response it waits on landing first
-// among those due with it (r13 `y_module_defer_async`).
+// one whose fetch has landed by now (`ASYNC_WAITED`: `parserWaits`, script_fetch.rs `due_now`), none where it has not. A
+// fetch takes no time here unless its server's does, so with the parser's first wait every one of the document's has
+// landed whose server took none — as a browser's parser waiting has fetched ahead (Chrome and Firefox: one listed after a
+// parser-blocking script still runs before DOMContentLoaded, csim-bench rvfn `y_after_block`) — and one whose server took
+// time lands as its task comes, after DOMContentLoaded where that is later (both: `b inl dcl a`, r13 `q_asyblk_150_0`,
+// `p_asyblk_50_0`).
 const ASYNC_ALL: u32 = 0;
 const ASYNC_WAITED: u32 = 1;
-const ASYNC_AHEAD: u32 = 2;
 fn take_parser_async_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let which = args.get(0).uint32_value(scope).unwrap_or(ASYNC_ALL);
@@ -721,14 +716,8 @@ fn take_parser_async_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     rv.set(v8::Array::new(scope, 0).into());
     let arena = crate::dom::realm(scope, cid);
     let Some(state) = arena.realm_state(cid).filter(|state| which != ASYNC_WAITED || state.parser_waited) else { return };
-    let ahead = if which == ASYNC_AHEAD { state.parser_ahead } else { state.parser_list.len() };
     let listed = state.parser_list.clone();
-    let mut candidates = Vec::new();
-    for (at, &id) in listed.iter().enumerate() {
-        if at < ahead && listed_async(arena, id) {
-            candidates.push(id);
-        }
-    }
+    let candidates: Vec<NodeId> = listed.into_iter().filter(|&id| listed_async(arena, id)).collect();
     let mut taken = Vec::with_capacity(candidates.len());
     for id in candidates {
         let landed = match (which, host) {
@@ -744,7 +733,6 @@ fn take_parser_async_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     }
     if let Some(state) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
         state.parser_list.retain(|id| !taken.contains(id));
-        state.parser_ahead = 0;
     }
     rv.set(crate::dom::nodes_value(scope, cid, &taken));
 }
@@ -753,7 +741,6 @@ fn forget_parser_scripts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     let cid = crate::dom::realm_id(scope, &args);
     if let Some(state) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
         state.parser_list.clear();
-        state.parser_ahead = 0;
     }
 }
 // …whether a listed script is an `async` external one.
