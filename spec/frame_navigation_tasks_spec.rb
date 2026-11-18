@@ -1534,6 +1534,17 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(log).to include('stopped i.js-ran i:l')
     end
 
+    # s5_graft: a `define` in a task that ran as a style sheet held up the parse upgrades an element the parser inserted —
+    # connected, its connectedCallback the upgrade's — which the parser's connection steps call no second time (Chrome and
+    # Firefox: one `ce:b`).
+    it 'calls the connectedCallback of an element a define upgraded before the parser connected it once' do
+      log = page_log(<<~HTML, at: 600)
+        <script>setTimeout(() => customElements.define('x-e', class extends HTMLElement { connectedCallback() { L.push('ce:' + this.id); } }), 50)</script>
+        <link rel="stylesheet" href="/slow/200/x.css"><x-e id="b"></x-e><script>L.push('inl')</script>
+      HTML
+      expect(log.scan('ce:b').size).to eq(1)
+    end
+
     # ca4: …but not for one that came to block after it was prepared — Chrome runs the script first, Firefox after the sheet;
     # the spec's text holds it back for none.
     it 'runs an `async` script ahead of a style sheet that came to block scripts after it was prepared' do
