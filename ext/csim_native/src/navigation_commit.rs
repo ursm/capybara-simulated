@@ -316,6 +316,7 @@ impl Commit {
     // it to, of what the host gave it (`data`) beside what the navigation began it with, the origin its document state is
     // of kept — or a replay's active one made again (`made_again`).
     fn commit_frame(&mut self, origin: Option<&str>) {
+        self.history.frame_document_made(self.nav);
         let redirect = self.redirected.then_some((self.url.as_str(), self.to_get));
         match self.token.take() {
             Some(token) => {
