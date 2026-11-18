@@ -201,6 +201,32 @@ RSpec.describe "a form submission's request" do
     expect(session.evaluate_script('document.body.textContent')).to eq('')
   end
 
+  # …and a traversal forward to it alike: no request at all, an error document at its URL (HTML "apply the history step":
+  # allowPOST is its reload pending, false, so "attempt to populate the history entry's document" fetches no POST
+  # resource, and a navigable with no navigation params gets a document for inline content — an error document). No
+  # resubmission prompt to answer: the text has none. Chrome 157 and Firefox 159, measured 2026-11-19 (a POST result
+  # sent `Cache-Control: no-store`): Chrome's forward makes no request — ERR_CACHE_MISS, its "Confirm Form Resubmission"
+  # error page, no dialog — Firefox's none either, its "Document Expired" page; one Chrome's HTTP cache holds it shows
+  # from there, which this driver keeps no cache of.
+  it 'makes no request on a traversal forward to a POST result, an error document at its URL' do
+    requests = []
+    app = lambda {|env|
+      requests << "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
+      next html.('<title>Done</title><body>done') if env['PATH_INFO'] == '/done'
+
+      html.('<title>Home</title><body><form action="/done" method="post"><input name=q value=1><button>go</button></form>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.click_button('go')
+    session.go_back
+    expect(session).to have_title('Home')
+    session.go_forward
+    expect(session).to have_current_path('/done')
+    expect(session.evaluate_script('[document.title, document.body.textContent]')).to eq(['', ''])
+    expect(requests).to eq(['GET /', 'POST /done', 'GET /'])
+  end
+
   # …under the referrer policy it was first sent under, not the page it reached's: a `no-referrer` form page's POST is
   # re-posted with `Origin: null` and no Referer (Chrome).
   it 're-posts under the referrer policy it was first sent under' do
