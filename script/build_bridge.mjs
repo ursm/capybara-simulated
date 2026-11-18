@@ -23,7 +23,11 @@ await esbuild.build({
   entryPoints: ['lib/capybara/simulated/js/src/bridge.entry.js'],
   bundle:      true,
   format:      'iife',
-  keepNames:   true,
+  // (…no `keepNames`: what it keeps is the name of a function the bundling renamed, and each is the bindings' own — a
+  // platform object's interface and members take their names from their declarations, a `var X = class extends …`'s
+  // and the generated bindings' — while the `__name` it calls for every function made, at every call that makes one
+  // (`listOf`'s on each walk), defined a property through the page's `Object.prototype`: a page's `get` or `set` there
+  // made every one of them throw)
   outfile:     'lib/capybara/simulated/js/bridge.bundle.js',
   logLevel:    'warning',
   // (…one an engine lacks passed as undefined, as a bare reference to it would have thrown)

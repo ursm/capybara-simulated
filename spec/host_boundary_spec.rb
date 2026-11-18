@@ -126,6 +126,18 @@ RSpec.describe 'the host boundary' do
     File.unlink(file.path) if file
   end
 
+  # …nor does a page's `get` or `set` on Object.prototype reach how the bindings define what they make: a function
+  # they make as a step runs (a list's walk, the keys typed) had its name defined through a descriptor that inherited
+  # them, and threw.
+  it "walks the host's lists whatever a page put on Object.prototype's get and set" do
+    session.visit '/args'
+    session.execute_script(<<~JS)
+      for (const key of ['get', 'set']) Reflect.defineProperty(Object.prototype, key, { __proto__: null, value: 1, configurable: true, writable: true });
+    JS
+    session.find(:css, '#t').send_keys('ab')
+    expect(session.find(:css, '#t').value).to eq('ab')
+  end
+
   # …nor of the event loop's: the rendering update's resize steps over the frames, a frame's task run in its realm
   # (a page's fake global among the realms would have its "task" run), and the custom element reactions an operation
   # of the page's leaves — whose elements the page's iterator would be handed.
