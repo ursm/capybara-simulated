@@ -8,16 +8,7 @@
 // (`Float16Array`) or installs after the snapshot the bundle is built into (`SharedArrayBuffer`, `WebAssembly`): it
 // would be captured as undefined.
 import * as esbuild from 'esbuild';
-
-const INTRINSICS = [
-  'AggregateError', 'Array', 'ArrayBuffer', 'Atomics', 'BigInt', 'BigInt64Array', 'BigUint64Array', 'Boolean', 'DataView',
-  'Error', 'EvalError', 'FinalizationRegistry', 'Float32Array', 'Float64Array', 'Function',
-  'Int8Array', 'Int16Array', 'Int32Array', 'Intl', 'Iterator', 'JSON', 'Map', 'Math', 'Number', 'Object', 'Promise',
-  'Proxy', 'RangeError', 'ReferenceError', 'Reflect', 'RegExp', 'Set', 'String', 'Symbol',
-  'SyntaxError', 'TypeError', 'URIError', 'Uint8Array', 'Uint8ClampedArray', 'Uint16Array', 'Uint32Array', 'WeakMap',
-  'WeakRef', 'WeakSet', 'decodeURI', 'decodeURIComponent', 'encodeURI', 'encodeURIComponent', 'escape', 'eval',
-  'isFinite', 'isNaN', 'parseFloat', 'parseInt', 'unescape'
-];
+import { INTRINSICS, intrinsicArguments } from './bundle_intrinsics.mjs';
 
 await esbuild.build({
   entryPoints: ['lib/capybara/simulated/js/src/bridge.entry.js'],
@@ -36,5 +27,5 @@ await esbuild.build({
   // and so holds the bindings' own functions, which a strict frame answers undefined for. (…in a function of its own:
   // the parameters' `eval` is no name a strict function may bind)
   banner: {js: `((${INTRINSICS.join(', ')}) => (() => {\n'use strict';`},
-  footer: {js: `})())(${INTRINSICS.map((name) => `typeof ${name} === 'undefined' ? undefined : ${name}`).join(', ')});`}
+  footer: {js: `})())(${intrinsicArguments()});`}
 });

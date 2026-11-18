@@ -25,4 +25,28 @@ RSpec.describe 'Array.prototype index accessors' do
     end
     expect(hits).to eq([])
   end
+
+  # A pipe's abort settles its actions with `Promise.all` over a list of the polyfill's: walked by an iterator of the
+  # list's own, not %ArrayIteratorPrototype%'s `next`, which a page may replace.
+  it "run no step of a page's array iterator as a pipe is aborted" do
+    iterated = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><body><pre id=out></pre><script>
+      const AIP = Object.getPrototypeOf([][Symbol.iterator]()), next = AIP.next;
+      let hits = 0;
+      (async () => {
+        const ac = new AbortController();
+        const piped = new ReadableStream({ start(c) { c.enqueue('a'); } }).pipeTo(new WritableStream(), { signal: ac.signal });
+        AIP.next = function () { hits++; return next.call(this); };
+        ac.abort();
+        await piped.catch(() => {});
+        AIP.next = next;
+        document.getElementById('out').textContent = String(hits);
+      })();
+      </script>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [iterated]] })
+    session.visit '/'
+    expect(session).to have_css('#out', text: /\A\d+\z/)
+    expect(session.find('#out').text).to eq('0')
+  end
 end
