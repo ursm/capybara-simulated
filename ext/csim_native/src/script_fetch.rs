@@ -1,10 +1,10 @@
 // The fetches of scripts a document's elements began as "prepare the script element" — an inserted script's, the parser's
 // `async` and `defer` ones; a classic one's (subresource_obtain.rs `classic_script_begin`), a module script's graph's entry
 // (`scriptFetchBeginModule`, its graph fetched as it runs, the entry's answer kept for it) — each in parallel, its network
-// leg the host's, and each landing as the event loop comes to it: as a task queued as it began, behind the tasks due with
-// it (timers.rs `BEHIND`), a network's time away — which is its server's: what its sleeps came to (browser.rb
-// `script_fetch_wait`, the fetch made as the task first asks, in the event loop's order), the task coming again that much
-// later. The
+// leg the host's (browser.rb `script_fetch_start`), and each landing as the event loop comes to it: as a task queued as it
+// began, behind the tasks due with it (timers.rs `BEHIND`), a network's time away — which is its server's: what its
+// sleeps came to (browser.rb `script_fetch_wait`, the fetch made as the task first asks, in the event loop's order), the
+// task coming again that much later. The
 // order the lists of HTML's scripts run them in is the bindings' (bridge.entry.js), each landing as its turn comes.
 
 use crate::dom::{realm, realm_id, register, NodeId};

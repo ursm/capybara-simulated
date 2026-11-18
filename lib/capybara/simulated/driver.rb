@@ -25,7 +25,7 @@ module Capybara
         return super if seconds.nil?
         n = super
         # (…inside a fetch whose server's time is counted, whatever its length — a script's, which lands that far after it
-        # began by: Browser#script_fetch_wait)
+        # began by, a frame navigation's: Browser#script_fetch_wait, #server_timed)
         if (slept = Thread.current.thread_variable_get(:csim_server_slept))
           slept[0] += (seconds.to_f * 1000).round(3)
           return n
@@ -35,9 +35,9 @@ module Capybara
         # load-bearing because rusty_racer VMs aren't thread-safe. An idle Driver's clock moves all the same — the time
         # slept passes for its page's `Date` — a step with nothing due, so the broadcast is cheap.
         # (…the app's own, called on this thread in the middle of a fetch of that driver's, whatever its length — the server's
-        # time, which a fetch on a thread of its own counts the same: Browser#server_slept_ms; to another session's, and a
+        # time, which a counted fetch counts the same: Browser#server_slept_ms; to another session's, and a
         # test's own above the threshold, any time passing)
-        # (…to the microsecond, as the thread's count is: `sleep(0.03)` is 30 ms on both)
+        # (…to the microsecond, as the count is: `sleep(0.03)` is 30 ms on both)
         ms = (seconds.to_f * 1000).round(3)
         pacing = seconds.to_f >= Capybara::Simulated::USER_SLEEP_THRESHOLD_S
         if ms.positive?
