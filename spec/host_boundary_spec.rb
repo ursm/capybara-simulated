@@ -20,6 +20,19 @@ RSpec.describe 'the host boundary' do
         <!DOCTYPE html><body><iframe id=f src="/tick"></iframe><iframe id=x src="http://evil.test/ad"></iframe>
         <script>window.ticks = 0; setInterval(() => ticks++, 10);</script>
       HTML
+      '/poisoned' => <<~HTML,
+        <!DOCTYPE html><meta charset=utf-8><script>for (const key of ['get', 'set', 'value', 'writable', 'enumerable', 'configurable']) Reflect.defineProperty(Object.prototype, key, { __proto__: null, value: 1, configurable: true, writable: true });</script>
+        <body><p class=a>one</p><p class=a>two</p><input id=t><button id=b>b</button><iframe id=f src=/poisoned-frame></iframe>
+        <script>
+          window.seen = [];
+          document.getElementById('b').addEventListener('click', () => seen.push('clicked'));
+          customElements.define('x-p', class extends HTMLElement { connectedCallback() { seen.push('connected'); } });
+          document.body.append(document.createElement('x-p'));
+          seen.push(document.createElement('div').attachShadow({ mode: 'open' }).mode);
+          new Worker('/poisoned-worker.js').onmessage = (e) => seen.push(e.data);
+        </script>
+      HTML
+      '/poisoned-frame' => "<!DOCTYPE html><script>for (const key of ['get', 'set', 'value', 'writable', 'enumerable', 'configurable']) Reflect.defineProperty(Object.prototype, key, { __proto__: null, value: 1, configurable: true, writable: true });</script><p>in the frame</p>",
       '/args'   => <<~HTML,
         <!DOCTYPE html><meta charset=utf-8><body><input id=t><input id=f type=file><button id=c>c</button>
         <script>document.getElementById('c').addEventListener('click', (e) => { window.shifted = e.shiftKey; });</script>
@@ -55,6 +68,7 @@ RSpec.describe 'the host boundary' do
     pages = self.pages
     lambda do |env|
       next [200, {'content-type' => 'text/javascript'}, ["var x = 1;\nthrow new Error('cross-origin secret');"]] if env['PATH_INFO'] == '/s.js'
+      next [200, {'content-type' => 'text/javascript'}, ["for (const key of ['get', 'set', 'value', 'writable', 'enumerable', 'configurable']) Reflect.defineProperty(Object.prototype, key, { __proto__: null, value: 1, configurable: true, writable: true }); postMessage(navigator.userAgent.length > 0 && typeof fetch);"]] if env['PATH_INFO'] == '/poisoned-worker.js'
 
       [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'], '<!DOCTYPE html>')]]
     end
@@ -126,16 +140,18 @@ RSpec.describe 'the host boundary' do
     File.unlink(file.path) if file
   end
 
-  # …nor does a page's `get` or `set` on Object.prototype reach how the bindings define what they make: a function
-  # they make as a step runs (a list's walk, the keys typed) had its name defined through a descriptor that inherited
-  # them, and threw.
-  it "walks the host's lists whatever a page put on Object.prototype's get and set" do
-    session.visit '/args'
-    session.execute_script(<<~JS)
-      for (const key of ['get', 'set']) Reflect.defineProperty(Object.prototype, key, { __proto__: null, value: 1, configurable: true, writable: true });
-    JS
+  # …nor does what a page put on Object.prototype — a `get`, a `set`, a `value`, a descriptor's flags — reach what V8
+  # reads a descriptor or a trap off: a descriptor the bindings define a property by, a Proxy's handler (a document's,
+  # a collection's), a `getOwnPropertyDescriptor` trap's answer, the engine's own descriptors. A load, a frame's, a
+  # worker's, `querySelectorAll`, custom elements, a shadow root, a click and typing all go on as they would.
+  it "goes on whatever a page put on Object.prototype's descriptor fields" do
+    session.visit '/poisoned'
+    expect(poll_until { session.evaluate_script('seen.length') >= 3 && session.evaluate_script('seen') }).to eq(['connected', 'open', 'function'])
+    expect(session.evaluate_script("[document.querySelectorAll('p.a').length, Object.keys(document.body.children).length]")).to eq([2, 7])
+    expect(session.within_frame('f') { session.find(:css, 'p').text }).to eq('in the frame')
+    session.find(:css, '#b').click
     session.find(:css, '#t').send_keys('ab')
-    expect(session.find(:css, '#t').value).to eq('ab')
+    expect(session.evaluate_script("[seen.at(-1), document.getElementById('t').value]")).to eq(['clicked', 'ab'])
   end
 
   # …nor of the event loop's: the rendering update's resize steps over the frames, a frame's task run in its realm

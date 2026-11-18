@@ -6516,25 +6516,20 @@ fn attr_descriptor(
             // A data descriptor consistent with the enumerator: enumerable + writable + configurable,
             // so Object.keys / hasOwnProperty / Object.assign see a valid own property (V8 invariant). The
             // value round-trips losslessly (the UTF-16 override wins over the lossy UTF-8 when present).
-            let desc = v8::Object::new(scope);
-            let v = text.value(scope);
-            if let Some(k) = v8::String::new(scope, "value") {
-                desc.set(scope, k.into(), v);
-            }
-            desc_set_bool(scope, desc, "writable", true);
-            desc_set_bool(scope, desc, "enumerable", true);
-            desc_set_bool(scope, desc, "configurable", true);
+            // (…of no prototype: V8 reads its fields as a [[Get]] would, and nothing a page put on Object.prototype —
+            // a `get`, a `set` — may be read as one of them)
+            let value = text.value(scope);
+            let yes: v8::Local<'_, v8::Value> = v8::Boolean::new(scope, true).into();
+            let keys: Vec<v8::Local<'_, v8::Name>> = ["value", "writable", "enumerable", "configurable"]
+                .iter()
+                .filter_map(|k| v8::String::new(scope, k).map(Into::into))
+                .collect();
+            let null = v8::null(scope).into();
+            let desc = v8::Object::with_prototype_and_properties(scope, null, &keys, &[value, yes, yes, yes]);
             rv.set(desc.into());
             v8::Intercepted::kYes
         }
         None => v8::Intercepted::kNo,
-    }
-}
-
-fn desc_set_bool(scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>, key: &str, value: bool) {
-    if let Some(k) = v8::String::new(scope, key) {
-        let b = v8::Boolean::new(scope, value);
-        obj.set(scope, k.into(), b.into());
     }
 }
 
