@@ -238,18 +238,19 @@ RSpec.describe 'legacy platform objects' do
     expect(r).to eq(%w[0 1 2 7])
   end
 
-  # An `<object>` showing its fallback content is not "exposed" — "for object elements, is additionally either not
-  # showing its fallback content or has no object or embed descendants" (HTML §3.1.6) — so an `<embed>` in it is
+  # Any embed or object is a named element, nested or not: "it is an embed, form, iframe, img, or object element whose
+  # name content attribute's value is name" (HTML §3.1.6) — the "exposed" rule that hid one in an object is withdrawn
   # (Chrome, Firefox).
-  it "exposes an embed in an object that shows its fallback" do
+  it "names an embed or object inside an object" do
     r = probe(<<~JS)
-      document.body.insertAdjacentHTML('beforeend', '<object><embed name="x1"></object>');
-      return [String(document.x1), String(window.x1)];
+      document.body.insertAdjacentHTML('beforeend', '<object><embed name="x1"></object><object><object name="x2"></object></object>');
+      return [String(document.x1), String(window.x1), String(document.x2)];
     JS
-    expect(r).to eq(['[object HTMLEmbedElement]', '[object HTMLEmbedElement]'])
+    expect(r).to eq(['[object HTMLEmbedElement]', '[object HTMLEmbedElement]', '[object HTMLObjectElement]'])
   end
 
-  # A name set through another realm's method is the gate of the realm whose document the element is in (Chrome).
+  # A name set through another realm's method is the gate of the realm whose document the element is in (Chrome) — and
+  # one an element brings into a document, adopted or imported, that document's realm's.
   it "finds a name another realm's method gave a frame's element" do
     session = simulated_session(app)
     session.visit '/'

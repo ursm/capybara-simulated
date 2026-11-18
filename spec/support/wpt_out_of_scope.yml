@@ -60610,14 +60610,31 @@ html/dom/aria-attribute-reflection-enumerated.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 html/dom/documents/dom-tree-accessors/nameditem-names.html:
+- name: An object id does not appear in a document's property names if the object is
+    inside another object.
+  reason: 'Holds HTML''s withdrawn "exposed" rule ("An embed or object element is said to be
+    exposed if it has no exposed object ancestor, and, for object elements, is additionally
+    either not showing its fallback content or has no object or embed descendants"), which
+    the current standard no longer has: a named element is any "embed, form, iframe, img,
+    or object element whose name content attribute''s value is name" or "object element
+    whose id content attribute''s value is name" (HTML §3.1.6, DOM tree accessors). Chrome
+    and Firefox name the nested object too (measured 2026-11-19).'
+- name: An object name does not appear in a document's property names if the object
+    is inside another object.
+  reason: 'Holds HTML''s withdrawn "exposed" rule ("An embed or object element is said to be
+    exposed if it has no exposed object ancestor, and, for object elements, is additionally
+    either not showing its fallback content or has no object or embed descendants"), which
+    the current standard no longer has: a named element is any "embed, form, iframe, img,
+    or object element whose name content attribute''s value is name" or "object element
+    whose id content attribute''s value is name" (HTML §3.1.6, DOM tree accessors). Chrome
+    and Firefox name the nested object too (measured 2026-11-19).'
 - name: An embed name does not appears in a document's property names if the embed
     is inside another embed.
   reason: "`<embed>` is a void element, so the test's nested `<embed name=not_exposed_embed>`
     actually parses as a SIBLING of the outer embed (parentNode === body), not a child
     — verified in Chrome 137, which likewise lists `not_exposed_embed` in Object.getOwnPropertyNames(document).
     The subtest asserts the opposite, so it matches no real browser; our output (include
-    it) matches Chrome. Independent of the named-properties machinery. The other 9
-    subtests in this file now PASS."
+    it) matches Chrome. Independent of the named-properties machinery."
 html/dom/documents/dom-tree-accessors/nameditem-no-shadowing.tentative.html:
 - name: document.__proto__ is not shadowed
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

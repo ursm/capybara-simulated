@@ -143,8 +143,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // Which named-property lookups an element's `name` (or its `id`) may make it found by — the window's (an id, or the name
 // of an embed, form, img, object, iframe or frame: `window_named`'s, a navigable's container's among them) and the
-// document's (the name of an embed, form, iframe, img or object, the id of an object or an img: `document_names_of`'s,
-// where it is exposed) — which the bindings keep a gate of each by, so a miss is no tree walk. A superset of what the
+// document's (the name of an embed, form, iframe, img or object, the id of an object or an img: `document_names_of`'s)
+// — which the bindings keep a gate of each by, so a miss is no tree walk. A superset of what the
 // lookups find, never fewer.
 const GATE_WINDOW: u32 = 1;
 const GATE_DOCUMENT: u32 = 2;
@@ -425,54 +425,20 @@ impl RealmArena {
     // HTML's named properties of a document (§3.1.6) and of its window (§7.2.2.3), over the document tree — not into a
     // shadow tree or a template's contents.
     //
-    // An embed or object is "exposed" (HTML §3.1.6, the document's named properties: "if it has no exposed object
-    // ancestor, and, for object elements, is additionally either not showing its fallback content or has no object or
-    // embed descendants") — an `<object>` showing its fallback (rendered.rs `object_shows_fallback`: no `data`, or its
-    // resource failed) leaving an `<embed>` in it exposed, as Chrome has it.
-    fn exposed(&self, id: NodeId) -> bool {
-        let Some(node) = self.get(id) else { return false };
-        if node.is_html_named("object") && crate::rendered::object_shows_fallback(node) && self.has_plugin_descendant(id) {
-            return false;
-        }
-        let mut at = node.parent;
-        while let Some(p) = at {
-            let Some(n) = self.get(p).filter(|n| n.kind == NodeKind::Element) else { break };
-            if n.is_html_named("object") && self.exposed(p) {
-                return false;
-            }
-            at = n.parent;
-        }
-        true
-    }
-    // …whether an object or embed is among the descendants of `id`.
-    fn has_plugin_descendant(&self, id: NodeId) -> bool {
-        let mut stack: Vec<NodeId> = self.get(id).map(|n| n.children.iter().rev().copied().collect()).unwrap_or_default();
-        while let Some(c) = stack.pop() {
-            let Some(n) = self.get(c) else { continue };
-            if n.kind == NodeKind::Element && (n.is_html_named("object") || n.is_html_named("embed")) {
-                return true;
-            }
-            stack.extend(n.children.iter().rev());
-        }
-        false
-    }
     // The names an element of a document is a named element with, its id's first: an embed, form, iframe, img or object
-    // by its `name`, an object by its `id`, and an img by its `id` where it has a `name` too — an embed or object only
-    // where it is exposed; none empty.
-    fn document_names_of(&self, id: NodeId, n: &NodeData) -> [Option<Vec<u16>>; 2] {
+    // by its `name`, an object by its `id`, and an img by its `id` where it has a `name` too; none empty. (Any embed or
+    // object, as HTML §3.1.6 has it now — it once took only an "exposed" one, which no object or showing object around it
+    // hid; Chrome and Firefox name each, nested or not.)
+    fn document_names_of(n: &NodeData) -> [Option<Vec<u16>>; 2] {
         if n.ns != ns!(html) {
             return [None, None];
         }
         let nonempty = |v: Option<Vec<u16>>| v.filter(|v| !v.is_empty());
         let name = nonempty(n.plain_attr_units("name"));
         let (by_name, by_id) = match &*n.local_name {
-            "form" | "iframe" => (true, false),
+            "embed" | "form" | "iframe" => (true, false),
             "img" => (true, name.is_some()),
-            "embed" => (self.exposed(id), false),
-            "object" => {
-                let exposed = self.exposed(id);
-                (exposed, exposed)
-            }
+            "object" => (true, true),
             _ => (false, false),
         };
         [nonempty(n.plain_attr_units("id")).filter(|_| by_id), name.filter(|_| by_name)]
@@ -484,7 +450,7 @@ impl RealmArena {
             return out;
         }
         each_element(self, doc, |id, n| {
-            if self.document_names_of(id, n).iter().flatten().any(|v| v == name) {
+            if Self::document_names_of(n).iter().flatten().any(|v| v == name) {
                 out.push(id);
             }
         });
@@ -493,8 +459,8 @@ impl RealmArena {
     // The document's supported property names: each element's names in tree order, a later duplicate ignored.
     pub(crate) fn document_names(&self, doc: NodeId) -> Vec<Vec<u16>> {
         let (mut out, mut seen) = (Vec::new(), std::collections::HashSet::new());
-        each_element(self, doc, |id, n| {
-            for name in self.document_names_of(id, n).into_iter().flatten() {
+        each_element(self, doc, |_, n| {
+            for name in Self::document_names_of(n).into_iter().flatten() {
                 if seen.insert(name.clone()) {
                     out.push(name);
                 }
