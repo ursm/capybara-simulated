@@ -305,4 +305,30 @@ RSpec.describe 'legacy platform objects' do
       expect(r).to eq('SecurityError')
     end
   end
+
+  # An element adopted into a document is that document's realm's from then on: a name it is given before any tree
+  # takes it, and a control given a name in a form moved from a frame, are found by the document and the form (Chrome).
+  it "finds names given after an adoption from a frame" do
+    session = simulated_session(app)
+    session.visit '/'
+    r = JSON.parse(session.evaluate_script(<<~JS))
+      (() => {
+        const frame = document.createElement('iframe');
+        document.body.append(frame);
+        const fd = frame.contentDocument;
+        fd.body.innerHTML = '<img id="i"><form id="fm"></form>';
+        const img = fd.getElementById('i');
+        document.adoptNode(img);
+        img.name = 'late';
+        document.body.append(img);
+        const fm = fd.getElementById('fm');
+        document.body.append(fm);
+        const input = document.createElement('input');
+        fm.append(input);
+        input.name = 'q';
+        return JSON.stringify([String(document.late), String(window.late), String(fm.q)]);
+      })()
+    JS
+    expect(r).to eq(['[object HTMLImageElement]', '[object HTMLImageElement]', '[object HTMLInputElement]'])
+  end
 end
