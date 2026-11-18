@@ -186,14 +186,12 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 
 // The faces a walk needs, `[family, bucket, …]`, for the JS side to resolve.
 fn faces_answer<'s>(scope: &mut v8::PinScope<'s, '_>, wanted: &[(String, &'static str)]) -> v8::Local<'s, v8::Array> {
-    let out = v8::Array::new(scope, (wanted.len() * 2) as i32);
-    for (i, (family, bucket)) in wanted.iter().enumerate() {
-        let f = v8::String::new(scope, family).unwrap();
-        let b = v8::String::new(scope, bucket).unwrap();
-        out.set_index(scope, (i * 2) as u32, f.into());
-        out.set_index(scope, (i * 2 + 1) as u32, b.into());
+    let mut out: Vec<v8::Local<'s, v8::Value>> = Vec::with_capacity(wanted.len() * 2);
+    for (family, bucket) in wanted {
+        out.push(v8::String::new(scope, family).unwrap().into());
+        out.push(v8::String::new(scope, bucket).unwrap().into());
     }
-    out
+    v8::Array::new_with_elements(scope, &out)
 }
 
 // __dom.styleFaces(generation) -> null, or [family, bucket, …]: the faces the style engine computed a font metric (`ex`,

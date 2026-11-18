@@ -4495,14 +4495,10 @@ fn inspect_node(
             None => v8::undefined(scope).into(),
         },
     ];
-    for (i, v) in vals.into_iter().enumerate() {
-        out.set_index(scope, i as u32, v);
+    for c in &children {
+        vals.push(v8::Number::new(scope, c.to_f64()).into());
     }
-    for (i, c) in children.iter().enumerate() {
-        let v: v8::Local<v8::Value> = v8::Number::new(scope, c.to_f64()).into();
-        out.set_index(scope, (HEAD + i) as u32, v);
-    }
-    rv.set(out.into());
+    rv.set(v8::Array::new_with_elements(scope, &vals).into());
 }
 
 // A JS string of these UTF-16 code units.
@@ -5256,12 +5252,9 @@ fn xpath_prefixes(
     let text = utf16_arg(scope, args.get(0));
     match crate::xpath::prefixes(&text) {
         Ok(prefixes) => {
-            let array = v8::Array::new(scope, prefixes.len() as i32);
-            for (i, p) in prefixes.iter().enumerate() {
-                let v = v8::String::new(scope, p).map_or_else(|| v8::undefined(scope).into(), Into::into);
-                array.set_index(scope, i as u32, v);
-            }
-            rv.set(array.into());
+            let values: Vec<v8::Local<v8::Value>> =
+                prefixes.iter().map(|p| v8::String::new(scope, p).map_or_else(|| v8::undefined(scope).into(), Into::into)).collect();
+            rv.set(v8::Array::new_with_elements(scope, &values).into());
         }
         Err(message) => {
             let v = v8::String::new(scope, &message).map_or_else(|| v8::undefined(scope).into(), Into::into);
@@ -6206,12 +6199,8 @@ fn layout_measure_counts(
     }
     counts[3] = d.walk_reuse.get(&cid).map_or(0.0, |r| r.spliced_records as f64);
     counts[4] = d.walk_reuse.get(&cid).map_or(0.0, |r| r.walked_records as f64);
-    let out = v8::Array::new(scope, 5);
-    for (i, n) in counts.into_iter().enumerate() {
-        let v: v8::Local<v8::Value> = v8::Number::new(scope, n).into();
-        out.set_index(scope, i as u32, v);
-    }
-    rv.set(out.into());
+    let values: Vec<v8::Local<v8::Value>> = counts.into_iter().map(|n| v8::Number::new(scope, n).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
 
 
@@ -6491,13 +6480,8 @@ fn attrs_enumerate(
         .get(id)
         .map(|n| n.attributes.iter().map(|(k, _)| k.clone()).collect())
         .unwrap_or_default();
-    let array = v8::Array::new(scope, names.len() as i32);
-    for (i, name) in names.iter().enumerate() {
-        if let Some(js) = v8::String::new(scope, name) {
-            array.set_index(scope, i as u32, js.into());
-        }
-    }
-    rv.set(array);
+    let values: Vec<v8::Local<v8::Value>> = names.iter().filter_map(|name| v8::String::new(scope, name)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &values));
 }
 
 fn attrs_descriptor(
