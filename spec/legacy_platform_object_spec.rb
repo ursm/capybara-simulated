@@ -331,4 +331,23 @@ RSpec.describe 'legacy platform objects' do
     JS
     expect(r).to eq(['[object HTMLImageElement]', '[object HTMLImageElement]', '[object HTMLInputElement]'])
   end
+
+  # No list of the bindings' is grown through Array.prototype: a page's index setter there sees none of their values.
+  it "hands a page's Array.prototype index setters nothing of the bindings'" do
+    r = probe(<<~JS)
+      const got = [];
+      for (let i = 0; i < 4; i++) {
+        Object.defineProperty(Array.prototype, i, {
+          configurable: true,
+          set(v) { Object.defineProperty(this, i, { value: v, writable: true, enumerable: true, configurable: true }); got[got.length] = typeof v; }
+        });
+      }
+      console.log('%s x', 'a', { b: 1 });
+      customElements.define('x-legacy-arr', class extends HTMLElement { connectedCallback() {} });
+      document.body.append(document.createElement('x-legacy-arr'));
+      for (let i = 0; i < 4; i++) delete Array.prototype[i];
+      return got.length;
+    JS
+    expect(r).to eq(0)
+  end
 end

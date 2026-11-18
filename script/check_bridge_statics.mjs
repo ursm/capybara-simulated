@@ -140,37 +140,48 @@ for (const entry of sources) {
     }
   };
   walk(ast, false);
-  // …and no element written into a plain array a function made (`const out = []`, then `out[out.length] = v`, `out[i] =
-  // v`), which a setter a page defined on Array.prototype's index meets: a list the bindings build is engine.js's
-  // `newList()` / `listBuild`, of no prototype as it grows, or grows by `listPush`.
-  // (…the module's own such lists too, written by its functions)
-  const scope = (fn, outer) => {
+  // …and no list made inside a function as a plain Array — an empty literal, `new Array(n)` / `Array(n)` — whose element
+  // written, or `push`ed, meets a setter a page defined on Array.prototype's index (and is handed the bindings' own
+  // value): a list the bindings grow is engine.js's `newList()` / `newList(n)`, of no prototype, handed on by
+  // `builtList`; one made to hand a page is `pageList()`, the intent named; an empty one read and never written,
+  // `NO_ARGUMENTS`. (engine.js's own two, which make them, are the exception.) And no element written into an Array a
+  // function or module made with elements already, or by `pageList()`: `listPush` defines it instead, as `appendTo`.
+  const making = (name) => path.endsWith('engine.js') && (name === 'newList' || name === 'pageList');
+  const scope = (fn, outer, made) => {
     const plain = new Set(outer);
-    const visit = (node, top) => {
+    const visit = (node, top, decl) => {
       if (!node || typeof node.type !== 'string') return;
-      if (!top && /Function/.test(node.type)) { scope(node, plain); return; }
-      if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.init?.type === 'ArrayExpression'
-          && node.init.elements.length === 0) plain.add(node.id.name);
+      if (!top && /Function/.test(node.type)) { scope(node, plain, decl); return; }
+      const inFunction = fn.type !== 'Program';
+      const at = node.loc ? `${path}:${node.loc.start.line}:${node.loc.start.column + 1}` : path;
+      if (inFunction && !making(made) && node.type === 'ArrayExpression' && node.elements.length === 0) {
+        console.error(`${at}: \`[]\` in a function — engine.js's \`newList()\` (a list the bindings grow), \`pageList()\` (one a page is handed) or \`NO_ARGUMENTS\` (one read alone)`);
+        failures++;
+      }
+      if (inFunction && !making(made) && (node.type === 'NewExpression' || node.type === 'CallExpression')
+          && node.callee.type === 'Identifier' && node.callee.name === 'Array') {
+        console.error(`${at}: \`Array(…)\` in a function — engine.js's \`newList(n)\``);
+        failures++;
+      }
+      if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.init
+          && (node.init.type === 'ArrayExpression'
+            || (node.init.type === 'CallExpression' && node.init.callee.type === 'Identifier' && node.init.callee.name === 'pageList'))) plain.add(node.id.name);
       if (node.type === 'AssignmentExpression' && node.left.type === 'MemberExpression' && node.left.computed
           && node.left.object.type === 'Identifier' && plain.has(node.left.object.name)) {
-        console.error(`${path}:${node.loc.start.line}:${node.loc.start.column + 1}: an element written into \`${node.left.object.name}\`, a plain array — make it engine.js's \`newList()\``);
+        console.error(`${at}: an element written into \`${node.left.object.name}\`, an Array — make it engine.js's \`newList()\``);
         failures++;
       }
-      if (node.type === 'CallExpression' && node.callee.type === 'Identifier' && (node.callee.name === 'listPush' || node.callee.name === 'listAppend')
-          && node.arguments[0]?.type === 'Identifier' && plain.has(node.arguments[0].name)) {
-        console.error(`${path}:${node.loc.start.line}:${node.loc.start.column + 1}: \`${node.callee.name}\` onto \`${node.arguments[0].name}\`, a plain array — make it engine.js's \`newList()\``);
-        failures++;
-      }
+      const name = node.type === 'VariableDeclarator' && node.id.type === 'Identifier' ? node.id.name : decl;
       for (const key in node) {
         if (key === 'loc') continue;
         const value = node[key];
-        if (Array.isArray(value)) value.forEach((child) => visit(child, false));
-        else if (value && typeof value.type === 'string') visit(value, false);
+        if (Array.isArray(value)) value.forEach((child) => visit(child, false, name));
+        else if (value && typeof value.type === 'string') visit(value, false, name);
       }
     };
-    visit(fn, true);
+    visit(fn, true, made);
   };
-  scope(ast, []);
+  scope(ast, [], null);
 }
 if (failures) {
   console.error(`\n${failures} statics read, or lists walked through a page's methods, at call time in ${SRC}.`);

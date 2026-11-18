@@ -734,7 +734,7 @@ const RUNTIME = [
   'PLATFORM', 'createObject', 'rootInterface', 'inheritInterface', 'checkPlatformSteps', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
-  'defineConstants', 'legacyPlatformObject', 'namedPropertiesObject', 'observableArray', 'observableArrayOf', 'replaceObservableArray', 'requireSteps', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
+  'NO_ARGUMENTS', 'pageList', 'defineConstants', 'legacyPlatformObject', 'namedPropertiesObject', 'observableArray', 'observableArrayOf', 'replaceObservableArray', 'requireSteps', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike', 'defineMaplike',
   'ceEnter', 'ceLeave'
 ];
@@ -1946,11 +1946,11 @@ function installInterface(def, { shell, body, statics, unforgeables, checks, uns
   else if (indexed) lines.push(`  defineIndexedIterator(iface.prototype);`);
   if (setlike) {
     const own = setlike.readonly ? [] : ['add', 'delete', 'clear'].filter((n) => !setlike.declared.includes(n));
-    lines.push(`  defineSetlike(iface.prototype, '${name}', (self) => impl.setOf(self), IS_SELF, ${JSON.stringify(own)}, ${setlike.convert}, impl.setChanged);`);
+    lines.push(`  defineSetlike(iface.prototype, '${name}', (self) => impl.setOf(self), IS_SELF, ${own.length ? JSON.stringify(own) : 'NO_ARGUMENTS'}, ${setlike.convert}, impl.setChanged);`);
   }
   if (maplike) {
     const own = maplike.readonly ? [] : ['set', 'delete', 'clear'].filter((n) => !maplike.declared.includes(n));
-    lines.push(`  defineMaplike(iface.prototype, '${name}', (self) => impl.mapOf(self), IS_SELF, ${JSON.stringify(own)}, ${maplike.keys}, ${maplike.value});`);
+    lines.push(`  defineMaplike(iface.prototype, '${name}', (self) => impl.mapOf(self), IS_SELF, ${own.length ? JSON.stringify(own) : 'NO_ARGUMENTS'}, ${maplike.keys}, ${maplike.value});`);
   }
   if (constants.length) {
     const list = JSON.stringify(constants.map(([n]) => n));
@@ -2388,7 +2388,8 @@ function defaultValue(d, where) {
     case 'boolean': return String(d.value);
     case 'number': return String(d.value);
     case 'null': return 'null';
-    case 'sequence': return '[]';
+    // (…an empty sequence's: an Array of its own each time, the page's — webidl.js `pageList`)
+    case 'sequence': return 'pageList()';
     default: throw new Error(`${where}: no binding gives a default of ${d.type} yet`);
   }
 }
