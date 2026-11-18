@@ -1504,12 +1504,12 @@ RSpec.describe 'a frame navigation as tasks' do
     end
 
     # rv-r13-probe `r3_rtmod`: …on the page's clock, as a classic script's is — begun as it was prepared (a scanned one as
-    # its parse began, ahead of a parser-blocking script's after it), ended as far after as its server took — never before
-    # the page's time origin, whatever real time the host spent meanwhile.
+    # its parse began, ahead of a parser-blocking script's after it), ended as it landed, past what its server took — never
+    # before the page's time origin, whatever real time the host spent meanwhile.
     it "times a module script's fetch on the page's clock" do
       log = page_log(<<~HTML, at: 600)
         <script type="module" src="/slow/40/m.js"></script><script src="/slow/0/c.js"></script>
-        <script>onload = () => { const [m, c] = ['m.js', 'c.js'].map((n) => performance.getEntries().find((e) => e.name.endsWith('/' + n))); L.push('start:' + (m.startTime >= 0 && m.startTime <= c.startTime), 'duration:' + (Math.abs(m.duration - 40) < 1)); }</script>
+        <script>onload = () => { const [m, c] = ['m.js', 'c.js'].map((n) => performance.getEntries().find((e) => e.name.endsWith('/' + n))); L.push('start:' + (m.startTime >= 0 && m.startTime <= c.startTime), 'duration:' + (m.duration >= 40 && m.duration < 100)); }</script>
       HTML
       expect(log).to end_with('start:true duration:true rs:complete')
     end

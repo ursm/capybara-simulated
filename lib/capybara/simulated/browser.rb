@@ -8965,16 +8965,16 @@ module Capybara
       end
       # …and its answer, taken as it lands (the slot let go of), the cookies its responses set stored now: the network's
       # response, or the asset cache's answer — kept by the memos it is kept by — nil for a network error.
-      # (…a module's Resource Timing entry timed as a classic script's is, on the page's clock: its fetch began as the
-      # slot's did, `started`, its server's time after it — `take_module_rt`)
-      def script_fetch_take(id)
+      # (…a module's Resource Timing entry timed as a classic script's is, on the page's clock: from as its fetch began,
+      # `started`, to as it lands, `now` — `take_module_rt`)
+      def script_fetch_take(id, now)
         slot = @script_fetches.delete(id.to_i) or return nil
         script_fetch_landed(slot)
         store_kept_cookies(slot[:cookies])
         result = slot[:result]
         return result unless (request = slot[:request]) && result
 
-        result[:times] = [:page, slot[:started], slot[:started] + slot[:slept]] if slot[:graph_entry]
+        result[:times] = [:page, slot[:started], now] if slot[:graph_entry]
         answered = asset_answer(request, result)
         slot[:graph_entry] || answered
       end
