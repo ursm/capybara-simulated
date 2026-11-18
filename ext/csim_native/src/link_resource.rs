@@ -3,10 +3,11 @@
 // fetch (a service worker's answer, the asset cache, the network, a `data:` URL), file the timing and fire the event.
 
 use crate::dom::{nid_arg, realm, realm_id, NodeId, RealmArena, STATE_LINK_MEDIA_SKIPPED};
-use crate::token_list::{link_types, LINK_MANIFEST, LINK_MODULEPRELOAD, LINK_PREFETCH, LINK_PRELOAD, LINK_STYLESHEET};
+use crate::token_list::{link_types, LINK_ALTERNATE, LINK_MANIFEST, LINK_MODULEPRELOAD, LINK_PREFETCH, LINK_PRELOAD, LINK_STYLESHEET};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "linkPlan", link_plan_op, context_id);
+    crate::dom::register(scope, ns, "linkBlocksScripts", link_blocks_scripts_op, context_id);
     crate::dom::register(scope, ns, "linkMediaSkipped", link_media_skipped_op, context_id);
 }
 
@@ -43,7 +44,9 @@ pub(crate) fn link_destination(obtains: u32, module: Option<&'static str>, prelo
     }
 }
 
-// A link's plan, `media_matches` asked of its `media` where that decides it: a disabled one obtains nothing; a
+// A link's plan, `media_matches` asked of its `media` where that decides it: a disabled one obtains nothing; a style
+// sheet whose `type` names no styling language no sheet (HTML `rel=stylesheet`: "If the type attribute is present ...
+// the user agent must not fetch", Chrome and Firefox no event at all — rv-r13-probe `s4_badtype`); a
 // modulepreload or a preload — one that is no style sheet — whose `media` does not match obtains nothing until a change
 // of it matches (the element's `STATE_LINK_MEDIA_SKIPPED`, which `linkMediaSkipped` reads); a preload whose `as` names
 // no preload destination nothing; one with no `href` nothing; a modulepreload whose `as` names a destination no module
@@ -55,7 +58,7 @@ pub(crate) fn link_plan(arena: &mut RealmArena, id: NodeId, media_matches: impl 
         return none;
     }
     let rel = link_types(n.plain_attr("rel").unwrap_or(""));
-    let stylesheet = rel & LINK_STYLESHEET != 0;
+    let stylesheet = rel & LINK_STYLESHEET != 0 && crate::sheet_owners::style_is_css(n);
     let module = rel & LINK_MODULEPRELOAD != 0;
     let preload = rel & LINK_PRELOAD != 0 && rel & (LINK_STYLESHEET | LINK_MODULEPRELOAD | LINK_PREFETCH | LINK_MANIFEST) == 0;
     let obtains = u32::from(stylesheet) * OBTAINS_STYLESHEET
@@ -125,6 +128,27 @@ fn link_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         text(scope, plan.preload_destination),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.linkBlocksScripts(nid) -> whether the link, as the parser creates it, contributes a script-blocking style sheet
+// (HTML): one whose plan fetches a style sheet — none disabled, of another `type`, with no `href` — enabled as it is
+// created, so no alternative one (its sheet disabled until it is chosen), and whose `media` matches the environment now.
+// Chrome and Firefox wait for none of the others (rv-r13-probe `s4_media`, `s4_alt`, `s4_badtype`, `s4_disabled`).
+fn link_blocks_scripts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    let Some((rel, media)) = realm(scope, cid).get(id).map(|n| (link_types(n.plain_attr("rel").unwrap_or("")), n.plain_attr("media").map(str::to_owned))) else {
+        return rv.set_bool(false);
+    };
+    if rel & LINK_ALTERNATE != 0 {
+        return rv.set_bool(false);
+    }
+    let plan = link_plan(crate::dom::dom(scope).arena.enter(cid), id, |_| true);
+    if plan.verdict != PLAN_FETCH || plan.obtains & OBTAINS_STYLESHEET == 0 {
+        return rv.set_bool(false);
+    }
+    let viewport = crate::media_query_lists::viewport_here(scope, &args);
+    rv.set_bool(media.is_none_or(|m| crate::media_query_lists::matches(scope, cid, &m, viewport)));
 }
 
 // (…a destination as a string, null for none)

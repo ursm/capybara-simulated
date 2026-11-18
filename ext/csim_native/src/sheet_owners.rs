@@ -92,8 +92,7 @@ impl RealmArena {
         let title = n.plain_attr("title").unwrap_or("").to_string();
         if &*n.local_name == "link" {
             let rel = link_types(n.plain_attr("rel").unwrap_or(""));
-            let sheet = rel & LINK_STYLESHEET != 0 && n.plain_attr("href").is_some_and(|h| !h.is_empty()) && n.plain_attr("disabled").is_none();
-            return sheet.then(|| (title, rel & LINK_ALTERNATE != 0));
+            return link_has_sheet(n, rel).then(|| (title, rel & LINK_ALTERNATE != 0));
         }
         style_is_css(n).then_some((title, false))
     }
@@ -181,6 +180,13 @@ pub(crate) fn sheet_response_accepted(content_type: &str, nosniff: &str, quirks:
     }
     let essence = crate::mime::extract(content_type).map(|m| m.essence).unwrap_or_default();
     matches!(essence.as_str(), "" | "text/css" | "application/x-unknown-content-type") || (quirks && same_origin())
+}
+
+// Whether a `<link>` of link types `rel` has a style sheet: a `stylesheet` one with an `href`, not disabled, whose `type`
+// names CSS where it names any (HTML `rel=stylesheet`: "If the type attribute is present ... the user agent must not fetch";
+// Chrome and Firefox apply none of a `text/plain` one, rv-r13-probe `s4_badtype`).
+pub(crate) fn link_has_sheet(n: &NodeData, rel: u32) -> bool {
+    rel & LINK_STYLESHEET != 0 && n.plain_attr("href").is_some_and(|h| !h.is_empty()) && n.plain_attr("disabled").is_none() && style_is_css(n)
 }
 
 // Whether a `<style>` holds a style sheet at all (HTML "update a style block"): its `type` absent, empty or an ASCII
@@ -417,7 +423,7 @@ impl RealmArena {
                 sheets.push((owner, title, alternate, enabled));
             } else if link {
                 let rel = link_types(n.plain_attr("rel").unwrap_or(""));
-                if rel & LINK_STYLESHEET == 0 || n.plain_attr("href").is_none_or(str::is_empty) || n.plain_attr("disabled").is_some() {
+                if !link_has_sheet(n, rel) {
                     continue;
                 }
                 let alternate = rel & LINK_ALTERNATE != 0;

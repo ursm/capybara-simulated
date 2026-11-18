@@ -1485,6 +1485,35 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # rv-r13-probe s4_*: …after the script the parser waited with it to run — the parser goes on from that wait before the
+    # event loop runs the script's task — through a `<style>`'s `@import` as through a link, a link's foster-parented or
+    # `document.write`-written as one in the head (Chrome and Firefox `css inl a.js-ran dcl`).
+    {
+      's4_base' => '<link rel="stylesheet" href="/slow/150/x.css" onload="L.push(\'css\')">',
+      's4_foster' => '<table><link rel="stylesheet" href="/slow/150/x.css" onload="L.push(\'css\')"><tr><td>x</td></tr></table>',
+      's4_dw' => %(<script>document.write('<link rel=stylesheet href=/slow/150/x.css onload="L.push(\\'css\\')">')</script>),
+      's4_style_import' => '<style>@import url(/slow/150/x.css);</style>'
+    }.each do |probe, sheet|
+      it "runs the parser's script ahead of an `async` one both waited on a style sheet for (#{probe})" do
+        log = page_log(%(#{sheet}<script async src="/slow/0/a.js"></script><script>L.push('inl')</script>), at: 600)
+        expect(log).to eq(probe == 's4_style_import' ? 'inl a.js-ran dcl load rs:complete' : 'css inl a.js-ran dcl load rs:complete')
+      end
+    end
+
+    # s4_alt, s4_badtype, s4_disabled: a link that contributes no script-blocking style sheet — an alternative one, one of a
+    # `type` no styling language is (which fetches nothing and fires no event), a disabled one — holds back no script
+    # (Chrome and Firefox `inl dcl a.js-ran`).
+    {
+      'an alternative style sheet' => ['<link rel="alternate stylesheet" title="alt" href="/slow/150/x.css" onload="L.push(\'css\')">', 'inl dcl a.js-ran css load'],
+      'a style sheet of another type' => ['<link rel="stylesheet" type="text/plain" href="/slow/150/x.css" onload="L.push(\'css\')" onerror="L.push(\'csserr\')">', 'inl dcl a.js-ran load'],
+      'a disabled style sheet' => ['<link rel="stylesheet" disabled href="/slow/150/x.css" onload="L.push(\'css\')">', 'inl dcl a.js-ran load']
+    }.each do |what, (sheet, logged)|
+      it "holds back no script for #{what}" do
+        log = page_log(%(#{sheet}<script async src="/slow/0/a.js"></script><script>L.push('inl')</script>), at: 600)
+        expect(log).to eq("#{logged} rs:complete")
+      end
+    end
+
     # ca4: …but not for one that came to block after it was prepared — Chrome runs the script first, Firefox after the sheet;
     # the spec's text holds it back for none.
     it 'runs an `async` script ahead of a style sheet that came to block scripts after it was prepared' do
