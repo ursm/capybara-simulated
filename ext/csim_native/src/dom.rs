@@ -1173,7 +1173,8 @@ pub(crate) struct RealmState {
     // Whether the parser has waited on a fetch (script.rs `parserWaits`).
     pub(crate) parser_waited: bool,
     pub(crate) parser_sources: std::collections::HashMap<NodeId, Vec<u16>>,
-    // The fetches of classic scripts its document's elements began (script_fetch.rs), and the places in the event loop's
+    // The script fetches its document's elements began — a classic script's, a module graph's entry's (script_fetch.rs) —
+    // and the places in the event loop's
     // sequence its document's parse kept for their responses as it began (`parserBegins`).
     pub(crate) script_fetches: crate::script_fetch::ScriptFetches,
     pub(crate) speculative: Option<std::ops::Range<u64>>,
