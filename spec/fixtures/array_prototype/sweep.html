@@ -1,0 +1,47 @@
+<!DOCTYPE html><!-- Every API below, driven with a getter and a setter on Array.prototype's indices 0-39 (spec/array_prototype_spec.rb):
+     the page's accessors must meet no read or write of the bindings' own lists. -->
+<meta charset=utf-8><body><form id=f><input name=q value=1><select name=s multiple><option selected>a<option>b</select><textarea name=t>x</textarea><input type=checkbox name=c checked></form><div id=d class="a b" style="color:red" data-x=1>text<span>s</span></div><canvas id=cv></canvas><svg id=sv><rect width=1 height=1/></svg><pre id=out></pre><script>
+const S = Object.create(null); let busy = false;
+for (let i = 0; i < 40; i++) Object.defineProperty(Array.prototype, i, { configurable: true,
+  get() { if (!busy) { busy = true; S['get[' + i + '] @ ' + new Error().stack.split('\n').slice(2, 4).map((l) => l.trim().replace(/\(.*\)/, '')).join(' < ')] = 1; busy = false; } },
+  set(v) { Object.defineProperty(this, i, { value: v, writable: true, enumerable: true, configurable: true }); if (!busy) { busy = true; S['set[' + i + '] ' + (v && typeof v === 'object' ? Object.prototype.toString.call(v) : typeof v) + ' @ ' + new Error().stack.split('\n').slice(2, 4).map((l) => l.trim().replace(/\(.*\)/, '')).join(' < ')] = 1; busy = false; } } });
+const t = async (fn) => { try { await fn(); } catch (e) {} };
+(async () => {
+  const f = document.getElementById('f'), d = document.getElementById('d');
+  const ops = [
+    () => new FormData(f), () => [...new FormData(f)], () => new URLSearchParams(new FormData(f)).toString(), () => f.requestSubmit && 0,
+    () => d.classList.add('c'), () => d.classList.toggle('a'), () => d.getAttributeNames(), () => d.querySelectorAll('*'), () => document.querySelectorAll('span, div'),
+    () => d.getClientRects(), () => d.getBoundingClientRect(), () => document.elementsFromPoint(5, 5), () => d.animate([{ opacity: 0 }, { opacity: 1 }], 100), () => document.getAnimations(),
+    () => getComputedStyle(d).getPropertyValue('color'), () => d.style.setProperty('margin', '1px 2px'), () => d.style.cssText, () => [...document.styleSheets],
+    () => { const s = new CSSStyleSheet(); s.replaceSync('a{color:red} @media (x){b{}}'); return s.cssRules.length; },
+    () => new Headers([['a', 'b'], ['c', 'd']]), () => fetch('/').then((r) => r.text()), () => new Response('x').arrayBuffer(), () => new Response('body').text(), () => new Blob(['a', 'b']).text(),
+    () => structuredClone({ a: [1, { b: new Map([[1, 2]]) }], s: new Set([1]) }), () => new TextEncoder().encode('abc'), () => btoa('x'),
+    () => new URL('http://a/b?c=1&d=2').searchParams.getAll('c'), () => new URLSearchParams('a=1&a=2').getAll('a'), () => [...new URLSearchParams('a=1&b=2')],
+    () => { const r = document.createRange(); r.selectNodeContents(d); return [r.getClientRects(), r.cloneContents(), r.toString()]; },
+    () => { getSelection().selectAllChildren(d); return getSelection().toString(); },
+    () => document.getElementById('cv').getContext('2d').getImageData(0, 0, 1, 1), () => document.getElementById('cv').getContext('2d').setLineDash([1, 2]), () => document.getElementById('cv').getContext('2d').getLineDash(),
+    () => new MutationObserver(() => {}).takeRecords(), () => new DOMParser().parseFromString('<p>a<b>b</b></p>', 'text/html').body.innerHTML,
+    () => new XMLSerializer().serializeToString(d), () => document.evaluate('//span', document, null, 7, null).snapshotLength,
+    () => d.cloneNode(true), () => d.append('x', document.createElement('i')), () => d.replaceChildren(...d.childNodes), () => d.insertAdjacentHTML('beforeend', '<u>u</u>'),
+    () => crypto.getRandomValues(new Uint8Array(4)), () => crypto.subtle.digest('SHA-256', new Uint8Array(3)), () => crypto.randomUUID(),
+    () => new Intl.DateTimeFormat().format(0), () => Promise.all([1, 2]), () => Promise.allSettled([1]),
+    () => caches.open('x').then((c) => c.addAll(['/']).then(() => c.keys())), () => indexedDB.open('db'), () => navigator.clipboard && navigator.clipboard.writeText('x'),
+    () => document.fonts.load('12px serif'), () => new FontFace('x', 'url(/x.woff)').load(), () => localStorage.setItem('a', 'b'), () => Object.keys(localStorage),
+    () => customElements.define('x-q', class extends HTMLElement { static observedAttributes = ['a', 'b']; attributeChangedCallback() {} }), () => document.body.append(document.createElement('x-q')),
+    () => d.attachShadow({ mode: 'open' }).innerHTML = '<slot></slot>', () => d.shadowRoot.querySelector('slot').assignedNodes(),
+    () => new Event('x').composedPath(), () => d.dispatchEvent(new CustomEvent('y', { bubbles: true })), () => history.pushState({ a: [1] }, '', '#h'),
+    () => new ReadableStream({ start(c) { c.enqueue('a'); c.close(); } }).getReader().read(), () => new Worker && 0, () => postMessage([1, 2], '*'),
+    () => new MessageChannel().port1.postMessage([1]), () => new BroadcastChannel('b').postMessage([1]), () => document.cookie = 'a=b', () => document.cookie,
+    () => document.createTreeWalker(d).nextNode(), () => d.matches('.a'), () => d.closest('body'), () => window.find && 0, () => document.execCommand('bold'),
+    () => new DOMMatrix([1, 0, 0, 1, 0, 0]).toFloat32Array(), () => new DOMRect(0, 0, 1, 1).toJSON(), () => JSON.stringify(d.getBoundingClientRect()),
+    () => performance.getEntries(), () => performance.mark('m'), () => performance.getEntriesByName('m'), () => navigator.languages, () => matchMedia('(min-width: 1px)').matches,
+    () => setTimeout(() => {}, 0), () => requestAnimationFrame(() => {}), () => queueMicrotask(() => {}), () => new AbortController().abort(), () => AbortSignal.any([new AbortController().signal]),
+    () => document.getElementById('sv').getBBox(), () => document.getElementById('sv').createSVGPoint(), () => f.elements, () => f.s.selectedOptions, () => [...f.s.options],
+    () => new File(['a'], 'n').name, () => new DataTransfer().items.add('x', 'text/plain'), () => console.log('%o', [1]), () => console.table([{ a: 1 }]),
+  ];
+  for (const op of ops) await t(op);
+  await new Promise((r) => setTimeout(r, 200));
+  busy = true;
+  document.getElementById('out').textContent = JSON.stringify(Object.keys(S));
+})();
+</script>
