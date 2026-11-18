@@ -221,6 +221,16 @@ RSpec.describe 'legacy platform objects' do
     expect(r).to eq('[object HTMLOptionElement]')
   end
 
+  # A supported name that looks like an index past the indices is listed by [[OwnPropertyKeys]] (the spec's list, and
+  # Chrome's and Firefox's); one below `length` is listed once, as the index.
+  it "lists a collection's index-like name past its indices" do
+    r = probe(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<i class="k"></i><i id="1" class="k"></i><i id="7" class="k"></i>');
+      return Object.getOwnPropertyNames(document.getElementsByClassName('k'));
+    JS
+    expect(r).to eq(%w[0 1 2 7])
+  end
+
   # An `<object>` showing its fallback content is not "exposed" — "for object elements, is additionally either not
   # showing its fallback content or has no object or embed descendants" (HTML §3.1.6) — so an `<embed>` in it is
   # (Chrome, Firefox).
