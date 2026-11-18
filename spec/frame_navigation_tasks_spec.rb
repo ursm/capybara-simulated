@@ -1464,6 +1464,34 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(log).to eq('css d.js-ran dcl load t50 rs:complete')
     end
 
+    # cb1: a script the parser runs waits for a style sheet that blocks scripts, the sheet's `load` first (Chrome and
+    # Firefox `css inl dcl`).
+    it 'runs an inline script after the load of a style sheet that blocks scripts' do
+      log = page_log(%(<link rel="stylesheet" href="/slow/150/s.css" onload="L.push('css')"><script>L.push('inl')</script>), at: 600)
+      expect(log).to eq('css inl dcl load rs:complete')
+    end
+
+    # rv_css_asy, ca2, ca3, ca8: an `async` script, an inserted one — classic or module, in order or not — waits for the
+    # style sheets that blocked scripts as it was prepared, where the spec says nothing of them (Chrome and Firefox).
+    {
+      'a parser `async` classic script' => ['<script async src="/slow/0/a.js"></script>', 'css a.js-ran dcl'],
+      'a parser `async` module script' => ['<script type="module" async src="/slow/0/m.js"></script>', 'css m.js-ran dcl'],
+      'an inserted script' => [%(<script>{ const s = document.createElement('script'); s.src = '/slow/0/i.js'; document.head.append(s); }</script>), 'css dcl i.js-ran'],
+      'an inserted in-order script' => [%(<script>{ const s = document.createElement('script'); s.async = false; s.src = '/slow/0/i.js'; document.head.append(s); }</script>), 'css dcl i.js-ran']
+    }.each do |what, (markup, logged)|
+      it "runs #{what} after the load of a style sheet that blocked scripts as it was prepared" do
+        log = page_log(%(<link rel="stylesheet" href="/slow/150/s.css" onload="L.push('css')">#{markup}<script>setTimeout(() => L.push('t50'), 50)</script>), at: 600)
+        expect(log).to eq("#{logged} load t50 rs:complete")
+      end
+    end
+
+    # ca4: …but not for one that came to block after it was prepared — Chrome runs the script first, Firefox after the sheet;
+    # the spec's text holds it back for none.
+    it 'runs an `async` script ahead of a style sheet that came to block scripts after it was prepared' do
+      log = page_log(%(<script async src="/slow/50/a.js"></script><link rel="stylesheet" href="/slow/300/s.css" onload="L.push('css')"><script>setTimeout(() => L.push('t50'), 50)</script>), at: 800)
+      expect(log).to eq('a.js-ran css dcl load t50 rs:complete')
+    end
+
     # rv_rt_mod: a module script's Resource Timing entry reports its entry's fetch, made as it was prepared, whatever its graph
     # took of it as it ran.
     it "times a module script's fetch made as it was prepared" do

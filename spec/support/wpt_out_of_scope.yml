@@ -72650,6 +72650,10 @@ resource-timing/tentative/initiator-url/xml-http-request.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 resource-timing/tentative/stylesheet-initiated.html:
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 - name: Ensure initiator Attribute matches with Stylesheet ResourceID
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative

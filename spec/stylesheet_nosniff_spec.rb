@@ -18,14 +18,13 @@ RSpec.describe 'a style sheet under nosniff' do
       when '/plain-sniffed.css' then [200, {'content-type' => 'text/plain'}, [sheet['d']]]
       else
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
-          <html><meta charset="utf-8">
+          <html><meta charset="utf-8"><script>window.seen = [];</script>
           <link rel=stylesheet href="/css.css" onload="seen.push('a load')" onerror="seen.push('a error')">
           <link rel=stylesheet href="/untyped.css" onload="seen.push('b load')" onerror="seen.push('b error')">
           <link rel=stylesheet href="/plain.css" onload="seen.push('c load')" onerror="seen.push('c error')">
           <link rel=stylesheet href="/plain-sniffed.css" onload="seen.push('d load')" onerror="seen.push('d error')">
           <link rel=preload as=style href="/plain.css" onload="seen.push('preload c load')" onerror="seen.push('preload c error')">
           <link rel=preload as=style href="/css.css" onload="seen.push('preload a load')" onerror="seen.push('preload a error')">
-          <script>window.seen = [];</script>
           <p id=a>a</p><p id=b>b</p><p id=c>c</p><p id=d>d</p>
         HTML
       end
