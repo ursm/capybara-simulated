@@ -3909,11 +3909,13 @@ module Capybara
       # (…`answer` a controlling service worker's, which its entry is made of where it answered)
       def note_module_fetch(url, started, answer: nil)
         meta = Thread.current[:csim_asset_meta] unless answer
+        # (…its fetch's own times where it was answered by one made as its script was prepared: `asset_request`'s "once")
+        times, Thread.current[:csim_asset_times] = Thread.current[:csim_asset_times], nil
         return unless meta || answer
 
         url  = url.to_s
         list = (@module_rt[Thread.current] ||= [])
-        list << {'url' => url, 'meta' => meta, 'answer' => answer, 'started' => started, 'ended' => Process.clock_gettime(Process::CLOCK_MONOTONIC)} unless list.any? {|m| m['url'] == url }
+        list << {'url' => url, 'meta' => meta, 'answer' => answer, 'started' => times&.first || started, 'ended' => times&.last || Process.clock_gettime(Process::CLOCK_MONOTONIC)} unless list.any? {|m| m['url'] == url }
       end
       # The modules fetched since the last call, for the bridge to time as 'script' — cleared on read — each with how
       # long ago, in ms, its fetch began and ended (`startAge`, `endAge`), which the bridge's clock places.
@@ -4150,14 +4152,22 @@ module Capybara
         # (…and, first, the answer a module script's fetch brought as it was prepared, for its graph's fetch of it alone, whatever
         # its freshness: `script_fetch_start`)
         memo = document && @page_asset_src&.[](document.to_i)
-        if memo && (e = memo.delete("once #{memo_key}") || memo[memo_key])
+        if memo && (once = memo.delete("once #{memo_key}"))
+          # (…its fetch's real start and end with it, which its Resource Timing entry reports: `note_module_fetch`)
+          Thread.current[:csim_asset_meta]  = once[1]
+          Thread.current[:csim_asset_times] = once[3]
+          return once.take(3)
+        end
+        if memo && (e = memo[memo_key])
           Thread.current[:csim_asset_meta] = e[1]
           return e
         end
         # (…or the answer the fetch of it under way on a thread brings — a script's, as it was prepared — waited for: one
         # fetch, as the module map's entry being fetched is one, whoever asks next — a modulepreload, a module graph)
+        # (…its server's time the joiner's wait's, on the clock as a server's sleep in its own fetch would be)
         if joins && memo && (slot = @asset_flights[[document.to_i, memo_key]])
-          script_fetch_slot_wait(slot)
+          slept = script_fetch_slot_wait(slot)
+          server_slept_ms(slept.round) if slept.positive?
           return asset_answer(slot[:request], slot[:result]) if slot[:result]
         end
         client     = client_for(realm.to_i, policy, referrer: referrer)
@@ -4178,10 +4188,11 @@ module Capybara
       # max-age → absolute deadline), with what the fetch left of the response beside the body.
       private def asset_fetch(request)
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = Thread.current[:csim_asset_no_store] = nil
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         body, fresh_until = durable_source(request.key, request.realm, request.policy, referrer: request.referrer, dest: request.dest, mode: request.mode,
                                                                                        credentials: request.credentials, client: request.client)
         {body: body, fresh_until: fresh_until, meta: Thread.current[:csim_asset_meta], bytes: Thread.current[:csim_asset_bytes],
-         no_store: Thread.current[:csim_asset_no_store]}
+         no_store: Thread.current[:csim_asset_no_store], times: [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]}
       end
       # …and what it answers, kept by the memos it may be kept by — on the main thread, which alone writes them.
       private def asset_answer(request, fetched)
@@ -8866,7 +8877,7 @@ module Capybara
         realm = realm.to_i
         if document
           mode, credentials, policy, dest = request_of_plan(plan)
-          dest = 'json' if graph_entry && url.to_s.match?(/\.json(?:\?|$)/)
+          dest = 'json' if graph_entry && @runtime.json_module?(url)
           request = asset_request(url, document, realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, dest: dest, mode: mode, credentials: credentials,
                                                                 pinned: true, joins: false)
           return request unless request.is_a?(AssetRequest)
@@ -8883,7 +8894,7 @@ module Capybara
             answered = asset_answer(request, fetched)
             next answered unless graph_entry
 
-            request.memo["once #{request.memo_key}"] = answered if request.memo
+            request.memo["once #{request.memo_key}"] = [*answered, fetched[:times]] if request.memo
             true
           }
         else

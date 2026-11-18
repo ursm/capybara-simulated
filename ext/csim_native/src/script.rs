@@ -718,8 +718,9 @@ fn take_parser_async_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let cid = crate::dom::realm_id(scope, &args);
     let which = args.get(0).uint32_value(scope).unwrap_or(ASYNC_ALL);
     let host = v8::Local::<v8::Function>::try_from(args.get(1)).ok();
+    rv.set(v8::Array::new(scope, 0).into());
     let arena = crate::dom::realm(scope, cid);
-    let Some(state) = arena.realm_state(cid).filter(|state| which != ASYNC_WAITED || state.parser_waited) else { return rv.set(v8::Array::new(scope, 0).into()) };
+    let Some(state) = arena.realm_state(cid).filter(|state| which != ASYNC_WAITED || state.parser_waited) else { return };
     let ahead = if which == ASYNC_AHEAD { state.parser_ahead } else { state.parser_list.len() };
     let listed = state.parser_list.clone();
     let mut candidates = Vec::new();

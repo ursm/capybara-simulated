@@ -1422,6 +1422,23 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # rv_css_dfr: "the end" waits for no style sheet to block scripts as it waits for a deferred one, the sheet's `load` first.
+    it 'runs a deferred script after the load of a style sheet that blocks scripts' do
+      log = page_log(%(<link rel="stylesheet" href="/slow/150/s.css" onload="L.push('css')"><script defer src="/slow/0/d.js"></script><script>setTimeout(() => L.push('t50'), 50)</script>), at: 600)
+      expect(log).to eq('css d.js-ran dcl load t50 rs:complete')
+    end
+
+    # rv_rt_mod: a module script's Resource Timing entry reports its entry's fetch, made as it was prepared, whatever its graph
+    # took of it as it ran.
+    it "times a module script's fetch made as it was prepared" do
+      log = page_log(<<~HTML, at: 600)
+        <script type="module" async src="/slow/100/ma.js"></script><script type="module" src="/slow/100/md.js"></script>
+        <script>{ const s = document.createElement('script'); s.type = 'module'; s.src = '/slow/100/mx.js'; document.head.append(s); }</script>
+        <script>onload = () => { for (const n of ['ma.js', 'md.js', 'mx.js']) { const e = performance.getEntries().find((e) => e.name.endsWith('/' + n)); L.push(n + ':' + (e && e.duration >= 90)); } }</script>
+      HTML
+      expect(log).to end_with('ma.js:true md.js:true mx.js:true rs:complete')
+    end
+
     # y_frame_flag2: …ahead of a frame's document, which the parse inserted before it.
     it "lands an `async` script's fetch ahead of a frame's document inserted before it" do
       child = "<script>document.addEventListener('DOMContentLoaded', () => top.L.push('cdcl')); addEventListener('load', () => top.L.push('cload'))</script>" \

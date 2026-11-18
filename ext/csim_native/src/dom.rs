@@ -1867,6 +1867,9 @@ impl RealmArena {
         self.parser_waited = false;
         self.parser_ahead = 0;
         self.parser_sources.clear();
+        // (…nor its script fetches, which land in no document now (the host's slots left to the session's end) — its parse's
+        // speculative places its own, `parserBegins`, which the new parse takes before this runs)
+        self.script_fetches = Default::default();
         // (…nor what the old page planned for its navigable, which the host took or let go — and the form it held with it)
         self.navigation_plan = Default::default();
         self.laid_out_at = None;
