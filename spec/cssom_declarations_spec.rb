@@ -194,4 +194,34 @@ RSpec.describe 'CSSOM declaration blocks' do
     got = page.evaluate_script("[CSS.supports('(grid-template-rows: subgrid)'), CSS.supports('grid-template-columns', 'subgrid [a] [b]')]")
     expect(got).to eq([true, true])
   end
+
+  # A declaration's supported property indices are its own properties (Web IDL's legacy platform object, CSSOM's
+  # `getter item(index)`): listed first by [[OwnPropertyKeys]], each the name at it, enumerable, read-only and
+  # configurable, none definable — an inline style's, a computed style's, and a detached element's empty one. Its
+  # property attributes stay its prototype's accessors (Firefox; Chrome makes them own).
+  it 'has its indices as own properties, read-only' do
+    got = page.evaluate_script(<<~'JS')
+      (() => {
+        const p = document.createElement('p'); document.body.append(p);
+        const st = p.style; st.color = 'red'; st.backgroundColor = 'blue';
+        const computed = getComputedStyle(p), empty = getComputedStyle(document.createElement('p'));
+        const strictSet = () => { 'use strict'; try { st[0] = 'x'; return 'set'; } catch (e) { return e.name; } };
+        const define = () => { try { Object.defineProperty(st, '0', { value: 'x' }); return 'defined'; } catch (e) { return e.name; } };
+        return [
+          Object.keys(st), Object.getOwnPropertyNames(st), Object.getOwnPropertyDescriptor(st, '1'),
+          Object.getOwnPropertyDescriptor(st, '2'), Object.hasOwn(st, 'color'), strictSet(), st[0], define(),
+          delete st[0], delete st[2],
+          Object.keys(computed).length === computed.length, Object.getOwnPropertyDescriptor(computed, '0').value === computed.item(0),
+          Object.keys(empty)
+        ];
+      })()
+    JS
+    expect(got).to eq([
+      %w[0 1], %w[0 1], {'value' => 'background-color', 'writable' => false, 'enumerable' => true, 'configurable' => true},
+      nil, false, 'TypeError', 'color', 'TypeError',
+      false, true,
+      true, true,
+      []
+    ])
+  end
 end
