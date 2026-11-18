@@ -8,13 +8,13 @@ require_relative 'support/session_teardown'
 # import map's (HTML "resolve a module integrity metadata") — one that does not match no module, a network error: its
 # `error`, its graph none (SRI; Chrome and Firefox, csim-bench r13 `rv_sri` `ime dcl ice iie load`).
 RSpec.describe 'module script integrity' do
-  BODY = 'document.title += "m"'
-  GOOD = "sha256-#{Digest::SHA256.base64digest(BODY)}"
-  BAD  = 'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+  SRI_MODULE_BODY = 'document.title += "m"'
+  SRI_MODULE_GOOD = "sha256-#{Digest::SHA256.base64digest(SRI_MODULE_BODY)}"
+  SRI_MODULE_BAD  = 'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
   def title_of(markup)
     app = ->(env) {
-      next [200, {'content-type' => 'text/javascript'}, [BODY]] if env['PATH_INFO'] == '/m.js'
+      next [200, {'content-type' => 'text/javascript'}, [SRI_MODULE_BODY]] if env['PATH_INFO'] == '/m.js'
 
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><title>t</title>#{markup}"]]
     }
@@ -24,13 +24,13 @@ RSpec.describe 'module script integrity' do
   end
 
   it 'runs one whose integrity matches and fires error for one whose does not' do
-    expect(title_of(%(<script type="module" integrity="#{GOOD}" src="/m.js" onerror="document.title += 'e'"></script>))).to eq('tm')
-    expect(title_of(%(<script type="module" integrity="#{BAD}" src="/m.js" onerror="document.title += 'e'"></script>))).to eq('te')
+    expect(title_of(%(<script type="module" integrity="#{SRI_MODULE_GOOD}" src="/m.js" onerror="document.title += 'e'"></script>))).to eq('tm')
+    expect(title_of(%(<script type="module" integrity="#{SRI_MODULE_BAD}" src="/m.js" onerror="document.title += 'e'"></script>))).to eq('te')
   end
 
   # (…its graph none, the inline script's `error` fired: HTML "execute the script element" of a null result)
   it "checks an import against its import map's integrity" do
-    map = %(<script type="importmap">{"imports": {"m": "/m.js"}, "integrity": {"/m.js": "#{BAD}"}}</script>)
+    map = %(<script type="importmap">{"imports": {"m": "/m.js"}, "integrity": {"/m.js": "#{SRI_MODULE_BAD}"}}</script>)
     expect(title_of(%(#{map}<script type="module" onerror="document.title += 'e'">import "m"; document.title += "i"</script>))).to eq('te')
   end
 end
