@@ -82,6 +82,19 @@ RSpec.describe 'a navigation, a close and beforeunload' do
     expect(session.evaluate_script('w.closed')).to be(false)
     session.within_window(popup) { session.accept_confirm { session.click_on('closeme') } }
     expect(session.windows.size).to eq(1)
+    # (…and, the close made, the system focus its opener's)
+    expect(session.evaluate_script('document.hasFocus()')).to be(true)
+  end
+
+  # Focus leaves a window as its close is made, not as `close()` is asked (HTML: `close()` queues "definitely close",
+  # the focus going with the navigable destroyed): a pop-up closing keeps it until then, and gives it to its opener's
+  # window — a pop-up's that opened it, open still — not to the page.
+  it 'moves the focus as the close is made, to the opener' do
+    session.execute_script("window.w = window.open('/c')")
+    session.execute_script("window.w2 = w.open('/d'); w2.focus()")
+    expect(session.evaluate_script('[document.hasFocus(), w.document.hasFocus(), w2.document.hasFocus()]')).to eq([false, false, true])
+    expect(session.evaluate_script('w2.close(); [w2.closed, w2.document.hasFocus()]')).to eq([true, true])
+    expect(session.evaluate_script('[document.hasFocus(), w.document.hasFocus()]')).to eq([false, true])
   end
 
   it "keeps a window open the driver's close the user declines" do

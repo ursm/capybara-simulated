@@ -59,7 +59,8 @@ pub(crate) struct Navigables {
     // The focus (HTML "focused area of the top-level traversable"), as a document holds its part: the child navigable
     // whose container its focused area is, for each realm's document where it is one (`Child::id`) — a frame that
     // navigates holding it on in its next document — and the top-level traversable with system focus, by its window
-    // key: the page's until a window of its takes it, back with the page when that one closes.
+    // key: the page's until a window of its takes it, its opener's when that one is discarded (`discard_window`), the
+    // page's where that is gone too.
     focused_child: HashMap<i32, u32>,
     system_focus: i32,
     // The realm of the script the isolate runs now, which its callbacks are called in: HTML's entry realm — the realm of
@@ -689,7 +690,8 @@ impl RealmArena {
     }
     // …and its close not made after all, the user declining to unload its page: closing no more (`closed` false, a
     // `close()` asked again), as Chrome 157 has it (measured 2026-11-19) — HTML's "definitely close" returns leaving "is
-    // closing" set, which whatwg/html#12969 reports as the bug it is: a window no `close()` could close again.
+    // closing" set, which whatwg/html#12969 reports as the bug it is: a window no `close()` could close again. Its
+    // system focus it never lost: a window closing keeps it until it is discarded (`focus_chain`).
     pub(crate) fn reopen_window(&mut self, key: i32) {
         self.navigables.closed.remove(&key);
     }
@@ -708,6 +710,12 @@ impl RealmArena {
         nav.windows.retain(|&w| w != realm);
         nav.window_histories.remove(&key);
         nav.lost.insert(realm);
+        // (…the system focus, where it had it, its opener's window's — open still — else the page's: Chrome 157 focuses
+        // the opener's window as a pop-up closes, no event fired, measured 2026-11-19)
+        if nav.system_focus == key {
+            let opener = nav.openers.get(&key).copied().filter(|o| *o == 0 || nav.window_realms.get(o).is_some_and(|r| nav.windows.contains(r)));
+            nav.system_focus = opener.unwrap_or(0);
+        }
         self.note_discarded();
         self.note_linked();
     }
@@ -888,7 +896,9 @@ impl RealmArena {
     pub(crate) fn focus_chain(&self) -> Vec<i32> {
         let nav = &self.navigables;
         let key = nav.system_focus;
-        let top = nav.window_realms.get(&key).copied().filter(|r| nav.windows.contains(r) && !nav.closed.contains(&key)).unwrap_or(0);
+        // (…a window closing keeps it until the close is made and it is discarded — HTML moves no focus at `close()`, which
+        // only queues "definitely close"; Chrome 157 keeps it on a pop-up whose close is declined, measured 2026-11-19)
+        let top = nav.window_realms.get(&key).copied().filter(|r| nav.windows.contains(r)).unwrap_or(0);
         let mut chain = vec![top];
         while let Some(next) = chain.last().and_then(|r| nav.focused_child.get(r)).and_then(|&id| self.navigable_active_realm(id)) {
             if chain.len() > MAX_NESTING {
