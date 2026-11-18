@@ -289,4 +289,17 @@ RSpec.describe 'processing a keyframes argument' do
       '0'
     ])
   end
+
+  # A property-indexed member's value converts as Web IDL's union of a value and a sequence of them: an iterable object —
+  # a generator, a Set, an array — gives a keyframe a value; any other value (a string, an object with no @@iterator)
+  # is one.
+  it 'reads an iterable property-indexed value as a sequence' do
+    expect(results(
+      "el.animate({opacity: (function* () { yield 0; yield 1; })()}, 1000).effect.getKeyframes().map((k) => [k.computedOffset, k.opacity])",
+      "el.animate({opacity: new Set([0, 0.5, 1])}, 1000).effect.getKeyframes().map((k) => k.opacity)",
+      "el.animate({opacity: [0, 1], offset: (function* () { yield 0; yield 1; })()}, 1000).effect.getKeyframes().map((k) => k.offset)",
+      "el.animate({opacity: [0, 1], easing: new Set(['ease-in', 'linear'])}, 1000).effect.getKeyframes().map((k) => k.easing)",
+      "el.animate({opacity: {toString() { return '0.3'; }}}, 1000).effect.getKeyframes().map((k) => k.opacity)"
+    )).to eq(['[[0,"0"],[1,"1"]]', '["0","0.5","1"]', '[0,1]', '["ease-in","linear"]', '["0.3"]'])
+  end
 end
