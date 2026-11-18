@@ -3069,6 +3069,14 @@ fn realm_of_global_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 fn is_proxy(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(args.get(0).is_proxy());
 }
+// __dom.proxyTarget(o) -> the target of `o` where it is a JS Proxy, else undefined: what no script can ask without running
+// the Proxy's traps — the bindings' to find, behind an object of theirs that is a Proxy, the state they stamped on its
+// target (style-proxy.js `Declaration`), where a field stamped on the Proxy itself costs a runtime call to add.
+fn proxy_target(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Ok(proxy) = v8::Local::<v8::Proxy>::try_from(args.get(0)) {
+        rv.set(proxy.get_target(scope));
+    }
+}
 // __dom.isPlatformFunction(fn) -> whether `fn` is one the snapshot's script made — the bindings' (and the vendor
 // bundle's) as the realm was made from it, every realm's alike: what `Function.prototype.toString` answers native code
 // for (engine.js `installPlatformToString`). A page's function — a script's, an `eval`'s, a handler compiled from its
@@ -3470,6 +3478,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "engineOf", engine_of, context_id);
     register(scope, ns, "realmOfGlobal", realm_of_global_op, context_id);
     register(scope, ns, "isProxy", is_proxy, context_id);
+    register(scope, ns, "proxyTarget", proxy_target, context_id);
     register(scope, ns, "isPlatformFunction", is_platform_function, context_id);
     // The ops are no property of the global: the realm's bindings take them as the realm is made, before any script of a
     // page's runs (engine.js `__csimTakeEngine`, which the snapshot's global holds until then and loses as it is called),
