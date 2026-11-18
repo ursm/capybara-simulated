@@ -502,6 +502,9 @@ module Capybara
         @script_fetch_seq   = 0
         @script_fetches     = {}
         @asset_flights      = {}
+        # The module fetches each thread's graphs noted for this window, until a realm files them (`note_module_fetch`) — the
+        # window's own, which another session's never takes.
+        @module_rt          = {}.compare_by_identity
         # EVERY background thread that runs a Rack request into the host app (async
         # <img> loads, keepalive fetches) registers here via spawn_app_request_thread;
         # drain_app_request_threads joins them at the session boundary — see reset!
@@ -3715,6 +3718,9 @@ module Capybara
           @image_load_pending = 0
         end
         @script_fetches.clear
+        # (…and the module fetches its graphs noted and no realm filed — a frame's `import()` whose page went before its
+        # timing was taken: `note_module_fetch`)
+        @module_rt.clear
         @asset_flights.clear
         @sticky_headers.clear
         # The driver-side resize buffer has to clear too — without
@@ -3906,14 +3912,13 @@ module Capybara
         return unless meta || answer
 
         url  = url.to_s
-        list = (Thread.current[:csim_module_rt] ||= [])
+        list = (@module_rt[Thread.current] ||= [])
         list << {'url' => url, 'meta' => meta, 'answer' => answer, 'started' => started, 'ended' => Process.clock_gettime(Process::CLOCK_MONOTONIC)} unless list.any? {|m| m['url'] == url }
       end
       # The modules fetched since the last call, for the bridge to time as 'script' — cleared on read — each with how
       # long ago, in ms, its fetch began and ended (`startAge`, `endAge`), which the bridge's clock places.
       def take_module_rt
-        list = Thread.current[:csim_module_rt] || []
-        Thread.current[:csim_module_rt] = []
+        list = @module_rt.delete(Thread.current) || []
         now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         list.map {|m| {'url' => m['url'], 'meta' => m['meta'], 'answer' => m['answer'], 'startAge' => (now - m['started']) * 1000, 'endAge' => (now - m['ended']) * 1000} }
       end
@@ -3936,11 +3941,11 @@ module Capybara
       # from the host during module resolution, which the rusty_racer rendezvous makes risky): a
       # dynamic import's entry is filed at drain time rather than fetch time, and a page that reads
       # `performance` from within the import's own `.then` (before any driver read) won't see it yet.
-      # Gated on the thread-local so a module-free page never crosses into JS; routed through
+      # Gated on the list so a module-free page never crosses into JS; routed through
       # `dom_call` so the flush runs in the active realm (a `within_frame` dynamic import read from a
       # different realm is filed there, not in the frame's `performance` — the remaining gap).
       def flush_module_rt
-        return if (Thread.current[:csim_module_rt] || []).empty?
+        return if (@module_rt[Thread.current] || []).empty?
 
         dom_call('flushModuleRt')
       end
