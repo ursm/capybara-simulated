@@ -8301,6 +8301,8 @@ module Capybara
       end
       # …and its close by the user (Capybara's `Window#close`): its document unloaded and its browsing context discarded
       # at once (window.js `closeWindowNow`), then its realms — its document's, its frames' — let go of.
+      # (…`may_close?` first: its page asked, as the page's — Browser#may_close?)
+      def window_realm_may_close?(key) = (realm = window_realm_made(key)).nil? || @runtime.realm_call(realm, 'promptToUnload') != false
       def close_window_realm(key)
         realm = window_realm_made(key) or return
         invalidate_find_cache
@@ -8386,9 +8388,8 @@ module Capybara
       # if unloading is canceled"), as a traversal applies its step (`traversal`), or as its close runs (HTML "definitely
       # close"): `beforeunload` at its document, then at its frames' documents, its unload counter raised while each runs
       # (dom-nodes.js `promptDocumentToUnload`). Whether it may: false where the user declined the prompt a handler asked
-      # for — the driver's dialog policy the user (`handle_modal`: confirmed, but in a `dismiss_confirm` block). A
-      # traversal stops there (HTML "apply the history step": `apply_history_step`); a navigation and a close go on, for
-      # now, whatever the answer.
+      # for — the driver's dialog policy the user (`handle_modal`: confirmed, but in a `dismiss_confirm` block) — which
+      # stops the navigation, the traversal or the close (HTML "navigate", "apply the history step", "definitely close").
       def prompt_page_to_unload(traversal: false) = (@runtime.call('promptToUnload', traversal) rescue nil)
       # The document-teardown pair (pagehide+unload), this window AND its nested
       # frames, theirs first — fired as a navigation replaces the page's document
@@ -8470,12 +8471,18 @@ module Capybara
       # whether it may be unloaded, its document unloaded — `pagehide` and `unload`, its frames' with it — and its
       # traversable closed, none of the session's windows reaching it after (Driver#window_entries), its browser due to be
       # discarded, which the driver does between calls (Driver#reap_closed_windows), none of this window's on the stack.
+      # (…none where the user declines to unload its page — HTML "definitely close" returns — the window open still and
+      # closing no more: `closed` false again, a `close()` asked again, as Chrome 157 has it (measured 2026-11-19), where
+      # the text leaves "is closing" set — whatwg/html#12969, the bug that is)
       private def close_steps
-        prompt_page_to_unload
+        return @session_history.keep_open if prompt_page_to_unload == false
+
         close!
       end
-      # …and the user's close of it (Capybara's `Window#close`, Driver#close_window): its page not asked — the driver an
-      # accepting user — its document unloaded and its traversable closed at once (HTML "close a top-level traversable"),
+      # …whether the user's close of it may go on (Capybara's `Window#close`, Driver#close_window): its page asked, as a
+      # browser asks as its tab closes — none closed where the user declines.
+      def may_close? = prompt_page_to_unload != false
+      # …and that close: its document unloaded and its traversable closed at once (HTML "close a top-level traversable"),
       # what a window its script opened reads of its opener after (navigables.rs `opener_now`).
       def close!
         fire_document_teardown
@@ -11292,7 +11299,7 @@ module Capybara
 
         # (…its document asked first whether it may be unloaded, as the page's is: `prompt_page_to_unload` — a traversal's
         # as it applied its step: `traverse_window`)
-        @runtime.realm_call(realm_id, 'promptToUnload') unless kind == 'traverse'
+        return if kind != 'traverse' && @runtime.realm_call(realm_id, 'promptToUnload') == false
         fetch, origin_url, client_id = window_navigation_fetch(realm_id, history, url, post, handling, [at, id], replayed, initiator, source, policy, activated)
         begin
           # (…an about:blank document's or a blob's opener policy the one it inherits: coop.rs `inherited` — a replay's the
@@ -12463,16 +12470,15 @@ module Capybara
       # Call a host fn in the realm that OWNS an iframe (main realm for 0/nil).
       # A frame's navigation asks its document whether it may be unloaded before it fetches anything (HTML "check if
       # unloading is canceled": its `beforeunload`, and its frames' — `promptToUnloadFrame`): false when a handler
-      # removed the frame, the navigation then going no further — :canceled where the user declined the prompt a handler
-      # asked for (`handle_modal`), which a traversal stops at (`unload_traversed_frames`) and a navigation, for now, does
-      # not.
+      # removed the frame, the navigation then going no further, or where the user declined the prompt a handler asked for
+      # (`handle_modal`) — a traversal's :canceled then, which stops every navigable it moves (`unload_traversed_frames`).
       # (…none a second time of one a traversal asked as it applied its step: `unload_traversed_frames`)
       def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id), traversal: false)
         return true if traversed_frame(realm_id) {|history, nav| history.take_prompted(nav) }
 
         case frame_realm_host_call(parent, 'promptToUnloadFrame', realm_id, traversal)
         when false then false
-        when 'canceled' then :canceled
+        when 'canceled' then traversal ? :canceled : false
         else true
         end
       end
@@ -13009,8 +13015,12 @@ module Capybara
         # A replay already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if !replay && @timers_active
-        # (…a traversal's page asked as its step is applied: `apply_history_step`)
-        prompt_page_to_unload unless history_handling == 'traverse'
+        # (…a traversal's page asked as its step is applied: `apply_history_step` — another's here, and aborted where the
+        # user declines to unload the page, HTML "navigate": the page stays, what its flushed tasks planned still standing)
+        if history_handling != 'traverse' && prompt_page_to_unload == false
+          restore_flushed_nav_intents
+          return
+        end
         referrer_policy ||= main_document_referrer_policy if referer
         req_body = body&.b
         # (…a traversal's or a user's reload's, of no initiator: `replay_history_entry` — its client the document it leaves,

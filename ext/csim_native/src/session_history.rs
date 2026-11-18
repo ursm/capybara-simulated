@@ -1992,6 +1992,11 @@ impl SessionHistory {
         });
         true
     }
+    // #keep_open: its close not made after all, the user declining to unload its page — closing no more (navigables.rs
+    // `reopen_window`, whatwg/html#12969).
+    fn keep_open(&self) {
+        asking(&mut self.lock(), |t| (t.asked.closing, t.asked.close_due) = (false, false));
+    }
     // #closing? -> whether it is closing or closed: its `closed` getter's, from any window.
     fn is_closing(&self) -> bool {
         let t = self.lock();
@@ -2102,6 +2107,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("show", method!(SessionHistory::show, 0))?;
     class.define_method("close!", method!(SessionHistory::close, 0))?;
     class.define_method("ask_close", method!(SessionHistory::ask_close, 0))?;
+    class.define_method("keep_open", method!(SessionHistory::keep_open, 0))?;
     class.define_method("by_web_content=", method!(SessionHistory::set_by_web_content, 1))?;
     class.define_method("popup_sandbox=", method!(SessionHistory::set_popup_sandbox, 1))?;
     class.define_method("opener_policy=", method!(SessionHistory::set_opener_policy, 1))?;

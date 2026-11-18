@@ -912,6 +912,9 @@ module Capybara
 
         w = @aux_windows.find {|win| win[:handle] == h } or return
         window = w[:window]
+        # (…its page asked first, as a browser's tab closing asks it: none closed where the user declines)
+        return unless window.discard_due? || window.may_close?
+
         window.close! unless window.discard_due?
         discard_window(w)
       end

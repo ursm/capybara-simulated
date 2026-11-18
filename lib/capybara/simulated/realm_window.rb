@@ -73,6 +73,7 @@ module Capybara
       def response_headers = Browser.capitalized_headers(host.window_realm_response(realm!)[1])
 
       # The user's close (Capybara's `Window#close`), and its realms let go of after a script's close discarded it.
+      def may_close? = host.window_realm_may_close?(key)
       def close!   = host.close_window_realm(key)
       def discard! = host.discard_window_realm(key)
 

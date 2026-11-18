@@ -687,6 +687,12 @@ impl RealmArena {
         let nav = &mut self.navigables;
         nav.opened.contains(&key) && nav.closed.insert(key)
     }
+    // …and its close not made after all, the user declining to unload its page: closing no more (`closed` false, a
+    // `close()` asked again), as Chrome 157 has it (measured 2026-11-19) — HTML's "definitely close" returns leaving "is
+    // closing" set, which whatwg/html#12969 reports as the bug it is: a window no `close()` could close again.
+    pub(crate) fn reopen_window(&mut self, key: i32) {
+        self.navigables.closed.remove(&key);
+    }
     // Whether the script of realm `source`'s document may close the window whose document is realm `target`'s (HTML's
     // Window `close()`, past "script-closable", the window's own to say): `source`'s browsing context familiar with its
     // one, and allowed by sandboxing to navigate it — a cross-site pop-up closes no opener of another origin it did not
@@ -1428,6 +1434,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setSteppedWindow", set_stepped_window, context_id);
     crate::dom::register(scope, ns, "isSteppedWindow", is_stepped_window, context_id);
     crate::dom::register(scope, ns, "closeWindow", close_window, context_id);
+    crate::dom::register(scope, ns, "reopenWindow", reopen_window, context_id);
     crate::dom::register(scope, ns, "closeAllowed", close_allowed_op, context_id);
     crate::dom::register(scope, ns, "forgetPageOpenings", forget_page_openings_op, context_id);
     crate::dom::register(scope, ns, "releaseWindowHistory", release_window_history_op, context_id);
@@ -1772,6 +1779,12 @@ fn is_stepped_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // The ops below take a window by its key (`window_keys`): the one the host told its realm (realm_identity.rs
 // `realmIdentify('windowKey', …)`), else the realm's id.
 // __dom.closeWindow(key) -> whether the window, one a script opened, closed (`close_window`).
+// __dom.reopenWindow(key) — `reopen_window`.
+fn reopen_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(key) = args.get(0).int32_value(scope) else { return };
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).reopen_window(key);
+}
 fn close_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
