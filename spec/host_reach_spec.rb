@@ -153,11 +153,20 @@ RSpec.describe "the host's reach into a page" do
       spyAll(Object.getPrototypeOf(function* () {}).prototype, 'Generator', ['next']);
       // (…and no static of Math's, Number's, String's or ArrayBuffer's a page replaced is called at all: none's answer is
       // the page's to make up)
-      // (…nor a static of a typed array's, nor a method of String.prototype's an array's shares the name of)
-      for (const [holder, label, names] of [[Math, 'Math', ['min', 'max', 'floor', 'ceil', 'round', 'trunc', 'abs']], [Number, 'Number', ['isFinite', 'isNaN', 'isSafeInteger']], [String, 'String', ['fromCharCode']], [ArrayBuffer, 'ArrayBuffer', ['isView']], [Float64Array, 'Float64Array', ['from', 'of']], [Uint8Array, 'Uint8Array', ['from', 'of']], [String.prototype, 'String.prototype', ['slice', 'indexOf', 'lastIndexOf', 'includes', 'at', 'concat']]]) {
+      // (…nor an ArrayBufferView's or an ArrayBuffer's accessor: each handed what it is read on)
+      for (const [proto, label, names] of [[Object.getPrototypeOf(Uint8Array.prototype), 'TypedArray', ['length', 'byteLength', 'byteOffset', 'buffer']], [ArrayBuffer.prototype, 'ArrayBuffer', ['byteLength']], [DataView.prototype, 'DataView', ['byteLength', 'byteOffset', 'buffer']]]) {
+        for (const name of names) {
+          const d = Object.getOwnPropertyDescriptor(proto, name);
+          saved.push([proto, name, d, true]);
+          Object.defineProperty(proto, name, { configurable: true, get() { /*PAGE*/ if (!busy) leaks.push(label + '.' + name + ' read ' + String(new Error().stack).split('\\n')[2]); return R(d.get, this, []); } });
+        }
+      }
+      // (…nor a static of a typed array's, a method of String.prototype's an array's shares the name of, or a WeakRef's
+      // `deref`)
+      for (const [holder, label, names] of [[Math, 'Math', ['min', 'max', 'floor', 'ceil', 'round', 'trunc', 'abs']], [Number, 'Number', ['isFinite', 'isNaN', 'isSafeInteger']], [String, 'String', ['fromCharCode']], [ArrayBuffer, 'ArrayBuffer', ['isView']], [Float64Array, 'Float64Array', ['from', 'of']], [Uint8Array, 'Uint8Array', ['from', 'of']], [String.prototype, 'String.prototype', ['slice', 'indexOf', 'lastIndexOf', 'includes', 'at', 'concat']], [WeakRef.prototype, 'WeakRef.prototype', ['deref']]]) {
         for (const m of names) { const o = holder[m]; saved.push([holder, m, o]); holder[m] = function (...args) { /*PAGE*/ if (!busy) leaks.push(label + '.' + m + ' called'); return R(o, this, args); }; }
       }
-      window.restore = () => { for (const [p, m, o] of saved) p[m] = o; };
+      window.restore = () => { for (const [p, m, o, accessor] of saved) { if (accessor) Object.defineProperty(p, m, o); else p[m] = o; } };
       try {
         const img = new Image(); img.onload = () => { /*PAGE*/ done++; }; img.src = '/i.png'; document.body.append(img);
         fetch('/').then((r) => { /*PAGE*/ return r.text(); }).then(() => { /*PAGE*/ done++; });

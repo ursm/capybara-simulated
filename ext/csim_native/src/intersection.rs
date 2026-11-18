@@ -212,8 +212,15 @@ fn io_options_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 fn observe_intersections_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let root = nid_arg(scope, &args, 0);
     let numbers = |scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>| -> Vec<f64> {
-        let Ok(list) = v8::Local::<v8::Object>::try_from(value) else { return Vec::new() };
-        let len = list.get(scope, v8::String::new(scope, "length").unwrap().into()).and_then(|l| l.uint32_value(scope)).unwrap_or(0);
+        // (…its length an array's or a typed array's own, never read through a `length` getter a page replaced)
+        let len = if let Ok(list) = v8::Local::<v8::TypedArray>::try_from(value) {
+            list.length() as u32
+        } else if let Ok(list) = v8::Local::<v8::Array>::try_from(value) {
+            list.length()
+        } else {
+            return Vec::new();
+        };
+        let list = v8::Local::<v8::Object>::try_from(value).expect("an array is an object");
         (0..len).filter_map(|i| list.get_index(scope, i).and_then(|v| v.number_value(scope))).collect()
     };
     let flat = numbers(scope, args.get(1));

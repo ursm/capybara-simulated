@@ -1,8 +1,9 @@
 // Every static of Reflect / Object / JSON / Array / Promise / Symbol / ArrayBuffer / Number / String / Math / the typed
 // arrays the bindings call — and every method of one's prototype — read as the bundle loads, never once a page runs; and
-// nothing of the bindings' — a function, a list, a typed array — handed to a method of Array.prototype's, of
-// %TypedArray%.prototype's or of %ArrayIteratorPrototype%'s: no such method called by name, and no for…of, spread or
-// array destructuring, which walk an array by `Array.prototype[Symbol.iterator]` and the iterator's `next`.
+// nothing of the bindings' — a function, a list, a typed array, a WeakRef — handed to a method of Array.prototype's, of
+// %TypedArray%.prototype's or of %ArrayIteratorPrototype%'s, to an ArrayBufferView's or an ArrayBuffer's accessor or to
+// WeakRef's `deref`: no such method called, nor accessor read, by name, and no for…of, spread or array destructuring,
+// which walk an array by `Array.prototype[Symbol.iterator]` and the iterator's `next`.
 
 // (…`Date` is none of them: a bare `Date` in the bindings is the platform's own, the virtual clock's that timers.js
 // installs, meant to be read as the global; `Intl`'s one constructor the bindings use, `DateTimeFormat`, is taken by
@@ -41,6 +42,10 @@ const CALLBACK_METHODS = new Set(['map', 'filter', 'forEach', 'some', 'every', '
 const LIST_METHODS = new Set(['at', 'concat', 'copyWithin', 'entries', 'fill', 'flat', 'includes', 'indexOf', 'join', 'keys',
   'lastIndexOf', 'pop', 'reverse', 'shift', 'slice', 'splice', 'subarray', 'toReversed', 'toSpliced', 'unshift', 'values',
   'with']);
+// (…and an ArrayBufferView's or an ArrayBuffer's accessors, and a WeakRef's `deref`, each a page's to replace on its
+// prototype and so handed what the bindings read: intrinsics.js's `viewBuffer`, `viewByteLength`, `byteLengthOf`,
+// `weakRefDeref`, …)
+const ACCESSORS = new Set(['buffer', 'byteLength', 'byteOffset']);
 // (…and the statics that walk a list by its iterator: `arrayFrom` — engine.js's `listFrom` is called instead)
 const ITERATING_CALLS = new Set(['arrayFrom', 'objectFromEntries']);
 
@@ -82,6 +87,15 @@ for (const entry of sources) {
         && !(receiver.type === 'Identifier' && receiver.name === 'impl')
         && !(receiver.type === 'CallExpression' && receiver.callee.type === 'Identifier' && receiver.callee.name === 'engineOf')) {
       console.error(`${at}: \`.${node.callee.property.name}(…)\` — call engine.js's list helper`);
+      failures++;
+    }
+    if (inFunction && node.type === 'MemberExpression' && !node.computed && ACCESSORS.has(node.property.name)) {
+      console.error(`${at}: \`.${node.property.name}\` read through a prototype a page replaces — take intrinsics.js's`);
+      failures++;
+    }
+    if (inFunction && node.type === 'CallExpression' && node.callee.type === 'MemberExpression' && !node.callee.computed
+        && node.callee.property.name === 'deref') {
+      console.error(`${at}: \`.deref()\` — call intrinsics.js's \`weakRefDeref\``);
       failures++;
     }
     if (inFunction && node.type === 'CallExpression' && node.callee.type === 'Identifier' && ITERATING_CALLS.has(node.callee.name)) {
