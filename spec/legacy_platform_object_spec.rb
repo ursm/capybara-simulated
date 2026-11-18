@@ -142,4 +142,17 @@ RSpec.describe 'legacy platform objects' do
     JS
     expect(r).to eq(['[object WindowProperties]', true, false, false, false, '[object HTMLFormElement]', false])
   end
+
+  # An observable array's attribute set (Web IDL §3.7.6): the list emptied, then each value set in turn — a sheet its
+  # "set an indexed value" refuses leaves those before it adopted (Chrome and Firefox alike).
+  it 'sets adoptedStyleSheets value by value' do
+    r = probe(<<~JS)
+      const good = new CSSStyleSheet();
+      document.adoptedStyleSheets = [new CSSStyleSheet()];
+      let threw;
+      try { document.adoptedStyleSheets = [good, document.styleSheets[0]]; } catch (e) { threw = e.name; }
+      return [threw, document.adoptedStyleSheets.length, document.adoptedStyleSheets[0] === good];
+    JS
+    expect(r).to eq(['NotAllowedError', 1, true])
+  end
 end

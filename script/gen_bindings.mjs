@@ -734,7 +734,7 @@ const RUNTIME = [
   'PLATFORM', 'createObject', 'rootInterface', 'inheritInterface', 'checkPlatformSteps', 'Dictionary', 'EMPTY_DICTIONARY', 'freeze', 'frozenCopy', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'stampSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
-  'defineConstants', 'legacyPlatformObject', 'namedPropertiesObject', 'requireSteps', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
+  'defineConstants', 'legacyPlatformObject', 'namedPropertiesObject', 'observableArray', 'observableArrayOf', 'replaceObservableArray', 'requireSteps', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike', 'defineMaplike',
   'ceEnter', 'ceLeave'
 ];
@@ -1031,6 +1031,8 @@ function failure(where, text = '') {
   if (where.dictionary) return `prefix + ${JSON.stringify(`Failed to read the '${where.member}' property from '${where.dictionary}': ${text}`)}`;
   // (…a value a special operation's setter is given, whose name or index is `name` / `i` where it is converted: Chrome's)
   if (where.special === 'named') return `${JSON.stringify("Failed to set a named property '")} + name + ${JSON.stringify(`' on '${where.iface}': ${text}`)}`;
+  // (…and an observable array's value, set at an index: Chrome's, no member's)
+  if (where.special === 'observed') return JSON.stringify(text);
   if (where.special === 'indexed') return `${JSON.stringify('Failed to set an indexed property [')} + i + ${JSON.stringify(`] on '${where.iface}': ${text}`)}`;
   return JSON.stringify((where.index === undefined
     ? `Failed to set the '${where.member}' property on '${where.iface}': `
@@ -1048,6 +1050,7 @@ function typeName(t) {
 // What a conversion's TypeError says, by where the value comes from (Chrome's messages): an operation's argument
 // (`index`, from 0), or an attribute's value.
 function conversionError(where, what) {
+  if (where.special === 'observed') return failure(where, `Failed to convert value to '${what}'.`);
   if (where.special) return failure(where, `The provided value is not of type '${what}'.`);
   return failure(where, where.index === undefined
     ? `Failed to convert value to '${what}'.`
@@ -1717,7 +1720,16 @@ function generateInterface(def, options = {}) {
       const slot = eventSlot ?? slotOfAttribute.get(m.name);
       // (…a promise-typed one's exception its promise's rejection, as its getter steps say)
       const slotRead = slot && `${options.install ? `thisOf(this ?? globalThis, '${name}')` : self}.${slot}`;
+      // (…an observable array's its one array of the object's, over the backing list the implementation keeps —
+      // `impl.observe_<name>`, webidl.js `observableArray` — each value its index is given converted to its type)
+      const observed = m.idlType.generic === 'ObservableArray';
+      if (observed) {
+        if (!options.install) throw new Error(`${label}: an observable array attribute of an interface the binding makes is not generated yet`);
+        const each = conversion(m.idlType.idlType[0], 'x', { iface: name, special: 'observed' }, checks);
+        preamble.push(`  const OBSERVED_${m.name} = observableArray((x) => ${each}, impl.observe_${m.name});`);
+      }
       const getter = slot ? `return ${slotRead};`
+        : observed ? `return observableArrayOf(${self}, '${m.name}', OBSERVED_${m.name});`
         : reflection?.get ? `const self = ${self}; return ${reflection.get};`
         : options.selfChecked?.includes(m.name) ? `return ${getImpl}(this ?? globalThis);`
         : `return ${getImpl}(${self});`;
@@ -1745,6 +1757,9 @@ function generateInterface(def, options = {}) {
         out.push(`    set ${key}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) { ${withCEReactions(m, `${setImpl}(self, value);`)} } }`);
       } else if (!m.readonly && eventSlot) {
         out.push(`    set ${key}(v) { ${self}.${slot} = ${conversion(m.idlType, 'v', { iface: name, member: m.name }, checks)}; }`);
+      } else if (!m.readonly && observed) {
+        const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
+        out.push(`    set ${key}(v) { const self = ${self}; const values = ${v}; ${withCEReactions(m, `replaceObservableArray(impl.observe_${m.name}, self, values);`)} }`);
       } else if (!m.readonly && reflection) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
         out.push(`    set ${key}(v) { const self = ${self}; v = ${v}; ${withCEReactions(m, `${reflection.set};`)} }`);
