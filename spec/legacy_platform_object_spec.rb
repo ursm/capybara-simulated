@@ -332,6 +332,27 @@ RSpec.describe 'legacy platform objects' do
     expect(r).to eq(['[object HTMLImageElement]', '[object HTMLImageElement]', '[object HTMLInputElement]'])
   end
 
+  # The other way: a form this realm made, adopted into a frame's document, is that realm's to answer names for — the
+  # names its controls are given there are registered there.
+  it "finds names given in a frame through a form adopted into it" do
+    session = simulated_session(app)
+    session.visit '/'
+    r = JSON.parse(session.evaluate_script(<<~JS))
+      (() => {
+        const frame = document.createElement('iframe');
+        document.body.append(frame);
+        const fd = frame.contentDocument;
+        const form = document.createElement('form');
+        fd.body.append(form);
+        const input = fd.createElement('input');
+        form.append(input);
+        input.name = 'inFrame';
+        return JSON.stringify([String(form.inFrame), 'inFrame' in form, String(form.elements.namedItem('inFrame'))]);
+      })()
+    JS
+    expect(r).to eq(['[object HTMLInputElement]', true, '[object HTMLInputElement]'])
+  end
+
   # getComputedStyle makes a new declaration each call (CSSOM; Chrome), so an expando on one is no other's.
   it "makes a new computed style each call" do
     r = probe(<<~JS)
