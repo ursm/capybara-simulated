@@ -263,6 +263,10 @@ struct Applying {
     frames: Vec<(u32, u64)>,
     prompted: HashSet<u32>,
     none: Vec<u32>,
+    // …those whose documents were made as it made them (`document_made`), and the navigables whose ongoing navigation
+    // it is — "traversal", which it lets go of as it ends, and no other application's (`end_traversal_of_navs`).
+    made: HashSet<u32>,
+    marks: Vec<u32>,
     moves: std::collections::VecDeque<Move>,
     stepping: Option<Stepping>,
 }
@@ -354,8 +358,9 @@ struct Traversable {
     applying: Vec<Applying>,
     applying_tokens: u64,
     // The frames a traversal applied was to make the documents of, none made yet, by navigable: the entry each was at, the
-    // step it was at and the one it goes to (`made_no_document`).
-    late: HashMap<u32, (u64, i64, u64)>,
+    // step it was at, the one it goes to, and the number of the navigation making it, its ongoing one then — none held
+    // by a navigation begun since (`made_no_document`).
+    late: HashMap<u32, (u64, i64, u64, Option<u64>)>,
     #[cfg(test)]
     fail_next: bool,
     steps_applied: u64,
@@ -1047,7 +1052,6 @@ impl Traversable {
     // other ongoing navigations")
     fn begin_navigation(&mut self, nav: u32) -> u64 {
         self.navigations.remove(&nav);
-        self.late.remove(&nav);
         self.next_ongoing += 1;
         self.ongoing.insert(nav, self.next_ongoing);
         self.next_ongoing
@@ -1071,7 +1075,8 @@ impl Traversable {
     // entry it changes, and theirs alone (HTML "apply the history step": "For each navigable of changingNavigables … Set
     // navigable's ongoing navigation to "traversal"", changingNavigables the navigables "whose current session history
     // entry will change"): a frame's navigation under way goes on past a traversal that moves the page within its
-    // document (Chrome 157 and Firefox 159). Its own "traversal" marks let go, the traversal done.
+    // document (Chrome 157 and Firefox 159) — the "traversal" of each one it moves among them; another's left to the
+    // application that marked it (`Traversable::applied`), which may be under way still.
     fn go_to(&mut self, step: i64) {
         let build = self.build;
         let before = self.state.current_entries(build);
@@ -1085,7 +1090,6 @@ impl Traversable {
                 self.navigations.remove(&nav);
             }
         }
-        self.end_traversal();
     }
     // A traversal's step `step` applied that keeps its top-level navigable's document — `changes`, the navigables it
     // moves (`plan`), each moved within its document or made the document of its entry again (HTML "apply the history
@@ -1139,6 +1143,7 @@ impl Traversable {
     fn begin_apply(&mut self, delta: Option<i64>, planned: Option<(i64, Vec<Change>)>, replays: bool) -> u64 {
         self.applying_tokens += 1;
         let (step, changes) = planned.unwrap_or_default();
+        let marks = if delta.is_some() || replays { vec![TOP] } else { changes.iter().filter(|c| !c.2).map(|c| c.0).collect() };
         let phase = if delta.is_some() {
             Phase::Plan
         } else if replays {
@@ -1155,6 +1160,8 @@ impl Traversable {
             frames: Vec::new(),
             prompted: HashSet::new(),
             none: Vec::new(),
+            made: HashSet::new(),
+            marks,
             moves: Default::default(),
             stepping: None,
         });
@@ -1190,21 +1197,27 @@ impl Traversable {
             self.applied(a);
         }
     }
-    // (…the frames whose documents it was to make, and made none of yet — a navigation of one deferred on a service
-    // worker activating, made again once it does: browser.rb `await_sw_activation` — each with the entry it was at, the
-    // step it was at and its target entry: `late`)
+    // (…the frames whose documents it was to make, and has neither made nor made none of — a navigation of one deferred
+    // on a service worker activating, made again once it does: browser.rb `await_sw_activation` — each with the entry it
+    // was at, the step it was at and its target entry: `late`)
+    // (…its own navigables traversing no more: another application under way — whose host step this one ran in — keeps
+    // its own)
     fn applied(&mut self, a: Applying) {
         APPLYING.fetch_sub(1, Ordering::Relaxed);
         if let Some(stepping) = a.stepping {
             let none: Vec<u32> = a.none.into_iter().filter(|nav| a.frames.iter().any(|f| f.0 == *nav)).collect();
-            for &(nav, target) in a.frames.iter().filter(|f| !none.contains(&f.0)) {
+            for &(nav, target) in a.frames.iter().filter(|f| !none.contains(&f.0) && !a.made.contains(&f.0)) {
                 if let Some(&at) = stepping.at.get(&nav) {
-                    self.late.insert(nav, (at, stepping.before, target));
+                    self.late.insert(nav, (at, stepping.before, target, self.ongoing.get(&nav).copied()));
                 }
             }
             self.end_step(stepping, a.frames.len(), &none);
         }
-        self.end_traversal();
+        for nav in a.marks {
+            if self.traversing(nav) {
+                self.ongoing.remove(&nav);
+            }
+        }
     }
     // …every one let go, the traversable cleared.
     fn forget_applying(&mut self) {
@@ -1311,15 +1324,19 @@ impl Traversable {
     fn made_no_document(&mut self, nav: u32) {
         if let Some(a) = self.applying.iter_mut().rev().find(|a| matches!(a.phase, Phase::Making(_)) && a.frames.iter().any(|f| f.0 == nav)) {
             a.none.push(nav);
-        } else if let Some((at, before, target)) = self.late.remove(&nav) {
-            if self.state.current_entry(nav, self.build).is_some_and(|e| e.id == target) {
+        } else if let Some((at, before, target, number)) = self.late.remove(&nav) {
+            if number == self.ongoing.get(&nav).copied() && self.state.current_entry(nav, self.build).is_some_and(|e| e.id == target) {
                 self.hold(nav, at, before);
             }
         }
     }
-    // …and a document made of frame `nav`, or a navigation of it begun: no traversal's to hold it any more.
+    // …and a document made of frame `nav`: no traversal's to hold it any more — one making it noting it made
+    // (`Applying::made`).
     fn document_made(&mut self, nav: u32) {
         self.late.remove(&nav);
+        if let Some(a) = self.applying.iter_mut().rev().find(|a| matches!(a.phase, Phase::Making(_)) && a.frames.iter().any(|f| f.0 == nav)) {
+            a.made.insert(nav);
+        }
     }
     // Navigable `nav` left at `entry` — the one it was at at `step` — by the step just applied, its target entry's
     // document not made.
@@ -1631,11 +1648,6 @@ impl SessionHistory {
     // #traversal_planned? -> whether one is planned for the host (`planned_for_host`), its cheap gate.
     fn is_traversal_planned(&self) -> bool {
         self.lock().planned_for_host
-    }
-    // #end_traversal: the traversals the host took applied, or let go — their navigables traversing no more, whatever
-    // became of them (`Traversable::end_traversal`).
-    fn end_traversal(&self) {
-        self.lock().end_traversal();
     }
     // #clear_queued: the page's traversals let go — its document gone, whose traversals go with it.
     fn clear_queued(&self) {
@@ -2135,7 +2147,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("flush_end", method!(SessionHistory::flush_end, 0))?;
     class.define_method("hold_traversals", method!(SessionHistory::hold_traversals, 1))?;
     class.define_method("traversal_planned?", method!(SessionHistory::is_traversal_planned, 0))?;
-    class.define_method("end_traversal", method!(SessionHistory::end_traversal, 0))?;
     class.define_method("queued?", method!(SessionHistory::is_queued, 0))?;
     class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
     class.define_method("clear_queued", method!(SessionHistory::clear_queued, 0))?;
@@ -2749,7 +2760,6 @@ mod tests {
         h.push(TOP, TOP, "/a".into(), false, Data::default());
         h.push(TOP, TOP, "/b".into(), false, Data::default());
         let token = h.apply_by(-1);
-        let before = APPLYING.load(Ordering::Relaxed);
         let mut t = h.lock();
         t.begin_traversal(TOP);
         t.fail_next = true;
@@ -2757,7 +2767,6 @@ mod tests {
         assert!(panicked.is_err());
         assert!(t.applying.is_empty());
         assert!(!t.traversing(TOP));
-        assert!(APPLYING.load(Ordering::Relaxed) < before || before == 0);
         assert!(t.next_command(token, Answer::Nothing).is_none());
     }
 
@@ -2798,6 +2807,45 @@ mod tests {
         assert_eq!(t.state.current_entry(1, t.build).map(|e| e.id), Some(f2));
         t.made_no_document(1);
         assert_eq!(t.state.current_entry(1, t.build).map(|e| e.id), Some(f2));
+    }
+
+    // An application let go lets go of its own navigables' "traversal" alone: one under way, in whose host step it ran,
+    // keeps its own.
+    #[test]
+    fn an_application_ends_its_own_traversal_alone() {
+        let h = history();
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
+        h.seed(1, TOP, "/f1".into());
+        h.push(1, TOP, "/f2".into(), false, Data::default());
+        let (step, changes) = h.plan(-1).unwrap();
+        let outer = h.apply_by(-1);
+        let inner = h.apply_step(step, changes);
+        let mut t = h.lock();
+        t.begin_traversal(TOP);
+        t.begin_traversal(1);
+        t.end_apply(inner);
+        assert!(t.traversing(TOP));
+        assert!(!t.traversing(1));
+        t.end_apply(outer);
+        assert!(!t.traversing(TOP));
+    }
+
+    // A frame whose document was made as the step made it is not held by a navigation of it that makes none later.
+    #[test]
+    fn a_frame_made_is_not_held_later() {
+        let h = history();
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
+        h.seed(1, TOP, "/f1".into());
+        h.push(1, TOP, "/f2".into(), false, Data::default());
+        let (step, changes) = h.plan(-1).unwrap();
+        let token = h.apply_step(step, changes);
+        let mut t = h.lock();
+        assert!(matches!(t.next_command(token, Answer::Nothing), Some(Command::UnloadFrames(_))));
+        let Some(Command::MakeFrame(1, f1)) = t.next_command(token, Answer::Unloaded(vec![Some(true)])) else { panic!() };
+        t.document_made(1);
+        assert!(t.next_command(token, Answer::Nothing).is_none());
+        t.made_no_document(1);
+        assert_eq!(t.state.current_entry(1, t.build).map(|e| e.id), Some(f1));
     }
 
     #[test]

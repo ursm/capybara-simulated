@@ -11790,10 +11790,13 @@ module Capybara
       # (frame_navigation.rs `releaseFrameSandbox`), and a traversal applying its step told.
       def frame_navigation_made_no_document(realm_id)
         @runtime.call('releaseFrameSandbox', realm_id)
-        traversed_frame(realm_id) {|history, nav| history.made_no_document(nav) }
+        # (…a traversal's told whenever it is — as it makes the frame's document, or after, a navigation of it it deferred
+        # made again: session_history.rs `late`)
+        nav, _, _, history = frame_navigable(realm_id)
+        history&.made_no_document(nav)
       end
-      # The session history and navigable of frame realm `realm_id`, yielded while a traversal is applied — whose navigation
-      # it is asked about (session_history.rs `take_prompted`, `made_no_document`) — nil while none is.
+      # The session history and navigable of frame realm `realm_id`, yielded while a traversal is applied — whether it
+      # asked the frame already (session_history.rs `take_prompted`) — nil while none is.
       private def traversed_frame(realm_id)
         return unless Native::SessionHistory.applying? && (nav, _, _, history = frame_navigable(realm_id))
 
@@ -12235,6 +12238,8 @@ module Capybara
       # POST's body and initiator origin — which a traversal to it refers by and a reload or a traversal re-posts (HTML's
       # document state: a Post/Redirect/Get one's entry a GET's) — and the Referer it sent, its document's referrer.
       # (…`restored` the form state a traversal's document is given: `reload_frame_to_entry`)
+      # (…`begun` the number of the navigation it goes on with, one deferred on an activating worker made again: the same
+      # navigation, its frame's ongoing one still — what a traversal that deferred it holds it by: session_history.rs `late`)
       private def navigate_realm_self(
         realm_id,
         url,
@@ -12249,11 +12254,12 @@ module Capybara
         user_activated:,
         entry: nil,
         restored: {},
-        handling: nil
+        handling: nil,
+        begun: nil
       )
         # (…its navigation begun, the frame's ongoing one: session_history.rs `begin_navigation`)
         nav, _, _, history = frame_navigable(realm_id)
-        ongoing = history && [history, nav, history.begin_navigation(nav)]
+        ongoing = history && [history, nav, begun || history.begin_navigation(nav)]
         dest = @runtime.realm_direct_call(0, 'frameDestination', realm_id.to_i)
         if sw_registered?
           deferred = await_sw_activation(url, blob_partition_site(realm_id), ongoing:, frame: true) do
@@ -12271,7 +12277,8 @@ module Capybara
               user_activated:,
               entry:,
               restored:,
-              handling:
+              handling:,
+              begun: ongoing&.last
             )
           end
           return if deferred
