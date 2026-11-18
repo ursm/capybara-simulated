@@ -1046,7 +1046,7 @@ fn load_delayed_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 }
 impl RealmArena {
     // Whether something delays realm `cid`'s document's load event now: its images (image_requests.rs
-    // `images_delay_load`), a load gate's work under way (load_gates.rs), its containers' loads still owed
+    // `images_delay_load`), a load gate's work under way or one late that holds it (load_gates.rs), its containers' loads still owed
     // (`frame_loads_owed`), and its child navigables' documents
     // whose own load is delayed.
     // Whether realm `cid`'s document has a frame in it.
@@ -1055,7 +1055,7 @@ impl RealmArena {
     }
     pub(crate) fn load_delayed_here(&self, cid: i32) -> bool {
         self.images_delay_load(cid)
-            || self.realm_state(cid).is_some_and(|s| s.load_gates.running())
+            || self.realm_state(cid).is_some_and(|s| s.load_gates.running() || s.load_gates.holding())
             || frame_loads_owed(self, cid)
             || self.child_realms(cid).into_iter().any(|kid| self.realm_state(kid).is_some_and(|s| s.load_delay != 0))
     }

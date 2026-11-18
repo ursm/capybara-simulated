@@ -167,6 +167,7 @@ mod reflect_keywords;
 // What is rendered, and the text it renders (`innerText`, the visible text a driver reads).
 mod rendered;
 mod script;
+mod script_fetch;
 mod resize_observation;
 mod resize_observers;
 mod resource_timing;

@@ -498,6 +498,9 @@ module Capybara
         @image_load_flights = {}
         @image_load_pending = 0
         @image_load_lock    = Mutex.new
+        # Scripts' fetches (`script_fetch_start`): each one's slot, by number, until its realm takes it.
+        @script_fetch_seq   = 0
+        @script_fetches     = {}
         # EVERY background thread that runs a Rack request into the host app (async
         # <img> loads, keepalive fetches) registers here via spawn_app_request_thread;
         # drain_app_request_threads joins them at the session boundary — see reset!
@@ -3710,6 +3713,7 @@ module Capybara
           @image_load_flights.clear
           @image_load_pending = 0
         end
+        @script_fetches.clear
         @sticky_headers.clear
         # The driver-side resize buffer has to clear too — without
         # this the previous test's `driver.resize(425, …)` leaks into
@@ -3856,10 +3860,12 @@ module Capybara
         rack_fetch('GET', url, '', {'Accept' => accept}, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
                                                   client_origin: client[:origin], client_realm: client[:realm])
       end
+      # (…`ancestors` its client's ancestors' origins, where it is pinned for a fetch off the main thread: `pinned_client`)
       def rack_fetch_body(url, cors_mode: nil, credentials: 'same-origin', client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil,
-                          initiator: nil, dest: nil)
+                          initiator: nil, dest: nil, ancestors: nil)
         result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, credentials: credentials, client_url: client_url, client_origin: client_origin, referrer: referrer,
-                                                                     referrer_policy: referrer_policy, client_realm: client_realm, initiator: initiator, dest: dest)
+                                                                     referrer_policy: referrer_policy, client_realm: client_realm, initiator: initiator, dest: dest,
+                                                                     ancestors: ancestors)
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
@@ -4002,7 +4008,8 @@ module Capybara
       def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin',
                          client: client_for(realm, element_policy, referrer: referrer))
         body = rack_fetch_body(url, cors_mode: mode, credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
-                                    client_origin: client[:origin], client_realm: client[:realm], initiator: client[:initiator], dest: dest)
+                                    client_origin: client[:origin], client_realm: client[:realm], initiator: client[:initiator], dest: dest,
+                                    ancestors: client[:ancestors])
         return [nil, nil] unless body
         # (…fresh as long as its every hop's stored response is — a fresh redirect lends no lifetime to the response it
         # leads to, nor that response to an uncacheable redirect)
@@ -4100,6 +4107,16 @@ module Capybara
       # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of
       # one URL two responses — or nil where the URL resolves to none.
       def external_asset_response(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin')
+        request = asset_request(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials)
+        return request unless request.is_a?(AssetRequest)
+
+        asset_answer(request, asset_fetch(request))
+      end
+      # What an asset's request comes to before any fetch (`external_asset_response`): its answer from memory — the
+      # document's memo of it, else the process-wide cache's — nil where its URL resolves to none, or the request to fetch
+      # (`asset_fetch`), its client `pinned` where it is fetched off the main thread.
+      AssetRequest = Struct.new(:key, :memo, :memo_key, :shared_key, :client, :realm, :policy, :referrer, :dest, :mode, :credentials)
+      private def asset_request(url, document, realm, policy, referrer:, dest:, mode:, credentials:, pinned: false)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4138,23 +4155,33 @@ module Capybara
             @@asset_src.delete(shared_key)
           end
         end
-        # `durable_source` already does the spec-compliant fetch + header-driven
-        # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
-        # re-deriving `fresh_until` here.
-        Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
-        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, client: client)
-        meta = Thread.current[:csim_asset_meta]
+        client = pinned_client(client) if pinned
+        AssetRequest.new(key, memo, memo_key, shared_key, client, realm.to_i, policy, referrer, dest, mode, credentials)
+      end
+      # …its fetch, on whichever thread: `durable_source`'s spec-compliant fetch and header-driven freshness (RFC 9111
+      # max-age → absolute deadline), with what the fetch left of the response beside the body.
+      private def asset_fetch(request)
+        Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = Thread.current[:csim_asset_no_store] = nil
+        body, fresh_until = durable_source(request.key, request.realm, request.policy, referrer: request.referrer, dest: request.dest, mode: request.mode,
+                                                                                       credentials: request.credentials, client: request.client)
+        {body: body, fresh_until: fresh_until, meta: Thread.current[:csim_asset_meta], bytes: Thread.current[:csim_asset_bytes],
+         no_store: Thread.current[:csim_asset_no_store]}
+      end
+      # …and what it answers, kept by the memos it may be kept by — on the main thread, which alone writes them.
+      private def asset_answer(request, fetched)
+        meta = Thread.current[:csim_asset_meta] = fetched[:meta]
+        body = fetched[:body]
         return [nil, meta, nil] unless body
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
         # arrives BINARY-tagged (see `RuntimeShared.utf8_text`). (…its bytes kept beside it where the text is not them:
         # `rack_fetch_body`)
         text  = RuntimeShared.utf8_text(body)
-        bytes = Thread.current[:csim_asset_bytes] || (body.b if text.b != body.b)
-        memo[memo_key] = [text, meta, bytes] if memo && !Thread.current[:csim_asset_no_store]
-        if fresh_until
+        bytes = fetched[:bytes] || (body.b if text.b != body.b)
+        request.memo[request.memo_key] = [text, meta, bytes] if request.memo && !fetched[:no_store]
+        if fetched[:fresh_until]
           @@asset_src_lock.synchronize do
             @@asset_src.clear if @@asset_src.size >= ASSET_SRC_MAX
-            @@asset_src[shared_key] = [text, fresh_until, meta, bytes]
+            @@asset_src[request.shared_key] = [text, fetched[:fresh_until], meta, bytes]
           end
         end
         [text, meta, bytes]
@@ -8800,6 +8827,76 @@ module Capybara
       private def undecodable_image_result
         meta = Thread.current[:csim_image_meta]
         meta ? {'broken' => true, 'meta' => meta} : nil
+      end
+
+      # ── Script fetches ──────────────────────────────────────────────
+      #
+      # A classic script's fetch as "prepare the script element" begins it — an inserted script's, the parser's `async` and
+      # `defer` ones (subresource_obtain.rs `classic_script_begin`) — made when its task first asks how long its server took
+      # (`script_fetch_wait`): the network's answer to `url` as the engine's `plan` requests it for realm `realm`'s document,
+      # its client as it was prepared, or, its `document`'s (a parser's script, `docToken`), the asset cache's —
+      # `[text, facts, bytes]` (`external_asset_response`), answered at once where a memo has it, `referrer` the one it
+      # names of its own. The number of its slot, by which the engine takes its answer (`script_fetch_take`) as it lands —
+      # its server's time later, the virtual clock's to come to; nil for a URL that resolves to none.
+      # (…on this thread, in the event loop's order: what the server sees of it the page's tasks' order decides, never a
+      # thread's timing)
+      # (…the time its server took is its sleeps — `SleepHook` counts them in its `:csim_server_slept` rather than moving the
+      # clock — which the event loop lands it that far after it began by)
+      def script_fetch_start(url, realm, plan, document, referrer)
+        realm = realm.to_i
+        if document
+          mode, credentials, policy, dest = request_of_plan(plan)
+          request = asset_request(url, document, realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, dest: dest, mode: mode, credentials: credentials,
+                                                                pinned: true)
+          return request unless request.is_a?(AssetRequest)
+
+          work   = -> { asset_fetch(request) }
+          answer = ->(fetched) { asset_answer(request, fetched) }
+        else
+          mode, credentials, policy, dest, accept = request_of_plan(plan)
+          client = pinned_client(client_for(realm, policy))
+          work   = lambda {
+            rack_fetch('GET', url.to_s, '', {'Accept' => accept}, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer],
+                                                                                client_url: client[:url], dest: dest, client_origin: client[:origin], ancestors: client[:ancestors])
+          }
+          answer = nil
+        end
+        @script_fetches[@script_fetch_seq += 1] = {done: false, work: work, result: nil, slept: 0.0, answer: answer}
+        @script_fetch_seq
+      end
+      # How long, in virtual milliseconds, the server took over the fetch in slot `id` — its sleeps — the fetch made now
+      # where it is still to be: 0 for a slot gone (its session reset).
+      def script_fetch_wait(id)
+        slot = @script_fetches[id.to_i] or return 0.0
+        unless slot[:done]
+          slot[:done] = true
+          slept = [0.0]
+          outer = Thread.current.thread_variable_get(:csim_server_slept)
+          Thread.current.thread_variable_set(:csim_server_slept, slept)
+          begin
+            slot[:result] = slot[:work].call
+          rescue StandardError
+            slot[:result] = nil
+          ensure
+            Thread.current.thread_variable_set(:csim_server_slept, outer)
+            slot[:slept] = slept[0]
+          end
+        end
+        slot[:slept].to_f
+      end
+      # …and its answer, taken as it lands (the slot let go of): the network's response, or the asset cache's answer — kept
+      # by the memos it is kept by — nil for a network error.
+      def script_fetch_take(id)
+        script_fetch_wait(id)
+        slot = @script_fetches.delete(id.to_i) or return nil
+        return slot[:result] unless slot[:answer]
+
+        slot[:result] && slot[:answer].call(slot[:result])
+      end
+      # …or let go of, unanswered: its fetch cancelled (its document aborted), never made where it was still to be.
+      def script_fetch_forget(id)
+        @script_fetches.delete(id.to_i)
+        nil
       end
 
       def image_loads_pending?

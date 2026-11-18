@@ -1340,6 +1340,73 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # A script's fetch goes on in parallel with the event loop from the moment "prepare the script element" begins it — the
+    # parser's `async` and `defer` ones' at their end tags, an inserted one's as it is inserted (script_fetch.rs) — and lands
+    # as far after it began as its server took, the virtual time its sleeps came to: as the event loop puts it, whichever
+    # host thread finishes first, behind the tasks due with it, and, the parser's, as of its parse's beginning, as a preload
+    # scanner fetches them. Chrome 157 and Firefox 159, csim-bench r13 (page named), 2026-11-19.
+    {
+      # p_asyblk_50_0
+      'an `async` one a server takes its time over, before a parser-blocking one'  => [
+        %(<script async src="/slow/50/a.js"></script><script src="/slow/0/b.js"></script><script>L.push('inl')</script>),
+        'b.js-ran inl dcl a.js-ran load rs:complete'
+      ],
+      # p_blkasy_0_50
+      'an `async` one a server takes its time over, after a parser-blocking one'   => [
+        %(<script src="/slow/0/b.js"></script><script async src="/slow/50/a.js"></script><script>L.push('inl')</script>),
+        'b.js-ran inl dcl a.js-ran load rs:complete'
+      ],
+      # p_asydfr_50_0
+      'a deferred one after an `async` one a server takes its time over'           => [
+        %(<script async src="/slow/50/a.js"></script><script defer src="/slow/0/d.js"></script><script>L.push('inl')</script>),
+        'inl d.js-ran dcl a.js-ran load rs:complete'
+      ],
+      # p_dfrasy_50_0
+      'an `async` one after a deferred one a server takes its time over'           => [
+        %(<script defer src="/slow/50/d.js"></script><script async src="/slow/0/a.js"></script><script>L.push('inl')</script>),
+        'inl a.js-ran d.js-ran dcl load rs:complete'
+      ],
+      # v_dfr_two_t: "the end" spins until the deferred one has landed, a timer queued as it spins running first too
+      'deferred ones after a zero timer that sets a zero timer'                    => [
+        %(<script defer src="/slow/0/d1.js"></script><script defer src="/slow/0/d2.js"></script><script>setTimeout(() => { L.push('t0'); setTimeout(() => L.push('t00')); })</script><script>L.push('inl')</script>),
+        'inl t0 t00 d1.js-ran d2.js-ran dcl load rs:complete'
+      ],
+      # y_dynasync_false
+      'an `async` one after an inline one that inserted one'                       => [
+        %(<script>{ const s = document.createElement('script'); s.src = '/slow/0/dy.js'; s.async = false; document.head.append(s); }</script><script async src="/slow/0/a.js"></script><script>L.push('inl')</script>),
+        'inl dcl a.js-ran dy.js-ran load rs:complete'
+      ],
+      # p_dyn_inorder
+      'inserted ones of `async` false, the first a server takes its time over'     => [
+        "<script>#{format(INSERT, 60, 'o1', 's.async = false;')}#{format(INSERT, 0, 'o2', 's.async = false;')}#{format(INSERT, 0, 'fa', '')} L.push('ins')</script>",
+        'ins dcl fa.js-ran o1.js-ran o2.js-ran load rs:complete'
+      ]
+    }.each do |what, (markup, logged)|
+      it "lands a script's fetch as far after it began as its server took: #{what}" do
+        expect(page_log(markup)).to eq(logged)
+      end
+    end
+
+    # y_frame_flag2: …ahead of a frame's document, which the parse inserted before it.
+    it "lands an `async` script's fetch ahead of a frame's document inserted before it" do
+      child = "<script>document.addEventListener('DOMContentLoaded', () => top.L.push('cdcl')); addEventListener('load', () => top.L.push('cload'))</script>" \
+              '<script async src="/slow/0/ca.js"></script><script src="/slow/0/cb.js"></script>'
+      log = page_log(%(<iframe src="/c"></iframe><script async src="/slow/0/a.js"></script><script>L.push('inl')</script>), pages: {'/c' => child})
+      expect(log).to eq('inl dcl a.js-ran cb.js-ran ca.js-ran cdcl cload load rs:complete')
+    end
+
+    # z3_dyn_after: …inserted by a timer the load's task set — a `stop()` as its server takes its time cancels it, its `error`
+    # after.
+    it "cancels an inserted script's fetch a timer began as its server takes its time" do
+      log = page_log(<<~HTML, at: 700)
+        <script>onload = () => setTimeout(() => {
+          #{format(INSERT, 120, 'x', "s.onload = () => L.push('sl'); s.onerror = () => L.push('se');")}
+          setTimeout(() => { stop(); L.push('stopped'); }, 20);
+        }, 10)</script>
+      HTML
+      expect(log).to eq('dcl load stopped se rs:complete')
+    end
+
     # HTML "spin the event loop" as the parser waits on a fetch — a pending parsing-blocking script's, a style sheet's that
     # blocks a script, a deferred script's in "the end": the tasks queued before the wait run first, the response landing
     # behind them (Chrome and Firefox, csim-bench r13 `p_t0blk_0`, `q_t0css`, `q_dfrt0_0`, `p_t0dfr_0`, `r_t0write*`).

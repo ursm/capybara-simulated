@@ -1175,6 +1175,10 @@ pub(crate) struct RealmState {
     pub(crate) parser_waited: bool,
     pub(crate) parser_ahead: usize,
     pub(crate) parser_sources: std::collections::HashMap<NodeId, Vec<u16>>,
+    // The fetches of classic scripts its document's elements began (script_fetch.rs), and the places in the event loop's
+    // sequence its document's parse kept for their responses as it began (`parserBegins`).
+    pub(crate) script_fetches: crate::script_fetch::ScriptFetches,
+    pub(crate) speculative: Option<std::ops::Range<u64>>,
     // What its document's cascade was made of when last handed to its style engine (sheet_owners.rs `cascade_rekey`), and
     // the rule-set generation each shadow root's sheets were last handed it at (sheet_feed.rs `feed_shadows`).
     pub(crate) cascade_key: Option<crate::sheet_owners::CascadeKey>,
@@ -3358,6 +3362,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::details::install(scope, ns, context_id);
     crate::adopt::install(scope, ns, context_id);
     crate::script::install(scope, ns, context_id);
+    crate::script_fetch::install(scope, ns, context_id);
     crate::dialogs::install(scope, ns, context_id);
     crate::connection_steps::install(scope, ns, context_id);
     crate::text_selection::install(scope, ns, context_id);

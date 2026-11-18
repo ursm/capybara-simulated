@@ -90,18 +90,22 @@ pub(crate) struct Timers {
 // its own realm's task disposed its context in — a message it posted to itself does not, its document no longer fully
 // active (Chrome and Firefox: a frame posting to itself and removing itself hears nothing); or what goes on once a
 // response is in (`BEHIND`): a navigation's, an inserted script's fetch's.
+// (…code 4, `SPECULATIVE`, a response alike — a fetch the parser began as it scanned ahead of what it parsed: script_fetch.rs
+// — whose turn is the parse's, queued as it began: `timer_add`)
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Source {
     Turn,
     Network,
     Response,
 }
+const SPECULATIVE: i32 = 4;
+const SPECULATIVE_PLACES: u64 = 4096;
 impl Source {
     fn of(code: i32) -> Option<Source> {
         match code {
             1 => Some(Source::Turn),
             2 => Some(Source::Network),
-            3 => Some(Source::Response),
+            3 | SPECULATIVE => Some(Source::Response),
             _ => None,
         }
     }
@@ -148,6 +152,14 @@ pub(crate) struct EventLoop {
 }
 
 impl EventLoop {
+    // The places in its sequence a parse that begins now keeps for the responses its preload scanner's fetches will
+    // bring (`SPECULATIVE`), each after the tasks queued by now and before any queued from now on — as many as
+    // `SPECULATIVE_PLACES`, past which they are queued as any task is (script_fetch.rs `parserBegins`).
+    pub(crate) fn reserve_speculative(&mut self) -> std::ops::Range<u64> {
+        let from = self.seq + 1;
+        self.seq += SPECULATIVE_PLACES;
+        from..self.seq + 1
+    }
     // A realm's list, or the realms, changed: the task due first is to be found again.
     pub(crate) fn changed(&self) {
         self.first.set(None);
@@ -301,6 +313,13 @@ impl Timers {
 }
 
 impl RealmArena {
+    // The place in the event loop's sequence of a task realm `cid` queues now: the next, or, a response to a fetch its
+    // parser began as it scanned ahead (`speculative`), the next its parse kept for those as it began (script_fetch.rs
+    // `parserBegins`) — the next of all past them.
+    pub(crate) fn task_place(&mut self, cid: i32, speculative: bool) -> u64 {
+        let kept = if speculative { self.realm_state_mut(cid).and_then(|s| s.speculative.as_mut()).and_then(Iterator::next) } else { None };
+        kept.unwrap_or_else(|| self.event_loop.next_seq())
+    }
     // The mark of the tasks queued on the event loop now: the timers and platform tasks scheduled so far, of every realm
     // of the agent, and its clock (`queued_by`).
     pub(crate) fn task_mark(&self) -> (u64, f64) {
@@ -776,7 +795,10 @@ fn clock_followed(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 // of this clock by (agent_clock.rs `Read::lead`), which its timeout is counted from, and runs no earlier on its realm's
 // clock than its timeout after it was set (`Timer::not_early`). A platform task of a source the event loop treats apart
 // is kept as one (`source`: 1 a crossing queue's turn, which neither, 2 a request's, 3 a response's, `BEHIND` those due
-// with it — `Source`).
+// with it — `Source` — 4 a response to a fetch the parser began as it scanned ahead, behind them alike but in turn as of
+// the parse's beginning: Chrome and Firefox, whose preload scanners fetch a page's scripts as its bytes come, land an
+// `async` one ahead of a script its inline script inserted, csim-bench r13 `y_dynasync_false`, and ahead of a frame's
+// document the parse inserted before it, `y_frame_flag2` — script_fetch.rs `parserBegins`).
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
     let list = args.get(1);
@@ -784,7 +806,8 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let timeout = args.get(2).number_value(scope).unwrap_or(0.0);
     let repeats = args.get(3).is_true();
     let task = args.get(4).is_true();
-    let source = if task { args.get(6).int32_value(scope).and_then(Source::of) } else { None };
+    let code = if task { args.get(6).int32_value(scope).unwrap_or(0) } else { 0 };
+    let source = Source::of(code);
     let turn = match source {
         Some(Source::Response) => BEHIND,
         _ if task && args.get(5).is_true() => AHEAD,
@@ -818,7 +841,7 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     };
     // (…a realm that takes none answers with a key all the same, which names nothing)
     if takes {
-        let seq = arena.event_loop.next_seq();
+        let seq = arena.task_place(cid, code == SPECULATIVE);
         arena.event_loop.changed();
         let timers = &mut arena.enter(cid).timers;
         let nesting = if task { 0 } else { nesting + 1 };

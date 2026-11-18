@@ -14,6 +14,11 @@ struct Gate {
     delayed: bool,
     // Whether its work is a frame's build, none of its document's own fetches.
     frame: bool,
+    // …and whether, late, it delays the load all the same: a script's fetch whose server took time (script_fetch.rs),
+    // which "the end" waits for however long.
+    holds: bool,
+    // Its place in the event loop's sequence as it was made, its task's: what the flush runs them in the order of.
+    order: u64,
 }
 // (…taken, its work is under way until it ends: a server's `sleep` in a script's fetch runs the event loop inside it, whose
 // `load` must not come before it, HTML "the end" spinning until the set of scripts that will execute as soon as possible
@@ -35,6 +40,10 @@ impl LoadGates {
     // Whether a gate's work is under way (`loadGateEnd`).
     pub(crate) fn running(&self) -> bool {
         !self.running.is_empty()
+    }
+    // Whether a gate late on purpose delays the load still (`Gate::holds`).
+    pub(crate) fn holding(&self) -> bool {
+        self.gates.iter().any(|g| g.holds)
     }
     // Whether a fetch of the document's own is waiting on a gate, or one's work is under way: not a frame's.
     pub(crate) fn own_fetches(&self) -> bool {
@@ -59,17 +68,22 @@ fn gates_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut
     realm(scope, cid).realm_state_mut(cid).map(|s| &mut s.load_gates)
 }
 
-// __dom.loadGate(el, delayed) -> the number of a new gate of the calling realm's document for the element `el` (null for
-// none), `delayed` one late on purpose.
+// __dom.loadGate(el, delayed, holds, speculative) -> the number of a new gate of the calling realm's document for the
+// element `el` (null for none), `delayed` one late on purpose — that the load waits for all the same, `holds` — its place
+// in the event loop's sequence a speculative fetch's (`speculative`: timers.rs `SPECULATIVE`).
 fn load_gate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let el = crate::node_handle::nid_of(scope, args.get(0));
     let delayed = args.get(1).is_true();
+    let holds = delayed && args.get(2).is_true();
+    let speculative = args.get(3).is_true();
     let cid = realm_id(scope, &args);
-    let frame = el.and_then(|el| realm(scope, cid).get(el)).is_some_and(|n| n.is_html_named("iframe") || n.is_html_named("frame"));
+    let arena = realm(scope, cid);
+    let frame = el.and_then(|el| arena.get(el)).is_some_and(|n| n.is_html_named("iframe") || n.is_html_named("frame"));
+    let order = arena.task_place(cid, speculative);
     let Some(gates) = gates_of(scope, cid) else { return rv.set_uint32(0) };
     gates.next += 1;
     let id = gates.next;
-    gates.gates.push(Gate { id, el, delayed, frame });
+    gates.gates.push(Gate { id, el, delayed, frame, holds, order });
     rv.set_uint32(id);
 }
 
@@ -94,8 +108,8 @@ fn load_gate_end_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     }
 }
 
-// __dom.flushLoadGates(run) — the gates of the calling realm's document run, `run(id)` each, as its load is about to
-// fire: those of THIS document's elements alone — an element a script built inside another document (a
+// __dom.flushLoadGates(run) — the gates of the calling realm's document run, `run(id)` each, in the order their tasks would
+// run in, as its load is about to fire: those of THIS document's elements alone — an element a script built inside another document (a
 // `createHTMLDocument` context, a DOMParser result) has its own load to wait for, and forcing its work here reached a
 // frame a browser has not built yet — and none late on purpose; round after round while running some queued more.
 // Deliberately NO microtask checkpoint between them: a subresource's own `load` event is dispatched from one, so
@@ -109,10 +123,13 @@ fn flush_load_gates_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 pub(crate) fn flush(scope: &mut v8::PinScope<'_, '_>, cid: i32, run: v8::Local<'_, v8::Function>) {
     let document = realm(scope, cid).realm_document(cid);
     for _ in 0..FLUSH_ROUNDS {
-        let candidates: Vec<(u32, Option<NodeId>)> = match gates_of(scope, cid) {
-            Some(g) => g.gates.iter().filter(|g| !g.delayed).map(|g| (g.id, g.el)).collect(),
+        // (…in the order their tasks would have run in: a speculative fetch's ahead of what the parse queued meanwhile)
+        let mut candidates: Vec<(u64, u32, Option<NodeId>)> = match gates_of(scope, cid) {
+            Some(g) => g.gates.iter().filter(|g| !g.delayed).map(|g| (g.order, g.id, g.el)).collect(),
             None => return,
         };
+        candidates.sort_unstable_by_key(|&(order, id, _)| (order, id));
+        let candidates = candidates.into_iter().map(|(_, id, el)| (id, el));
         let due: Vec<u32> = candidates.into_iter().filter(|&(_, el)| el.is_none_or(|el| node_document(scope, el) == document)).map(|(id, _)| id).collect();
         if due.is_empty() {
             break;

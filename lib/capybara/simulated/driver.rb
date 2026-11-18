@@ -24,6 +24,12 @@ module Capybara
       def sleep(seconds = nil)
         return super if seconds.nil?
         n = super
+        # (…inside a fetch whose server's time is counted, whatever its length — a script's, which lands that far after it
+        # began by: Browser#script_fetch_wait)
+        if (slept = Thread.current.thread_variable_get(:csim_server_slept))
+          slept[0] += seconds.to_f * 1000
+          return n
+        end
         if seconds.to_f >= Capybara::Simulated::USER_SLEEP_THRESHOLD_S
           # Broadcast to every Driver constructed on the current
           # thread. Background threads (`MessageBus::TimerThread`,

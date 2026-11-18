@@ -67873,7 +67873,6 @@ html/webappapis/dynamic-markup-insertion/document-write/module-tla-import.html:
 html/webappapis/dynamic-markup-insertion/document-write/mutation-observer.html:
 - Mutation observer for async script element
 - Mutation observer for classic script element
-- Mutation observer for defer script element
 html/webappapis/dynamic-markup-insertion/document-write/write-active-document.html:
 - document.write only writes to active documents
 html/webappapis/dynamic-markup-insertion/html-unsafe-methods/setHTMLUnsafe-runScripts.html:

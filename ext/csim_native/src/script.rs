@@ -190,21 +190,27 @@ impl RealmArena {
     // runs nothing (`listParserScript`): one connected then goes on the list of scripts to execute after parsing — where
     // "the end" finds it, whatever an earlier script did to it since (HTML §13.2.7: the lists are kept, not the tree
     // walked again), an inline one with the source text it has now — and one in a subtree a script removed does not;
-    // one preparing returns from before it is "already started" is left preparable (`leave_preparable`).
-    pub(crate) fn list_parser_script(&mut self, cid: i32, id: NodeId) {
-        let Some(n) = self.get_mut_quietly(id) else { return };
+    // one preparing returns from before it is "already started" is left preparable (`leave_preparable`). Whether it is
+    // a classic script whose preparation fetches its `src` now — "prepare the script element" step 26: an external one,
+    // not `nomodule`, `scripting` enabled for it — the fetch the bindings begin (script_fetch.rs).
+    pub(crate) fn list_parser_script(&mut self, cid: i32, id: NodeId, scripting: bool) -> bool {
+        let Some(n) = self.get_mut_quietly(id) else { return false };
         n.script_flags |= SCRIPT_END_TAG;
         if n.script_flags & SCRIPT_RUN != 0 {
-            return;
+            return false;
         }
         if !self.ready_to_start(id, BY_PARSER) {
-            return self.leave_preparable(id);
+            self.leave_preparable(id);
+            return false;
         }
-        let Some(n) = self.get(id) else { return };
-        if !matches!(script_type(n), CLASSIC | MODULE) {
-            return;
+        let Some(n) = self.get(id) else { return false };
+        let ty = script_type(n);
+        if !matches!(ty, CLASSIC | MODULE) {
+            return false;
         }
         let inline = n.plain_attr("src").is_none();
+        let fetches = ty == CLASSIC && n.plain_attr("src").is_some_and(|src| !src.is_empty()) && n.plain_attr("nomodule").is_none()
+            && scripting && !self.scripts_sandboxed(n.realm);
         let text = inline.then(|| self.child_text(id));
         if let Some(state) = self.realm_state_mut(cid) {
             state.parser_list.push(id);
@@ -212,6 +218,7 @@ impl RealmArena {
                 state.parser_sources.insert(id, text);
             }
         }
+        fetches
     }
     // The scripts of `root`'s tree (not a shadow tree's, nor a template's contents) its parser inserted and no end tag
     // decided — none of a parse that stopped at each (HTML's), every one of one that stopped at none (the XML parser's),
@@ -654,11 +661,13 @@ fn parser_scripts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(crate::dom::nodes_value(scope, cid, &found));
 }
 
-// __dom.listParserScript(nid) — the parser at the script's end tag, a deferred, async or module one (`list_parser_script`).
-fn list_parser_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
+// __dom.listParserScript(nid, scripting) -> the parser at the script's end tag, a deferred, async or module one
+// (`list_parser_script`): whether its fetch begins now.
+fn list_parser_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let scripting = args.get(1).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    crate::dom::realm(scope, cid).list_parser_script(cid, id);
+    rv.set_bool(crate::dom::realm(scope, cid).list_parser_script(cid, id, scripting));
 }
 
 // __dom.takeParserSource(nid) -> the source text a listed inline script had at its end tag, or null for none — taken.
@@ -685,33 +694,48 @@ fn take_parser_next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set(crate::dom::node_value(scope, Some(next)));
 }
 // What of the `async` external scripts its end tags listed — the realm's parser's "set of scripts that will execute as soon
-// as possible" — `takeParserAsync(which)` takes: every one (`ASYNC_ALL`); every one where its parser has waited on a fetch,
-// none where it has not (`ASYNC_WAITED`: `parserWaits`); those listed before the script `takeParserNext` last took
-// (`ASYNC_AHEAD`). Its fetch takes no time here unless its server's does, so an async one's landing is when the fetches the
-// parser waits on land: with the first, every one of the document's — as a browser's parser waiting has fetched ahead
-// (Chrome and Firefox: one listed after a parser-blocking script still runs before DOMContentLoaded, csim-bench rvfn
-// `y_after_block`); a deferred script's, those whose fetches began before its own, the response it waits on landing first
-// among those due with it (both: `inl d.js dcl a.js` for a deferred then an async one, r13 `p_dfrasy_0_0`) — or every one
-// where its server took time (`ASYNC_ALL` then: `inl a.js d.js dcl`, r13 `q_dfrasy_150_0`).
+// as possible" — `takeParserAsync(which, host)` takes: every one (`ASYNC_ALL`); where its parser has waited on a fetch, every
+// one whose fetch has landed by now (`ASYNC_WAITED`: `parserWaits`, script_fetch.rs `due_now`), none where it has not;
+// those listed before the script `takeParserNext` last took (`ASYNC_AHEAD`). A fetch takes no time here unless its server's
+// does, so with the parser's first wait every one of the document's has landed whose server took none — as a browser's
+// parser waiting has fetched ahead (Chrome and Firefox: one listed after a parser-blocking script still runs before
+// DOMContentLoaded, csim-bench rvfn `y_after_block`) — and one whose server took time lands as its task comes, after
+// DOMContentLoaded where that is later (both: `b inl dcl a`, r13 `q_asyblk_150_0`, `p_asyblk_50_0`). A deferred
+// module's fetch, its graph's fetched as it runs, lands those listed before it, the response it waits on landing first
+// among those due with it (r13 `y_module_defer_async`).
 const ASYNC_ALL: u32 = 0;
 const ASYNC_WAITED: u32 = 1;
 const ASYNC_AHEAD: u32 = 2;
 fn take_parser_async_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let which = args.get(0).uint32_value(scope).unwrap_or(ASYNC_ALL);
+    let host = v8::Local::<v8::Function>::try_from(args.get(1)).ok();
     let arena = crate::dom::realm(scope, cid);
-    let mut taken = Vec::new();
-    if let Some(state) = arena.realm_state(cid).filter(|state| which != ASYNC_WAITED || state.parser_waited) {
-        let ahead = if which == ASYNC_AHEAD { state.parser_ahead } else { state.parser_list.len() };
-        let listed = state.parser_list.clone();
-        let mut left = Vec::with_capacity(listed.len());
-        for (at, id) in listed.into_iter().enumerate() {
-            if at < ahead && listed_async(arena, id) { taken.push(id) } else { left.push(id) }
+    let Some(state) = arena.realm_state(cid).filter(|state| which != ASYNC_WAITED || state.parser_waited) else { return rv.set(v8::Array::new(scope, 0).into()) };
+    let ahead = if which == ASYNC_AHEAD { state.parser_ahead } else { state.parser_list.len() };
+    let listed = state.parser_list.clone();
+    let mut candidates = Vec::new();
+    for (at, &id) in listed.iter().enumerate() {
+        if at < ahead && listed_async(arena, id) {
+            candidates.push(id);
         }
-        if let Some(state) = arena.realm_state_mut(cid) {
-            state.parser_list = left;
-            state.parser_ahead = 0;
+    }
+    let mut taken = Vec::with_capacity(candidates.len());
+    for id in candidates {
+        let landed = match (which, host) {
+            (ASYNC_WAITED, Some(host)) => match crate::script_fetch::due_now(scope, cid, id, host) {
+                Ok(landed) => landed,
+                Err(_) => return,
+            },
+            _ => true,
+        };
+        if landed {
+            taken.push(id);
         }
+    }
+    if let Some(state) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
+        state.parser_list.retain(|id| !taken.contains(id));
+        state.parser_ahead = 0;
     }
     rv.set(crate::dom::nodes_value(scope, cid, &taken));
 }
