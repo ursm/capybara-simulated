@@ -2541,7 +2541,12 @@ module Capybara
       private def unload_traversed_frames(navs, realms)
         navs.each {|nav| realms[nav] = navigable_realm(nav) }
         urls  = navs.to_h {|nav| [nav, realms[nav] && frame_realm_url(realms[nav])] }
-        asked = navs.map {|nav| (realm = realms[nav]) && prompt_to_unload_frame(realm, traversal: true) }
+        shown = false
+        asked = navs.map {|nav|
+          next unless (realm = realms[nav])
+
+          prompt_to_unload_frame(realm, traversal: true, shown: shown).tap {|ok| shown ||= %i[shown canceled].include?(ok) }
+        }
         return false if asked.include?(:canceled)
 
         asked.map!.with_index {|ok, i| ok && @runtime.frame_realm_alive?(realms[navs[i]]) }
@@ -12480,12 +12485,15 @@ module Capybara
       # removed the frame, the navigation then going no further, or where the user declined the prompt a handler asked for
       # (`handle_modal`) — a traversal's :canceled then, which stops every navigable it moves (`unload_traversed_frames`).
       # (…none a second time of one a traversal asked as it applied its step: `unload_traversed_frames`)
-      def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id), traversal: false)
+      # (…a traversal's, over several frames, one check — HTML "check if unloading is canceled" for all the documents its
+      # step unloads: the user asked once — `shown` where an earlier frame's asked, :shown answered where this one's did)
+      def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id), traversal: false, shown: false)
         return true if traversed_frame(realm_id) {|history, nav| history.take_prompted(nav) }
 
-        case frame_realm_host_call(parent, 'promptToUnloadFrame', realm_id, traversal)
+        case frame_realm_host_call(parent, 'promptToUnloadFrame', realm_id, traversal, shown)
         when false then false
         when 'canceled' then traversal ? :canceled : false
+        when 'shown' then traversal ? :shown : true
         else true
         end
       end

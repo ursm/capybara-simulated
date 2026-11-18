@@ -9,9 +9,15 @@ require_relative 'support/session_teardown'
 # Chrome 157, measured 2026-11-19 (Playwright, a click on the page first): `history.back()` and the browser's back both
 # prompt; accepted, the traversal goes on; dismissed, the page stays. With no activation no prompt is shown.
 RSpec.describe 'a traversal and beforeunload' do
+  TRAVERSAL_BEFOREUNLOAD_FRAMES = {
+    '/two' => '<button id=touch>touch</button><iframe id=f1 src="/ia"></iframe><iframe id=f2 src="/ia"></iframe>',
+    '/ia'  => '<p>ia</p><script>addEventListener("beforeunload", (e) => { e.preventDefault(); top.count++; })</script>',
+    '/ib'  => '<p>ib</p><script>addEventListener("beforeunload", (e) => { e.preventDefault(); top.count++; })</script>'
+  }.freeze
+
   let(:session) {
     simulated_session(lambda {|env|
-      body = env['PATH_INFO'] == '/b' ? <<~HTML : env['PATH_INFO']
+      body = TRAVERSAL_BEFOREUNLOAD_FRAMES[env['PATH_INFO']] || (env['PATH_INFO'] == '/b' ? <<~HTML : env['PATH_INFO'])
         <button id=back onclick="history.back()">back</button><button id=touch>touch</button>
         <iframe src="/inner"></iframe>
         <script>addEventListener('beforeunload', (e) => { e.preventDefault(); window.asked = (window.asked || 0) + 1; });</script>
@@ -80,5 +86,21 @@ RSpec.describe 'a traversal and beforeunload' do
       expect(session).to have_no_button('back')
       expect(session.current_path).to eq('/a')
     end
+  end
+
+  # …one check over every document the step unloads, its frames' each: the user asked once (HTML "check if unloading
+  # is canceled", `unloadPromptShown`), every one's `beforeunload` fired.
+  it 'asks the user once for all the frames a traversal moves' do
+    modals = []
+    session.visit('/two')
+    session.execute_script("document.getElementById('f1').src = '/ib'; document.getElementById('f2').src = '/ib'")
+    expect(session.evaluate_script("[f1.contentWindow.location.pathname, f2.contentWindow.location.pathname]")).to eq(%w[/ib /ib])
+    session.click_button('touch')
+    session.execute_script('top.count = 0')
+    browser = session.driver.browser
+    browser.define_singleton_method(:handle_modal) {|type, *rest| modals << type; super(type, *rest) }
+    session.dismiss_confirm { session.execute_script('history.go(-2)') }
+    expect(modals).to eq(['beforeunload'])
+    expect(session.evaluate_script('[top.count, f1.contentWindow.location.pathname, f2.contentWindow.location.pathname]')).to eq([2, '/ib', '/ib'])
   end
 end
