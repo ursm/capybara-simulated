@@ -1563,10 +1563,11 @@ function legacyKind(def, options) {
     steps.push('get_length');
     // (…a supported index one below `length`: a getter whose type is nullable answers null past it, any other is asked
     // nothing there)
+    // (…each step the implementation's own function where it is the step, called with no `this`)
     entries.push(indexedGetter.m.idlType.nullable
-      ? `item: (o, i) => impl.${item}(o, i)`
+      ? `item: impl.${item}`
       : `item: (o, i) => (i < impl.get_length(o) ? impl.${item}(o, i) : null)`);
-    entries.push('length: (o) => impl.get_length(o)');
+    entries.push('length: impl.get_length');
     const setter = specials['indexed setter'];
     if (setter) {
       const v = conversion(setter.m.arguments[1].idlType, 'v', { iface: name, special: 'indexed' }, checks);
@@ -1577,9 +1578,9 @@ function legacyKind(def, options) {
     // (…asked first whether the name is supported where the getter answers others too — `isSupportedName(o, name)`:
     // NamedNodeMap's getNamedItem, which finds `foo` by `FOO` in an HTML document, no name of its own)
     const getter = step('named getter');
-    entries.push(`named: impl.isSupportedName === undefined ? (o, name) => impl.${getter}(o, name) : (o, name) => (impl.isSupportedName(o, name) ? impl.${getter}(o, name) : null)`);
+    entries.push(`named: impl.isSupportedName === undefined ? impl.${getter} : (o, name) => (impl.isSupportedName(o, name) ? impl.${getter}(o, name) : null)`);
     steps.push('supportedNames');
-    entries.push('names: (o) => impl.supportedNames(o)');
+    entries.push('names: impl.supportedNames');
     const setter = specials['named setter'], deleter = specials['named deleter'];
     if (setter) {
       const v = conversion(setter.m.arguments[1].idlType, 'v', { iface: name, special: 'named' }, checks);
