@@ -1514,6 +1514,17 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # s4_stopwait: a timer the event loop ran as a style sheet's server took its time during the parse — a task of its own,
+    # whatever parse it ran beneath — stops the page and inserts a script, which runs (Chrome and Firefox `stopped …
+    # i.js-ran i:l`).
+    it 'runs a script a task inserted as a style sheet held up the parse' do
+      log = page_log(<<~HTML, at: 600)
+        <script>setTimeout(() => { stop(); L.push('stopped'); const s = document.createElement('script'); s.src = '/slow/0/i.js'; s.onload = () => L.push('i:l'); document.head.append(s); }, 50)</script>
+        <link rel="stylesheet" href="/slow/300/x.css">
+      HTML
+      expect(log).to include('stopped i.js-ran i:l')
+    end
+
     # ca4: …but not for one that came to block after it was prepared — Chrome runs the script first, Firefox after the sheet;
     # the spec's text holds it back for none.
     it 'runs an `async` script ahead of a style sheet that came to block scripts after it was prepared' do
