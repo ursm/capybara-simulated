@@ -58,6 +58,7 @@ Gem::Specification.new do |spec|
   # wrappers call into the native source of their own release, and another's may name a method this one
   # lacks. (0.2.6: `Context#function`, and a host argument's elements and entries defined, through no setter a
   # page put on `Array.prototype` / `Object.prototype`; 0.2.7: a Ruby fiber's stack bounds looked up once per stack,
-  # not by reading /proc/self/maps for each new fiber.)
-  spec.add_dependency 'rusty_racer', '0.2.7'
+  # not by reading /proc/self/maps for each new fiber; 0.2.8: a host object per realm, which `@` paths start from and
+  # no script of a page's can reach.)
+  spec.add_dependency 'rusty_racer', '0.2.8'
 end

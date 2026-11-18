@@ -2288,8 +2288,8 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rusty_racer"
-version = "0.2.7"
-source = "git+https://github.com/ursm/rusty_racer?tag=v0.2.7#e96c77781406a490831b2a2ed8421a798418f200"
+version = "0.2.8"
+source = "git+https://github.com/ursm/rusty_racer?tag=v0.2.8#da80d5d6c2cb29aa46580a974dc2fc1ca1df8260"
 dependencies = [
  "libc",
  "magnus",
