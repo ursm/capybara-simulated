@@ -1324,7 +1324,8 @@ RSpec.describe 'a frame navigation as tasks' do
       'two of them'                           => ['<script async src="/slow/0/a.js"></script><script async src="/slow/0/b.js"></script>', 'dcl a.js-ran b.js-ran load rs:complete'],
       'an inline script after it'             => ["<script async src=\"/slow/0/s.js\"></script><script>L.push('inl')</script>", 'inl dcl s.js-ran load rs:complete'],
       'a parser-blocking script after it'     => ['<script async src="/slow/0/a.js"></script><script src="/slow/0/b.js"></script>', 'b.js-ran a.js-ran dcl load rs:complete'],
-      'a parser-blocking script, a slow one'  => ['<script async src="/slow/0/a.js"></script><script src="/slow/50/b.js"></script>', 'b.js-ran a.js-ran dcl load rs:complete'],
+      # (…one whose server takes its time lands as it waits, Chrome's place — Firefox's `b.js a.js`: r13 `p_asyblk_0_50`)
+      'a parser-blocking script, a slow one'  => ['<script async src="/slow/0/a.js"></script><script src="/slow/50/b.js"></script>', 'a.js-ran b.js-ran dcl load rs:complete'],
       'a deferred script after it'            => ['<script async src="/slow/0/a.js"></script><script defer src="/slow/50/d.js"></script>', 'a.js-ran d.js-ran dcl load rs:complete'],
       'a sheet that blocks a script'          => [
         "<script async src=\"/slow/0/a.js\"></script><link rel=\"stylesheet\" href=\"/slow/0/s.css\"><script>L.push('inl')</script><script async src=\"/slow/0/b.js\"></script>",
@@ -1419,6 +1420,20 @@ RSpec.describe 'a frame navigation as tasks' do
     }.each do |what, (markup, logged)|
       it "lands a script's fetch as far after it began as its server took: #{what}" do
         expect(page_log(markup)).to eq(logged)
+      end
+    end
+
+    # A frame's navigation's response in as far after its fetch began as its server took, as a script's lands: a timer due
+    # meanwhile, a script that lands meanwhile, run before the frame's document (Chrome and Firefox, csim-bench r13 `rv_tf`,
+    # `rv_af`, `rv_abf`, `rv_insf60`); a parser-blocking script's response in ahead of an `async` one that lands with it.
+    {
+      'a timer'                                  => ['<script>setTimeout(() => L.push("t30"), 30)</script><iframe src="/slow/60/f.html"></iframe>', 'dcl t30 sf-script sf-load load rs:complete'],
+      'an `async` script'                        => ['<script async src="/slow/30/a1.js"></script><iframe src="/slow/30/f.html"></iframe>', 'dcl a1.js-ran sf-script sf-load load rs:complete'],
+      'an `async` and a parser-blocking script'  => ['<script async src="/slow/30/a1.js"></script><script src="/slow/30/b1.js"></script><iframe src="/slow/30/f.html"></iframe>', 'b1.js-ran a1.js-ran dcl sf-script sf-load load rs:complete'],
+      'an inserted script'                       => ["<script>#{format(INSERT, 30, 'x', '')}</script><iframe src=\"/slow/60/f.html\"></iframe>", 'dcl x.js-ran sf-script sf-load load rs:complete']
+    }.each do |what, (markup, logged)|
+      it "runs #{what} due as a frame's server takes its time before the frame's document" do
+        expect(page_log(markup, at: 600)).to eq(logged)
       end
     end
 

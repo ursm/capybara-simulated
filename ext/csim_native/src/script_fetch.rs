@@ -61,13 +61,26 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // __dom.parserBegins() — the calling realm's document's parser begins: the fetches it begins as it scans ahead of what it
 // parses — a browser's preload scanner, which fetches a page's scripts as its bytes come, before any of its scripts runs
-// — land in turn as of now (timers.rs `SPECULATIVE`), ahead of what its scripts queue as the parse goes on.
+// — land in turn as of now (timers.rs `SPECULATIVE`), ahead of what its scripts queue as the parse goes on, and as far
+// after now as their servers took: begun now, whatever the parser waits on before it reaches their end tags (Chrome and
+// Firefox: a deferred script after a parser-blocking one lands with it where their servers take as long, csim-bench r13
+// `e_mix6`).
 fn parser_begins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     let places = arena.event_loop.reserve_speculative();
+    let clock = arena.event_loop.clock;
     if let Some(state) = arena.realm_state_mut(cid) {
         state.speculative = Some(places);
+        state.parse_began_at = clock;
+    }
+}
+// When a fetch the realm `cid` begins now began: the parser's as its parse did (`parserBegins`), any other now.
+fn began_at(arena: &mut crate::dom::RealmArena, cid: i32, parser: bool) -> f64 {
+    let now = arena.event_loop.clock;
+    match arena.realm_state(cid) {
+        Some(state) if parser && state.speculative.is_some() => state.parse_began_at.min(now),
+        _ => now,
     }
 }
 
@@ -90,7 +103,7 @@ fn begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let Some(request) = classic_request(scope, &args) else { return rv.set_uint32(0) };
     let cid = realm_id(scope, &args);
     let el = request.el;
-    let began = realm(scope, cid).event_loop.clock;
+    let began = began_at(realm(scope, cid), cid, args.get(3).is_true());
     let Ok(fetch) = classic_script_begin(scope, cid, host, request, true) else { return rv.set_uint32(0) };
     rv.set_uint32(file(scope, cid, el, began, Fetch::Classic(fetch)));
 }
@@ -102,7 +115,7 @@ fn file(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, began: f64, fetc
     id
 }
 
-// __dom.scriptFetchBeginModule(el, url, host, plan) -> the number of the fetch of the module script `el`'s graph's entry
+// __dom.scriptFetchBeginModule(el, url, host, plan, parser) -> the number of the fetch of the module script `el`'s graph's entry
 // `url` (resolved), its request the engine's `plan` of it — a CORS one — begun through the asset cache (browser.rb
 // `script_fetch_start`), which keeps its answer for the graph's fetch of it as the script runs; 0 where none began.
 // (…none of a document a service worker controls: its graph's fetches are the worker's, as it runs)
@@ -114,7 +127,7 @@ fn begin_module_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     }
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
-    let (began, client) = (arena.event_loop.clock, arena.get(el).map(|n| n.realm));
+    let (began, client) = (began_at(arena, cid, args.get(4).is_true()), arena.get(el).map(|n| n.realm));
     let client = match client {
         Some(realm) => v8::Integer::new(scope, realm).into(),
         None => v8::undefined(scope).into(),
@@ -153,7 +166,8 @@ pub(crate) fn due_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: 
             d
         }
     };
-    let due = (f.began + delay - realm(scope, cid).event_loop.clock).max(0.0);
+    // (…none left of it within a nanosecond: the clock a server's time moved on to in steps, Browser#server_slept_ms)
+    let due = Some(f.began + delay - realm(scope, cid).event_loop.clock).filter(|due| *due > 1e-6).unwrap_or(0.0);
     put_back(scope, cid, f);
     Ok(Some(due))
 }

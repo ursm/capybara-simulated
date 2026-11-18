@@ -27,26 +27,25 @@ module Capybara
         # (…inside a fetch whose server's time is counted, whatever its length — a script's, which lands that far after it
         # began by: Browser#script_fetch_wait)
         if (slept = Thread.current.thread_variable_get(:csim_server_slept))
-          slept[0] += seconds.to_f * 1000
+          slept[0] += (seconds.to_f * 1000).round(3)
           return n
         end
-        if seconds.to_f >= Capybara::Simulated::USER_SLEEP_THRESHOLD_S
-          # Broadcast to every Driver constructed on the current
-          # thread. Background threads (`MessageBus::TimerThread`,
-          # etc.) sleep too, but their Drivers — if any — were
-          # registered under a different thread, so they skip; the
-          # filter is load-bearing because rusty_racer VMs aren't
-          # thread-safe. An idle Driver's clock moves all the same — the
-          # time slept passes for its page's `Date` — a step with nothing
-          # due, so the broadcast is cheap.
-          # (…the app's own, called on this thread in the middle of a fetch of that driver's, no test's pacing:
-          # Browser#server_slept_ms; to another session's it is any time passing)
-          ms = (seconds.to_f * 1000).to_i
+        # Broadcast to every Driver constructed on the current thread. Background threads (`MessageBus::TimerThread`, etc.)
+        # sleep too, but their Drivers — if any — were registered under a different thread, so they skip; the filter is
+        # load-bearing because rusty_racer VMs aren't thread-safe. An idle Driver's clock moves all the same — the time
+        # slept passes for its page's `Date` — a step with nothing due, so the broadcast is cheap.
+        # (…the app's own, called on this thread in the middle of a fetch of that driver's, whatever its length — the server's
+        # time, which a fetch on a thread of its own counts the same: Browser#server_slept_ms; to another session's, and a
+        # test's own above the threshold, any time passing)
+        # (…to the microsecond, as the thread's count is: `sleep(0.03)` is 30 ms on both)
+        ms = (seconds.to_f * 1000).round(3)
+        pacing = seconds.to_f >= Capybara::Simulated::USER_SLEEP_THRESHOLD_S
+        if ms.positive?
           Capybara::Simulated::Driver.each_live_on_thread(Thread.current) {|d|
             if Capybara::Simulated::Browser.in_app_call?(d)
               d.browser.server_slept_ms(ms)
-            else
-              d.browser.advance_virtual_clock_ms(ms)
+            elsif pacing
+              d.browser.advance_virtual_clock_ms(ms.to_i)
             end
           }
         end

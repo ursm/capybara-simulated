@@ -3528,10 +3528,28 @@ module Capybara
       # navigation under way, ended by one begun since, makes none: `navigate_top_level`) — and no task at all runs under a
       # script of the page's, as a fetch it made run-to-completion holds (an inserted script's, a synchronous XHR's: Chrome and
       # Firefox `after` before the timer it set before them).
+      # (…its response in at the end of it, ahead of the others that come in at that instant — a script's fetch's landing
+      # (script_fetch.rs): the tasks due before it run, and the clock moved on to it with none of those due then: Chrome and
+      # Firefox run a parser-blocking script before an `async` one whose server took as long, csim-bench r13 `rv_abf`)
+      # (…its last millisecond the clock's alone, the loop stepping whole ones: V8Runtime#run_loop_step)
+      SERVER_TIE_MS = 1
       def server_slept_ms(ms)
-        return unless ms.positive? && !@runtime.call('scriptOnStack')
+        return unless ms.positive? && !@ticking && !@runtime.call('scriptOnStack')
 
-        tick_real_time(step_ms: ms, drain: false)
+        tick_real_time(step_ms: ms - SERVER_TIE_MS, drain: false) if ms > SERVER_TIE_MS
+        @runtime.call('clockOn', [ms, SERVER_TIE_MS].min)
+      end
+      # A request the app answers on this thread inside the block, its server's sleeps counted rather than run on the event
+      # loop (`SleepHook`'s thread variable): its answer, a Hash, with how long they came to, `'slept'` (none for none) — a
+      # frame navigation's whose build waits for that much virtual time as a script's fetch lands (frame_response.rs).
+      def server_timed
+        outer = Thread.current.thread_variable_get(:csim_server_slept)
+        slept = [0.0]
+        Thread.current.thread_variable_set(:csim_server_slept, slept)
+        result = yield
+        result.is_a?(Hash) && slept[0].positive? ? result.merge('slept' => slept[0]) : result
+      ensure
+        Thread.current.thread_variable_set(:csim_server_slept, outer)
       end
       # Whether the app is answering a request of `driver`'s session on this thread — its body read too, which an app streams
       # as it goes (`in_app_call`). A thread's, not a fiber's: an app's sleep in a fiber of its own is the app's all the same.

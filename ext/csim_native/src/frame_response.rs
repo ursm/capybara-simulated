@@ -18,6 +18,9 @@ use crate::subresource_obtain::{call, now, text, text_or_null, H_FILE, H_FRAME_N
 const FRAME_BUILD: u32 = 0;
 const FRAME_DEFERRED: u32 = 1;
 const FRAME_KEPT: u32 = 2;
+// …or none yet, its response held until the event loop comes to the time its server took over it — `[FRAME_LATER, ms]`
+// — as a script's fetch lands (script_fetch.rs): a commit's build alone (`defer`), whose task comes again then.
+const FRAME_LATER: u32 = 3;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "frameResponse", frame_response_op, context_id);
@@ -46,13 +49,14 @@ fn frame_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
         .and_then(|d| crate::node_handle::nid_of(scope, d.into()));
     let initial = args.get(2).is_true();
+    let defer = args.get(3).is_true() && !initial;
     let cid = realm_id(scope, &args);
     // (…none past the nesting limit, nothing fetched for it: navigables.rs `MAX_FRAME_DEPTH`)
     if realm(scope, cid).realm_tree(cid).1 >= crate::navigables::MAX_FRAME_DEPTH {
         let code = v8::Integer::new_from_unsigned(scope, FRAME_KEPT).into();
         return rv.set(v8::Array::new_with_elements(scope, &[code]).into());
     }
-    if let Ok(answer) = frame_response(scope, host, cid, container, doc, initial) {
+    if let Ok(answer) = frame_response(scope, host, cid, container, doc, initial, defer) {
         rv.set(answer);
     }
 }
@@ -72,16 +76,23 @@ struct Response<'s> {
     // (…a network error's: no response, its document an error document of a new opaque origin — HTML "create a document
     // for inline content", as a top-level one's is — and a PDF's, its viewer's document made by those steps too)
     error: bool,
+    // (…how long after now the response is in, `FRAME_LATER`'s)
+    later: f64,
 }
 
-fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Function>, cid: i32, container: NodeId, doc: Option<NodeId>, initial: bool) -> Result<v8::Local<'s, v8::Value>, Terminated> {
-    let code = |scope: &mut v8::PinScope<'s, '_>, code: u32| {
-        let code = v8::Integer::new_from_unsigned(scope, code).into();
-        v8::Array::new_with_elements(scope, &[code]).into()
+#[allow(clippy::too_many_arguments)]
+fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Function>, cid: i32, container: NodeId, doc: Option<NodeId>, initial: bool, defer: bool) -> Result<v8::Local<'s, v8::Value>, Terminated> {
+    let code = |scope: &mut v8::PinScope<'s, '_>, code: u32, later: f64| {
+        let first = v8::Integer::new_from_unsigned(scope, code).into();
+        if code == FRAME_LATER {
+            let later = v8::Number::new(scope, later).into();
+            return v8::Array::new_with_elements(scope, &[first, later]).into();
+        }
+        v8::Array::new_with_elements(scope, &[first]).into()
     };
     let (source, reload) = if initial { (FrameSource::None, false) } else { realm(scope, cid).frame_source(container, doc) };
     let empty = v8::String::empty(scope).into();
-    let mut r = Response { url: String::new(), body: empty, content_type: "text/html".to_owned(), javascript: None, client_id: None, referrer: None, policy: None, refresh: None, csp: None, origin_agent_cluster: false, error: false };
+    let mut r = Response { url: String::new(), body: empty, content_type: "text/html".to_owned(), javascript: None, client_id: None, referrer: None, policy: None, refresh: None, csp: None, origin_agent_cluster: false, error: false, later: 0.0 };
     let (carried, srcdoc) = (matches!(source, FrameSource::Navigation(_)), matches!(source, FrameSource::Srcdoc(_)));
     match source {
         // (…a scripted navigation's: its response's as it carried it)
@@ -118,9 +129,9 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
         FrameSource::Data(url) => match crate::data_url::process(&url) {
             Some((mime, bytes)) if crate::mime::load(Some(&mime), &bytes) == crate::mime::Load::Download => {
                 r.url = url;
-                match navigate(scope, host, cid, container, reload, &mut r)? {
+                match navigate(scope, host, cid, container, reload, defer, &mut r)? {
                     FRAME_BUILD => {}
-                    kept_or_deferred => return Ok(code(scope, kept_or_deferred)),
+                    other => return Ok(code(scope, other, r.later)),
                 }
             }
             Some((mime, bytes)) if crate::mime::load(Some(&mime), &bytes) == crate::mime::Load::Inline => {
@@ -156,9 +167,9 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
         }
         FrameSource::Fetch(url) => {
             r.url = url;
-            match navigate(scope, host, cid, container, reload, &mut r)? {
+            match navigate(scope, host, cid, container, reload, defer, &mut r)? {
                 FRAME_BUILD => {}
-                kept_or_deferred => return Ok(code(scope, kept_or_deferred)),
+                other => return Ok(code(scope, other, r.later)),
             }
         }
     }
@@ -219,8 +230,16 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
 // the full build and load; a response that makes no document (a 204 / 205: HTML "navigate" aborted) leaves the frame at
 // the document it is at, its navigation over with no `load` (`FRAME_KEPT`) — one with none yet at its initial
 // about:blank, Chrome.
-fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Function>, cid: i32, container: NodeId, reload: bool, r: &mut Response<'s>) -> Result<u32, Terminated> {
-    let started = now(scope, host)?;
+// (…`defer`: its server's time, its sleeps as the host counts them — `slept` — the event loop's to come to before the
+// response is in, `FRAME_LATER`: Chrome and Firefox run a page's timer due as a frame's server takes its time, and an
+// `async` script that lands meanwhile, before the frame's document — csim-bench r13 `rv_tf`, `rv_af`, `e_mix6`)
+#[allow(clippy::too_many_arguments)]
+fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Function>, cid: i32, container: NodeId, reload: bool, defer: bool, r: &mut Response<'s>) -> Result<u32, Terminated> {
+    let held = realm(scope, cid).take_held_frame_response(container);
+    let started = match &held {
+        Some((_, started, _)) => *started,
+        None => now(scope, host)?,
+    };
     let arena = realm(scope, cid);
     let node = arena.get(container);
     let dest = if node.is_some_and(|n| n.is_html_named("frame")) { "frame" } else { "iframe" };
@@ -245,14 +264,27 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
         v8::Boolean::new(scope, activated).into(),
         v8::undefined(scope).into(),
         active.map_or_else(|| v8::null(scope).into(), |id| v8::Integer::new(scope, id).into()),
+        v8::Boolean::new(scope, defer).into(),
     ];
     let request = v8::Array::new_with_elements(scope, &request).into();
-    let generation = realm(scope, cid).await_frame_response(container);
-    let resp = call(scope, host, H_FRAME_NAVIGATION, &[request])?.map(|resp| v8::Local::new(scope, resp));
+    let (generation, resp, fresh) = match held {
+        Some((generation, _, resp)) => (generation, Some(v8::Local::new(scope, resp)), false),
+        None => {
+            let generation = realm(scope, cid).await_frame_response(container);
+            (generation, call(scope, host, H_FRAME_NAVIGATION, &[request])?.map(|resp| v8::Local::new(scope, resp)), true)
+        }
+    };
     if !realm(scope, cid).frame_response_in(container, generation) {
         return Ok(FRAME_KEPT);
     }
     let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
+    let slept = resp.filter(|_| fresh && defer).and_then(|resp| member(scope, resp, "slept")).and_then(|s| s.number_value(scope)).filter(|ms| *ms > 0.0);
+    if let (Some(slept), Some(held)) = (slept, resp) {
+        let held = v8::Global::new(scope, v8::Local::<v8::Value>::from(held));
+        realm(scope, cid).hold_frame_response(container, generation, started, held);
+        r.later = slept;
+        return Ok(FRAME_LATER);
+    }
     let flag = |scope: &mut v8::PinScope<'_, '_>, k: &str| resp.and_then(|resp| member(scope, resp, k)).is_some_and(|v| v.is_true());
     let no_document = flag(scope, "no_document");
     // (…a network error, at the URL it failed at: its last hop's, HTML "create navigation params by fetching" setting the

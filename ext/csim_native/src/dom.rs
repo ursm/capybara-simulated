@@ -1179,6 +1179,8 @@ pub(crate) struct RealmState {
     // sequence its document's parse kept for their responses as it began (`parserBegins`).
     pub(crate) script_fetches: crate::script_fetch::ScriptFetches,
     pub(crate) speculative: Option<std::ops::Range<u64>>,
+    // …and the event loop's clock as it began, which those fetches began at.
+    pub(crate) parse_began_at: f64,
     // What its document's cascade was made of when last handed to its style engine (sheet_owners.rs `cascade_rekey`), and
     // the rule-set generation each shadow root's sheets were last handed it at (sheet_feed.rs `feed_shadows`).
     pub(crate) cascade_key: Option<crate::sheet_owners::CascadeKey>,

@@ -64,6 +64,9 @@ struct FrameNavigation {
     // Whether the build under way waits on the response of its navigation (frame_response.rs `navigate`): that navigation is
     // its navigable's ongoing one till the response is in, a stop cancelling it.
     awaiting_response: bool,
+    // …and the response it has, held — with when its fetch began, and of which navigation — until the event loop comes to
+    // the time its server took (frame_response.rs `FRAME_LATER`).
+    held: Option<(u32, f64, v8::Global<v8::Value>)>,
     // …and the navigation the host plans to make of it, by the order it was planned in (`HostNavigation`).
     host: Option<(u64, HostNavigation)>,
     // Whether the navigation it plans now aborted its document, planned while that one's parser was active
@@ -1243,6 +1246,17 @@ impl RealmArena {
         let nav = self.frame_navigation(container);
         nav.awaiting_response = true;
         nav.generation
+    }
+    // The response of navigation `generation` held until its server's time has passed (`held`), the navigation its
+    // navigable's ongoing one still — and taken back as its build comes again.
+    pub(crate) fn hold_frame_response(&mut self, container: NodeId, generation: u32, started: f64, response: v8::Global<v8::Value>) {
+        let nav = self.frame_navigation(container);
+        nav.awaiting_response = true;
+        nav.held = Some((generation, started, response));
+    }
+    pub(crate) fn take_held_frame_response(&mut self, container: NodeId) -> Option<(u32, f64, v8::Global<v8::Value>)> {
+        // (…none of a navigation one begun since superseded)
+        self.frame_navigations.0.get_mut(&container).and_then(|nav| nav.held.take().filter(|&(generation, ..)| generation == nav.generation))
     }
     pub(crate) fn frame_response_in(&mut self, container: NodeId, generation: u32) -> bool {
         let nav = self.frame_navigation(container);

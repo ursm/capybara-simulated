@@ -152,7 +152,11 @@ module Capybara
         'swNavPreloadSet'              => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2], a[3].to_s); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
-        'frameNavigationFetch'         => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], defer_ok: !!a[4], dest: a[5] || 'iframe', container_realm: a[6], referrer_policy: a[7], initiator_realm: a[8], sandbox: [a[9]], user_activated: a[10] == true, link_policy: a[11], replaces_realm: a[12]) },
+        # (…its server's time counted, not ticked, where the build can wait for it — `a[13]`: Browser#server_timed)
+        'frameNavigationFetch'         => lambda {|b, *a|
+          fetch = -> { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], defer_ok: !!a[4], dest: a[5] || 'iframe', container_realm: a[6], referrer_policy: a[7], initiator_realm: a[8], sandbox: [a[9]], user_activated: a[10] == true, link_policy: a[11], replaces_realm: a[12]) }
+          a[13] == true ? b.server_timed(&fetch) : fetch.call
+        },
         'workerTerminate'              => ->(b, *a) { b.worker_terminate(a[0]); nil },
         # The font FILES native text metrics read (font.rs): a family's system face, as fontconfig resolves it;
         # an `@font-face` url's, fetched (WOFF-decoded, cached) with the fetch's facts for its Resource Timing
