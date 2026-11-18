@@ -69,10 +69,15 @@ RSpec.describe 'a navigation, a close and beforeunload' do
   it "keeps a pop-up open whose close the user declines" do
     session.click_on('pop')
     popup = session.windows.last
+    session.execute_script('w.focus()')
+    focused = -> { [session.evaluate_script('document.hasFocus()'), session.within_window(popup) { session.evaluate_script('document.hasFocus()') }] }
+    expect(focused.call).to eq([false, true])
     session.within_window(popup) do
       session.dismiss_confirm { session.click_on('closeme') }
       expect(session).to have_button('closeme')
     end
+    # (…the system focus the pop-up's still, as Chrome keeps it — the close's move of it to the page taken back)
+    expect(focused.call).to eq([false, true])
     expect(session.windows.size).to eq(2)
     expect(session.evaluate_script('w.closed')).to be(false)
     session.within_window(popup) { session.accept_confirm { session.click_on('closeme') } }
