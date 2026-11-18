@@ -22,6 +22,21 @@ RSpec.describe 'a script fetch and cookies' do
     s.evaluate_script('R.join(" ")')
   end
 
+  # …each redirect hop's stored as its response comes, which the next hop's request carries (Fetch "HTTP-redirect fetch"),
+  # the last one's as the script lands.
+  it "sends a redirect hop's cookie with the next hop of an `async` script's fetch" do
+    app = ->(env) {
+      case env['PATH_INFO']
+      when '/r' then [302, {'location' => '/sc.js', 'set-cookie' => 'hop=1; path=/'}, []]
+      when '/sc.js' then [200, {'content-type' => 'text/javascript', 'set-cookie' => 'last=1; path=/'}, ["R.push('sent:' + #{'%p'} + ' doc:' + document.cookie)".sub('%p', (env['HTTP_COOKIE'] || '').inspect)]]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><title>t</title><script async src="/r"></script><script>window.R = ["inl:" + document.cookie]</script>']]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    expect(s.evaluate_script('R.join(" ")')).to eq('inl: sent:hop=1 doc:hop=1; last=1')
+  end
+
   [0, 150].each do |busy|
     it "stores an `async` script's cookie as it lands, its server busy #{busy} ms" do
       expect(log_with(busy)).to eq('inl: sc:s=1')

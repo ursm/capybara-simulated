@@ -8973,11 +8973,17 @@ module Capybara
         slot = @script_fetches.delete(id.to_i) or return nil
         script_fetch_slot_wait(slot)
         script_fetch_landed(slot)
-        slot[:cookies].each {|url, line, context| Native.cookie_jar_set(@cookie_jar, url, line, context, cookie_now) }
-        slot[:cookies] = []
+        store_kept_cookies(slot[:cookies])
         return slot[:result] unless slot[:answer]
 
         slot[:result] && slot[:answer].call(slot[:result])
+      end
+      # …the cookies a script's fetch's responses set, kept (`store_set_cookies`), stored now and let go of.
+      private def store_kept_cookies(kept)
+        return if kept.nil? || kept.empty?
+
+        kept.each {|url, line, context| Native.cookie_jar_set(@cookie_jar, url, line, context, cookie_now) }
+        kept.clear
       end
       # …or let go of, unanswered: its fetch cancelled (its document aborted, its realm gone), never made where it was still
       # to be.
@@ -13926,7 +13932,10 @@ module Capybara
 
       # A request's `Cookie`, as its cookie context lets the jar give it (cookie_jar.rs) — none for nil, a request that
       # includes no credentials.
+      # (…a script's fetch's earlier hops' Set-Cookie stored first — Fetch stores each hop's as its response comes, which the
+      # next hop's request carries — its last response's alone kept for it to store as it lands: `script_fetch_take`)
       def attach_cookies(env, url, context)
+        store_kept_cookies(Thread.current[:csim_cookie_writes])
         cookies = context && Native.cookie_jar_get(@cookie_jar, url.to_s, context, cookie_now)
         if cookies.nil? || cookies.empty?
           env.delete('HTTP_COOKIE')
