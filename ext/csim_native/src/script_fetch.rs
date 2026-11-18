@@ -3,13 +3,12 @@
 // (`scriptFetchBeginModule`, its graph fetched as it runs, the entry's answer kept for it) — each in parallel, its network
 // leg the host's (browser.rb `script_fetch_start`), and each landing as the event loop comes to it: as a task queued as it
 // began, behind the tasks due with it (timers.rs `BEHIND`), a network's time away — which is its server's: what its
-// sleeps came to (browser.rb `script_fetch_wait`, the fetch made as the task first asks, in the event loop's order), the
-// task coming again that much later. The
+// sleeps came to (the request made as it begins, in the order the fetches begin, the host answering how long its server
+// took), the task coming again that much later. The
 // order the lists of HTML's scripts run them in is the bindings' (bridge.entry.js), each landing as its turn comes.
 
 use crate::dom::{realm, realm_id, register, NodeId};
-use crate::font_files::Terminated;
-use crate::subresource_obtain::{call, classic_request, classic_script_begin, classic_script_delay, classic_script_drop, classic_script_land, landed_value, ClassicFetch, H_SCRIPT_FORGET, H_SCRIPT_START, H_SCRIPT_TAKE, H_SCRIPT_WAIT};
+use crate::subresource_obtain::{call, classic_request, classic_script_begin, classic_script_delay, classic_script_drop, classic_script_land, landed_value, next_slot, slept_ms, ClassicFetch, H_SCRIPT_FORGET, H_SCRIPT_START, H_SCRIPT_TAKE};
 
 // A realm's script fetches (`RealmState::script_fetches`), by number.
 #[derive(Default)]
@@ -17,13 +16,13 @@ pub(crate) struct ScriptFetches {
     next: u32,
     list: Vec<ScriptFetch>,
 }
-// One of them: its element, the event loop's clock as it began, the time its network leg took once known, whether its
-// task has come (`scriptFetchLanded`), and the fetch.
+// One of them: its element, the event loop's clock as it began, the time its network leg took, whether its task has come
+// (`scriptFetchLanded`), and the fetch.
 struct ScriptFetch {
     id: u32,
     el: NodeId,
     began: f64,
-    delay: Option<f64>,
+    delay: f64,
     landed: bool,
     fetch: Fetch,
 }
@@ -32,20 +31,6 @@ struct ScriptFetch {
 enum Fetch {
     Classic(ClassicFetch),
     Module(Option<u32>),
-}
-impl Fetch {
-    // The virtual time its network leg took (`classic_script_delay`).
-    fn delay(&self, scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>) -> Result<f64, Terminated> {
-        match self {
-            Fetch::Classic(f) => classic_script_delay(scope, host, f),
-            Fetch::Module(None) => Ok(0.0),
-            Fetch::Module(Some(id)) => {
-                let id = v8::Integer::new_from_unsigned(scope, *id).into();
-                let slept = call(scope, host, H_SCRIPT_WAIT, &[id])?;
-                Ok(slept.and_then(|s| v8::Local::new(scope, s).number_value(scope)).filter(|ms| ms.is_finite() && *ms > 0.0).unwrap_or(0.0))
-            }
-        }
-    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -108,13 +93,14 @@ fn begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let began = began_at(realm(scope, cid), cid, args.get(7).is_true());
     request.began = began;
     let Ok(fetch) = classic_script_begin(scope, cid, host, request, true) else { return rv.set_uint32(0) };
-    rv.set_uint32(file(scope, cid, el, began, Fetch::Classic(fetch)));
+    let delay = classic_script_delay(&fetch);
+    rv.set_uint32(file(scope, cid, el, (began, delay), Fetch::Classic(fetch)));
 }
-fn file(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, began: f64, fetch: Fetch) -> u32 {
+fn file(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (began, delay): (f64, f64), fetch: Fetch) -> u32 {
     let Some(fetches) = fetches_of(scope, cid) else { return 0 };
     fetches.next += 1;
     let id = fetches.next;
-    fetches.list.push(ScriptFetch { id, el, began, delay: None, landed: false, fetch });
+    fetches.list.push(ScriptFetch { id, el, began, delay, landed: false, fetch });
     id
 }
 
@@ -133,14 +119,26 @@ fn begin_module_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         Some(realm) => v8::Integer::new(scope, realm).into(),
         None => v8::undefined(scope).into(),
     };
-    let slot = if args.get(1).is_string() {
-        let start = [args.get(1), args.get(3), v8::null(scope).into(), client, v8::Integer::new(scope, 2).into(), v8::Number::new(scope, began).into()];
+    let (slot, delay) = if args.get(1).is_string() {
+        let id = next_slot();
+        let start = [
+            args.get(1),
+            args.get(3),
+            v8::null(scope).into(),
+            client,
+            v8::Integer::new(scope, 2).into(),
+            v8::Number::new(scope, began).into(),
+            v8::Integer::new_from_unsigned(scope, id).into()
+        ];
         let Ok(started) = call(scope, host, H_SCRIPT_START, &start) else { return };
-        started.map(|s| v8::Local::new(scope, s)).filter(|s| s.is_number()).and_then(|s| s.uint32_value(scope))
+        match started.map(|s| v8::Local::new(scope, s)).filter(|s| s.is_number()) {
+            Some(slept) => (Some(id), slept_ms(scope, slept)),
+            None => (None, 0.0),
+        }
     } else {
-        None
+        (None, 0.0)
     };
-    rv.set_uint32(file(scope, cid, el, began, Fetch::Module(slot)));
+    rv.set_uint32(file(scope, cid, el, (began, delay), Fetch::Module(slot)));
 }
 
 // __dom.scriptFetchOf(el) -> the number of the fetch the script `el` began and has not landed, 0 for none — the parser's
@@ -152,49 +150,25 @@ fn of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     rv.set_uint32(id.unwrap_or(0));
 }
 
-// How long after now the fetch `id` of realm `cid` lands — its network leg's time, past the clock as it began, waited for
-// where it is not yet known — none for a fetch it has no more.
-pub(crate) fn due_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>) -> Result<Option<f64>, Terminated> {
-    let Some(mut f) = take(scope, cid, id) else { return Ok(None) };
-    let delay = match f.delay {
-        Some(d) => d,
-        None => {
-            let d = f.fetch.delay(scope, host);
-            let d = match d {
-                Ok(d) => d,
-                Err(t) => {
-                    put_back(scope, cid, f);
-                    return Err(t);
-                }
-            };
-            f.delay = Some(d);
-            d
-        }
-    };
+// How long after now the fetch `id` of realm `cid` lands — its network leg's time, past the clock as it began — none for a
+// fetch it has no more.
+pub(crate) fn due_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) -> Option<f64> {
+    let clock = realm(scope, cid).event_loop.clock;
+    let f = fetches_of(scope, cid).and_then(|f| find(f, id))?;
     // (…none left of it within a nanosecond: the clock a server's time moved on to in steps, Browser#server_slept_ms)
-    let due = Some(f.began + delay - realm(scope, cid).event_loop.clock).filter(|due| *due > 1e-6).unwrap_or(0.0);
-    put_back(scope, cid, f);
-    Ok(Some(due))
-}
-fn put_back(scope: &mut v8::PinScope<'_, '_>, cid: i32, f: ScriptFetch) {
-    if let Some(fetches) = fetches_of(scope, cid) {
-        fetches.list.push(f);
-    }
+    Some(Some(f.began + f.delay - clock).filter(|due| *due > 1e-6).unwrap_or(0.0))
 }
 // …whether that is now: the fetch landed by the event loop's clock, or none of the realm's (one that answered at once).
-pub(crate) fn due_now(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, host: v8::Local<'_, v8::Function>) -> Result<bool, Terminated> {
+pub(crate) fn due_now(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId) -> bool {
     let id = fetches_of(scope, cid).and_then(|f| f.list.iter().rev().find(|f| f.el == el).map(|f| f.id));
-    let Some(id) = id else { return Ok(true) };
-    Ok(due_in(scope, cid, id, host)?.is_none_or(|due| due <= 0.0))
+    id.is_none_or(|id| due_in(scope, cid, id).is_none_or(|due| due <= 0.0))
 }
 
-// __dom.scriptFetchDue(id, host) -> how many milliseconds after now the fetch `id` lands (`due_in`), -1 for none.
+// __dom.scriptFetchDue(id) -> how many milliseconds after now the fetch `id` lands (`due_in`), -1 for none.
 fn due_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return rv.set_double(-1.0) };
     let cid = realm_id(scope, &args);
-    let Ok(due) = due_in(scope, cid, id, host) else { return };
-    rv.set_double(due.unwrap_or(-1.0));
+    rv.set_double(due_in(scope, cid, id).unwrap_or(-1.0));
 }
 
 // __dom.scriptFetchLanded(id, landed) -> whether the fetch `id`'s task has come — true for one it has no more — marked so,

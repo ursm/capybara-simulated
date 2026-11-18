@@ -25,9 +25,9 @@ module Capybara
         return super if seconds.nil?
         n = super
         # (…inside a fetch whose server's time is counted, whatever its length — a script's, which lands that far after it
-        # began by, a frame navigation's: Browser#script_fetch_wait, #server_timed)
+        # began by, a frame navigation's: Browser#script_fetch_start, #server_timed)
         if (slept = Thread.current.thread_variable_get(:csim_server_slept))
-          slept[0] += (seconds.to_f * 1000).round(3)
+          slept[:slept] += (seconds.to_f * 1000).round(3)
           return n
         end
         # Broadcast to every Driver constructed on the current thread. Background threads (`MessageBus::TimerThread`, etc.)

@@ -700,7 +700,7 @@ fn take_parser_next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set(crate::dom::node_value(scope, Some(next)));
 }
 // What of the `async` external scripts its end tags listed — the realm's parser's "set of scripts that will execute as soon
-// as possible" — `takeParserAsync(which, host)` takes: every one (`ASYNC_ALL`); where its parser has waited on a fetch, every
+// as possible" — `takeParserAsync(which)` takes: every one (`ASYNC_ALL`); where its parser has waited on a fetch, every
 // one whose fetch has landed by now (`ASYNC_WAITED`: `parserWaits`, script_fetch.rs `due_now`), none where it has not. A
 // fetch takes no time here unless its server's does, so with the parser's first wait every one of the document's has
 // landed whose server took none — as a browser's parser waiting has fetched ahead (Chrome and Firefox: one listed after a
@@ -712,7 +712,6 @@ const ASYNC_WAITED: u32 = 1;
 fn take_parser_async_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let which = args.get(0).uint32_value(scope).unwrap_or(ASYNC_ALL);
-    let host = v8::Local::<v8::Function>::try_from(args.get(1)).ok();
     rv.set(v8::Array::new(scope, 0).into());
     let arena = crate::dom::realm(scope, cid);
     let Some(state) = arena.realm_state(cid).filter(|state| which != ASYNC_WAITED || state.parser_waited) else { return };
@@ -720,14 +719,7 @@ fn take_parser_async_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let candidates: Vec<NodeId> = listed.into_iter().filter(|&id| listed_async(arena, id)).collect();
     let mut taken = Vec::with_capacity(candidates.len());
     for id in candidates {
-        let landed = match (which, host) {
-            (ASYNC_WAITED, Some(host)) => match crate::script_fetch::due_now(scope, cid, id, host) {
-                Ok(landed) => landed,
-                Err(_) => return,
-            },
-            _ => true,
-        };
-        if landed {
+        if which != ASYNC_WAITED || crate::script_fetch::due_now(scope, cid, id) {
             taken.push(id);
         }
     }

@@ -41,7 +41,6 @@ pub(crate) const H_SW_NOTE_IMPORT: u32 = 24;
 const H_LOAD_IMAGE: u32 = 25;
 const H_IMAGE_BLOB: u32 = 26;
 pub(crate) const H_SCRIPT_START: u32 = 27;
-pub(crate) const H_SCRIPT_WAIT: u32 = 28;
 pub(crate) const H_SCRIPT_TAKE: u32 = 29;
 pub(crate) const H_SCRIPT_FORGET: u32 = 30;
 
@@ -978,13 +977,13 @@ pub(crate) struct ClassicFetch {
     pub(crate) leg: Leg,
 }
 // The leg that answers it: one that has — a `data:` or `blob:` URL's scheme fetch, a preload its request took — a
-// controlling service worker's, which is asked as it lands, the network's the host's slot's (`H_SCRIPT_START`'s
-// number), or the host's answer from memory as it began (the asset cache's, `[text, facts, bytes]`; none for a URL that
+// controlling service worker's, which is asked as it lands, the network's the host's slot's (its number, and the virtual
+// time its server took, which `H_SCRIPT_START` answers), or the host's answer from memory as it began (the asset cache's, `[text, facts, bytes]`; none for a URL that
 // resolves to none).
 pub(crate) enum Leg {
     Answered(Landed),
     Worker,
-    Slot(u32),
+    Slot(u32, f64),
     Host(Option<v8::Global<v8::Value>>),
 }
 
@@ -1054,10 +1053,12 @@ pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, h
     // (…the parser's from the cross-visit asset cache, an inserted one's from the network: the host's slot's, or its
     // memory's answer at once)
     let mut args = request_args(scope, &r).to_vec();
-    let (parser_arg, began_arg): (v8::Local<v8::Value>, v8::Local<v8::Value>) = (v8::Boolean::new(scope, parser).into(), v8::Number::new(scope, began).into());
-    args.extend([parser_arg, began_arg]);
+    let id = next_slot();
+    let (parser_arg, began_arg, id_arg): (v8::Local<v8::Value>, v8::Local<v8::Value>, v8::Local<v8::Value>) =
+        (v8::Boolean::new(scope, parser).into(), v8::Number::new(scope, began).into(), v8::Integer::new_from_unsigned(scope, id).into());
+    args.extend([parser_arg, began_arg, id_arg]);
     let leg = match call(scope, host, H_SCRIPT_START, &args)? {
-        Some(started) if v8::Local::new(scope, &started).is_number() => Leg::Slot(v8::Local::new(scope, &started).uint32_value(scope).unwrap_or(0)),
+        Some(slept) if v8::Local::new(scope, &slept).is_number() => Leg::Slot(id, slept_ms(scope, v8::Local::new(scope, &slept))),
         answer => Leg::Host(answer),
     };
     Ok(ClassicFetch { request: r, parser, leg })
@@ -1067,17 +1068,23 @@ fn controlled(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function
     let handle = call(scope, host, H_CONTROLLER, &[])?;
     Ok(handle.is_some_and(|h| v8::Local::new(scope, h).int32_value(scope).unwrap_or(0) != 0))
 }
-// The virtual time its network leg took — its server's sleeps (browser.rb `script_fetch_wait`), waited for — 0 for a leg
-// that is no slot's.
-pub(crate) fn classic_script_delay(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, fetch: &ClassicFetch) -> Result<f64, Terminated> {
-    let Leg::Slot(id) = fetch.leg else { return Ok(0.0) };
-    let id = v8::Integer::new_from_unsigned(scope, id).into();
-    let slept = call(scope, host, H_SCRIPT_WAIT, &[id])?;
-    Ok(slept.and_then(|s| v8::Local::new(scope, s).number_value(scope)).filter(|ms| ms.is_finite() && *ms > 0.0).unwrap_or(0.0))
+// A host slot's number, the engine's for every realm of the process: the host files the fetch under it
+// (browser.rb `script_fetch_start`), which answers the time its server took at once — one call per fetch begun.
+pub(crate) fn next_slot() -> u32 {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed).wrapping_add(1).max(1)
+}
+// …that time, the virtual milliseconds its server's sleeps came to (none for one not a finite positive number).
+pub(crate) fn slept_ms(scope: &mut v8::PinScope<'_, '_>, slept: v8::Local<'_, v8::Value>) -> f64 {
+    slept.number_value(scope).filter(|ms| ms.is_finite() && *ms > 0.0).unwrap_or(0.0)
+}
+// The virtual time its network leg took — its server's sleeps — 0 for a leg that is no slot's.
+pub(crate) fn classic_script_delay(fetch: &ClassicFetch) -> f64 {
+    if let Leg::Slot(_, slept) = fetch.leg { slept } else { 0.0 }
 }
 // …and its answer let go of, its fetch cancelled.
 pub(crate) fn classic_script_drop(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, fetch: ClassicFetch) -> Result<(), Terminated> {
-    if let Leg::Slot(id) = fetch.leg {
+    if let Leg::Slot(id, _) = fetch.leg {
         let id = v8::Integer::new_from_unsigned(scope, id).into();
         call(scope, host, H_SCRIPT_FORGET, &[id])?;
     }
@@ -1092,7 +1099,7 @@ pub(crate) fn classic_script_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, ho
     let response = match leg {
         Leg::Answered(landed) => return Ok(landed),
         Leg::Host(answer) => answer,
-        Leg::Slot(id) => {
+        Leg::Slot(id, _) => {
             let id = v8::Integer::new_from_unsigned(scope, id).into();
             call(scope, host, H_SCRIPT_TAKE, &[id])?
         }
