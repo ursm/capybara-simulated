@@ -3551,6 +3551,21 @@ module Capybara
       ensure
         Thread.current.thread_variable_set(:csim_server_slept, outer)
       end
+      # …or the sleeps of a request the bindings make counted rather than run, from `begins` on until its end (`begins`
+      # false), which answers what they came to — a parser-blocking script's, whose server's time the parser's wait takes
+      # from when the fetch is dated (bridge.entry.js `waitOnFetch`, `serverTimeWaited`).
+      def server_time_counted(begins)
+        if begins
+          (@server_time_counts ||= []) << [Thread.current.thread_variable_get(:csim_server_slept), {slept: 0.0}]
+          Thread.current.thread_variable_set(:csim_server_slept, @server_time_counts.last[1])
+          return 0.0
+        end
+        outer, slept = @server_time_counts&.pop
+        return 0.0 unless slept
+
+        Thread.current.thread_variable_set(:csim_server_slept, outer)
+        slept[:slept]
+      end
       # Whether the app is answering a request of `driver`'s session on this thread — its body read too, which an app streams
       # as it goes (`in_app_call`). A thread's, not a fiber's: an app's sleep in a fiber of its own is the app's all the same.
       def self.in_app_call?(driver) = Thread.current.thread_variable_get(:csim_app_calls)&.include?(driver)

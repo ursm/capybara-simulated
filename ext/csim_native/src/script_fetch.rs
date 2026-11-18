@@ -42,6 +42,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "scriptFetchLand", land_op, context_id);
     register(scope, ns, "scriptFetchDrop", drop_op, context_id);
     register(scope, ns, "parserBegins", parser_begins_op, context_id);
+    register(scope, ns, "scriptFetchBeganAt", began_at_op, context_id);
 }
 
 // __dom.parserBegins() — the calling realm's document's parser begins: the fetches it begins as it scans ahead of what it
@@ -70,6 +71,14 @@ fn began_at(arena: &mut crate::dom::RealmArena, cid: i32, scanned: bool) -> f64 
     }
 }
 
+// __dom.scriptFetchBeganAt(scanned) -> when a fetch the calling realm begins now began (`began_at`): a parser-blocking
+// script's, whose request the parser makes as it waits on it (bridge.entry.js `waitOnFetch`), dated as any other.
+fn began_at_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let scanned = args.get(0).is_true();
+    rv.set_double(began_at(realm(scope, cid), cid, scanned));
+}
+
 fn fetches_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut ScriptFetches> {
     realm(scope, cid).realm_state_mut(cid).map(|s| &mut s.script_fetches)
 }
@@ -91,7 +100,7 @@ fn begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let cid = realm_id(scope, &args);
     let el = request.el;
     let began = began_at(realm(scope, cid), cid, args.get(7).is_true());
-    request.began = began;
+    request.began = Some(began);
     let Ok(fetch) = classic_script_begin(scope, cid, host, request, true) else { return rv.set_uint32(0) };
     let delay = classic_script_delay(&fetch);
     rv.set_uint32(file(scope, cid, el, (began, delay), Fetch::Classic(fetch)));

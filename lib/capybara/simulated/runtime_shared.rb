@@ -173,6 +173,8 @@ module Capybara
         'scriptFetchStart'             => ->(b, *a) { b.script_fetch_start(a[0], a[1], a[2], a[3], a[4], a[5] == true, a[6].to_f, a[7], a[8].to_f) },
         'scriptFetchTake'              => ->(b, *a) { b.script_fetch_take(a[0], a[1].to_f) },
         'scriptFetchForget'            => ->(b, *a) { b.script_fetch_forget(a[0]) },
+        'serverTimeCounted'            => ->(b, *a) { b.server_time_counted(a[0] == true) },
+        'serverTimeWaited'             => ->(b, *a) { b.server_slept_ms(a[0].to_f) && nil },
         'scriptFetchesForgetRealm'     => ->(b, *a) { b.script_fetches_forget_realm(a[0]) },
         'spinServeWorkers'             => ->(b, *a) { b.spin_serve_workers(a[0]); nil },
         'blobWindow'                   => ->(b, *_a) { b.blob_window },

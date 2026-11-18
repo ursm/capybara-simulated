@@ -929,7 +929,7 @@ pub(crate) fn classic_request(scope: &mut v8::PinScope<'_, '_>, args: &v8::Funct
         let integrity = arena.get(el).and_then(|n| n.plain_attr("integrity")).unwrap_or("").to_owned();
         (plan_in(arena, crate::subresource_judge::J_CLASSIC_SCRIPT, Some(el), Some(doc), None), integrity)
     };
-    Some(ClassicRequest { el, doc, src, parser, plan, integrity, began: 0.0 })
+    Some(ClassicRequest { el, doc, src, parser, plan, integrity, began: None })
 }
 // …and what a landing hands the bindings: `[ok, body, entry]`.
 pub(crate) fn landed_value<'s>(scope: &mut v8::PinScope<'s, '_>, (ok, body, entry): Landed) -> v8::Local<'s, v8::Array> {
@@ -967,8 +967,8 @@ pub(crate) struct ClassicRequest {
     parser: bool,
     plan: u32,
     integrity: String,
-    // (…when on the event loop's clock it began: script_fetch.rs `began_at`)
-    pub(crate) began: f64,
+    // (…when on the event loop's clock it began, where that is not now: script_fetch.rs `began_at`)
+    pub(crate) began: Option<f64>,
 }
 // …its fetch begun (`classic_script_begin`): the request the engine made of it, and the leg that answers it.
 pub(crate) struct ClassicFetch {
@@ -1035,7 +1035,10 @@ pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, h
         };
         return Ok(ClassicFetch { request: r, parser, leg });
     }
-    r.started = now(scope, host)?;
+    // (…its Resource Timing entry begun as it began — a scanned one's as its parse did — on the page's clock)
+    let clock = realm(scope, cid).event_loop.clock;
+    let began = began.unwrap_or(clock);
+    r.started = now(scope, host)? - (clock - began);
     if let Some(preloaded) = crate::preload_map::consume(scope, cid, (doc, &r.url, "script", plan), &r.integrity, host)? {
         let landed = match preloaded {
             Some(resp) => {

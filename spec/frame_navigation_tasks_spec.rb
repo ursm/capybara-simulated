@@ -1557,6 +1557,18 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(s.evaluate_script("['old', 'new', 'after'].map((id) => !!document.getElementById(id)).join(' ')")).to eq('false true false')
     end
 
+    # s6_dating, s6_rt_blk: a parser-blocking script's fetch, made as the parser waits on it, is dated as the parse began
+    # where a preload scanner saw it — two of them fetched alongside, the second waiting on nothing once the first ran, its
+    # Resource Timing entry begun with the parse's, give or take the script time between (Chrome and Firefox `b b2 inl
+    # a.js-ran dcl`, each entry's start the same).
+    it 'dates the fetch of a parser-blocking script a preload scanner saw from the parse' do
+      log = page_log(<<~HTML, at: 600)
+        <script src="/slow/100/b.js"></script><script async src="/slow/50/a.js"></script><script>setTimeout(() => L.push('t20'), 20)</script><script src="/slow/100/b2.js"></script><script>L.push('inl')</script>
+        <script>onload = () => { const [b, b2] = ['b.js', 'b2.js'].map((n) => performance.getEntries().find((e) => e.name.endsWith('/' + n))); L.push('starts:' + (Math.abs(b.startTime - b2.startTime) < 10)); }</script>
+      HTML
+      expect(log).to eq('b.js-ran b2.js-ran inl a.js-ran dcl load starts:true t20 rs:complete')
+    end
+
     # ca4: …but not for one that came to block after it was prepared — Chrome runs the script first, Firefox after the sheet;
     # the spec's text holds it back for none.
     it 'runs an `async` script ahead of a style sheet that came to block scripts after it was prepared' do
