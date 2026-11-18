@@ -2727,6 +2727,10 @@ pub(crate) struct Dom {
     realm_key: Option<v8::Global<v8::Private>>,
     // …and the one it carries its engine ops under (`engine_of`): another realm's code holding the window reaches them so.
     engine_key: Option<v8::Global<v8::Private>>,
+    // The ids of the snapshot's script as each realm's deserialized it — the bindings' and the vendor bundle's one script,
+    // taken off the bindings' `__csimTakeEngine` as the realm is installed — which a platform function is one of
+    // (`is_platform_function`).
+    snapshot_scripts: Vec<i32>,
     // The template a legacy platform object with an indexed getter is made from (legacy.rs).
     pub(crate) indexed_template: Option<v8::Global<v8::ObjectTemplate>>,
     // …and the one an HTMLAllCollection is (legacy.rs `allCollectionObject`).
@@ -3067,19 +3071,16 @@ fn is_proxy(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 }
 // __dom.isPlatformFunction(fn) -> whether `fn` is one the snapshot's script made — the bindings' (and the vendor
 // bundle's) as the realm was made from it, every realm's alike: what `Function.prototype.toString` answers native code
-// for (intrinsics.js). A page's function — a script's, an `eval`'s, a handler compiled from its markup — is another
-// script's.
+// for (engine.js `installPlatformToString`). A page's function — a script's, an `eval`'s, a handler compiled from its
+// markup — is another script's.
 fn is_platform_function(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(function) = v8::Local::<v8::Function>::try_from(args.get(0)) else {
         rv.set_bool(false);
         return;
     };
-    let origin = function.get_script_origin(scope);
-    let name = origin.resource_name().filter(|n| n.is_string()).map(|n| n.to_rust_string_lossy(scope));
-    rv.set_bool(name.as_deref() == Some(SNAPSHOT_SCRIPT));
+    // (…by the script's id, never its name: a page names its own script anything, `//# sourceURL=<snapshot>` too)
+    rv.set_bool(dom(scope).snapshot_scripts.contains(&function.script_id()));
 }
-// (…the name rusty_racer's Snapshot compiles its source under)
-const SNAPSHOT_SCRIPT: &str = "<snapshot>";
 // Whether a realm's global names its engine ops `__dom` besides (`Native.engine_global=`): for a spec that reads the
 // engine's own state off a page — never a page's of an app, whose scripts it would hand every op of the engine.
 pub(crate) static ENGINE_GLOBAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -3480,6 +3481,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     global.set_private(scope, key, ns.into());
     let take = v8::String::new(scope, "__csimTakeEngine").expect("a short string");
     if let Some(take) = global.get(scope, take.into()).and_then(|f| v8::Local::<v8::Function>::try_from(f).ok()) {
+        let script = take.script_id();
+        if !dom(scope).snapshot_scripts.contains(&script) {
+            dom(scope).snapshot_scripts.push(script);
+        }
         let host = rusty_racer::host_object(scope);
         let exposed = v8::Boolean::new(scope, ENGINE_GLOBAL.load(std::sync::atomic::Ordering::Relaxed));
         v8::tc_scope!(let tc, scope);

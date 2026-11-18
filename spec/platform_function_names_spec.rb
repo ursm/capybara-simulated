@@ -85,6 +85,25 @@ RSpec.describe "the platform's functions" do
     ])
   end
 
+  # …a page's own function one whatever its script calls itself: a `//# sourceURL` naming the bindings' snapshot script
+  # makes no page script the snapshot's — through eval, indirect eval, `new Function` or a worker's eval
+  it 'reads a page function as its source, whatever its script names itself' do
+    session.visit '/'
+    got = read(<<~'JS')
+      (() => {
+        const t = (f) => Function.prototype.toString.call(f).slice(0, 13);
+        return [t(eval('(function a1() {})\n//# sourceURL=<snapshot>')), t((0, eval)('(function a2() {})\n//# sourceURL=<snapshot>')),
+                t(new Function('return 1;\n//# sourceURL=<snapshot>'))];
+      })()
+    JS
+    expect(got).to eq(['function a1()', 'function a2()', 'function anon'])
+    session.execute_script(<<~'JS')
+      const source = "postMessage(Function.prototype.toString.call(eval('(function w1() {})\\n//# sourceURL=<snapshot>')).slice(0, 13))";
+      new Worker(URL.createObjectURL(new Blob([source]))).onmessage = (e) => { window.workerSource = e.data; };
+    JS
+    expect(poll_until { session.evaluate_script('window.workerSource') }).to eq('function w1()')
+  end
+
   # …every one a page can reach — a window's globals and their prototypes, members and accessors, a document's, an
   # iterator's, a cross-origin window's and its Location's, a worker's globals — none the bindings' source
   it 'are all native code, wherever a page reaches one' do
