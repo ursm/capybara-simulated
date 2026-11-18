@@ -425,17 +425,36 @@ impl RealmArena {
     // HTML's named properties of a document (§3.1.6) and of its window (§7.2.2.3), over the document tree — not into a
     // shadow tree or a template's contents.
     //
-    // An embed or object is "exposed" where no object or embed is its ancestor, as the structure tells it (which of a
-    // plugin and the fallback content an object shows is not modelled).
+    // An embed or object is "exposed" (HTML §3.1.6, the document's named properties: "if it has no exposed object
+    // ancestor, and, for object elements, is additionally either not showing its fallback content or has no object or
+    // embed descendants") — an `<object>` showing its fallback (rendered.rs `object_shows_fallback`: no `data`, or its
+    // resource failed) leaving an `<embed>` in it exposed, as Chrome has it.
     fn exposed(&self, id: NodeId) -> bool {
-        let mut at = self.get(id).and_then(|n| n.parent);
-        while let Some(n) = at.and_then(|p| self.get(p)).filter(|n| n.kind == NodeKind::Element) {
-            if n.is_html_named("object") || n.is_html_named("embed") {
+        let Some(node) = self.get(id) else { return false };
+        if node.is_html_named("object") && crate::rendered::object_shows_fallback(node) && self.has_plugin_descendant(id) {
+            return false;
+        }
+        let mut at = node.parent;
+        while let Some(p) = at {
+            let Some(n) = self.get(p).filter(|n| n.kind == NodeKind::Element) else { break };
+            if n.is_html_named("object") && self.exposed(p) {
                 return false;
             }
             at = n.parent;
         }
         true
+    }
+    // …whether an object or embed is among the descendants of `id`.
+    fn has_plugin_descendant(&self, id: NodeId) -> bool {
+        let mut stack: Vec<NodeId> = self.get(id).map(|n| n.children.iter().rev().copied().collect()).unwrap_or_default();
+        while let Some(c) = stack.pop() {
+            let Some(n) = self.get(c) else { continue };
+            if n.kind == NodeKind::Element && (n.is_html_named("object") || n.is_html_named("embed")) {
+                return true;
+            }
+            stack.extend(n.children.iter().rev());
+        }
+        false
     }
     // The names an element of a document is a named element with, its id's first: an embed, form, iframe, img or object
     // by its `name`, an object by its `id`, and an img by its `id` where it has a `name` too — an embed or object only

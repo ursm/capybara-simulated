@@ -220,4 +220,15 @@ RSpec.describe 'legacy platform objects' do
     JS
     expect(r).to eq('[object HTMLOptionElement]')
   end
+
+  # An `<object>` showing its fallback content is not "exposed" — "for object elements, is additionally either not
+  # showing its fallback content or has no object or embed descendants" (HTML §3.1.6) — so an `<embed>` in it is
+  # (Chrome, Firefox).
+  it "exposes an embed in an object that shows its fallback" do
+    r = probe(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<object><embed name="x1"></object>');
+      return [String(document.x1), String(window.x1)];
+    JS
+    expect(r).to eq(['[object HTMLEmbedElement]', '[object HTMLEmbedElement]'])
+  end
 end
