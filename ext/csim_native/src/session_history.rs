@@ -1123,12 +1123,21 @@ impl Traversable {
         }
     }
 
-    // A traversal applied by the host begun (`Applying`): one by `delta` of the page's, its step planned as it runs, or
-    // one moving its frames, `planned` its step and changes — its number.
-    fn begin_apply(&mut self, delta: Option<i64>, planned: Option<(i64, Vec<Change>)>) -> u64 {
+    // A traversal applied by the host begun (`Applying`): one by `delta` of the page's, its step planned as it runs; one
+    // of a window's that makes its document again (`replays`), planned at its step with its change; or one moving its
+    // frames, `planned` its step and changes — its number.
+    // (…a window's no tasks of its page's to run first: its navigations are taken at the navigation turn, behind what
+    // was due — navigation_plan.rs `takeWindowNavigations` — the page's flush the host's stand-in for a fetch it awaits)
+    fn begin_apply(&mut self, delta: Option<i64>, planned: Option<(i64, Vec<Change>)>, replays: bool) -> u64 {
         self.applying_tokens += 1;
         let (step, changes) = planned.unwrap_or_default();
-        let phase = if delta.is_some() { Phase::Plan } else { Phase::Frames };
+        let phase = if delta.is_some() {
+            Phase::Plan
+        } else if replays {
+            Phase::Flushed
+        } else {
+            Phase::Frames
+        };
         self.applying.push(Applying {
             token: self.applying_tokens,
             delta,
@@ -1633,14 +1642,18 @@ impl SessionHistory {
         self.lock().go_to(step);
     }
     // #apply_by(delta) / #apply_step(step, changes) -> the number of a traversal the host applies (`Applying`): the page's
-    // by `delta`, or one moving its frames planned at `step` with `changes`; #next_step(number, answer) -> its next step
+    // by `delta`, or one moving its frames planned at `step` with `changes` (#apply_replay: a window's); #next_step(number, answer) -> its next step
     // for the host (`Command`: [name, …]), which answered the last with `answer` — nil once it is done; #end_apply(number):
     // let go, done or not (browser.rb `apply_history_step`).
     fn apply_by(&self, delta: i64) -> u64 {
-        self.lock().begin_apply(Some(delta), None)
+        self.lock().begin_apply(Some(delta), None, false)
     }
     fn apply_step(&self, step: i64, changes: Vec<Change>) -> u64 {
-        self.lock().begin_apply(None, Some((step, changes)))
+        self.lock().begin_apply(None, Some((step, changes)), false)
+    }
+    // #apply_replay(step, entry) -> one of a window's planned at `step`, making its document of `entry` again.
+    fn apply_replay(&self, step: i64, entry: u64) -> u64 {
+        self.lock().begin_apply(None, Some((step, vec![(TOP, entry, false)])), true)
     }
     fn next_step(ruby: &magnus::Ruby, rb_self: &Self, token: u64, answer: magnus::Value) -> Result<Option<RArray>, magnus::Error> {
         let answer = if answer.is_nil() {
@@ -2068,6 +2081,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("go_to", method!(SessionHistory::go_to, 1))?;
     class.define_method("apply_by", method!(SessionHistory::apply_by, 1))?;
     class.define_method("apply_step", method!(SessionHistory::apply_step, 2))?;
+    class.define_method("apply_replay", method!(SessionHistory::apply_replay, 2))?;
     class.define_method("next_step", method!(SessionHistory::next_step, 2))?;
     class.define_method("end_apply", method!(SessionHistory::end_apply, 1))?;
     class.define_method("take_prompted", method!(SessionHistory::take_prompted, 1))?;
@@ -2665,6 +2679,21 @@ mod tests {
         let after = h.step();
         h.lock().end_step(outer, 1, &[1]);
         assert_eq!(h.step(), after);
+    }
+
+    // …and one the user declines to unload the page for is aborted: no document made again.
+    #[test]
+    fn a_traversal_the_user_declines_is_aborted() {
+        let h = history();
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
+        h.push(TOP, TOP, "/b".into(), false, Data::default());
+        let step = h.step();
+        let token = h.apply_by(-1);
+        let mut t = h.lock();
+        assert!(matches!(t.next_command(token, Answer::Nothing), Some(Command::Flush)));
+        assert!(matches!(t.next_command(token, Answer::Bool(false)), Some(Command::PromptPage)));
+        assert!(t.next_command(token, Answer::Bool(false)).is_none());
+        assert_eq!(t.state.current, step);
     }
 
     #[test]

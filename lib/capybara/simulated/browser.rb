@@ -2505,12 +2505,20 @@ module Capybara
           flush_outgoing_page_init if (flushing = @timers_active)
           flushing
         when 'prompt_page'
-          prompt_page_to_unload(traversal: true) != false
+          (top.zero? ? prompt_page_to_unload(traversal: true) : @runtime.realm_call(top, 'promptToUnload', true)) != false
         when 'replay'
-          replay_history_entry(args[0], step: args[1], by_user: by_user)
+          if top.zero?
+            replay_history_entry(args[0], step: args[1], by_user: by_user)
+          else
+            realms[:window] = navigate_window_realm(top, 'traverse', [args[1], args[0], by_user])
+          end
           nil
         when 'restore_form_state'
-          restore_form_state(args[0])
+          if top.zero?
+            restore_form_state(args[0])
+          elsif (window = realms[:window]).is_a?(Integer) && @runtime.frame_realm_alive?(window) && (state = history.entry(args[0])[:form_state])
+            @runtime.realm_call(window, 'restoreFormState', state)
+          end
           nil
         when 'unload_frames'
           unload_traversed_frames(args[0], realms)
@@ -2549,6 +2557,18 @@ module Capybara
         return unless realm && (realm.zero? || @runtime.frame_realm_alive?(realm))
 
         @runtime.realm_call(realm, 'updateForHistoryStep', url, state, hashchange)
+      end
+      # …one a window of this isolate, realm `realm`, planned that makes its document again — at `step`, of `entry`
+      # (navigation_plan.rs `takeWindowNavigations`) — applied as the page's is (`apply_history_step`: the window asked,
+      # its document made again, its controls' state restored); then, its navigable traversing no more whichever became of
+      # it, those queued behind it, which waited for it, applied from the step it went to.
+      private def traverse_window(realm, step, entry, by_user)
+        return unless (history = window_history(realm))
+
+        key = @runtime.window_realm_meta.dig(realm, :window_key)
+        apply_history_step(history, history.apply_replay(step, entry), top: realm, by_user: by_user)
+        window = window_realm_made(key)
+        @runtime.realm_call(window, 'applyOwnTraversals', true) if window && @runtime.frame_realm_alive?(window)
       end
       # …one the engine planned for the host of the page or a window of this isolate, realm `realm` (navigation_plan.rs
       # `FrameTraversal`: `changes` flat — the navigations of the frames whose documents it makes again let go of as it
@@ -11211,19 +11231,10 @@ module Capybara
               next from_document(source) { submit_routed_form(source, spec, {to: source == realm_id ? :self : :window, window: realm_id, referrer: referrer}) }
             end
 
-            history, key = window_history(realm_id), @runtime.window_realm_meta.dig(realm_id, :window_key) if kind == 'traverse'
-            begin
-              navigate_window_realm(realm_id, kind, plan)
-            ensure
-              # (…a traversal's navigable traversing no more, whichever became of it — its entry gone since, its document
-              # made of none — and those queued behind it, which waited for it, applied from the step it went to, as the
-              # page's are: `consume_planned_traversal`)
-              if history
-                history.end_traversal
-                window = window_realm_made(key)
-                @runtime.realm_call(window, 'applyOwnTraversals', true) if window && @runtime.frame_realm_alive?(window)
-              end
-            end
+            # (…a traversal that makes its document again, applied as the page's are)
+            next traverse_window(realm_id, *plan) if kind == 'traverse'
+
+            navigate_window_realm(realm_id, kind, plan)
           rescue StandardError => e
             log_console('warn', "window realm self-navigation failed: #{e.message}")
           end
@@ -11279,8 +11290,9 @@ module Capybara
           return if deferred
         end
 
-        # (…its document asked first whether it may be unloaded, as the page's is: `prompt_page_to_unload`)
-        @runtime.realm_call(realm_id, 'promptToUnload')
+        # (…its document asked first whether it may be unloaded, as the page's is: `prompt_page_to_unload` — a traversal's
+        # as it applied its step: `traverse_window`)
+        @runtime.realm_call(realm_id, 'promptToUnload') unless kind == 'traverse'
         fetch, origin_url, client_id = window_navigation_fetch(realm_id, history, url, post, handling, [at, id], replayed, initiator, source, policy, activated)
         begin
           # (…an about:blank document's or a blob's opener policy the one it inherits: coop.rs `inherited` — a replay's the
@@ -11465,10 +11477,6 @@ module Capybara
         return unless new_id
 
         @runtime.window_realm_meta[new_id][:response] = response || ABOUT_BLANK_RESPONSE
-        # (…a traversal's document given the state its entry's controls were left in, as the page's is: `restore_form_state`)
-        if kind == 'traverse' && (form_state = history.entry(history.active(0))[:form_state])
-          @runtime.realm_call(new_id, 'restoreFormState', form_state)
-        end
         retarget_scope(realm_id, new_id)
         new_id
       end

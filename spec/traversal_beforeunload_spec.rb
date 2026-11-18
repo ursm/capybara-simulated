@@ -65,4 +65,20 @@ RSpec.describe 'a traversal and beforeunload' do
     session.go_back
     expect(session.evaluate_script('frames[0].location.pathname')).to eq('/inner2')
   end
+
+  # …and a window's `window.open` made in this isolate, as the page's: asked, and aborted; confirmed, made again with
+  # its controls' state.
+  it "stays where the user declines a window's traversal, and goes on where confirmed" do
+    session.execute_script("window.w = open('/a')")
+    popup = session.windows.last
+    session.execute_script("w.location = '/b'")
+    session.within_window(popup) do
+      expect(session).to have_button('back')
+      session.dismiss_confirm { session.click_button('back') }
+      expect(session.current_path).to eq('/b')
+      session.accept_confirm { session.click_button('back') }
+      expect(session).to have_no_button('back')
+      expect(session.current_path).to eq('/a')
+    end
+  end
 end
