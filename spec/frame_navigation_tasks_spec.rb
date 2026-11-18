@@ -1449,6 +1449,15 @@ RSpec.describe 'a frame navigation as tasks' do
       end
     end
 
+    # rv-r13-probe `r3_pre2`, `r3_mpreload`: a preload's and a modulepreload's fetch delays no load — HTML "A user agent
+    # must not delay the load event for this link type" (Chrome and Firefox: `load` before `pre:l`).
+    {'preload' => '<link rel="preload" as="script" href="/slow/80/p.js" onload="L.push(\'pre:l\')">',
+     'modulepreload' => '<link rel="modulepreload" href="/slow/80/m.js" onload="L.push(\'pre:l\')">'}.each do |what, markup|
+      it "fires the load before a #{what} whose server takes its time" do
+        expect(page_log(markup, at: 300)).to eq('dcl load pre:l rs:complete')
+      end
+    end
+
     # rv_css_dfr: "the end" waits for no style sheet to block scripts as it waits for a deferred one, the sheet's `load` first.
     it 'runs a deferred script after the load of a style sheet that blocks scripts' do
       log = page_log(%(<link rel="stylesheet" href="/slow/150/s.css" onload="L.push('css')"><script defer src="/slow/0/d.js"></script><script>setTimeout(() => L.push('t50'), 50)</script>), at: 600)
