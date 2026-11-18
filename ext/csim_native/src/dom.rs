@@ -3065,6 +3065,21 @@ fn realm_of_global_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 fn is_proxy(_scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(args.get(0).is_proxy());
 }
+// __dom.isPlatformFunction(fn) -> whether `fn` is one the snapshot's script made — the bindings' (and the vendor
+// bundle's) as the realm was made from it, every realm's alike: what `Function.prototype.toString` answers native code
+// for (intrinsics.js). A page's function — a script's, an `eval`'s, a handler compiled from its markup — is another
+// script's.
+fn is_platform_function(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(function) = v8::Local::<v8::Function>::try_from(args.get(0)) else {
+        rv.set_bool(false);
+        return;
+    };
+    let origin = function.get_script_origin(scope);
+    let name = origin.resource_name().filter(|n| n.is_string()).map(|n| n.to_rust_string_lossy(scope));
+    rv.set_bool(name.as_deref() == Some(SNAPSHOT_SCRIPT));
+}
+// (…the name rusty_racer's Snapshot compiles its source under)
+const SNAPSHOT_SCRIPT: &str = "<snapshot>";
 // Whether a realm's global names its engine ops `__dom` besides (`Native.engine_global=`): for a spec that reads the
 // engine's own state off a page — never a page's of an app, whose scripts it would hand every op of the engine.
 pub(crate) static ENGINE_GLOBAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -3454,6 +3469,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "engineOf", engine_of, context_id);
     register(scope, ns, "realmOfGlobal", realm_of_global_op, context_id);
     register(scope, ns, "isProxy", is_proxy, context_id);
+    register(scope, ns, "isPlatformFunction", is_platform_function, context_id);
     // The ops are no property of the global: the realm's bindings take them as the realm is made, before any script of a
     // page's runs (engine.js `__csimTakeEngine`, which the snapshot's global holds until then and loses as it is called),
     // with the realm's host object — rusty_racer's namespace and the host's procs on it, no global's, where the bindings
