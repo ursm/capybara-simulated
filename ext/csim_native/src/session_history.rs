@@ -230,13 +230,15 @@ struct State {
     shown_name: Option<Vec<u16>>,
 }
 
-// A step applied that keeps the top-level navigable's document (`Traversable::begin_step`): the history as it stood, each
-// navigable whose document the step makes again with the entry it was at, the step it was at, and whether the step moves
-// a navigable within its document — what the step comes to once the host has made those documents or none (`end_step`).
+// A step applied that keeps the top-level navigable's document (`Traversable::begin_step`): what of the history the step
+// changes as it stood — the step it was at and the navigables held — each navigable whose document the step makes again
+// with the entry it was at, and whether the step moves a navigable within its document — what the step comes to once the
+// host has made those documents or none (`end_step`). (…the entries none of its: what was written of them meanwhile — a
+// frame's controls' state as it unloaded, a scroll restoration mode — stands)
 // …and the number of steps applied up to it (`Traversable::steps_applied`): one applied since — a traversal of the same
 // history its host steps applied — is not taken back with it.
 struct Stepping {
-    state: State,
+    held: HashMap<u32, (u64, i64)>,
     at: HashMap<u32, u64>,
     before: i64,
     within: bool,
@@ -1093,7 +1095,7 @@ impl Traversable {
         let from: HashMap<u32, String> = changes.iter().filter(|c| c.2).filter_map(|&(nav, ..)| self.state.current_entry(nav, build).map(|e| (nav, e.url.clone()))).collect();
         let within = changes.iter().any(|c| c.2);
         self.steps_applied += 1;
-        let stepping = Stepping { state: self.state.clone(), at, before: self.state.current, within, applied: self.steps_applied };
+        let stepping = Stepping { held: self.state.held.clone(), at, before: self.state.current, within, applied: self.steps_applied };
         self.go_to(step);
         let moves: Vec<Move> = changes
             .iter()
@@ -1113,9 +1115,9 @@ impl Traversable {
     // update-only, the navigable not updated) — but one none of whose documents was made, moving nothing within a
     // document, leaves the history as it stood (Chrome and Firefox stay where they were).
     fn end_step(&mut self, stepping: Stepping, attempted: usize, none: &[u32]) {
-        let Stepping { state, at, before, within, applied } = stepping;
+        let Stepping { held, at, before, within, applied } = stepping;
         if !within && none.len() == attempted && applied == self.steps_applied {
-            self.state = state;
+            (self.state.current, self.state.held) = (before, held);
             return;
         }
         for nav in none {
@@ -1753,10 +1755,20 @@ impl SessionHistory {
         Kept(t.state.clone(), t.same_document)
     }
     // …put back where a same-document update — a pushState, a replaceState, a fragment's — was made since, or `lost`.
+    // (…each entry it keeps with the scroll restoration mode written of it since: no step's, nor any same-document
+    // update's to take back)
     pub(crate) fn put_back(&self, kept: Kept, lost: bool) {
         let mut t = self.lock();
         if lost || t.same_document != kept.1 {
-            t.state = kept.0;
+            let mut state = kept.0;
+            for list in t.state.all_lists() {
+                for e in list {
+                    if let Some(old) = state.entry_mut(e.id).filter(|old| old.data.scroll_manual != e.data.scroll_manual) {
+                        Arc::make_mut(&mut old.data).scroll_manual = e.data.scroll_manual;
+                    }
+                }
+            }
+            t.state = state;
         }
     }
     // The entry the page's document leaves as a navigation of it commits another (navigation_commit.rs), none where it
@@ -2730,17 +2742,37 @@ mod tests {
         assert_eq!(t.state.current, step);
     }
 
+    // A step taken back keeps what was written of its entries meanwhile: a scroll restoration mode, a frame's controls'
+    // state as it unloaded.
     #[test]
-    fn a_step_left_keeps_the_data_it_had() {
+    fn a_step_taken_back_keeps_what_was_written_of_its_entries() {
         let h = history();
         h.push(TOP, TOP, "/top".into(), false, Data::default());
         h.seed(1, TOP, "/f1".into());
-        let a = h.push(1, TOP, "/f2".into(), false, Data { texts: [None, Some("/r".into()), None, None, None, None], ..Default::default() }).unwrap();
+        let f2 = h.push(1, TOP, "/f2".into(), false, Data::default()).unwrap();
+        let top = h.active(TOP).unwrap();
         let (step, changes) = h.plan(-1).unwrap();
         let (_, stepping) = h.lock().begin_step(step, &changes);
-        Arc::make_mut(&mut h.lock().state.entry_mut(a).unwrap().data).texts[1] = Some("/changed".into());
+        Arc::make_mut(&mut h.lock().state.entry_mut(top).unwrap().data).scroll_manual = true;
+        Arc::make_mut(&mut h.lock().state.entry_mut(f2).unwrap().data).form_state = Some(Arc::from(&b"f"[..]));
         h.lock().end_step(stepping, 1, &[1]);
-        assert_eq!(h.lock().state.entry(a).unwrap().data.text("referer"), Some("/r"));
+        assert_eq!(h.active(1), Some(f2));
+        let t = h.lock();
+        assert!(t.state.entry(top).unwrap().data.scroll_manual);
+        assert!(t.state.entry(f2).unwrap().data.form_state.is_some());
+    }
+
+    // …and a traversal's history put back keeps the scroll restoration mode written since.
+    #[test]
+    fn a_history_put_back_keeps_its_scroll_restoration_modes() {
+        let h = history();
+        let a = h.push(TOP, TOP, "/a".into(), false, Data::default()).unwrap();
+        let kept = h.keep();
+        h.replace_state_for_test("/a?x");
+        Arc::make_mut(&mut h.lock().state.entry_mut(a).unwrap().data).scroll_manual = true;
+        h.put_back(kept, false);
+        let t = h.lock();
+        assert_eq!(t.state.entry(a).map(|e| (e.url.as_str(), e.data.scroll_manual)), Some(("/a", true)));
     }
 }
 
