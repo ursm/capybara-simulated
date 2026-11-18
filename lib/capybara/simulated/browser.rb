@@ -2335,9 +2335,9 @@ module Capybara
       # The document that initiated a navigation of the page to about:blank, as the document it makes takes it
       # (`boot_response_into_ctx`'s `creator`): its origin (HTML "determine the origin": a URL matching about:blank takes
       # the initiator origin) and its base URL ("about base URL") — none for an opaque one: a new opaque origin is what the
-      # document is of otherwise. (…its URL that document's referrer)
-      private def about_blank_creator(origin, base, url = nil)
-        {origin: origin.to_s, base: base.to_s, url: url.to_s} unless origin.to_s.empty? || origin.to_s.start_with?('null')
+      # document is of otherwise.
+      private def about_blank_creator(origin, base)
+        {origin: origin.to_s, base: base.to_s} unless origin.to_s.empty? || origin.to_s.start_with?('null')
       end
       # HTML "create a new top-level traversable": a new window's initial about:blank, made with the window — a new opaque
       # origin, of no creator (a window this one opens without its opener) — and completely loaded as it is, no parse run
@@ -2494,11 +2494,8 @@ module Capybara
           flushed ||= command == 'flush' && answer
         end
       ensure
-        begin
-          restore_flushed_nav_intents if flushed
-        ensure
-          history.end_apply(applying)
-        end
+        history.end_apply(applying)
+        restore_flushed_nav_intents if flushed
       end
       # …one of its steps (session_history.rs `Command`), run: its answer. (…`realms` its frames' realms, by navigable, as
       # they were asked)
@@ -13284,6 +13281,10 @@ module Capybara
       # traversals the document it replaces queued going on after it: `commit_javascript_document`'s)
       # (…`creator` an about:blank one's, the document that initiated its navigation: `about_blank_creator`)
       def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: false, inherited_coop: nil, content_type: nil, inline: false, client_id: nil, controlled: true, keep_traversals: false, creator: nil)
+        # (…a replay's its entry's classic history API state as the step left it — `history.state` before its scripts run,
+        # HTML "update document for history step application" — none where its origin changed: navigation_commit.rs;
+        # taken first, so no boot that fails leaves it for the next document)
+        history_state = @session_history.take_starting_state
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -13371,11 +13372,7 @@ module Capybara
           opts['viewportH'] = @viewport_height
         end
         opts['touch'] = true if @touch_input
-        # (…a replay's its entry's classic history API state as the step left it — `history.state` before its scripts run,
-        # HTML "update document for history step application" — none where its origin changed: navigation_commit.rs)
-        if (state = @session_history.take_starting_state)
-          opts['historyState'] = state
-        end
+        opts['historyState'] = history_state if history_state
         # (…and its referrer, its navigation's request's: `@current_referer`)
         opts['referrer'] = @current_referer unless @current_referer.to_s.empty?
         # (…and the referrer policy its response's header sets, its policy container's)
@@ -13394,7 +13391,6 @@ module Capybara
         if creator && about_blank_url?(page_url)
           opts['creatorOrigin'] = creator[:origin]
           opts['aboutBase']     = creator[:base]
-          opts['referrer']      = creator[:url] unless creator[:url].empty?
         end
         @document_handle = @runtime.call('bootContext', opts).to_i
         # Drain the app's deferred external-script (chunk) boot chain to quiescence.

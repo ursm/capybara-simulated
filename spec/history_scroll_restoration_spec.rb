@@ -58,4 +58,24 @@ RSpec.describe 'history.scrollRestoration' do
     session.execute_script("frames[0].history.pushState(null, '', '/inner2'); frames[0].history.scrollRestoration = 'manual'")
     expect(session.evaluate_script('[history.scrollRestoration, frames[0].history.scrollRestoration]')).to eq(%w[auto manual])
   end
+
+  # …a frame's set before it has an entry of its own, which the entries after it take (no `src`: its initial about:blank).
+  it "is kept by a frame's first entry" do
+    session.visit('/a')
+    session.execute_script(<<~JS)
+      const f = document.createElement('iframe');
+      document.body.append(f);
+      f.contentWindow.history.scrollRestoration = 'manual';
+      f.contentWindow.history.pushState('s', '');
+    JS
+    expect(session.evaluate_script('frames[0].history.scrollRestoration')).to eq('manual')
+  end
+
+  # …and one a document set as it was unloaded is its own entry's, not the next document's.
+  it "is not the next entry's as the document is unloaded" do
+    session.visit('/a')
+    session.execute_script("addEventListener('pagehide', () => { history.scrollRestoration = 'manual'; })")
+    session.visit('/b')
+    expect(session.evaluate_script('history.scrollRestoration')).to eq('auto')
+  end
 end

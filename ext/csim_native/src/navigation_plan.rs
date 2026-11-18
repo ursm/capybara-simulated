@@ -77,7 +77,7 @@ struct Own {
 
 // A traversal of a top-level document's session history that makes its document again (session_history.rs
 // `applyTraversal`): the step it goes to — the delta it was asked by, which the page's host judges anew once the tasks
-// due before it ran (browser.rb `perform_history_traverse`) — and the entry the top-level navigable is at there, whose
+// due before it ran (session_history.rs `Applying`, browser.rb `apply_history_step`) — and the entry the top-level navigable is at there, whose
 // document state's resource and request a traversal makes its document of again (HTML "apply the history step") — and
 // whether the user asked for it, its request then made by no document (session_history.rs `Queued::by_user`).
 pub(crate) struct Traversal {
@@ -89,7 +89,7 @@ pub(crate) struct Traversal {
 
 // …and one that keeps its document, moving a frame of it: the step it goes to, each navigable whose active entry the step
 // moves with the entry and whether that is of the document it is at — what the host applies as it applies the page's
-// (browser.rb `traverse_navigables`), the traversals queued after it applied then, from the step it went to. No ongoing
+// (browser.rb `traverse_navigables_of`), the traversals queued after it applied then, from the step it went to. No ongoing
 // navigation of the window's own: HTML "apply the history step" sets that of the navigables whose documents it changes
 // alone (the host cancels the frames').
 // (…and the order it was planned in, which the navigation turn makes due: `takeTraversal`)
@@ -735,7 +735,7 @@ fn frame_traversal_items<'s>(scope: &mut v8::PinScope<'s, '_>, t: FrameTraversal
 }
 // __dom.takeTraversal(frames) -> the traversal of its session history the calling realm's document — the page's — planned,
 // which it plans no more: `["traverse", delta, by user]` of one making its document again (`Traversal`: the host's to judge anew
-// from its delta, browser.rb `perform_history_traverse`), one moving a frame of it as `takeWindowNavigations` gives it —
+// from its delta, session_history.rs `Applying`), one moving a frame of it as `takeWindowNavigations` gives it —
 // none of that kind before it is due (`frame_traversal_due`) — or null. Its traversable told whether one is still planned
 // (session_history.rs `planned_for_host`).
 fn take_traversal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

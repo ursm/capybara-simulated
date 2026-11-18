@@ -233,11 +233,14 @@ struct State {
 // A step applied that keeps the top-level navigable's document (`Traversable::begin_step`): the history as it stood, each
 // navigable whose document the step makes again with the entry it was at, the step it was at, and whether the step moves
 // a navigable within its document — what the step comes to once the host has made those documents or none (`end_step`).
+// …and the number of steps applied up to it (`Traversable::steps_applied`): one applied since — a traversal of the same
+// history its host steps applied — is not taken back with it.
 struct Stepping {
     state: State,
     at: HashMap<u32, u64>,
     before: i64,
     within: bool,
+    applied: u64,
 }
 
 // A traversal the host applies (HTML "apply the history step"), its steps the engine's to take and the host's to run, one
@@ -348,6 +351,7 @@ struct Traversable {
     // The traversals the host applies (`Applying`), in the order begun, and the number the next is given.
     applying: Vec<Applying>,
     applying_tokens: u64,
+    steps_applied: u64,
     // Each frame's navigation under way, by its navigable — one at a time, a navigation begun ending the one before it
     // (HTML "navigate") — and the number the next one is given.
     navigations: HashMap<u32, FrameNavigation>,
@@ -1086,7 +1090,8 @@ impl Traversable {
         let at = changes.iter().filter(|c| !c.2).filter_map(|&(nav, ..)| self.state.current_entry(nav, build).map(|e| (nav, e.id))).collect();
         let from: HashMap<u32, String> = changes.iter().filter(|c| c.2).filter_map(|&(nav, ..)| self.state.current_entry(nav, build).map(|e| (nav, e.url.clone()))).collect();
         let within = changes.iter().any(|c| c.2);
-        let stepping = Stepping { state: self.state.clone(), at, before: self.state.current, within };
+        self.steps_applied += 1;
+        let stepping = Stepping { state: self.state.clone(), at, before: self.state.current, within, applied: self.steps_applied };
         self.go_to(step);
         let moves: Vec<Move> = changes
             .iter()
@@ -1106,8 +1111,8 @@ impl Traversable {
     // update-only, the navigable not updated) — but one none of whose documents was made, moving nothing within a
     // document, leaves the history as it stood (Chrome and Firefox stay where they were).
     fn end_step(&mut self, stepping: Stepping, attempted: usize, none: &[u32]) {
-        let Stepping { state, at, before, within } = stepping;
-        if !within && none.len() == attempted {
+        let Stepping { state, at, before, within, applied } = stepping;
+        if !within && none.len() == attempted && applied == self.steps_applied {
             self.state = state;
             return;
         }
@@ -1424,6 +1429,7 @@ impl SessionHistory {
         let mut t = self.lock();
         let reached = t.state.current_entry(TOP, t.build).map(|e| Data { texts: e.data.texts.clone(), cross_site: e.data.cross_site, ..Data::default() });
         t.leaving = None;
+        t.starting_state = None;
         t.commit(TOP, TOP, &url, false, reached.is_some(), reached.unwrap_or_default());
     }
     // #active(navigable) -> the id of its active entry, or nil.
@@ -2636,6 +2642,24 @@ mod tests {
         assert_eq!((t.state.current, t.state.current_entry(2, t.build).map(|e| e.id)), (before, Some(g2)));
     }
 
+    // A step none of whose documents was made takes back no step another traversal of the history applied meanwhile.
+    #[test]
+    fn a_step_taken_back_leaves_a_later_one_standing() {
+        let h = history();
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
+        h.seed(1, TOP, "/f1".into());
+        h.push(1, TOP, "/f2".into(), false, Data::default());
+        h.push(1, TOP, "/f3".into(), false, Data::default());
+        let (step, changes) = h.plan(-1).unwrap();
+        let (_, outer) = h.lock().begin_step(step, &changes);
+        let (step, changes) = h.plan(-1).unwrap();
+        let (_, inner) = h.lock().begin_step(step, &changes);
+        h.lock().end_step(inner, 1, &[]);
+        let after = h.step();
+        h.lock().end_step(outer, 1, &[1]);
+        assert_eq!(h.step(), after);
+    }
+
     #[test]
     fn a_step_left_keeps_the_data_it_had() {
         let h = history();
@@ -3175,13 +3199,18 @@ fn history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // __dom.historyScrollRestoration(manual) -> the scroll restoration mode of the active session history entry of the calling
 // realm's navigable — 'manual' or 'auto' — or, `manual` given, that one made it (HTML's History `scrollRestoration`: the
 // mode is the ENTRY's, which an entry of the same document takes of the one it comes after, and a traversal back to it
-// finds again: Chrome 157 and Firefox 159, measured 2026-11-19), true; null for a navigable of no entry yet — a document
-// at its initial about:blank, whose History keeps it (history.js).
+// finds again: Chrome 157 and Firefox 159, measured 2026-11-19), true; null for a top-level navigable of no entry yet — a
+// window at its initial about:blank, which no pushState gives one — whose History keeps it (history.js), and for a
+// document being unloaded.
 fn history_scroll_restoration_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let manual = args.get(0);
     let manual = (!manual.is_undefined()).then(|| manual.is_true());
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
+    // (…none of a document being unloaded, whose navigable's active entry is already the next one's: as `historyUpdate`)
+    if !arena.session_history_takes(cid) {
+        return rv.set_null();
+    }
     let Some((traversable, window)) = traversable_of(arena, cid) else { return rv.set_null() };
     let (traversable, id) = if window.map_or(cid == 0, |window| window == cid) {
         let id = {
@@ -3190,7 +3219,8 @@ fn history_scroll_restoration_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Fun
         };
         (traversable, id)
     } else {
-        match frame_entry(arena, cid, false) {
+        // (…a frame's made where it has none, as a pushState of it would, so the entries after it take the mode set)
+        match frame_entry(arena, cid, manual.is_some()) {
             Some((frame, id)) => (frame.traversable, Some(id)),
             None => (traversable, None),
         }
