@@ -1545,6 +1545,16 @@ RSpec.describe 'a frame navigation as tasks' do
       expect(log.scan('ce:b').size).to eq(1)
     end
 
+    # s6_ce_reins: …a removal and an insertion of it meanwhile calling theirs all the same, the parser's connection none
+    # (Firefox `c:b d:b c:b reins`).
+    it 'calls the callbacks of an element a define upgraded and a task reinserted before the parser connected it' do
+      log = page_log(<<~HTML, at: 600)
+        <script>setTimeout(() => { customElements.define('x-e', class extends HTMLElement { connectedCallback() { L.push('c:' + this.id); } disconnectedCallback() { L.push('d:' + this.id); } }); const b = document.getElementById('b'); b.remove(); document.body.append(b); L.push('reins'); }, 50)</script>
+        <link rel="stylesheet" href="/slow/200/x.css"><x-e id="b"></x-e><script>L.push('inl')</script>
+      HTML
+      expect(log).to start_with('c:b d:b c:b reins inl')
+    end
+
     # s5_open: a timer that runs as the parser waits on a parser-blocking script's server — its script nesting level zero
     # — opens the document anew (HTML document open steps; Chrome and Firefox), where it used to run in "prepare the script
     # element" and find a script running.
