@@ -209,4 +209,15 @@ RSpec.describe 'legacy platform objects' do
       "QuotaExceededError Failed to execute 'setItem' on 'Storage': Setting the value of 'huge' exceeded the quota."
     ])
   end
+
+  # A select's namedItem is its options collection's steps, not that collection's member a page may replace.
+  it "answers a select's namedItem by its options' steps" do
+    r = probe(<<~JS)
+      const s = document.createElement('select');
+      s.innerHTML = '<option id="o1">a</option>';
+      HTMLOptionsCollection.prototype.namedItem = () => 'replaced';
+      return String(s.namedItem('o1'));
+    JS
+    expect(r).to eq('[object HTMLOptionElement]')
+  end
 end
