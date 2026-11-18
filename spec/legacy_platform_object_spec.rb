@@ -7,7 +7,9 @@ require_relative 'support/session_teardown'
 # Legacy platform objects (Web IDL §3.9) — every interface that supports indexed or named properties is made by one
 # generated helper (gen_bindings.mjs `legacyKind`, webidl.js `legacyPlatformObject`), its behaviour its IDL's: a
 # special operation's steps, [LegacyOverrideBuiltIns], [LegacyUnenumerableNamedProperties]. Each expectation below is
-# the spec's, measured where the spec leaves room against Chrome and Firefox (2026-11-19).
+# the spec's, measured where the spec leaves room against Chrome and Firefox (2026-11-19). Two follow explicit spec text
+# where BOTH differ (measured 2026-11-19): a form's own keys list its names, and a NamedNodeMap's upper-case name is no
+# property of an HTML element's — each quoted at its example.
 RSpec.describe 'legacy platform objects' do
   let(:page) {
     <<~HTML
@@ -77,7 +79,9 @@ RSpec.describe 'legacy platform objects' do
   end
 
   # [LegacyOverrideBuiltIns] on a form: a control named `submit` shadows the method; [LegacyUnenumerableNamedProperties]:
-  # its names are own properties, listed but not enumerable, read-only, never deleted.
+  # its names are own properties, listed but not enumerable, read-only, never deleted. Web IDL §3.9.6 [[OwnPropertyKeys]]:
+  # "If O supports named properties, then for each P of O's supported property names that is visible according to the
+  # named property visibility algorithm, append P to keys" — where Chrome and Firefox both list `["0", "1"]` alone.
   it "answers a form's controls by index and by name" do
     r = probe(<<~JS)
       const f = document.getElementById('f');
@@ -88,7 +92,10 @@ RSpec.describe 'legacy platform objects' do
   end
 
   # A name an HTML element's NamedNodeMap would find another attribute by (`FOO` for `foo`) is no supported property
-  # name: its getNamedItem answers it, its properties do not.
+  # name: its getNamedItem answers it, its properties do not. DOM §4.9.1: its supported property names drop, "if this
+  # NamedNodeMap object's element is in the HTML namespace and its node document is an HTML document", each name whose
+  # "lowercaseName is not name" — where Chrome and Firefox both answer `attributes.ID` with the attribute (Firefox's
+  # `'ID' in attributes` true too).
   it "takes a NamedNodeMap's supported names, not what its getter finds" do
     r = probe(<<~JS)
       const a = document.getElementById('d').attributes;
