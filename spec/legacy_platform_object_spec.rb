@@ -155,4 +155,28 @@ RSpec.describe 'legacy platform objects' do
     JS
     expect(r).to eq(['NotAllowedError', 1, true])
   end
+
+  # The driver's own reads of a document go through its steps, not its members, which a page's element of the name
+  # answers first ([LegacyOverrideBuiltIns]).
+  context 'with elements named after document members' do
+    let(:page) {
+      <<~HTML
+        <!DOCTYPE html><meta charset="utf-8"><title>Real</title>
+        <form name="title"></form><img name="URL"><img name="createElementNS"><img name="fonts"><img name="characterSet">
+      HTML
+    }
+
+    it "reads the document's own state" do
+      session = simulated_session(app)
+      session.visit '/'
+      r = JSON.parse(session.evaluate_script(<<~JS))
+        JSON.stringify([
+          String(new Image()), String(new Audio()),
+          typeof new DOMParser().parseFromString('<p>', 'text/html').URL, typeof document.cloneNode().URL
+        ])
+      JS
+      expect(session.title).to eq('Real')
+      expect(r).to eq(['[object HTMLImageElement]', '[object HTMLAudioElement]', 'string', 'string'])
+    end
+  end
 end
