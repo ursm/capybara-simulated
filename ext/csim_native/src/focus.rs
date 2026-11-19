@@ -461,7 +461,7 @@ fn descendants(arena: &RealmArena, root: NodeId) -> Vec<NodeId> {
 // ── the ops ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "focusable", focusable_op, context_id);
-    crate::dom::register(scope, ns, "nextFocus", next_focus_op, context_id);
+    crate::dom::register(scope, ns, "focusNavigation", focus_navigation_op, context_id);
     crate::dom::register(scope, ns, "focusableArea", focusable_area_op, context_id);
     crate::dom::register(scope, ns, "focusTarget", focus_target_op, context_id);
     crate::dom::register(scope, ns, "pressFocusTarget", press_target_op, context_id);
@@ -600,19 +600,81 @@ fn focusable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     }
 }
 
-// __dom.nextFocus(docNid, currentNid, reverse) -> the element Tab (Shift-Tab, with `reverse`) moves focus to from
-// `currentNid` (-1: nothing focused, the document's sequential focus navigation starting point), as `node_value`
-// answers it — null where nothing is focusable.
-fn next_focus_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
-    let current = crate::dom::nid_arg(scope, &args, 1);
-    let reverse = args.get(2).is_true();
-    let found = crate::rendered::with_engine(scope, &args, |engine, arena, now| {
-        // (…nothing focused: on from the starting point, where it is in the document yet — else from its start)
-        let current = current.or(arena.focus_start.filter(|&s| arena.shadow_including_root(s) == doc));
-        next(engine, arena, doc, current, reverse, now)
+
+// HTML §6.6.5 "sequential focus navigation" across navigables: from `current` in realm `cid`'s document (None: from its
+// starting point, else its start) forwards or `reverse` — a navigable container the order comes to entered, the focus
+// going to the first (last) element of its document's order, the container passed where that has none; past the end of
+// a child navigable's document on from its container in its parent's ("Otherwise, starting point is a focusable area in
+// a child navigable. Set starting point to that child navigable's parent and return to the step labeled loop"; Chrome and
+// Firefox) — the realm of the element focus goes to, and the element. None past the end of the top-level document's: the
+// user agent's own controls take focus (`next`).
+fn navigate(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, mut cid: i32, mut current: Option<NodeId>, reverse: bool) -> Option<(i32, NodeId)> {
+    let mut from_start = current.is_none();
+    loop {
+        let mut next = sequential_next(scope, args, cid, current, from_start, reverse);
+        while let Some(el) = next {
+            match child_document_realm(&crate::dom::dom(scope).arena, el) {
+                Some(child) => {
+                    if let Some(found) = navigate_into(scope, args, child, reverse) {
+                        return Some(found);
+                    }
+                    next = sequential_next(scope, args, cid, Some(el), false, reverse);
+                },
+                None => return Some((cid, el)),
+            }
+        }
+        let arena = &crate::dom::dom(scope).arena;
+        let container = arena.live_container(cid).filter(|&c| arena.frame_realm(c) == Some(cid))?;
+        cid = arena.get(container)?.realm;
+        current = Some(container);
+        from_start = false;
+    }
+}
+// …into the document of realm `cid`, a container's: its first (last) element, a container in it entered in turn — none
+// where it has none.
+fn navigate_into(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, cid: i32, reverse: bool) -> Option<(i32, NodeId)> {
+    let mut next = sequential_next(scope, args, cid, None, false, reverse);
+    while let Some(el) = next {
+        match child_document_realm(&crate::dom::dom(scope).arena, el) {
+            Some(child) => match navigate_into(scope, args, child, reverse) {
+                Some(found) => return Some(found),
+                None => next = sequential_next(scope, args, cid, Some(el), false, reverse),
+            },
+            None => return Some((cid, el)),
+        }
+    }
+    None
+}
+// The realm of the document of the navigable `el` contains, where it is a container whose document is live.
+fn child_document_realm(arena: &RealmArena, el: NodeId) -> Option<i32> {
+    arena.frame_realm(el).filter(|&c| !arena.is_dropped(c) && arena.realm_document(c).is_some())
+}
+// `next` in realm `cid`'s document by its own style engine — from `current`, or, with none, from its starting point where
+// `from_start` and it is in the document yet, else from its start.
+fn sequential_next(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, cid: i32, current: Option<NodeId>, from_start: bool, reverse: bool) -> Option<NodeId> {
+    let now = crate::dom::realm_clock(scope, args);
+    let mut found = None;
+    crate::dom::style_op(scope, cid, |scope| {
+        let d = crate::dom::dom(scope);
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
+        let Some(doc) = arena.realm_document(cid) else { return };
+        let start = from_start.then(|| arena.focus_start.filter(|&s| arena.shadow_including_root(s) == doc)).flatten();
+        found = next(engine, arena, doc, current.or(start), reverse, now);
+        engine.take_verify_failures();
     });
-    rv.set(crate::dom::node_value(scope, found.flatten()));
+    found
+}
+// __dom.focusNavigation(currentNid, reverse) -> [realm, element] Tab (Shift+Tab, with `reverse`) moves focus to from the
+// focused element `currentNid` (-1: none) of this realm's document, across navigables (`navigate`), or null: out of the
+// top-level document, to the user agent's controls.
+fn focus_navigation_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let current = crate::dom::nid_arg(scope, &args, 0);
+    let reverse = args.get(1).is_true();
+    let Some((realm, el)) = navigate(scope, &args, cid, current, reverse) else { return rv.set_null() };
+    let realm_value = v8::Integer::new(scope, realm).into();
+    let el = crate::dom::node_value(scope, Some(el));
+    rv.set(v8::Array::new_with_elements(scope, &[realm_value, el]).into());
 }
 
 // __dom.setPointerModality(pointer) — the user's input in the realm driven by a pointer (a press), or by the keyboard.

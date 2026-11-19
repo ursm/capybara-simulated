@@ -2660,24 +2660,14 @@ module Capybara
         h = dom_call('activeElement').to_i
         h.zero? ? nil : h
       end
-      # Session-level keystroke. Tab / shift-tab cycle focus; everything
-      # else is routed to the currently focused element (if any) as a
-      # plain keydown/keyup pair.
+      # Session-level keystrokes (`page.send_keys`), to the focused element — the body where none is.
       def send_session_keys(keys)
-        # Each key a call of its own to what is focused, a settle between — a dropdown highlight (Avo Tags input's arrow
-        # navigation) commits before the next key fires — the modifier keys before one held over it, as Selenium's are
-        # (`(:shift, :enter)` is Shift + Enter: keys.rs's `null` releasing them); Tab a key as any, backtab Shift + Tab.
-        held = []
-        Array(keys).each do |k|
-          if k.is_a?(Symbol) && !modifier_flags([k]).values.none?
-            held << k
-            next
-          end
-          handle = active_element_handle
-          handle = current_document_handle if handle.nil? || handle.zero?
-          key = k == :backtab ? [:shift, :tab] : k
-          send_keys(handle, held.empty? ? [key] : [held + Array(key)])
-        end
+        # The keys to what is focused, as one `send_keys` — the engine reads them as an element's are (a modifier held to
+        # the end or `:null`, an array a chord: keys.rs `KeyGesture`), each key going where focus is as it is pressed;
+        # backtab Shift + Tab.
+        handle = active_element_handle
+        handle = current_document_handle if handle.nil? || handle.zero?
+        send_keys(handle, Array(keys).map {|k| k == :backtab ? [:shift, :tab] : k })
       end
 
       def send_session_key(key) = send_session_keys([key])

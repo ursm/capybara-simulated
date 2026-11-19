@@ -216,4 +216,41 @@ RSpec.describe 'Key gestures' do
     s.find('#c').set('#ff0000')
     expect(log(s).grep(/Event$/)).to eq(%w[Event Event])
   end
+
+  # Sequential focus navigation across navigables (HTML §6.6.5): Tab past the last element leaves the document, the next
+  # Tab coming back in at its start, Shift + Tab at its end (Chrome); a frame's order goes on into its parent's past its
+  # end, and the parent's into a frame it comes to (Chrome and Firefox) — the keys after it typed there.
+  it 'tabs out of the document and back, into a frame and out of it' do
+    s = session_of(%(<input id=a><iframe id=fr srcdoc="<input id=in1><input id=in2>"></iframe><input id=z>))
+    ae = -> { s.evaluate_script('document.activeElement.id || document.activeElement.nodeName') }
+    s.find('#z').send_keys(:tab)
+    r = [ae.()]
+    s.send_keys(:tab)
+    r << ae.()
+    s.find('#z').send_keys(:tab)
+    s.send_keys([:shift, :tab])
+    r << ae.()
+    s.find('#a').send_keys(:tab, 'x')
+    r << ae.() << s.evaluate_script("fr.contentDocument.getElementById('in1').value")
+    s.within_frame('fr') { s.find('#in2').send_keys(:tab) }
+    expect(r << ae.()).to eq(%w[BODY a z fr x z])
+  end
+
+  # A gesture begun in a frame follows focus out of it to the page (Chrome); session keys read as an element's
+  # (`:null` releasing the modifiers, Selenium's); and a select's typeahead search runs on across `send_keys` calls a
+  # second apart at most (Chrome and Firefox: `c`, `c` steps to the second option a `c` begins).
+  it 'follows focus out of a frame, reads session keys as an element\'s, and keeps a typeahead search' do
+    s = session_of(%(<iframe id=fr srcdoc="<input id=in1>"></iframe><input id=after><select id=s><option>apple<option>cranberry<option>Coconut</select>))
+    s.within_frame('fr') do
+      s.execute_script("document.getElementById('in1').addEventListener('keydown', (e) => { if (e.key === 'a') setTimeout(() => parent.document.getElementById('after').focus()) })")
+      s.find('#in1').send_keys('abc')
+      expect(s.find('#in1').value).to eq('a')
+    end
+    expect(s.evaluate_script('after.value')).to eq('bc')
+    s.send_keys(:shift, 'x', :null, 'y')
+    expect(s.evaluate_script('after.value')).to eq('bcXy')
+    s.find('#s').send_keys('c')
+    s.find('#s').send_keys('c')
+    expect(s.evaluate_script('s.value')).to eq('Coconut')
+  end
 end

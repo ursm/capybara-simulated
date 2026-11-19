@@ -610,7 +610,20 @@ pub(crate) struct Keyboard {
     // modifiers held, and the keys down, by the value each was pressed by, and what their keydown left.
     held: u32,
     pressed: Vec<(Vec<u16>, Pressed)>,
+    // A select's typeahead search as the keys typed at it so far left it, and when the last came (`Typeahead`).
+    typeahead: Option<Typeahead>,
 }
+
+// A select's typeahead search: the select, the characters typed at it, and the time of the last, on the event loop's
+// clock — a key after `TYPEAHEAD_TIMEOUT_MS` of none, or at another select, beginning a new one (Chrome and Firefox: one
+// second, `kTypeAheadTimeout` and `ui.menu.incremental_search.timeout`; HTML says none).
+#[derive(Clone)]
+struct Typeahead {
+    select: NodeId,
+    search: Vec<u16>,
+    at: f64,
+}
+const TYPEAHEAD_TIMEOUT_MS: f64 = 1000.0;
 
 // A key down, between its keydown and its keyup: whether its default actions were canceled, and the element its keydown
 // went to — what its keyup's (Space's activation) asks.
@@ -633,8 +646,8 @@ struct KeyGesture {
     // left it.
     to: NodeId,
     focused: (i32, Option<NodeId>),
-    // What a run of keys pressed at a `<select>` typed so far: its typeahead search.
-    typeahead: Vec<u16>,
+    // The keyboard's typeahead search, which the gesture takes and hands back (`Keyboard::typeahead`).
+    typeahead: Option<Typeahead>,
     // Its jobs yet to start, and the steps the one under way has queued — the last of them, where it waits on its
     // outcome, marked so.
     jobs: std::collections::VecDeque<Job>,
@@ -847,7 +860,7 @@ impl KeyGesture {
             switched: false,
             to,
             focused: (cid, None),
-            typeahead: Vec::new(),
+            typeahead: None,
             jobs: Default::default(),
             queued: Default::default(),
             stage: Stage::Idle,
@@ -1221,7 +1234,7 @@ impl KeyGesture {
                 p.host = p.plan & EDITING_HOST != 0;
                 p.at = PressAt::Selection;
                 if p.plan & TYPEAHEAD == 0 {
-                    self.typeahead.clear();
+                    self.typeahead = None;
                 }
                 if p.blocked {
                     p.at = PressAt::KeyUp;
@@ -1230,10 +1243,18 @@ impl KeyGesture {
                 // A character typed at a select: the option its typeahead search finds picked, its `input` and `change`
                 // fired (Chrome and Firefox: "c" picks "cherry") — the search the run of characters typed at it.
                 if p.plan & TYPEAHEAD != 0 {
-                    self.typeahead.extend_from_slice(&p.key.key);
-                    if let Some(option) = typeahead_option(arena, self.to, &self.typeahead) {
+                    let now = arena.event_loop.clock;
+                    let mut t = self.typeahead.take().filter(|t| t.select == self.to && now - t.at < TYPEAHEAD_TIMEOUT_MS).unwrap_or(Typeahead {
+                        select: self.to,
+                        search: Vec::new(),
+                        at: now,
+                    });
+                    t.search.extend_from_slice(&p.key.key);
+                    t.at = now;
+                    if let Some(option) = typeahead_option(arena, self.to, &t.search) {
                         self.tell(Step::Pick(option, true));
                     }
+                    self.typeahead = Some(t);
                     p.at = PressAt::KeyUp;
                     return;
                 }
@@ -1767,6 +1788,7 @@ fn finish_gesture(keyboard: &mut Keyboard) -> bool {
     if let Some(down) = gesture.left_down {
         keyboard.pressed.push(down);
     }
+    keyboard.typeahead = gesture.typeahead;
     gesture.answer
 }
 
@@ -1850,12 +1872,18 @@ fn gesture_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         },
         RELEASE => {
             let keyboard = &mut crate::dom::dom(scope).keyboard;
-            (keyboard.held, keyboard.pressed) = (0, Vec::new());
+            (keyboard.held, keyboard.pressed, keyboard.typeahead) = (0, Vec::new(), None);
             return rv.set_bool(true);
         },
         _ => return rv.set_bool(false),
     };
-    crate::dom::dom(scope).keyboard.gestures.push(gesture);
+    // (…the focused area looked for from the top-level page down — a gesture begun in a frame follows focus out of it — and
+    // the keyboard's typeahead search taken on)
+    let d = crate::dom::dom(scope);
+    let mut gesture = gesture;
+    gesture.root = d.arena.top_level_realm(cid);
+    gesture.typeahead = d.keyboard.typeahead.take();
+    d.keyboard.gestures.push(gesture);
     answer_next(scope, &args, rv, 0);
 }
 
