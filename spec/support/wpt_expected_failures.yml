@@ -64870,11 +64870,6 @@ html/browsers/browsing-the-web/navigating-across-documents/abort-document-load.h
 - Aborting a Document load
 html/browsers/browsing-the-web/navigating-across-documents/abort-document-window-stop.sub.window.js:
 - abort-document-window-stop
-html/browsers/browsing-the-web/navigating-across-documents/about-srcdoc-navigation-blocked.window.js:
-- Navigations to about:srcdoc via window.location must be blocked
-- Navigations to about:srcdoc via window.open() must be blocked
-- Navigations to about:srcdoc?query via window.location within an about:srcdoc document
-  must be blocked
 html/browsers/browsing-the-web/navigating-across-documents/child-navigates-parent-cross-origin.window.js:
 - Child document attempts to navigate cross-origin parent via location
 - Child document attempts to navigate cross-origin parent via location.href

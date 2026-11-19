@@ -121,6 +121,8 @@ const BUILD_QUEUED: u32 = 1 << 10;
 const WINDOW_READ: u32 = 1 << 11;
 // Its document still to be asked whether it may be unloaded (frame-nav.js `FN_PROMPT_OWED`).
 const PROMPT_OWED: u32 = 1 << 12;
+// (…a navigation of its navigable to a URL its document or another made — not its attributes' processing: `frame_source`)
+const URL_NAV: u32 = 1 << 14;
 
 // A navigation the host makes of a frame's navigable, planned by the frame's own document or a hyperlink or a form that
 // targets it (HTML "plan to navigate": the navigable's one, a later one replacing it): to a URL — whether it replaces the
@@ -1376,7 +1378,11 @@ impl RealmArena {
     pub(crate) fn frame_source(&mut self, container: NodeId, doc: Option<NodeId>) -> (FrameSource, bool) {
         let nav = self.frame_navigation(container);
         let reload = nav.flags & RELOAD_NAV != 0;
-        nav.flags &= !RELOAD_NAV;
+        // (…a navigation of the frame's navigable to a URL — its document's own, a form's, a link's — not its attributes'
+        // processing, which alone reads `srcdoc`: HTML "process the iframe attributes"; Chrome and Firefox take a srcdoc
+        // frame's form to `about:blank?`)
+        let navigated = nav.flags & URL_NAV != 0;
+        nav.flags &= !(RELOAD_NAV | URL_NAV);
         nav.loading_srcdoc = None;
         let kept = nav.reload.take();
         let reload_url = kept.filter(|_| reload);
@@ -1411,7 +1417,7 @@ impl RealmArena {
         }
         let Some(node) = self.get(container) else { return (FrameSource::None, reload) };
         // (…refused, a `srcdoc` has only `stop()` to refuse it: `process_src` asks about a `src` where it has none)
-        if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| !went_on && !refused).map(str::to_owned) {
+        if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| !went_on && !refused && !navigated).map(str::to_owned) {
             self.frame_navigation(container).loading_srcdoc = Some(srcdoc.clone());
             return (FrameSource::Srcdoc(srcdoc), reload);
         }

@@ -71,4 +71,47 @@ RSpec.describe 'the navigations a page planned' do
     session.evaluate_script('1')
     expect(log).to eq(['/f', '/w'])
   end
+
+  # A form of a srcdoc frame navigates the frame to its action — about:blank's here, its query empty — not to the srcdoc
+  # again: only "process the iframe attributes" reads `srcdoc` (Chrome and Firefox: `about:blank?`).
+  it "navigates a srcdoc frame's form to its action" do
+    session, = logged_session(%q(<iframe id=fr srcdoc='<form id=f action="about:blank"></form>'></iframe>))
+    session.visit '/two'
+    session.execute_script("fr.contentDocument.getElementById('f').submit()")
+    expect(poll_until { session.evaluate_script('fr.contentWindow.location.href') == 'about:blank?' }).to be(true)
+  end
+end
+
+# A response that downloads where its document may not download (a sandboxed frame's, a CSP-sandboxed page's) is saved
+# by none, its body let go unread all the same: Rack's close contract.
+RSpec.describe 'a download refused' do
+  closes = Hash.new(0)
+  let(:body_class) do
+    Class.new do
+      define_method(:initialize) {|key, closes| @key, @closes = key, closes }
+      define_method(:each) {|&b| b.call('x') }
+      define_method(:close) { @closes[@key] += 1 }
+    end
+  end
+  let(:session) do
+    body_class = self.body_class
+    simulated_session(lambda {|env|
+      case env['PATH_INFO']
+      when %r{\A/dl/(\w+)} then [200, {'content-type' => 'application/octet-stream', 'content-disposition' => 'attachment; filename=a.bin'}, body_class.new($1, closes)]
+      when '/top' then [200, {'content-type' => 'text/html'}, ['<!doctype html><iframe id=s sandbox="allow-scripts allow-same-origin" src="/x"></iframe>']]
+      when '/csp' then [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-scripts allow-same-origin'}, ['<!doctype html><title>csp</title>']]
+      else [200, {'content-type' => 'text/html'}, ['<!doctype html><title>x</title>']]
+      end
+    })
+  end
+
+  it 'closes its body' do
+    session.visit '/top'
+    session.execute_script("document.getElementById('s').contentWindow.location = '/dl/frame'")
+    session.evaluate_script('1')
+    session.visit '/csp'
+    session.execute_script("location = '/dl/page'")
+    session.evaluate_script('1')
+    expect(closes.values_at('frame', 'page')).to eq([1, 1])
+  end
 end

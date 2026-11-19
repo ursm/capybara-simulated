@@ -13271,8 +13271,12 @@ module Capybara
         allowed = @runtime.call('downloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, sandbox)
         # (…a frame's session history as it stood before: a download is no navigation of it)
         frame_navigation_made_no_document(realm) if realm
-        return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
-        return unless allowed
+        # (…the download fails where its body never came whole (Chrome), and none is made where it is not allowed: its body
+        # let go unread either way, Rack's close contract)
+        unless allowed && !body.is_a?(CutShortBody)
+          close_rack_body(body)
+          return
+        end
 
         ctype    = (ct = header_field(headers, 'content-type')) && header_text(ct)
         filename = Native.download_filename(content_disposition_header(headers), url.to_s, hint, ctype)
