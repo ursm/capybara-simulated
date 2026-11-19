@@ -253,4 +253,57 @@ RSpec.describe 'Key gestures' do
     s.find('#s').send_keys('c')
     expect(s.evaluate_script('s.value')).to eq('Coconut')
   end
+
+  # Focus comes back into a frame whose document focused an element before (HTML returns early from the focusing steps
+  # only for the top-level traversable's focused area, else runs the focus update steps up the chain); what had focus in
+  # a frame loses it there as the focus leaves, the `<iframe>` firing nothing — only one focused as itself (Chrome); the
+  # windows of the documents the focus leaves and comes to their `blur` and `focus` (Chrome); and the page's keys go to
+  # the frame's field focused (Chrome and Selenium). Each window's styles current for the walk: a sheet the frame was
+  # just given hides its field from it. (Chrome 155, CDP keys giving its window the focus first; its `fr.focus()` blurs and
+  # focuses both windows once more between, which neither chain HTML's focus update steps compare holds.)
+  it 're-enters a frame, fires the frame chain\'s focus events, and types the page\'s keys there' do
+    s = session_of(%(<input id=a><iframe id=fr srcdoc="<input id=p><input id=q><input id=r>"></iframe><input id=z>))
+    s.execute_script(<<~JS)
+      const w = fr.contentWindow, d = w.document;
+      for (const t of ['focus', 'blur']) {
+        w.addEventListener(t, (e) => { if (e.target === w) L.push('fr:win' + t) });
+        d.addEventListener(t, (e) => L.push('fr:' + t + ' ' + e.target.id), true);
+        addEventListener(t, (e) => { if (e.target === window) L.push('win' + t) });
+      }
+    JS
+    path = -> { s.evaluate_script("[document.activeElement.id, fr.contentDocument.activeElement.id || 'BODY', fr.contentDocument.hasFocus()]") }
+    s.execute_script('a.focus()')
+    log(s)
+    s.execute_script("const p = fr.contentDocument.getElementById('p'); p.focus(); a.focus(); p.focus()")
+    expect(path.()).to eq(['fr', 'p', true])
+    expect(log(s)).to eq(['blur a', 'winblur', 'fr:winfocus', 'fr:focus p', 'fr:blur p', 'fr:winblur', 'winfocus', 'focus a', 'blur a', 'winblur', 'fr:winfocus', 'fr:focus p'])
+    s.send_keys('x', :tab)
+    expect(path.()).to eq(['fr', 'q', true])
+    s.execute_script("const st = fr.contentDocument.createElement('style'); st.textContent = '#r { visibility: hidden }'; fr.contentDocument.head.append(st)")
+    log(s)
+    s.send_keys(:tab)
+    expect(path.()).to eq(['z', 'BODY', false])
+    expect(log(s).grep(/^(fr:)?(win)?(focus|blur)/)).to eq(['fr:blur q', 'fr:winblur', 'winfocus', 'focus z'])
+    s.find('#a').send_keys(:tab, 'k')
+    expect(path.()).to eq(['fr', 'p', true])
+    expect(s.evaluate_script("fr.contentDocument.getElementById('p').value")).to eq('xk')
+    s.execute_script(<<~JS)
+      a.addEventListener('keydown', () => {
+        const st = fr.contentDocument.createElement('style');
+        st.textContent = '#p { display: none }';
+        fr.contentDocument.head.append(st);
+      });
+    JS
+    s.find('#a').send_keys(:tab)
+    expect(path.()).to eq(['fr', 'q', true])
+    s.execute_script("for (const st of fr.contentDocument.querySelectorAll('style')) st.remove()")
+    log(s)
+    s.execute_script("fr.contentDocument.getElementById('p').focus()")
+    log(s)
+    s.execute_script('fr.focus()')
+    r = [path.()]
+    s.execute_script('a.focus()')
+    expect(r << path.()).to eq([['fr', 'BODY', true], ['a', 'BODY', false]])
+    expect(log(s)).to eq(['fr:blur p', 'focus fr', 'fr:winblur', 'winfocus', 'blur fr', 'focus a'])
+  end
 end

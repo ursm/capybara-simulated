@@ -880,7 +880,10 @@ impl KeyGesture {
         let n = self.to;
         // (…keyboard-driven: `:focus-visible` applies)
         arena.pointer_modality = false;
-        if how & SEND_FOCUS != 0 {
+        // (…not one focused already, on the focus chain — Selenium's active element, which it sends to as it is: a
+        // container whose frame's document holds the focus is focused again by no key, which would take the focus out)
+        let active = arena.get(n).is_some_and(|d| focus_of(arena, d.realm) == Some(n) && arena.focus_chain().contains(&d.realm));
+        if how & SEND_FOCUS != 0 && !active {
             self.tell(Step::Focus(n));
         }
         if how & SEND_CARET_LAST != 0 {
@@ -1037,7 +1040,18 @@ impl KeyGesture {
                     }
                 },
                 Stage::Idle => match self.jobs.pop_front()? {
-                    Job::Begin => self.focused = focused_area(arena, self.root),
+                    // (…the keys sent to a container whose frame's document holds the focus go to the focused area in it —
+                    // `page.send_keys` with a frame's field focused types there, as Chrome and Selenium do)
+                    Job::Begin => {
+                        let area = focused_area(arena, self.root);
+                        self.focused = area;
+                        if area.0 != self.cid && arena.frame_realm(self.to).is_some() && arena.focus_chain().contains(&area.0) {
+                            self.cid = area.0;
+                            self.to = key_event_target(arena, area.0, self.to);
+                            self.switched = true;
+                            return Some(batch);
+                        }
+                    },
                     Job::Press(key, held, phases) => {
                         let (at, blocked, down) = match phases {
                             Phases::Up(p) => (PressAt::KeyUp, p.blocked, p.down),

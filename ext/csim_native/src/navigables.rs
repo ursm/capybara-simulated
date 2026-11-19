@@ -1417,6 +1417,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "realmTree", realm_tree, context_id);
     crate::dom::register(scope, ns, "setFocusedRealm", set_focused_realm, context_id);
     crate::dom::register(scope, ns, "focusChain", focus_chain, context_id);
+    crate::dom::register(scope, ns, "focusedRealm", focused_realm, context_id);
     crate::dom::register(scope, ns, "hasFocus", has_focus, context_id);
     crate::dom::register(scope, ns, "navigableRealms", navigable_realms, context_id);
     crate::dom::register(scope, ns, "realmsMadeUnder", realms_made_under, context_id);
@@ -1566,6 +1567,11 @@ fn realm_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 fn set_focused_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     rv.set_bool(crate::dom::dom(scope).arena.set_focused_realm(realm));
+}
+// __dom.focusedRealm() -> the realm of the document the top-level focused area is in: the focus chain's last.
+fn focused_realm(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let chain = crate::dom::dom(scope).arena.focus_chain();
+    rv.set_int32(chain.last().copied().unwrap_or(0));
 }
 // __dom.focusChain() -> the realms whose documents have focus (`focus_chain`).
 fn focus_chain(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
