@@ -701,15 +701,8 @@ module Capybara
           break unless @load_navigations_due
 
           @load_navigations_due = false
-          run_navigation_turn
-          # (…a traversal the turn made due ahead of the navigations it made due with it: `take_frame_navigations_due`)
-          consume_planned_traversal
-          consume_pending_frame_submit
-          consume_pending_frame_nav
-          consume_pending_location
-          consume_pending_page_submission
-          consume_pending_navigation
-          consume_pending_form_submit
+          # (…a traversal the turn made due ahead of the navigations it made due with it: navigation_takes.rs `load`)
+          take_plans(Native::PlanTakes.load)
         end
       end
 
@@ -1564,10 +1557,9 @@ module Capybara
           end
           # (…then what the page planned taken, in the plan's order: a navigation planned since — a `location`'s, a
           # reload — superseded the submission as it was planned, HTML "navigate" aborting the one ongoing
-          # (navigation_plan.rs `supersede`), and one that landed meanwhile took the page's plan with its document)
-          consume_pending_frame_nav
-          consume_pending_location
-          consume_pending_form_submit
+          # (navigation_plan.rs `supersede`), and one that landed meanwhile took the page's plan with its document:
+          # navigation_takes.rs `submission`)
+          take_plans(Native::PlanTakes.submission)
         when 'download'
           save_download(action)
         end
@@ -3159,11 +3151,7 @@ module Capybara
       # it posted, a navigation or a close of one it asked for.
       def drain_task_intents
         drain_pending_navigation
-        if takes_planned?
-          consume_pending_navigation
-          consume_pending_form_submit
-          consume_pending_download
-        end
+        take_plans(Native::PlanTakes.intents)
         deliver_asked_tasks
       end
       # Whether anything those takes take may be planned (navigation_plan.rs `takesPlanned`): one host call where nothing
@@ -11415,8 +11403,7 @@ module Capybara
       # realm — illegal while its location setter is still on the V8 stack.)
       # (…`windows`: the windows' navigations taken first, as they are at every drain point of the frames' — window-realm
       # self-navs are realm navs too — where the caller took them already, not)
-      def consume_pending_frame_nav(windows: true)
-        consume_pending_window_nav if windows
+      def consume_pending_frame_nav
         @runtime.call('takeFrameNavigations', 'navigate').each do |realm_id, url, replace, initiator, source, policy, sandbox, activated|
           parent    = @runtime.frame_realm_parent(realm_id)
           container = frame_container_handle(realm_id, parent)
@@ -11449,41 +11436,39 @@ module Capybara
       # one that keeps its document, its frames' each to theirs (`traverse_navigables_of`).
       # (None asked for where no window was opened.)
       # …and those the documents they made planned as they loaded — a pop-up's script navigating its opener, another
-      # window it opened — taken with them, up to `WINDOW_NAV_ROUNDS` rounds: a document that navigates itself as it
+      # window it opened — taken with them, up to navigation_takes.rs `WINDOW_ROUNDS` rounds: a document that navigates itself as it
       # loads, again and again, goes on at the next drain.
-      WINDOW_NAV_ROUNDS = 8
       def consume_pending_window_nav
-        return if @runtime.window_realm_meta.empty?
-
-        # (…a traversal a script queued that makes a window's document again applied first, as the page's are: its task's
-        # the host's now — history.js `applyWindowTraversals`)
-        @runtime.call('applyWindowTraversals')
-        WINDOW_NAV_ROUNDS.times do
-          navs = @runtime.call('takeWindowNavigations')
-          break if navs.empty?
-
-          navs.each do |realm_id, kind, *plan|
-            # (…a reload's waiting on the tasks queued on its window's event loop before it, run first, taken a round later:
-            # `run_queued_before_reload`)
-            next run_queued_before_reload(realm_id, plan[0]) if kind == 'queued'
-            # (…a traversal that keeps the window's document, moving a frame of it, applied as the page's frames' are)
-            next traverse_navigables_of(realm_id, *plan) if kind == 'traverse_navigables'
-            # (…a `javascript:` URL's document, its URL and its markup: `planJavascriptDocument`)
-            next commit_window_javascript_document(realm_id, *plan.values_at(0, 8)) if kind == 'javascript'
-            # (…a form's, of its own document or another's: its realm, its request and its Referer)
-            if kind == 'submit'
-              source, spec, *referrer = plan
-              next from_document(source) { submit_routed_form(source, spec, {to: source == realm_id ? :self : :window, window: realm_id, referrer: referrer}) }
-            end
-
-            # (…a traversal that makes its document again, applied as the page's are)
-            next traverse_window(realm_id, *plan) if kind == 'traverse'
-
-            navigate_window_realm(realm_id, kind, plan)
-          rescue StandardError => e
-            log_console('warn', "window realm self-navigation failed: #{e.message}")
+        take_plans(Native::PlanTakes.windows) unless @runtime.window_realm_meta.empty?
+      end
+      # (…a traversal a script queued that makes a window's document again applied first, as the page's are: its task's the
+      # host's now — history.js `applyWindowTraversals`)
+      private def apply_window_traversals = @runtime.call('applyWindowTraversals')
+      # …a round of them: whether it took any (navigation_takes.rs `windows`).
+      private def take_window_navigation_round
+        navs = @runtime.call('takeWindowNavigations')
+        navs.each do |realm_id, kind, *plan|
+          # (…a reload's waiting on the tasks queued on its window's event loop before it, run first, taken a round later:
+          # `run_queued_before_reload`)
+          next run_queued_before_reload(realm_id, plan[0]) if kind == 'queued'
+          # (…a traversal that keeps the window's document, moving a frame of it, applied as the page's frames' are)
+          next traverse_navigables_of(realm_id, *plan) if kind == 'traverse_navigables'
+          # (…a `javascript:` URL's document, its URL and its markup: `planJavascriptDocument`)
+          next commit_window_javascript_document(realm_id, *plan.values_at(0, 8)) if kind == 'javascript'
+          # (…a form's, of its own document or another's: its realm, its request and its Referer)
+          if kind == 'submit'
+            source, spec, *referrer = plan
+            next from_document(source) { submit_routed_form(source, spec, {to: source == realm_id ? :self : :window, window: realm_id, referrer: referrer}) }
           end
+
+          # (…a traversal that makes its document again, applied as the page's are)
+          next traverse_window(realm_id, *plan) if kind == 'traverse'
+
+          navigate_window_realm(realm_id, kind, plan)
+        rescue StandardError => e
+          log_console('warn', "window realm self-navigation failed: #{e.message}")
         end
+        !navs.empty?
       end
       # …one of them — or the driver's own, the user's (`by_user`: Capybara's `visit` / `refresh` in the window, which no
       # document initiates — its request's `Sec-Fetch-Site: none`, an about:blank one's origin a new opaque one, its
@@ -11742,17 +11727,13 @@ module Capybara
         # of the form's own document is at: a frame's form into its sibling goes on as its `location` is set after it)
         @taking_frame_navigations = true
         begin
-          # (…a traversal queued with them applied first, the one queue's: what a form after it navigates pushes from its step)
-          apply_planned_traversals_before_navigations(at_turn: true)
-          consume_pending_frame_submit
-          consume_pending_frame_nav
-          consume_pending_frame_reload
+          # (…a traversal queued with them applied first, the one queue's: what a form after it navigates pushes from its step;
+          # what the documents they made planned meanwhile, due already — the settle's step ran its turn — another turn's:
+          # the driver waits for it, as it does for any task — navigation_takes.rs `turn`)
+          take_plans(Native::PlanTakes.turn)
         ensure
           @taking_frame_navigations = false
         end
-        # (…what the documents they made planned meanwhile, due already — the settle's step ran its turn — another turn's: the
-        # driver waits for it, as it does for any task)
-        @runtime.call('queueNavigationTurn') if own_planned.anybits?(FRAMES_PLANNED)
         true
       end
       # A reload's history step unloads the document by a task HTML "apply the history step" queues (step 12) on its event
@@ -12430,39 +12411,46 @@ module Capybara
           @runtime.realm_call(parent_realm_id, fn, *args)
         end
       end
-      def drain_pending_navigation
-        # (…a traversal ahead of a navigation another window asked of the page: the page traversing ignores it, HTML
-        # "navigate" — `plan_on`)
-        apply_planned_traversals_before_navigations
-        take_window_tasks
-        # (…a navigation of a frame the task planned, its turn on the event loop queued, due with what is due before it: a
-        # script the driver ran on an idle page has no step following to run it — behind a traversal planned with it, which
-        # cancels it)
-        run_navigation_turn
-        # (…and one moving a frame the turn made due, ahead of what it made due with it, as `take_frame_navigations_due`
-        # takes them)
-        consume_planned_traversal
-        consume_pending_sw_client_nav
-        consume_sw_deferred_navigations
-        planned = takes_planned?
-        if planned
-          consume_pending_location
-          consume_pending_frame_submit
+      def drain_pending_navigation = take_plans(Native::PlanTakes.drain)
+      # What the documents planned taken in the engine's order (navigation_takes.rs `PlanTakes`): each step a take of one
+      # kind, or a question about what is planned, answered.
+      private def take_plans(takes)
+        answer = nil
+        while (step = takes.next(answer))
+          answer = __send__(PLAN_TAKES.fetch(step))
         end
-        # (…the windows' navigations, whatever the page planned: a window's newly loaded document may plan the page's — its
-        # opener's reload — which the takes after it take in this same pass)
-        consume_pending_window_nav
-        if planned || (!@runtime.window_realm_meta.empty? && takes_planned?)
-          consume_pending_frame_nav(windows: false)
-          consume_pending_page_submission
-          consume_pending_frame_reload
-          consume_pending_reload
-          consume_pending_aux_window
-        end
-        # (…and what the windows `window.open` made in this isolate planned meanwhile — a traversal a frame of one queued
-        # as its document loaded above — taken in the same pass, as the page's frames' traversal is just before)
-        consume_pending_window_nav if windows_planned?
       end
+      PLAN_TAKES = {
+        'traversals_before'       => :apply_planned_traversals_before_navigations,
+        'traversals_at_turn'      => :apply_planned_traversals_at_turn,
+        'window_tasks'            => :take_window_tasks,
+        'navigation_turn'         => :run_navigation_turn,
+        'planned_traversal'       => :consume_planned_traversal,
+        'sw_client_navigations'   => :consume_pending_sw_client_nav,
+        'sw_deferred_navigations' => :consume_sw_deferred_navigations,
+        'takes_planned?'          => :takes_planned?,
+        'windows?'                => :windows?,
+        'windows_planned?'        => :windows_planned?,
+        'frames_planned?'         => :frames_planned?,
+        'location'                => :consume_pending_location,
+        'frame_submissions'       => :consume_pending_frame_submit,
+        'window_navigations'      => :consume_pending_window_nav,
+        'frame_navigations'       => :consume_pending_frame_nav,
+        'page_submission'         => :consume_pending_page_submission,
+        'frame_reloads'           => :consume_pending_frame_reload,
+        'reload'                  => :consume_pending_reload,
+        'aux_window'              => :consume_pending_aux_window,
+        'navigation'              => :consume_pending_navigation,
+        'form_submission'         => :consume_pending_form_submit,
+        'download'                => :consume_pending_download,
+        'queue_navigation_turn'   => :queue_navigation_turn,
+        'window_traversals'       => :apply_window_traversals,
+        'window_navigation_round' => :take_window_navigation_round
+      }.freeze
+      private def windows? = !@runtime.window_realm_meta.empty?
+      private def frames_planned? = own_planned.anybits?(FRAMES_PLANNED)
+      private def queue_navigation_turn = @runtime.call('queueNavigationTurn')
+      private def apply_planned_traversals_at_turn = apply_planned_traversals_before_navigations(at_turn: true)
 
       # A script-driven `anchor.click()` / `target=_blank` navigation with no
       # Capybara action behind it (e.g. a WPT test) — open the aux window from the
