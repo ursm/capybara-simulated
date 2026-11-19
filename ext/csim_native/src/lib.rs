@@ -106,6 +106,7 @@ mod select_options;
 mod session_history;
 mod fetch_chain;
 mod navigation_commit;
+mod navigate;
 mod navigation_fetch;
 mod response_headers;
 mod isomorphic;
@@ -318,7 +319,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // A fetch the host makes, step by step: its hops, their headers and cookie site (fetch_plan.rs, fetch_hop.rs), its
     // CORS (cors.rs), HTTP authentication (http_auth.rs) and HTTP cache policy (http_cache.rs).
     fetch_plan::define(native, ruby)?;
-    navigation_fetch::define(native, ruby)?;
+    navigate::define(native, ruby)?;
     worker_script_fetch::define(native, ruby)?;
     // Each session's CORS-preflight cache, and the headers a CORS response exposes (cors.rs).
     native.define_module_function("cors_preflight_cache_new", magnus::function!(cors::cache_new_for_ruby, 0))?;

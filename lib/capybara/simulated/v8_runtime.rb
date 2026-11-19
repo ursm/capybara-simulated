@@ -689,7 +689,7 @@ module Capybara
       # navigable the new realm is linked to as it is made). The Browser then re-points
       # the iframe element at the new id (`rebindFrameRealm`).
       # `history_state` the `[state]` of the classic history API state its document starts with, a traversal's to its
-      # entry (Browser#reload_frame_to_entry).
+      # entry (Browser#traverse_frame_to_entry).
       def reload_frame_realm(
         old_id,
         parent_id,
@@ -707,7 +707,7 @@ module Capybara
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
         # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
-        # the Ruby reload path (navigate_realm_self_get/_post) rebuilds without that DOM teardown, so
+        # the Ruby reload path (Browser#navigate_realm_self) rebuilds without that DOM teardown, so
         # a descendant frame's realm would otherwise linger and its contentWindow stay live. (The old document the
         # Browser has unloaded already, as a navigation the page made unloads it: Browser#unload_frame_document.) The
         # WindowProxies of the frame kept, over the new document's window next.

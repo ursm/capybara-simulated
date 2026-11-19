@@ -379,7 +379,7 @@ impl WorkerHost {
 }
 
 // Native.reserved_client_seq -> the next number of a navigation's reserved client, the process's.
-fn reserved_client_seq() -> u64 {
+pub(crate) fn reserved_client_seq() -> u64 {
     RESERVED_CLIENTS.fetch_add(1, Ordering::Relaxed) + 1
 }
 

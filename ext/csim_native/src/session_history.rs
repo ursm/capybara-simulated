@@ -64,12 +64,6 @@ pub(crate) struct Data {
 }
 
 impl Data {
-    pub(crate) fn of(ruby: &magnus::Ruby, fields: RHash) -> Result<Self, magnus::Error> {
-        let mut data = Data::default();
-        data.merge(ruby, fields)?;
-        Ok(data)
-    }
-
     // The fields `fields` names made what it gives them — nil none — `:body` and `:content_type` a POST's together.
     fn merge(&mut self, ruby: &magnus::Ruby, fields: RHash) -> Result<(), magnus::Error> {
         let text = |key: &str| -> Result<Option<Option<String>>, magnus::Error> {
@@ -129,7 +123,7 @@ impl Data {
     }
 
     // The text field `key` names, where it has one.
-    fn text(&self, key: &str) -> Option<&str> {
+    pub(crate) fn text(&self, key: &str) -> Option<&str> {
         self.texts[TEXT_FIELDS.iter().position(|&k| k == key)?].as_deref()
     }
     pub(crate) fn set_text(&mut self, key: &str, value: String) {
@@ -138,6 +132,25 @@ impl Data {
         }
     }
 
+    // What a navigation's request was made of (`reached_by`): the Referer it sent and its policy, its origin, a POST's body
+    // and content type.
+    pub(crate) fn sent(referer: Option<String>, policy: Option<String>, origin: Option<String>, post: Option<Post>) -> Self {
+        let mut data = Data { post, ..Data::default() };
+        for (key, value) in [("referer", referer), ("referrer_policy", policy), ("origin", origin)] {
+            if let Some(value) = value {
+                data.set_text(key, value);
+            }
+        }
+        data
+    }
+    // …the blob its document was made of, and whether its request's cookies were
+    // cross-site.
+    pub(crate) fn blob(&self) -> Option<&(Arc<[u8]>, String)> {
+        self.blob.as_ref()
+    }
+    pub(crate) fn cross_site(&self) -> Option<bool> {
+        self.cross_site
+    }
     // …the blob it is of (`blob`).
     pub(crate) fn set_blob(&mut self, bytes: Arc<[u8]>, given: &str) {
         self.blob = Some((bytes, given.to_owned()));
@@ -376,7 +389,7 @@ struct Traversable {
     // (navigation_plan.rs), a frame's `src` (frame_navigation.rs), the host's own (browser.rb, `#begin_navigation`) —
     // one begun replacing the one before it, a traversal applied making it "traversal" (`go_to`). What a `javascript:`
     // URL's task (navigation_plan.rs `javascriptOngoing`) and a navigation waiting to be made again (one deferred on an
-    // activating service worker: browser.rb `await_sw_activation`) are judged by.
+    // activating service worker: navigate.rs `defer`) are judged by.
     ongoing: HashMap<u32, u64>,
     next_ongoing: u64,
     // The session history traversal queue (HTML §7.4.1.2): the traversals a page's `history` asked for, each applied as
@@ -1198,7 +1211,7 @@ impl Traversable {
         }
     }
     // (…the frames whose documents it was to make, and has neither made nor made none of — a navigation of one deferred
-    // on a service worker activating, made again once it does: browser.rb `await_sw_activation` — each with the entry it
+    // on a service worker activating, made again once it does: navigate.rs `defer` — each with the entry it
     // was at, the step it was at and its target entry: `late`)
     // (…its own navigables traversing no more: another application under way — whose host step this one ran in — keeps
     // its own)
@@ -1514,6 +1527,11 @@ impl SessionHistory {
     // #url(entry) -> its URL, or nil for no such entry.
     pub(crate) fn url(&self, id: u64) -> Option<String> {
         self.lock().state.entry(id).map(|e| e.url.clone())
+    }
+    // What a replay of entry `id` is made of again (HTML's document state): its URL and how it was reached (`Data`) — none
+    // for no such entry.
+    pub(crate) fn replayed(&self, id: u64) -> Option<(String, Arc<Data>)> {
+        self.lock().state.entry(id).map(|e| (e.url.clone(), e.data.clone()))
     }
     // #set_url(entry, url): its URL made `url` (a redirect's, a replaceState's).
     fn set_url(&self, id: u64, url: String) {
@@ -1874,15 +1892,15 @@ impl SessionHistory {
     }
     // #begin_navigation(navigable) -> the number of the navigation of `navigable` begun now, its ongoing one — and
     // #navigation_ongoing?(navigable, number): whether it still is, no navigation begun nor traversal applied since.
-    fn begin_navigation(&self, nav: u32) -> u64 {
+    pub(crate) fn begin_navigation(&self, nav: u32) -> u64 {
         self.lock().begin_navigation(nav)
     }
-    fn navigation_ongoing(&self, nav: u32, id: u64) -> bool {
+    pub(crate) fn navigation_ongoing(&self, nav: u32, id: u64) -> bool {
         self.lock().navigation_ongoing(nav, id)
     }
     // #ongoing_navigation(navigable) -> the number of its ongoing navigation as it stands, what a fetch under way goes by: another
-    // once it has its response, one begun meanwhile ended it (browser.rb `navigate_top_level`).
-    fn ongoing_navigation(&self, nav: u32) -> Option<u64> {
+    // once it has its response, one begun meanwhile ended it (navigate.rs `Navigation`).
+    pub(crate) fn ongoing_navigation(&self, nav: u32) -> Option<u64> {
         self.lock().ongoing.get(&nav).copied()
     }
     // #clear: no entries at all, nor traversals queued, nor a document's URL.

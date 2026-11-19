@@ -43,7 +43,7 @@ pub(crate) struct Location {
     activated: bool,
     blob: Option<v8::Global<v8::Value>>,
     // …the number of the navigation it is, its navigable's ongoing one as it was planned (HTML "navigate" step 20): the
-    // one record of it, which the host goes on with as it takes it (browser.rb `navigate_top_level`).
+    // one record of it, which the host goes on with as it takes it (navigate.rs `begun`).
     ongoing: u64,
     // …and, a `javascript:` URL's, the string its script returned: the markup of the document that replaces the one it ran
     // in, at that document's URL, no request made of it (`planJavascriptDocument`).
@@ -1069,7 +1069,7 @@ fn takes_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // __dom.navigationAwaited() -> whether the calling realm's document has planned what will navigate it once the host takes it, which
 // no ongoing navigation of its records yet: a reload (HTML "apply the reload history step" sets it to "traversal"), a form's
 // submission or a hyperlink's of its own navigable. What a fetch under way is ended by as well as by its number
-// (browser.rb `navigation_mark`).
+// (navigate.rs `awaited`).
 fn navigation_awaited(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let plan = plan(scope, &args);
     rv.set_bool(plan.own.reload.is_some() || plan.own.submission.is_some() || plan.submission.is_some() || plan.navigation.as_ref().is_some_and(|n| !n.opens_window));

@@ -49,7 +49,7 @@ impl Handling {
 // What the host makes of the navigation, its history done with as it says (`Commit`).
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Step {
-    // Its hops to make (navigation_fetch.rs `begin_hop`) — or, a `blob:` URL's, its blob to give (`NavigationFetch#blob_commit`).
+    // Its hops to make (navigation_fetch.rs `hop`) — or, a `blob:` URL's, its blob to give (`NavigationFetch::blob_commit`).
     Fetch,
     Blob,
     // No document: the navigable stays at the one it is at (HTML "navigate": a 204, a hand-off, a navigation ended).
@@ -107,7 +107,7 @@ pub(crate) struct Commit {
     // targetEntry, then return".
     began: Option<crate::session_history::Kept>,
     // The token of its hold of the page's traversals behind it (`SessionHistory::begin_page_traversal`), let go as it
-    // ends — or as the host is done with it (`NavigationFetch#close`).
+    // ends — or as the host is done with it (`NavigationFetch::close`).
     holds: Option<u64>,
     // Whether it ended: once, whatever asks again.
     ended: bool,

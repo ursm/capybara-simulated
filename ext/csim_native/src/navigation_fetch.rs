@@ -7,16 +7,16 @@
 // (`Nav::cookies`) — and what each response makes of the navigation (`response`): a redirect followed, a network error,
 // a hand-off, no document (a 204 / 205, a download) or the document, a top-level traversable's opener policy enforced
 // on every one. The host keeps the transport, a service worker's round-trip, the document, the session history; it
-// asks this twice a hop (`begin_hop`, `response`).
+// is asked this twice a hop (`hop`, `respond`) by the navigation it is of (navigate.rs).
 
 use std::cell::RefCell;
 
-use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, RModule, RString, Ruby, TryConvert, Value};
+use magnus::{prelude::*, IntoValue, RArray, Ruby, Value};
 
 use crate::cookie_jar::request_context;
 use crate::coop::Value as Coop;
 use crate::fetch_chain::{Followed, Judged, RequestChain, MAX_REDIRECTS};
-use crate::navigation_commit::{Commit, Handling, Step};
+use crate::navigation_commit::{Commit, Step};
 use crate::response_headers::ResponseFields;
 use crate::referrer::{cross_site_for_cookies, fetch_site, http_origin, wider_site, RedirectTaint};
 
@@ -108,7 +108,6 @@ impl Nav {
     }
 }
 
-#[magnus::wrap(class = "Capybara::Simulated::Native::NavigationFetch", free_immediately)]
 pub(crate) struct NavigationFetch {
     // The origin a redirect judges its request by and walks its redirect-taint with (fetch_chain.rs): a traversal's its
     // client's (`client_origin`), else its request's origin — its initiator's, `null` an opaque one's — else a new opaque
@@ -194,7 +193,7 @@ fn command(ruby: &Ruby, name: &str, payload: &[Value]) -> RArray {
     out
 }
 
-// `NavigationFetch#start`'s answer for a navigation to `url` by `method` — and, `refuses_data`, a document's navigation
+// `NavigationFetch::start`'s answer for a navigation to `url` by `method` — and, `refuses_data`, a document's navigation
 // of a top-level traversable, `refused` for a `data:` URL it would render, or none at all (`data_navigation`), before
 // anything of the navigation begins. Native.navigation_start(url, method, refuses_data) -> it, for a navigation the host
 // asks before it makes its NavigationFetch (a top-level traversable's: its document is asked whether it may be unloaded
@@ -259,83 +258,129 @@ pub(crate) fn data_navigation_for_ruby(ruby: &Ruby, url: String) -> (&'static st
 // The schemes a fetch goes to (Fetch "fetch scheme"): a navigation redirected to any other is handed off.
 const FETCH_SCHEMES: [&str; 6] = ["about:", "blob:", "data:", "file:", "http:", "https:"];
 
+// The request a navigation's fetch is made of (`NavigationFetch::of`), as navigate.rs chooses it: its `method`, `url`,
+// whether its body is empty (`body_empty`), its `referrer` (the referrer source, none none) and `referrer_policy`, its
+// `initiator` (the URL Sec-Fetch-Site and the request's origin are of, none none), its `origin` (the request's origin
+// serialized, where it is not its initiator's — a re-post's, the one it was first sent with: the document state's
+// initiator origin), `origin_null` (an opaque initiator's: its origin `null`, its site cross-site),
+// `initiator_cross_site_ancestor` (whether the initiating document has a cross-site ancestor: referrer.rs
+// `requestClient`), `ancestors` (the document origins above the navigable its cookies are judged by — none none, each
+// none for one not known), `dest` (its destination: `document` a top-level navigable's, whose request may retrieve a Lax
+// cookie by a safe method and whose response may set a SameSite one; `iframe` a frame's), `user_activated` (whether its
+// source snapshot had transient activation), `jar` (the session's cookie jar, 0 none), `sw` (none where no service
+// worker can answer it — no registration — else whether its navigable may be controlled at an HTTPS URL and the
+// top-level site a registration is matched in: none each hop's URL's), `reloaded_cross_site` (a reload through a user
+// interface element's: whether the request the document it reloads was reached by was cross-site — none for any other
+// navigation), `client_origin` (a traversal's or a user's reload's, of no initiator: its request's client's origin
+// serialized — its navigable's active document's, as HTML "apply the history step" snapshots that document's source
+// snapshot params where none is given, "as if navigable navigated itself" — which its redirect-taint is walked with in
+// place of `origin`), `traversed_initiator` (a top-level replay's: its entry's document state's initiator origin,
+// serialized — which its cookies are judged by alone, Fetch's step 2), `traversable` (a top-level traversable's, by its
+// number: the opener policy of its document — session_history.rs `opener_policy_of` — is what its responses' are
+// enforced against: `respond`; none a frame's) and `commit` (what it does to its session history: navigation_commit.rs).
+pub(crate) struct FetchRequest {
+    pub(crate) method: String,
+    pub(crate) url: String,
+    pub(crate) body_empty: bool,
+    pub(crate) referrer: Option<String>,
+    pub(crate) referrer_policy: String,
+    pub(crate) initiator: Option<String>,
+    pub(crate) origin: Option<String>,
+    pub(crate) origin_null: bool,
+    pub(crate) initiator_cross_site_ancestor: bool,
+    pub(crate) ancestors: Option<Vec<Option<String>>>,
+    pub(crate) dest: String,
+    pub(crate) user_activated: bool,
+    pub(crate) jar: u64,
+    pub(crate) sw: Option<(bool, Option<String>)>,
+    pub(crate) reloaded_cross_site: Option<bool>,
+    pub(crate) client_origin: Option<String>,
+    pub(crate) traversed_initiator: Option<String>,
+    pub(crate) traversable: Option<u64>,
+    pub(crate) commit: Option<Commit>,
+}
+
+// A hop to make (`NavigationFetch::hop`): its method and URL, the headers its network request carries (its Rack env's
+// `HTTP_*` pairs: `request_headers`), its referrer source and policy, the site Sec-Fetch-Site latched so far, whether its
+// origin is tainted `null`, whether the documents above the navigable are cross-site to it, its cookie context, and the
+// top-level site a service worker that may answer it is matched in (none where none may: `sw_site`).
+pub(crate) struct Hop {
+    pub(crate) method: String,
+    pub(crate) target: String,
+    pub(crate) headers: Vec<(&'static str, Vec<u8>)>,
+    pub(crate) ref_source: Option<String>,
+    pub(crate) ref_policy: Option<String>,
+    pub(crate) site: Option<&'static str>,
+    pub(crate) tainted: bool,
+    pub(crate) frame_cross: bool,
+    pub(crate) cookies: u32,
+    pub(crate) worker_site: Option<String>,
+}
+
+// What a hop's response makes of the navigation (`NavigationFetch::respond`), HTML "create navigation params by fetching"
+// and "navigate":
+// - `Fail` — a network error, its error document at `target`: a response whose opener policy is enforced against a
+//   navigable sandboxed (by its popup sandboxing flags or the response's Content-Security-Policy: HTML's
+//   finalSandboxFlags, step 12.3), or a redirect that is not followed (`redirect`);
+// - `Redirect` — the next hop, its body gone where it makes a GET, a hop to another origin wanting the reserved client made
+//   anew (`redirect`);
+// - `HandOff` — a redirect to a URL of no fetch scheme, the navigable keeping its document;
+// - `NoContent` — a 204 / 205: the navigation aborted, the navigable at the document it is at, no `load` and no session
+//   history entry (HTML "populate a session history entry's document"; Chrome, measured 2026-10-24: the page's link and
+//   form, a frame's form, link, `location` and `src` alike);
+// - `Download` — a response that downloads (its Content-Disposition, or a type that makes no document: mime.rs
+//   `document_type`): handed off to be saved, no document made;
+// - `Inline` — a PDF, its viewer's document for inline content (mime.rs `Load::Inline`);
+// - `Sniff` — one whose body says which, and the type of its document (mime.rs `load`);
+// - `Document` — the document it makes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Outcome {
+    Fail,
+    Redirect { to_get: bool, new_client: bool },
+    HandOff,
+    NoContent,
+    Download,
+    Inline,
+    Sniff,
+    Document,
+}
+
 impl NavigationFetch {
-    // NavigationFetch.new(request) -> the fetch `request` describes, by name: `method`, `url`, `body_empty`, `referrer`
-    // (the referrer source, nil none), `referrer_policy`, `initiator` (the URL Sec-Fetch-Site and the request's origin are
-    // of, nil none), `origin` (the request's origin serialized, where it is not its initiator's — a re-post's, the one it
-    // was first sent with: the document state's initiator origin — nil none), `origin_null` (an opaque initiator's: its
-    // origin `null`, its site cross-site), `initiator_cross_site_ancestor` (whether the initiating document has a
-    // cross-site ancestor: referrer.rs `requestClient`), `ancestors` (the document origins above the navigable its cookies
-    // are judged by — nil none, each nil for one not known), `dest` (its destination: `document` a top-level navigable's,
-    // whose request may retrieve a Lax cookie by a safe method and whose response may set a SameSite one; `iframe` a
-    // frame's), `user_activated` (whether its source snapshot had transient activation), `jar` (the session's cookie jar,
-    // nil none), `sw` (nil where no service worker can answer it — no registration — else [whether its navigable may be
-    // controlled at an HTTPS URL, the top-level site a registration is matched in: nil each hop's URL's]),
-    // `reloaded_cross_site` (a reload through a user interface element's: whether the request the document it reloads was
-    // reached by was cross-site, `#cross_site?` that one's — nil for any other navigation), `client_origin` (a traversal's
-    // or a user's reload's, of no initiator: its request's client's origin serialized — its navigable's active
-    // document's, as HTML "apply the history step" snapshots that document's source snapshot params where none is given,
-    // "as if navigable navigated itself" — which its redirect-taint is walked with in place of `origin`: its Origin, a
-    // re-post's the one it was first sent with, and its Sec-Fetch-Site still a user's; nil none), `traversed_initiator`
-    // (a top-level traversal's, of no initiator: its entry's document state's initiator origin, serialized — which its
-    // cookies are judged by alone, Fetch's step 2; nil none), `traversable` (a top-level traversable's, by its number: the
-    // opener policy of its document — session_history.rs `opener_policy_of` — is what its responses' are enforced against:
-    // `response`; nil a frame's, none), `commit` (a top-level navigation, of that traversable — the page's, a window's
-    // `window.open` made in an isolate: {handling: 'push', 'replace', 'reload' or 'traverse', traversal: a traversal's
-    // [step, entry id], entry: the fields of the entry it makes — session_history.rs `Data` — leaving_origin: the origin of
-    // the document it leaves, serialized, a window's initial about:blank's its creator's, nil none, opened: whether its
-    // navigable is an auxiliary browsing context's whose opener is there} — or a
-    // frame's, {navigable:, traversable: the number of the session history it is of, navigation: the number of the
-    // navigation whose entry it makes, session_history.rs `begin_frame_entry`, nil a replay's, entry: the fields of that
-    // entry the host gives, traversal: a replay's, whether it is a traversal's} — navigation_commit.rs `Commit`,
-    // `#begin_commit`, `#response_commit`; nil any other navigation).
-    fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
-        let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
-        let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
-        let initiator = text("initiator")?.filter(|u| !u.is_empty());
-        let given_origin = text("origin")?.filter(|o| !o.is_empty());
+    // The fetch `request` describes.
+    pub(crate) fn of(request: FetchRequest) -> Self {
+        let FetchRequest {
+            method,
+            url,
+            body_empty,
+            referrer,
+            referrer_policy,
+            initiator,
+            origin,
+            origin_null: initiator_opaque,
+            initiator_cross_site_ancestor,
+            ancestors,
+            dest,
+            user_activated,
+            jar,
+            sw,
+            reloaded_cross_site,
+            client_origin,
+            traversed_initiator,
+            traversable,
+            mut commit,
+        } = request;
+        let initiator = initiator.filter(|u| !u.is_empty());
+        let given_origin = origin.filter(|o| !o.is_empty());
         let has_origin = initiator.is_some() || given_origin.is_some();
         let origin = given_origin.or_else(|| initiator.as_deref().and_then(http_origin));
-        let dest = text("dest")?.filter(|d| !d.is_empty()).unwrap_or_else(|| "iframe".to_owned());
-        let initiator_opaque = get("origin_null")?.to_bool();
+        let dest = if dest.is_empty() { "iframe".to_owned() } else { dest };
         let opaque = initiator_opaque || origin.as_deref() == Some("null");
-        let judged_origin = match text("client_origin")?.filter(|o| !o.is_empty()) {
+        let judged_origin = match client_origin.filter(|o| !o.is_empty()) {
             Some(client) => client,
             None if initiator_opaque => "null".to_owned(),
             None => origin.clone().unwrap_or_else(|| "null".to_owned()),
         };
-        let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
-        let ancestors = ancestors.map(|a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>()).transpose()?;
-        let traversable = Option::<u64>::try_convert(get("traversable")?)?;
-        let commit = match Option::<RHash>::try_convert(get("commit")?)? {
-            Some(commit) => {
-                let field = |key: &str| commit.aref::<_, Value>(ruby.to_symbol(key));
-                let entry = Option::<RHash>::try_convert(field("entry")?)?.map(|e| crate::session_history::Data::of(ruby, e)).transpose()?;
-                match Option::<u32>::try_convert(field("navigable")?)? {
-                    // (…a frame's, of the traversable its navigable is of: none of whose responses' opener policies matter)
-                    Some(nav) => Option::<u64>::try_convert(field("traversable")?)?
-                        .and_then(crate::session_history::SessionHistory::of)
-                        .map(|history| {
-                            let navigation = Option::<u64>::try_convert(field("navigation")?)?;
-                            Ok::<_, Error>(Commit::of_frame(history, nav, navigation, entry, field("traversal")?.to_bool()))
-                        })
-                        .transpose()?,
-                    None => traversable
-                        .and_then(crate::session_history::SessionHistory::of)
-                        .map(|history| {
-                            let handling = String::try_convert(field("handling")?)?;
-                            let traversal = Option::<(i64, u64)>::try_convert(field("traversal")?)?;
-                            let handling = Handling::named(&handling, traversal).ok_or_else(|| Error::new(ruby.exception_arg_error(), format!("no history handling {handling}")))?;
-                            let leaving_origin = Option::<String>::try_convert(field("leaving_origin")?)?;
-                            Ok::<_, Error>(Commit::new(history, handling, entry, leaving_origin, field("opened")?.to_bool()))
-                        })
-                        .transpose()?,
-                }
-            }
-            None => None,
-        };
-        let mut commit = commit;
-        if let (Some(c), Some(url)) = (commit.as_mut(), text("url")?) {
+        if let Some(c) = commit.as_mut() {
             c.at(&url);
         }
         let coop = traversable.map(|id| CoopEnforcement {
@@ -345,76 +390,67 @@ impl NavigationFetch {
             switch: false,
             stand_in: crate::session_history::loopback_stand_in_of(id),
         });
-        Ok(NavigationFetch {
+        NavigationFetch {
             origin: judged_origin,
-            user_activated: get("user_activated")?.to_bool(),
+            user_activated,
             has_origin,
-            jar: Option::<u64>::try_convert(get("jar")?)?.unwrap_or(0),
-            sw: Option::<(bool, Option<String>)>::try_convert(get("sw")?)?,
+            jar,
+            sw,
             coop: RefCell::new(coop),
             commit: RefCell::new(commit),
             sandboxed: std::cell::Cell::new(false),
             st: RefCell::new(Nav {
                 chain: RequestChain {
-                    method: text("method")?.filter(|m| !m.is_empty()).map_or_else(|| "GET".to_owned(), |m| m.to_ascii_uppercase()),
-                    target: text("url")?.unwrap_or_default(),
+                    method: if method.is_empty() { "GET".to_owned() } else { method.to_ascii_uppercase() },
+                    target: url,
                     headers: Vec::new(),
-                    body_empty: get("body_empty")?.to_bool(),
+                    body_empty,
                     effective_origin: if opaque { Some("null".to_owned()) } else { origin },
                     taint: RedirectTaint::default(),
-                    ref_policy: text("referrer_policy")?,
-                    ref_source: text("referrer")?.filter(|u| !u.is_empty()),
+                    ref_policy: Some(referrer_policy),
+                    ref_source: referrer.filter(|u| !u.is_empty()),
                     passed: Vec::new(),
                     dispatches: 0,
                 },
                 initiator,
                 initiator_opaque,
-                initiator_cross_site_ancestor: get("initiator_cross_site_ancestor")?.to_bool(),
+                initiator_cross_site_ancestor,
                 site: initiator_opaque.then_some("cross-site"),
-                traversed_initiator: text("traversed_initiator")?.filter(|o| !o.is_empty()),
+                traversed_initiator: traversed_initiator.filter(|o| !o.is_empty()),
                 ancestors,
                 top_level: dest == "document",
-                reloaded_cross: Option::<bool>::try_convert(get("reloaded_cross_site")?)?,
+                reloaded_cross: reloaded_cross_site,
                 cross: false,
                 cookies: 0,
             }),
             dest,
-        })
+        }
     }
 
-    // #begin_hop(now) -> [method, URL, network headers, referrer source, referrer policy, site seed, origin tainted, frame
-    // cross-site, cookie context, worker site]: the hop to make — through a service worker that controls it, where one may
-    // (`worker site` the top-level site its registration is matched in, nil where none may: `sw_site`; its request of the
-    // site seed so far, of whether the documents above the navigable are cross-site to it, and of whether its cookies
-    // are cross-site: `#cross_site?`) or the network, whose request carries `network headers` (`request_headers`: its
-    // Rack env's `HTTP_*` pairs, its cookies from the jar at `now`). (…never a 22nd: `redirect` fails the 21st's redirect
-    // as it is reached)
-    fn begin_hop(ruby: &Ruby, rb_self: &Self, now: f64) -> RArray {
-        let mut st = rb_self.st.borrow_mut();
+    // The hop to make (`Hop`) — through a service worker that controls it, where one may (`worker_site`: `sw_site`), or the
+    // network, whose request carries its `headers` (`request_headers`, its cookies from the jar at `now`). (…never a
+    // 22nd: `redirect` fails the 21st's redirect as it is reached)
+    pub(crate) fn hop(&self, now: f64) -> Hop {
+        let mut st = self.st.borrow_mut();
         st.chain.dispatch();
-        let target = st.chain.target.clone();
         let (frame_cross, cookies) = st.cookies();
         st.cross = cookies & crate::cookie_jar::CROSS_SITE != 0;
         st.cookies = cookies;
-        if let Some(commit) = rb_self.commit.borrow_mut().as_mut() {
+        if let Some(commit) = self.commit.borrow_mut().as_mut() {
             commit.crossed(st.cross);
         }
-        let headers = ruby.ary_new_capa(8);
-        for (name, value) in rb_self.request_headers(&st, now) {
-            let _ = headers.push((name, ruby.str_from_slice(&value)));
+        Hop {
+            headers: self.request_headers(&st, now),
+            method: st.chain.method.clone(),
+            target: st.chain.target.clone(),
+            ref_source: st.chain.ref_source.clone(),
+            ref_policy: st.chain.ref_policy.clone(),
+            site: st.site,
+            tainted: st.chain.effective_origin.as_deref() == Some("null"),
+            frame_cross,
+            cookies,
+            worker_site: self.sw_site(&st.chain.target),
         }
-        ruby.ary_from_iter([
-            st.chain.method.clone().into_value_with(ruby),
-            target.into_value_with(ruby),
-            headers.as_value(),
-            st.chain.ref_source.clone().into_value_with(ruby),
-            st.chain.ref_policy.clone().into_value_with(ruby),
-            st.site.into_value_with(ruby),
-            (st.chain.effective_origin.as_deref() == Some("null")).into_value_with(ruby),
-            frame_cross.into_value_with(ruby),
-            cookies.into_value_with(ruby),
-            rb_self.sw_site(&st.chain.target).into_value_with(ruby),
-        ])
     }
 
     // The top-level site a service worker registration that may answer a hop to `target` is matched in — none where no
@@ -466,73 +502,66 @@ impl NavigationFetch {
         out
     }
 
-    // #response(status, headers, now) { facts } -> what the hop's response — of status `status`, its header map `headers`
-    // (response_headers.rs; nil none) — makes of the navigation, HTML "create navigation params by fetching" and
-    // "navigate", its Set-Cookie stored first in the hop's cookie context at `now` (nil for a response no network made: a
-    // service worker's, whose own fetches store theirs):
-    // - ['fail'] — a network error, its error document at `#target`: a response whose opener policy is enforced against a
-    //   navigable sandboxed (by its popup sandboxing flags or the response's Content-Security-Policy: HTML's
-    //   finalSandboxFlags, step 12.3), or a redirect that is not followed (`redirect`);
-    // - ['redirect', body gone, new client] — the next hop (`redirect`);
-    // - ['hand_off'] — a redirect to a URL of no fetch scheme, the navigable keeping its document;
-    // - ['no_content'] — a 204 / 205: the navigation aborted, the navigable at the document it is at, no `load` and no
-    //   session history entry (HTML "populate a session history entry's document"; Chrome, measured 2026-10-24: the
-    //   page's link and form, a frame's form, link, `location` and `src` alike);
-    // - ['download'] — a response that downloads (its Content-Disposition, or a type that makes no document: mime.rs
-    //   `document_type`): handed off to be saved, no document made;
-    // - ['inline'] — a PDF, its viewer's document for inline content (mime.rs `Load::Inline`);
-    // - ['sniff'] — one whose body says which, and the type of its document (`Native.navigation_load`);
-    // - ['document'] — the document it makes.
-    // A top-level traversable's opener policy is enforced on each, a redirect's too (`enforce_coop`); the block gives the
-    // facts of the document the navigation leaves, `[origin, initial about:blank, popup sandboxing flags]`, where they
-    // are needed — asked once.
-    fn response(ruby: &Ruby, rb_self: &Self, status: u32, headers: Option<Value>, now: Option<f64>) -> Result<RArray, Error> {
-        let fields = ResponseFields::read(headers)?;
-        if let Some(now) = now.filter(|_| rb_self.jar != 0) {
-            let st = rb_self.st.borrow();
-            crate::cookie_jar::store_lines(rb_self.jar, &st.chain.target, &fields.set_cookie, st.cookies, now);
+    // Whether the response whose fields are `fields` needs the facts of the document the navigation leaves to have its
+    // opener policy enforced (`CoopEnforcement::enforce`): a top-level traversable's, where a policy but "unsafe-none" is
+    // in play and they were not given yet.
+    pub(crate) fn wants_facts(&self, fields: &ResponseFields) -> bool {
+        let slot = self.coop.borrow();
+        let Some(c) = slot.as_ref() else { return false };
+        c.facts.is_none() && (c.coop != Coop::UnsafeNone || fields.opener_policy(&self.st.borrow().chain.target, c.stand_in) != Coop::UnsafeNone)
+    }
+
+    // What the hop's response — of status `status`, its fields `fields` — makes of the navigation (`Outcome`), its
+    // Set-Cookie stored first in the hop's cookie context at `now` (none for a response no network made: a service
+    // worker's, whose own fetches store theirs). A top-level traversable's opener policy is enforced on each, a redirect's
+    // too (`enforce_coop`), `facts` those of the document the navigation leaves, `[origin, initial about:blank, popup
+    // sandboxing flags]`, where they are needed (`wants_facts`).
+    pub(crate) fn respond(&self, status: u32, fields: &ResponseFields, now: Option<f64>, facts: Option<(String, bool, u32)>) -> Outcome {
+        if let Some(now) = now.filter(|_| self.jar != 0) {
+            let st = self.st.borrow();
+            crate::cookie_jar::store_lines(self.jar, &st.chain.target, &fields.set_cookie, st.cookies, now);
         }
-        if !rb_self.enforce_coop(ruby, &fields)? {
-            return Ok(command(ruby, "fail", &[]));
+        if !self.enforce_coop(fields, facts) {
+            return Outcome::Fail;
         }
         if let Some(locations) = fields.redirect_locations(status) {
-            return rb_self.redirect(ruby, status, &locations, fields.referrer_policy);
+            return self.redirect(status, &locations, fields.referrer_policy);
         }
-        rb_self.sandboxed.set(crate::sandbox::sandboxing(fields.csp.as_deref(), None) & crate::sandbox::ORIGIN != 0);
-        let outcome = if matches!(status, 204 | 205) {
-            "no_content"
+        self.sandboxed.set(crate::sandbox::sandboxing(fields.csp.as_deref(), None) & crate::sandbox::ORIGIN != 0);
+        if matches!(status, 204 | 205) {
+            Outcome::NoContent
         } else if fields.downloads() {
-            "download"
+            Outcome::Download
         } else if fields.inline() {
-            "inline"
+            Outcome::Inline
         } else if fields.sniffs() {
-            "sniff"
+            Outcome::Sniff
         } else {
-            "document"
-        };
-        Ok(command(ruby, outcome, &[]))
+            Outcome::Document
+        }
     }
 
     // HTML "enforce a response's opener policy" (`CoopEnforcement::enforce`), true where the navigation goes on.
-    fn enforce_coop(&self, ruby: &Ruby, fields: &ResponseFields) -> Result<bool, Error> {
+    fn enforce_coop(&self, fields: &ResponseFields, facts: Option<(String, bool, u32)>) -> bool {
         let mut slot = self.coop.borrow_mut();
-        let Some(result) = slot.as_mut() else { return Ok(true) };
+        let Some(result) = slot.as_mut() else { return true };
         let target = self.st.borrow().chain.target.clone();
-        result.enforce(fields.opener_policy(&target, result.stand_in), fields.csp.as_deref(), &target, || ruby.yield_value(ruby.qnil()))
+        let policy = fields.opener_policy(&target, result.stand_in);
+        result.enforce(policy, fields.csp.as_deref(), &target, || Ok::<_, std::convert::Infallible>(facts.unwrap_or_default())).unwrap_or(true)
     }
 
     // What a redirect response of the hop makes of the navigation, its Location fields `locations`, its
-    // `Referrer-Policy` (parsed) `policy`: ['redirect', body gone, new client] — the next hop, its request a GET where the
-    // redirect makes one, a hop to another origin wanting the reserved client made anew — ['hand_off'] — a URL of no
-    // fetch scheme (`mailto:`, an app's own), handed off to external software, the navigable keeping its document (HTML
-    // "create navigation params by fetching": non-fetch-scheme navigation params) — or ['fail']: a network error (a
-    // Location no URL, one given more than once differently, a fetch scheme no HTTP(S) one, a port blocked, the 21st hop).
-    fn redirect(&self, ruby: &Ruby, status: u32, locations: &[Vec<u8>], policy: Option<&str>) -> Result<RArray, Error> {
+    // `Referrer-Policy` (parsed) `policy`: the next hop (`Outcome::Redirect`), its request a GET where the redirect makes
+    // one, a hop to another origin wanting the reserved client made anew — a hand-off — a URL of no fetch scheme
+    // (`mailto:`, an app's own), handed off to external software, the navigable keeping its document (HTML "create
+    // navigation params by fetching": non-fetch-scheme navigation params) — or a network error: a Location no URL, one
+    // given more than once differently, a fetch scheme no HTTP(S) one, a port blocked, the 21st hop.
+    fn redirect(&self, status: u32, locations: &[Vec<u8>], policy: Option<&str>) -> Outcome {
         let mut st = self.st.borrow_mut();
         // (…the 21st hop's redirect a network error as it is reached — Fetch "HTTP-redirect fetch": a request redirected 20
         // times already — not a hop of its own)
         if st.chain.dispatches > MAX_REDIRECTS {
-            return Ok(command(ruby, "fail", &[]));
+            return Outcome::Fail;
         }
         let target = st.chain.target.clone();
         // (…the Referer it sent: the next hop's referrer source; the site it was at, latched)
@@ -546,74 +575,75 @@ impl NavigationFetch {
                 if let Some(commit) = self.commit.borrow_mut().as_mut() {
                     commit.redirected(&st.chain.target, st.chain.method == "GET");
                 }
-                Ok(command(ruby, "redirect", &[to_get.into_value_with(ruby), new_client.into_value_with(ruby)]))
+                Outcome::Redirect { to_get, new_client }
             }
             Followed::Answer | Followed::Fail => {
                 let handed_off = match locations {
                     [one] => ada_url::Url::parse(&String::from_utf8_lossy(one), Some(&target)).is_ok_and(|u| !FETCH_SCHEMES.contains(&u.protocol())),
                     _ => false,
                 };
-                Ok(command(ruby, if handed_off { "hand_off" } else { "fail" }, &[]))
+                if handed_off { Outcome::HandOff } else { Outcome::Fail }
             }
         }
     }
 
-    // #start -> what the navigation's URL makes of it before any request (HTML "navigate", Fetch "scheme fetch"): 'about_blank'
-    // — a URL that matches about:blank (url_ops.rs `matches_about_blank`), a document made of none, whatever its method —
-    // 'blob' — a GET of a `blob:` URL, its blob's document — 'fail' — a network error: any other `about:` URL (`about:BLANK`
-    // too: Fetch "scheme fetch" answers about:blank alone), any request but a GET to a URL no HTTP(S) one (a `blob:` URL is
-    // fetched by a GET alone) — 'data' — a `data:` URL, its own response (`data_navigation`; one a document refuses refused
-    // before: `start`) — or 'fetch', its hops to make (`begin_hop`).
-    fn start(&self) -> &'static str {
+    // What the navigation's URL makes of it before any request (HTML "navigate", Fetch "scheme fetch"): `about_blank` — a
+    // URL that matches about:blank (url_ops.rs `matches_about_blank`), a document made of none, whatever its method —
+    // `blob` — a GET of a `blob:` URL, its blob's document — `fail` — a network error: any other `about:` URL
+    // (`about:BLANK` too: Fetch "scheme fetch" answers about:blank alone), any request but a GET to a URL no HTTP(S) one
+    // (a `blob:` URL is fetched by a GET alone), a traversal's of an entry a POST made (`Commit::posts_none`) — `data` —
+    // a `data:` URL, its own response (`data_navigation`) — or `fetch`, its hops to make (`hop`).
+    pub(crate) fn start(&self) -> &'static str {
+        let posts_none = self.commit.borrow().as_ref().is_some_and(Commit::posts_none);
         let st = self.st.borrow();
-        start(&st.chain.target, &st.chain.method, false)
+        if posts_none && st.chain.method == "POST" { "fail" } else { start(&st.chain.target, &st.chain.method, false) }
     }
 
-    // #coop_switch? -> whether the navigation's responses need a browsing context group switch (`enforce_coop`).
-    fn coop_switch(&self) -> bool {
+    // Whether the navigation's responses need a browsing context group switch (`enforce_coop`).
+    pub(crate) fn coop_switch(&self) -> bool {
         self.coop.borrow().as_ref().is_some_and(|c| c.switch)
     }
 
-    // #target / #request_method / #redirected? / #referrer / #cross_site?: the request as it stands, the Referer its last
-    // hop sent — the referrer of the document its response makes — and whether that hop's cookies were cross-site: the
-    // request the document was reached by, which a reload of it through a user interface element is judged by.
-    fn target(&self) -> String {
+    // The request as it stands, the Referer its last hop sent — the referrer of the document its response makes — and
+    // whether that hop's cookies were cross-site: the request the document was reached by, which a reload of it through a
+    // user interface element is judged by.
+    pub(crate) fn target(&self) -> String {
         self.st.borrow().chain.target.clone()
     }
-    fn request_method(&self) -> String {
+    pub(crate) fn request_method(&self) -> String {
         self.st.borrow().chain.method.clone()
     }
-    fn redirected(&self) -> bool {
+    pub(crate) fn redirected(&self) -> bool {
         self.st.borrow().chain.redirected()
     }
-    fn referrer(&self) -> Option<String> {
+    pub(crate) fn referrer(&self) -> Option<String> {
         self.st.borrow().chain.referer()
     }
-    fn cross_site(&self) -> bool {
+    pub(crate) fn cross_site(&self) -> bool {
         self.st.borrow().cross
     }
 
-    // A top-level navigation (`commit`), step by step — each answer the step the host takes (navigation_commit.rs `Step`,
-    // `step_for_ruby`), its session history done with as that says; the block, where asked, gives the opener policy a
-    // document of a local scheme inherits (browser.rb `inherited_opener_policy`), asked of no replay:
-    // #begin_commit { policy } -> the first, what its URL makes of it before any request (`#start`): its hops to make,
-    // its blob to give (`#blob_commit`), about:blank's document, a `data:` URL's response's (`data_navigation`), an
-    // error document.
-    fn begin_commit(ruby: &Ruby, rb_self: &Self) -> Result<RArray, Error> {
-        // (…a traversal's of an entry a POST made, none: `Commit::posts_none`)
-        let posts_none = rb_self.commit.borrow().as_ref().is_some_and(Commit::posts_none);
-        let (url, start) = {
-            let st = rb_self.st.borrow();
-            let start = if posts_none && st.chain.method == "POST" { "fail" } else { start(&st.chain.target, &st.chain.method, false) };
-            (st.chain.target.clone(), start)
-        };
-        rb_self.commit_with(|c| c.begin(&url));
+    // Whether a document of a local scheme it makes takes the opener policy the host gives (`local_policy`): none where its
+    // entry kept one — a replay's (`Commit::local_policy`).
+    pub(crate) fn asks_policy(&self) -> bool {
+        self.commit.borrow().as_ref().and_then(Commit::replayed_policy).is_none()
+    }
+
+    // A top-level navigation's or a frame's (`commit`), step by step — each the step the host takes (navigation_commit.rs
+    // `Step`), its session history done with as that says; `policy` the opener policy a document of a local scheme
+    // inherits, where `asks_policy`. The first, what its URL makes of it before any request (`start`): its hops to make,
+    // its blob to give (`blob_commit`), about:blank's document, a `data:` URL's response's (`data_navigation`), an error
+    // document.
+    pub(crate) fn begin_commit(&self, policy: Option<String>) -> Step {
+        let start = self.start();
+        let url = self.target();
+        self.commit_with(|c| c.begin(&url));
         let step = match start {
             "about_blank" => {
-                let st = rb_self.st.borrow();
+                let st = self.st.borrow();
                 let creator = st.initiator.as_deref().filter(|_| !st.initiator_opaque).and_then(http_origin);
                 drop(st);
-                Step::AboutBlank(creator, rb_self.local_policy(ruby)?)
+                Step::AboutBlank(creator, self.local_policy(policy))
             }
             "blob" => Step::Blob,
             "data" => match data_navigation(&url) {
@@ -625,52 +655,49 @@ impl NavigationFetch {
             "fetch" => Step::Fetch,
             _ => Step::Error,
         };
-        rb_self.ended(ruby, step)
+        self.ended(step)
     }
-    // #blob_commit(type, bytes) { policy } -> what the blob of a `blob:` URL's GET makes of it, its type `type` (nil none)
-    // and its bytes `bytes` (mime.rs `load`) — nil none, which no store resolved: a network error. The blob its document
-    // is made of kept by its entry, as the URL record a session history entry keeps keeps its blob URL entry (URL
-    // parser): what a traversal or a reload of it fetches again, revoked since or not.
-    fn blob_commit(ruby: &Ruby, rb_self: &Self, given: Option<String>, bytes: Option<RString>) -> Result<RArray, Error> {
+    // …what the blob of a `blob:` URL's GET makes of it, its type `given` (none none) and its bytes `bytes` (mime.rs `load`)
+    // — none none, which no store resolved: a network error. The blob its document is made of kept by its entry, as the URL
+    // record a session history entry keeps keeps its blob URL entry (URL parser): what a traversal or a reload of it
+    // fetches again, revoked since or not.
+    pub(crate) fn blob_commit(&self, given: Option<String>, bytes: Option<&[u8]>, policy: Option<String>) -> Step {
         let given = given.unwrap_or_default();
         let step = match bytes {
             None => Step::Error,
             Some(bytes) => {
-                // SAFETY: read at once, before anything could run Ruby code that moves or frees it.
-                let bytes = unsafe { bytes.as_slice() };
-                let load = crate::mime::load(Some(&given).filter(|t| !t.is_empty()).map(String::as_str), &bytes[..bytes.len().min(1445)]);
+                let load = blob_load(&given, bytes);
                 if !matches!(load, crate::mime::Load::Download) {
                     let blob: std::sync::Arc<[u8]> = bytes.into();
-                    rb_self.commit_with(|c| c.keep_blob(blob, &given));
+                    self.commit_with(|c| c.keep_blob(blob, &given));
                 }
                 match load {
                     crate::mime::Load::Download => Step::Download(Some(given), None),
-                    crate::mime::Load::Inline => Step::Inline(Some(given), Some(rb_self.local_policy(ruby)?)),
+                    crate::mime::Load::Inline => Step::Inline(Some(given), Some(self.local_policy(policy))),
                     crate::mime::Load::Document(essence) => {
                         let ctype = if given.is_empty() { essence } else { given };
-                        Step::BlobDocument(ctype, rb_self.local_policy(ruby)?)
+                        Step::BlobDocument(ctype, self.local_policy(policy))
                     }
                 }
             }
         };
-        rb_self.ended(ruby, step)
+        self.ended(step)
     }
-    // #response_commit(command) -> what its last hop's `command` (`#response`'s, a sniffed one's as `Native.navigation_load`
-    // decided) makes of it.
-    fn response_commit(ruby: &Ruby, rb_self: &Self, command: String) -> Result<RArray, Error> {
-        let step = match command.as_str() {
-            "hand_off" | "no_content" => Step::None,
-            "download" => Step::Download(None, None),
-            "inline" => Step::Inline(None, None),
-            "document" => Step::Document(None),
+    // …what its last hop's `outcome` makes of it.
+    pub(crate) fn response_commit(&self, outcome: Option<Outcome>) -> Step {
+        let step = match outcome {
+            Some(Outcome::HandOff | Outcome::NoContent) => Step::None,
+            Some(Outcome::Download) => Step::Download(None, None),
+            Some(Outcome::Inline) => Step::Inline(None, None),
+            Some(Outcome::Document) => Step::Document(None),
             _ => Step::Error,
         };
-        rb_self.ended(ruby, step)
+        self.ended(step)
     }
 
-    // #close: the host done with it, whatever became of it — another navigation ended it, the host failed in it — what it
-    // holds let go (`Commit::let_go`).
-    fn close(&self) {
+    // The host done with it, whatever became of it — another navigation ended it, the host failed in it — what it holds
+    // let go (`Commit::let_go`).
+    pub(crate) fn close(&self) {
         self.commit_with(Commit::let_go);
     }
     fn commit_with(&self, f: impl FnOnce(&mut Commit)) {
@@ -678,32 +705,35 @@ impl NavigationFetch {
             f(commit);
         }
     }
-    // (…the host's block run with no borrow of the commit held)
-    fn local_policy(&self, ruby: &Ruby) -> Result<String, Error> {
+    fn local_policy(&self, given: Option<String>) -> String {
         if let Some(kept) = self.commit.borrow().as_ref().and_then(Commit::replayed_policy) {
-            return Ok(kept);
+            return kept;
         }
-        let policy = ruby.yield_value::<_, String>(ruby.qnil())?;
+        let policy = given.unwrap_or_else(|| "unsafe-none".to_owned());
         self.commit_with(|c| c.keep_policy(&policy));
-        Ok(policy)
+        policy
     }
-    fn ended(&self, ruby: &Ruby, step: Step) -> Result<RArray, Error> {
+    fn ended(&self, step: Step) -> Step {
         let sandboxed = self.sandboxed.get() && matches!(step, Step::Document(None));
         let sent = self.referrer();
         self.commit_with(|c| {
             c.sent(sent);
             c.end(&step, sandboxed);
         });
-        Ok(step_for_ruby(ruby, step))
+        step
     }
 }
 
+// What a blob of type `given` ('' none) and bytes `bytes` loads as (mime.rs `load`, of its first bytes).
+pub(crate) fn blob_load(given: &str, bytes: &[u8]) -> crate::mime::Load {
+    crate::mime::load(Some(given).filter(|t| !t.is_empty()), &bytes[..bytes.len().min(1445)])
+}
+
 // A `Step` as the host reads it: ['fetch'], ['blob'], ['none'], ['download', type, bytes] (a local scheme's type, a
-// `data:` URL's bytes; nil each else),
-// ['error'], ['inline', type, policy] (a local scheme's response type, the opener policy a blob's takes; nil each else),
-// ['about_blank', creator origin, policy], ['blob_document', type, policy], ['document', type, bytes] (a `data:` URL's;
-// nil each the host's response).
-fn step_for_ruby(ruby: &Ruby, step: Step) -> RArray {
+// `data:` URL's bytes; nil each else), ['error'], ['inline', type, policy] (a local scheme's response type, the opener
+// policy a blob's takes; nil each else), ['about_blank', creator origin, policy], ['blob_document', type, policy],
+// ['document', type, bytes] (a `data:` URL's; nil each the host's response).
+pub(crate) fn step_for_ruby(ruby: &Ruby, step: Step) -> RArray {
     let response = |r: Option<(String, Vec<u8>)>| -> [Value; 2] {
         r.map_or([ruby.qnil().as_value(); 2], |(mime, bytes)| [mime.into_value_with(ruby), ruby.str_from_slice(&bytes).as_value()])
     };
@@ -718,25 +748,6 @@ fn step_for_ruby(ruby: &Ruby, step: Step) -> RArray {
         Step::BlobDocument(mime, policy) => command(ruby, "blob_document", &[mime.into_value_with(ruby), policy.into_value_with(ruby)]),
         Step::Document(r) => command(ruby, "document", &response(r)),
     }
-}
-
-pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
-    let class = native.define_class("NavigationFetch", ruby.class_object())?;
-    class.define_singleton_method("new", function!(NavigationFetch::new, 1))?;
-    class.define_method("begin_hop", method!(NavigationFetch::begin_hop, 1))?;
-    class.define_method("response", method!(NavigationFetch::response, 3))?;
-    class.define_method("coop_switch?", method!(NavigationFetch::coop_switch, 0))?;
-    class.define_method("start", method!(NavigationFetch::start, 0))?;
-    class.define_method("target", method!(NavigationFetch::target, 0))?;
-    class.define_method("request_method", method!(NavigationFetch::request_method, 0))?;
-    class.define_method("redirected?", method!(NavigationFetch::redirected, 0))?;
-    class.define_method("cross_site?", method!(NavigationFetch::cross_site, 0))?;
-    class.define_method("referrer", method!(NavigationFetch::referrer, 0))?;
-    class.define_method("begin_commit", method!(NavigationFetch::begin_commit, 0))?;
-    class.define_method("blob_commit", method!(NavigationFetch::blob_commit, 2))?;
-    class.define_method("response_commit", method!(NavigationFetch::response_commit, 1))?;
-    class.define_method("close", method!(NavigationFetch::close, 0))?;
-    Ok(())
 }
 
 #[cfg(test)]
