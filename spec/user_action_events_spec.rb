@@ -145,7 +145,8 @@ RSpec.describe 'User action events', engine_global: true do
       'keypress KeyboardEvent true true true 0 32',
       'keyup KeyboardEvent true true true 0',
       'click PointerEvent true true true 0 0 0 -1 ""',
-      'input InputEvent true true true 0'
+      # (…its activation's `input` a plain Event, no view or detail: HTML, Chrome and Firefox)
+      'input Event true false true '
     ])
     expect(session.find('#cb')).to be_checked
     # (…an input button's Enter too; and Space's activation the keyup's default action)

@@ -77,6 +77,16 @@ RSpec.describe 'Key gestures' do
     expect(log(s).grep(/submit|click/)).to eq([])
   end
 
+  # The `input` of a value the user changed other than by editing its text is a plain Event — HTML's "fire an event
+  # named input", bubbling and composed: a checkbox's, a select's picked by an arrow, a number field's stepped (Chrome;
+  # Firefox's stepper fires an InputEvent).
+  it "fires a picked or stepped value's input as a plain Event" do
+    s = session_of('<input id=c type=checkbox><select id=s><option>a<option>b</select><input id=n type=number value=5>')
+    s.execute_script("document.addEventListener('input', (e) => L.push(e.constructor.name + ' ' + e.composed), true)")
+    %w[c s n].zip([:space, :down, :up]).each {|id, key| s.find("##{id}").send_keys(key) }
+    expect(log(s).grep(/^(Event|InputEvent) /)).to eq(['Event true', 'Event true', 'Event true'])
+  end
+
   # A chord's modifier keys each carry the modifiers held as it goes down or up — itself among them going down — its key
   # all of them; Control + A selects all at its keydown, before its keyup reads the selection; Control + Shift + A
   # selects nothing, and a chord of a modifier alone presses no other key.

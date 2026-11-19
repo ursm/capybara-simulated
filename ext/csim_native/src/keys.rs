@@ -636,6 +636,9 @@ enum SetAt {
 enum Step {
     Key { ty: &'static str, target: NodeId, key: Vec<u16>, code: Vec<u16>, key_code: u32, char_code: u32, modifiers: u32, forget_caret: bool },
     Input { ty: &'static str, target: NodeId, input_type: &'static str, data: Option<Vec<u16>>, cancelable: bool, target_ranges: bool },
+    // (…an `input` that is a plain Event: HTML's "fire an event named input" of a value the user changed other than by
+    // editing its text)
+    ValueInput(NodeId),
     Change(NodeId),
     Focus(NodeId),
     Blur(NodeId),
@@ -925,7 +928,8 @@ impl KeyGesture {
                     return;
                 }
                 // ArrowUp / ArrowDown on a stepped input steps its value: beforeinput, the step, `input` where the value
-                // moved, and the edit committed — `change` where it moved since it last was (Chrome).
+                // moved — a plain Event (HTML, Chrome; Firefox's an InputEvent) — and the edit committed: `change` where
+                // it moved since it last was (Chrome, Firefox).
                 if p.plan & STEP != 0 {
                     p.at = PressAt::StepValue;
                     self.ask(Step::Input { ty: "beforeinput", target: self.to, input_type: "", data: None, cancelable: true, target_ranges: false });
@@ -948,7 +952,7 @@ impl KeyGesture {
             PressAt::StepCommit => {
                 if yes {
                     self.tell(Step::Edited(self.to, true));
-                    self.tell(Step::Input { ty: "input", target: self.to, input_type: "", data: None, cancelable: false, target_ranges: false });
+                    self.tell(Step::ValueInput(self.to));
                 }
                 self.tell(Step::Commit(self.to));
                 p.at = PressAt::KeyUp;
@@ -1233,7 +1237,8 @@ const WRITE_ATTRIBUTE: u32 = 2;
 
 // A step as the bindings take it, `[kind, …]` (form-fields.js `keyStep`): a KeyboardEvent `[KEY, type, target, key, code,
 // keyCode, charCode, modifiers, forgetCaret]`, an InputEvent `[INPUT, type, target, inputType, data, flags]` (CANCELABLE,
-// TARGET_RANGES: the selection's), and the default actions' — each of an element, `[kind, element, …]`.
+// TARGET_RANGES: the selection's; PLAIN: a plain Event), and the default actions' — each of an element, `[kind, element,
+// …]`.
 const KEY: u32 = 0;
 const INPUT: u32 = 1;
 const CHANGE: u32 = 2;
@@ -1263,6 +1268,7 @@ const CLICK_RESOLVE: u32 = 25;
 const CLEAR_HOST: u32 = 26;
 const CANCELABLE: u32 = 1;
 const TARGET_RANGES: u32 = 2;
+const PLAIN: u32 = 4;
 fn step_value<'s>(scope: &mut v8::PinScope<'s, '_>, step: Step) -> v8::Local<'s, v8::Value> {
     let int = |scope: &mut v8::PinScope<'s, '_>, n: u32| -> v8::Local<'s, v8::Value> { v8::Integer::new_from_unsigned(scope, n).into() };
     let name = |scope: &mut v8::PinScope<'s, '_>, s: &str| -> v8::Local<'s, v8::Value> {
@@ -1289,6 +1295,7 @@ fn step_value<'s>(scope: &mut v8::PinScope<'s, '_>, step: Step) -> v8::Local<'s,
             let flags = if cancelable { CANCELABLE } else { 0 } | if target_ranges { TARGET_RANGES } else { 0 };
             vec![int(scope, INPUT), name(scope, ty), node(scope, target), name(scope, input_type), data, int(scope, flags)]
         },
+        Step::ValueInput(el) => vec![int(scope, INPUT), name(scope, "input"), node(scope, el), name(scope, ""), v8::null(scope).into(), int(scope, PLAIN)],
         Step::Change(el) => vec![int(scope, CHANGE), node(scope, el)],
         Step::Focus(el) => vec![int(scope, FOCUS), node(scope, el)],
         Step::Blur(el) => vec![int(scope, BLUR), node(scope, el)],
