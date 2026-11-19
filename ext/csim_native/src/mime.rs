@@ -326,17 +326,6 @@ fn signature(head: &[u8]) -> Option<&'static str> {
         _ => return None,
     })
 }
-// Native.navigation_load(content type, head) -> `load`: what a response of `Content-Type` `content_type` (nil none)
-// whose body begins with `head` loads as — ['document', its type], ['inline'] or ['download'].
-pub(crate) fn load_for_ruby(content_type: Option<String>, head: magnus::RString) -> (&'static str, Option<String>) {
-    // SAFETY: read at once, before anything could run Ruby code that moves or frees it.
-    let head = unsafe { head.as_slice() };
-    match load(content_type.as_deref(), head) {
-        Load::Document(essence) => ("document", Some(essence)),
-        Load::Inline => ("inline", None),
-        Load::Download => ("download", None),
-    }
-}
 // __dom.documentKind(essence) -> `document_kind`.
 fn document_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let essence = args.get(0).to_rust_string_lossy(scope);

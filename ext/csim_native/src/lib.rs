@@ -364,8 +364,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("navigation_start", magnus::function!(navigation_fetch::start_for_ruby, 3))?;
     native.define_module_function("url_fragment_navigation", magnus::function!(url_ops::fragment_navigation_for_ruby, 2))?;
     native.define_module_function("navigation_hands_off", magnus::function!(navigation_fetch::hands_off, 1))?;
-    native.define_module_function("navigation_load", magnus::function!(mime::load_for_ruby, 2))?;
-    native.define_module_function("data_navigation", magnus::function!(navigation_fetch::data_navigation_for_ruby, 1))?;
     // Whether a response downloads, and the name it is saved under (downloads.rs).
     native.define_module_function("download_filename", magnus::function!(downloads::filename_for_ruby, 4))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
@@ -408,7 +406,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_realm_owner", magnus::function!(sw_registry::realm_owner_for_ruby, 1))?;
     native.define_module_function("sw_set_active_window", magnus::function!(sw_registry::set_active_window_for_ruby, 2))?;
     native.define_module_function("sw_set_client_controller", magnus::function!(sw_registry::set_client_controller_for_ruby, 3))?;
-    native.define_module_function("sw_reserve_client", magnus::function!(sw_registry::reserve_client_for_ruby, 6))?;
     native.define_module_function("sw_client_reserved", magnus::function!(sw_registry::client_reserved_for_ruby, 2))?;
     native.define_module_function("sw_discard_reserved_client", magnus::function!(sw_registry::discard_reserved_client_for_ruby, 2))?;
     native.define_module_function("sw_forget_client", magnus::function!(sw_registry::forget_client_for_ruby, 2))?;

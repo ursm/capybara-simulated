@@ -1550,11 +1550,6 @@ impl SessionHistory {
             None => Ok(ruby.hash_new()),
         }
     }
-    // #blob(entry) -> [bytes, type] of the blob its document was made of (`Data::blob`), nil for none.
-    fn blob(ruby: &magnus::Ruby, rb_self: &Self, id: Option<u64>) -> Option<(RString, String)> {
-        let blob = id.and_then(|id| rb_self.lock().state.entry(id).and_then(|e| e.data.blob.clone()))?;
-        Some((ruby.str_from_slice(&blob.0), blob.1))
-    }
     // #text(entry, name) -> its text field `name` (`TEXT_FIELDS`: :origin, :referer, :referrer_policy, :referrer), nil
     // for none — what `#entry` gives without copying its bytes out.
     fn text(ruby: &magnus::Ruby, rb_self: &Self, id: Option<u64>, name: Symbol) -> Result<Option<String>, magnus::Error> {
@@ -2130,7 +2125,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("set_url", method!(SessionHistory::set_url, 2))?;
     class.define_method("entry", method!(SessionHistory::entry, 1))?;
     class.define_method("text", method!(SessionHistory::text, 2))?;
-    class.define_method("blob", method!(SessionHistory::blob, 1))?;
     class.define_method("update", method!(SessionHistory::update, 2))?;
     class.define_method("name", method!(SessionHistory::name, 0))?;
     class.define_method("name=", method!(SessionHistory::set_name, 1))?;
@@ -2182,9 +2176,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("take_starting_state", method!(SessionHistory::take_starting_state, 0))?;
     class.define_method("commit_frame_navigation", method!(SessionHistory::commit_frame_navigation_for_ruby, 2))?;
     class.define_method("abandon_frame_navigation", method!(SessionHistory::abandon_frame_navigation, 2))?;
-    class.define_method("begin_navigation", method!(SessionHistory::begin_navigation, 1))?;
-    class.define_method("navigation_ongoing?", method!(SessionHistory::navigation_ongoing, 2))?;
-    class.define_method("ongoing_navigation", method!(SessionHistory::ongoing_navigation, 1))?;
     class.define_method("clear", method!(SessionHistory::clear, 0))?;
     Ok(())
 }

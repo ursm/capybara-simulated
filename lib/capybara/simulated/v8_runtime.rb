@@ -589,8 +589,8 @@ module Capybara
       # of the top-level document it was made under — a window's `window.open` made in this isolate, or the page's, 0;
       # -1 for a realm the tree does not know: dropped, or never a frame's].
       def frame_realm_tree(realm_id) = realm_direct_call(0, 'realmTree', realm_id.to_i) || [0, 0, 0, false, 0, -1]
-      # …the realm that OWNS its container, which a form/navigation that reaches a frame via `contentWindow` (so it never
-      # entered `within_frame` and has no `@frame_stack` entry) rebuilds + rebinds it through.
+      # …the realm that OWNS its container, which a frame's navigation the host makes the document of rebuilds and rebinds
+      # it through (Browser#reload_frame_realm_by_id).
       def frame_realm_parent(realm_id)
         return 0 if realm_id.nil? || realm_id.zero?
         frame_realm_tree(realm_id)[0]

@@ -247,13 +247,6 @@ fn data_downloads(url: &str) -> bool {
         None => false,
     }
 }
-// Native.data_navigation(url) -> [verdict, MIME type, body] (`data_navigation`; nil each but the verdict for one of no
-// response).
-pub(crate) fn data_navigation_for_ruby(ruby: &Ruby, url: String) -> (&'static str, Option<String>, Option<magnus::RString>) {
-    let (verdict, response) = data_navigation(&url);
-    let (mime, body) = response.map_or((None, None), |(m, b)| (Some(m), Some(ruby.str_from_slice(&b))));
-    (verdict, mime, body)
-}
 
 // The schemes a fetch goes to (Fetch "fetch scheme"): a navigation redirected to any other is handed off.
 const FETCH_SCHEMES: [&str; 6] = ["about:", "blob:", "data:", "file:", "http:", "https:"];

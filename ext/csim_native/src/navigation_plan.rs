@@ -292,6 +292,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "navigationPlanned", navigation_planned, context_id);
     register(scope, ns, "takeNavigation", take_navigation, context_id);
     register(scope, ns, "takeSubmission", take_submission, context_id);
+    register(scope, ns, "submissionPlanned", submission_planned, context_id);
     register(scope, ns, "takeDownload", take_download, context_id);
     register(scope, ns, "planLocation", plan_location, context_id);
     register(scope, ns, "planReload", plan_reload, context_id);
@@ -423,6 +424,13 @@ fn take_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let opener = v8::Boolean::new(scope, n.opener).into();
     let activated = v8::Boolean::new(scope, n.activated).into();
     rv.set(v8::Array::new_with_elements(scope, &[url.into(), opens_window, name.into(), opener, policy.into(), blob, activated]).into());
+}
+
+// __dom.submissionPlanned() -> whether a submission of the calling realm's page is planned (`planSubmission`'s, the page's
+// own form's), which a navigation planned after it supersedes as any (`supersede`) — taken by the host as what was
+// planned is (`takeSubmission`).
+fn submission_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(plan(scope, &args).submission.is_some());
 }
 
 // __dom.takeSubmission() -> the request of the submission planned, which the realm plans no more, or null.

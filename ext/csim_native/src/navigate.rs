@@ -154,7 +154,6 @@ struct Machine {
     deferred: bool,
     parked: bool,
     superseded: bool,
-    flushed: bool,
 }
 
 // A command for the host, `[name, *payload]` — made at once, so no value of its payload is out of the garbage collector's
@@ -238,6 +237,7 @@ impl Machine {
                 client_id: Option::<String>::try_convert(field("client_id")?)?,
             }))
         };
+        let content_type = text("content_type")?;
         let initiator = document("initiator")?;
         let client = document("client")?;
         let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
@@ -246,8 +246,8 @@ impl Machine {
         Ok(Machine {
             kind,
             url: text("url")?.unwrap_or_default(),
-            content_type: text("content_type")?,
-            post: body.map(|b| (b, text("content_type").ok().flatten())),
+            content_type: content_type.clone(),
+            post: body.map(|b| (b, content_type.clone())),
             handling,
             replayed,
             by_user: get("by_user")?.to_bool(),
@@ -287,7 +287,6 @@ impl Machine {
             deferred: false,
             parked: false,
             superseded: false,
-            flushed: false,
         })
     }
 
@@ -439,7 +438,6 @@ impl Machine {
                     }
                 }
                 Phase::Flushed => {
-                    self.flushed |= given.truthy();
                     self.phase = Phase::Prompted;
                     if self.kind != Kind::Container && !self.traverses() {
                         return Ok(Some(cmd(ruby, "prompt", &[])));
@@ -862,9 +860,6 @@ impl Navigation {
     fn referrer(&self) -> Option<String> {
         self.0.borrow().fetch.as_ref().and_then(NavigationFetch::referrer)
     }
-    fn cross_site(&self) -> bool {
-        self.0.borrow().fetch.as_ref().is_some_and(NavigationFetch::cross_site)
-    }
     fn coop_switch(&self) -> bool {
         self.0.borrow().fetch.as_ref().is_some_and(NavigationFetch::coop_switch)
     }
@@ -873,9 +868,6 @@ impl Navigation {
     }
     fn superseded(&self) -> bool {
         self.0.borrow().superseded
-    }
-    fn flushed(&self) -> bool {
-        self.0.borrow().flushed
     }
     // #resume: a parked navigation (`defer`) taken again — #next goes on with it, its wait asked anew.
     fn resume(&self) {
@@ -892,11 +884,9 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("request_method", method!(Navigation::request_method, 0))?;
     class.define_method("redirected?", method!(Navigation::redirected, 0))?;
     class.define_method("referrer", method!(Navigation::referrer, 0))?;
-    class.define_method("cross_site?", method!(Navigation::cross_site, 0))?;
     class.define_method("coop_switch?", method!(Navigation::coop_switch, 0))?;
     class.define_method("deferred?", method!(Navigation::deferred, 0))?;
     class.define_method("superseded?", method!(Navigation::superseded, 0))?;
-    class.define_method("flushed?", method!(Navigation::flushed, 0))?;
     class.define_method("resume", method!(Navigation::resume, 0))?;
     Ok(())
 }

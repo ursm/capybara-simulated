@@ -321,7 +321,9 @@ module Capybara
         @document_handle              = 0
         # `within_frame` state. `@current_realm_id` is the V8 context id of the
         # active frame realm (nil = the main document); `@frame_stack` records
-        # the enclosing realms so `switch_to_frame(:parent)` can pop one level.
+        # the enclosing realms so `switch_to_frame(:parent)` can pop one level,
+        # each with its frame's navigable, which the scope follows to the realm
+        # a navigation replaced it with (`follow_frame_scope`).
         # DOM / node / query ops route through `dom_call`, which dispatches to
         # this realm. nil is the steady state, so the routing is one nil-check.
         @current_realm_id             = nil
@@ -1002,9 +1004,13 @@ module Capybara
         @top_realm_id = realm
         # (…none of the frames it entered once a document of it was replaced since: they were that one's)
         frames = window.frame_stack
-        frames = [] unless frames.all? {|entry| @runtime.frame_realm_alive?(entry[:realm_id]) }
-        @frame_stack      = frames.dup
+        @frame_stack      = frames.map(&:dup)
         @current_realm_id = @frame_stack.last&.fetch(:realm_id) || realm
+        # (…following each frame to the document its navigable shows now: `follow_frame_scope` — none where one is gone)
+        unless @frame_stack.all? {|entry| @runtime.frame_realm_alive?(entry[:realm_id]) } || follow_frame_scope
+          @frame_stack      = []
+          @current_realm_id = realm
+        end
         begin
           yield
         ensure
@@ -1552,24 +1558,16 @@ module Capybara
           # URL, e.g. `/start`) before the XHR resolves, landing on
           # the wrong page. Loop matches the navigate branch — bail
           # as soon as a drain round fires nothing.
-          submit_baseline_url = page_url
           8.times do
             @runtime.drain_microtasks
             break if @runtime.drain_timers(50).to_i.zero?
           end
-          # If the drain queued or consumed a `location.assign`, that
-          # navigation supersedes the form's default submit. Honour
-          # pending; if `page_url` already changed mid-drain (the
-          # navigate landed during a timer fire), skip the form submit
-          # entirely — its form handle is in a stale VM by now.
+          # (…then what the page planned taken, in the plan's order: a navigation planned since — a `location`'s, a
+          # reload — superseded the submission as it was planned, HTML "navigate" aborting the one ongoing
+          # (navigation_plan.rs `supersede`), and one that landed meanwhile took the page's plan with its document)
           consume_pending_frame_nav
-          if own_planned.anybits?(OWN_LOCATION)
-            consume_pending_location
-          elsif page_url != submit_baseline_url
-            # Already navigated; nothing more to do.
-          else
-            submit_form_spec(action['spec'])
-          end
+          consume_pending_location
+          consume_pending_form_submit
         when 'download'
           save_download(action)
         end
@@ -6599,6 +6597,10 @@ module Capybara
       def consume_sw_deferred_navigations
         until @sw_navigations_due.empty?
           navigation, host = @sw_navigations_due.shift
+          # (…none of a navigable gone since — a window closed, a frame removed — its navigation let go)
+          gone = host.kind == :window ? !window_history(host.realm) : host.kind == :frame && !@runtime.frame_realm_alive?(host.realm)
+          next navigation.close if gone
+
           navigation.resume
           navigate_with(navigation, host)
         end
@@ -7470,7 +7472,6 @@ module Capybara
         :history,
         :initiator,
         :source,
-        :policy,
         :by_user,
         :plan,
         :replayed,
@@ -7537,6 +7538,8 @@ module Capybara
           step, hop.client_id, type, = args
           hop.document_type = type if type
           host.result = navigation_committed(navigation, host, step, args[3])
+          # (…its body the commit's, read or saved: closed by it)
+          hop.rack_body = nil
           nil
         end
       end
@@ -12254,8 +12257,7 @@ module Capybara
       # initiator — Sec-Fetch-Site `none` — its client the frame's document all the same (HTML "apply the history step":
       # "as if navigable navigated itself"). A controlled one's hops through the SW's fetch event first (mode 'navigate' — a
       # POST's body the SW reads via event.request.text()), skipped where an https navigation sits under an insecure
-      # ancestor (`sw_may_control_frame_navigation?`), its reserved client adopted by the rebuilt realm. An entered frame's
-      # (`scope`) scope follows it to the document it makes.
+      # ancestor (`sw_may_control_frame_navigation?`), its reserved client adopted by the rebuilt realm.
       private def navigate_realm_self(realm_id, url, body = nil, content_type = nil, handling:, referrer:, initiator:, user_activated: false, replayed: nil, restored: {})
         nav, _, _, history = frame_navigable(realm_id)
         sw = sw_registered?
