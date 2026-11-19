@@ -338,6 +338,8 @@ module Capybara
         # timer_wait_elapsed?); armed by the first find, disarmed by reset_timer_state.
         @pre_tick_armed               = false
         @read_owes_tick               = false
+        # (…and what a pass of the plan queue left: `take_planned`)
+        @plans_left                   = false
         @last_read_handle             = nil
         @polling_grace                = nil
         # (…the settle generation a wait last sampled, by the realm whose document it was of: `polling?`)
@@ -3047,7 +3049,13 @@ module Capybara
       # (…`drain` false for a tick inside a fetch under way, whose caller takes what its tasks planned as it comes to it)
       def tick_real_time(step_ms: nil, drain: true)
         # (…a worker's timer too: its clock is the window's, which moves only as this advances it — `worker_due_within`)
-        return unless step_ms || @timers_active || async_io_pending? || background_steps_pending? || (!@workers.empty? && worker_next_timer_at)
+        unless step_ms || @timers_active || async_io_pending? || background_steps_pending? || (!@workers.empty? && worker_next_timer_at)
+          # (…but what the last pass of the plan queue left — a page's inline script redirecting the document a navigation
+          # just made, a pop-up redirecting itself again — taken now, a pass a poll: a matcher's wait polls a page that has
+          # no timer, and a `<meta>` refresh of 0 goes on a hop a poll rather than without end: `take_planned`)
+          drain_task_intents if drain && @plans_left && !@ticking
+          return
+        end
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -12413,9 +12421,11 @@ module Capybara
       # has not taken — a pop-up's newly loaded document reloading its opener — but none of a kind it took again: a
       # `<meta>` refresh of 0, again and again, is the next pass's, as a browser's next task is:
       # navigation_plan.rs `plannedThrough`)
+      # (…what it leaves is owed to the next poll — `@plans_left`, `tick_real_time`)
       private def take_planned(within = ALL_PLANS)
         kind = @runtime.call('plannedNext', ALL_PLANS, 0)
-        return if kind.negative?
+        @plans_left = !kind.negative?
+        return unless @plans_left
 
         through = @runtime.call('plannedThrough')
         taken = 0
@@ -12427,6 +12437,7 @@ module Capybara
           kind = @runtime.call('plannedNext', ALL_PLANS, through)
           kind = @runtime.call('plannedNext', ALL_PLANS & ~taken, 0) if kind.negative?
         end
+        @plans_left = !(kind.negative? ? @runtime.call('plannedNext', ALL_PLANS, 0) : kind).negative?
       end
       PLAN_TAKES_MAX = 32
       # …each kind's take of one plan, by the engine's kinds (navigation_plan.rs `TakeKind`, `Native.plan_take_kinds`).
