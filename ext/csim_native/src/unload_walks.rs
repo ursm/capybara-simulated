@@ -204,7 +204,6 @@ fn frame_build_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 }
 
 pub(crate) fn define(native: magnus::RModule) -> Result<(), magnus::Error> {
-    use magnus::Module;
     native.define_module_function("last_mark", magnus::function!(last_mark, 0))?;
     Ok(())
 }

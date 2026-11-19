@@ -386,7 +386,7 @@ struct Traversable {
     leaving: Option<u64>,
     // Each navigable's ongoing navigation (HTML "set the ongoing navigation"), by its number — the one record of it, every
     // way a navigation begins writing it: a location, hyperlink or form navigation planned, a `javascript:` URL's
-    // (navigation_plan.rs), a frame's `src` (frame_navigation.rs), the host's own (browser.rb, `#begin_navigation`) —
+    // (navigation_plan.rs), a frame's `src` (frame_navigation.rs), the host's own (navigate.rs, `begin_navigation`) —
     // one begun replacing the one before it, a traversal applied making it "traversal" (`go_to`). What a `javascript:`
     // URL's task (navigation_plan.rs `javascriptOngoing`) and a navigation waiting to be made again (one deferred on an
     // activating service worker: navigate.rs `defer`) are judged by.
@@ -1885,15 +1885,15 @@ impl SessionHistory {
     fn commit_frame_navigation_for_ruby(&self, nav: u32, token: u64) -> Option<u64> {
         self.commit_frame_navigation(nav, token, None, Data::default())
     }
-    // #begin_navigation(navigable) -> the number of the navigation of `navigable` begun now, its ongoing one — and
-    // #navigation_ongoing?(navigable, number): whether it still is, no navigation begun nor traversal applied since.
+    // The number of the navigation of navigable `nav` begun now, its ongoing one (`begin_navigation`) — and whether it
+    // still is, no navigation begun nor traversal applied since (`navigation_ongoing`).
     pub(crate) fn begin_navigation(&self, nav: u32) -> u64 {
         self.lock().begin_navigation(nav)
     }
     pub(crate) fn navigation_ongoing(&self, nav: u32, id: u64) -> bool {
         self.lock().navigation_ongoing(nav, id)
     }
-    // #ongoing_navigation(navigable) -> the number of its ongoing navigation as it stands, what a fetch under way goes by: another
+    // …the number of its ongoing navigation as it stands (`ongoing_navigation`), what a fetch under way goes by: another
     // once it has its response, one begun meanwhile ended it (navigate.rs `Navigation`).
     pub(crate) fn ongoing_navigation(&self, nav: u32) -> Option<u64> {
         self.lock().ongoing.get(&nav).copied()

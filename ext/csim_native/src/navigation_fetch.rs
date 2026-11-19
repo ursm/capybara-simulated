@@ -184,7 +184,7 @@ impl CoopEnforcement {
 }
 
 // (…a command and its payload, as the host reads it: `[name, *payload]`)
-fn command(ruby: &Ruby, name: &str, payload: &[Value]) -> RArray {
+pub(crate) fn command(ruby: &Ruby, name: &str, payload: &[Value]) -> RArray {
     let out = ruby.ary_new_capa(payload.len() + 1);
     let _ = out.push(name);
     for v in payload {

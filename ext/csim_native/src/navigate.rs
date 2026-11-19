@@ -161,12 +161,7 @@ struct Machine {
 struct Cmd(RArray);
 
 fn cmd(ruby: &Ruby, name: &str, payload: &[Value]) -> Cmd {
-    let out = ruby.ary_new_capa(payload.len() + 1);
-    let _ = out.push(name);
-    for v in payload {
-        let _ = out.push(*v);
-    }
-    Cmd(out)
+    Cmd(crate::navigation_fetch::command(ruby, name, payload))
 }
 
 // What the host answered of the last command.
@@ -408,7 +403,7 @@ impl Machine {
 
     // The reserved client id of a navigation's chain made anew (Service Workers: one per chain, origin-bound).
     fn mint(&self) -> String {
-        format!("client-{}nav{}", self.client_space, crate::worker_host::reserved_client_seq())
+        crate::worker_host::reserved_client_id(&self.client_space)
     }
     // Its next step for the host, which answered the last with `answer` at `now` (the app's clock, a cookie's expiry is
     // judged by) — none once it is done.
@@ -480,7 +475,7 @@ impl Machine {
                         }
                         match given {
                             Answer::Nothing => return Ok(Some(cmd(ruby, "wait_sw", &[url.into_value_with(ruby), site.into_value_with(ruby)]))),
-                            Answer::Bool(false) | Answer::Value(_) if self.defers && self.kind != Kind::Container && !given.truthy() => {
+                            Answer::Bool(false) if self.defers => {
                                 self.deferred = true;
                                 self.parked = true;
                                 return Ok(Some(cmd(ruby, "defer", &[])));
@@ -824,12 +819,12 @@ impl Navigation {
     // - ['policy'] -> the opener policy a document of a local scheme inherits; ['blob', url] -> [type, bytes] of a `blob:`
     //   URL's blob, nil none;
     // - ['awaited'] -> what is planned that no number records yet (navigation_plan.rs `navigationAwaited`);
-    // - ['sw_fetch', url, request] -> a worker's response [status, headers, body], nil none (the network next), false a
-    //   network error; ['network', url, method, headers, body, content type, cookie context] -> [status, headers], nil a
+    // - ['sw_fetch', url, request] -> a worker's response [status, headers] (its body the host's), nil none (the network
+    //   next), false a network error; ['network', url, method, headers, body, content type, cookie context] -> [status, headers], nil a
     //   network error; ['read_body'] -> the response's body; ['coop_facts'] -> [origin, initial about:blank, popup
     //   sandboxing flags] of the document it leaves; ['discard_client', id]: a reserved client let go;
-    // - ['superseded', client id], ['unmodeled'], ['commit', step, client id, document type] (navigation_fetch.rs
-    //   `step_for_ruby`): its end.
+    // - ['superseded', client id], ['unmodeled'], ['commit', step, client id, document type, blob] (the step:
+    //   navigation_fetch.rs `step_for_ruby`; a `blob:` URL's blob [type, bytes]): its end.
     fn next(ruby: &Ruby, rb_self: &Self, answer: Value, now: f64) -> Result<Option<RArray>, Error> {
         let answer = if answer.is_nil() {
             Answer::Nothing
@@ -847,9 +842,9 @@ impl Navigation {
             fetch.close();
         }
     }
-    // #kind / #realm-free facts the host's steps read: its URL as it stands, the method its last request was made with,
-    // whether a redirect made it, the Referer it sent, whether its last hop's cookies were cross-site, whether its
-    // responses need a browsing context group switch; whether it is parked, superseded, or ran the page's tasks first.
+    // #target / #request_method / #redirected? / #referrer / #coop_switch? / #deferred? / #superseded?: what the host's
+    // steps read of it — its URL as it stands, the method its last request was made with, whether a redirect made it, the
+    // Referer it sent, whether its responses need a browsing context group switch; whether it is parked or superseded.
     fn target(&self) -> String {
         let m = self.0.borrow();
         m.fetch.as_ref().map_or_else(|| m.url.clone(), NavigationFetch::target)

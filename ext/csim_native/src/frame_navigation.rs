@@ -195,6 +195,16 @@ impl FrameNavigations {
         }
         dropped
     }
+    // The order the first navigation the host plans of a frame that is due now was planned in — its reloads' (`reload`) or
+    // its others' but the forms' — none for none (navigation_plan.rs `plannedNext`).
+    pub(crate) fn first_hosted(&self, reload: bool) -> Option<u64> {
+        self.0
+            .values()
+            .filter_map(|n| n.host.as_ref())
+            .filter(|&&(at, ref h)| at <= self.1.through && !matches!(h, HostNavigation::Submit { .. }) && matches!(h, HostNavigation::Reload { .. }) == reload)
+            .map(|&(at, _)| at)
+            .min()
+    }
     // Whether a navigation planned in order `at` is due: the navigation turn has run since.
     pub(crate) fn due(&self, at: u64) -> bool {
         at <= self.1.through

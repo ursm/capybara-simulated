@@ -378,14 +378,15 @@ impl WorkerHost {
     }
 }
 
-// Native.reserved_client_seq -> the next number of a navigation's reserved client, the process's.
-pub(crate) fn reserved_client_seq() -> u64 {
-    RESERVED_CLIENTS.fetch_add(1, Ordering::Relaxed) + 1
+// Native.reserved_client_id(space) -> a navigation's reserved client id, made anew — numbered the process's, in the
+// session's `space` (navigate.rs `Machine::mint`, browser.rb `mint_resulting_client_id`).
+pub(crate) fn reserved_client_id(space: &str) -> String {
+    format!("client-{space}nav{}", RESERVED_CLIENTS.fetch_add(1, Ordering::Relaxed) + 1)
 }
 
 pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {
     use magnus::{function, method, Module, Object};
-    native.define_module_function("reserved_client_seq", function!(reserved_client_seq, 0))?;
+    native.define_module_function("reserved_client_id", function!(|space: String| reserved_client_id(&space), 1))?;
     let class = native.define_class("WorkerHost", ruby.class_object())?;
     for (name, value) in [
         ("BROADCAST", BROADCAST),
