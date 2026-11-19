@@ -880,13 +880,21 @@ impl KeyGesture {
         let n = self.to;
         // (…keyboard-driven: `:focus-visible` applies)
         arena.pointer_modality = false;
-        // (…not one focused already, on the focus chain — Selenium's active element, which it sends to as it is: a
-        // container whose frame's document holds the focus is focused again by no key, which would take the focus out)
-        let active = arena.get(n).is_some_and(|d| focus_of(arena, d.realm) == Some(n) && arena.focus_chain().contains(&d.realm));
-        if how & SEND_FOCUS != 0 && !active {
+        // (…not one focused already — Selenium's active element, which it sends to as it is: a container whose frame's
+        // document holds the focus is focused again by no key, which would take the focus out. Nor one its document kept
+        // as its focused area as the focus went to the user agent's controls (`document.activeElement` yet): the keys go
+        // where the focus is, its caret left, and Tab comes back in at the document's start. One a frame's document kept
+        // as the focus went elsewhere in the page is focused again: its document has no focus to send to)
+        let chain = arena.focus_chain();
+        let kept = arena.get(n).is_some_and(|d| focus_of(arena, d.realm) == Some(n));
+        let away = kept && chain.is_empty();
+        let active = kept && arena.get(n).is_some_and(|d| chain.contains(&d.realm));
+        if how & SEND_FOCUS != 0 && !active && !away {
             self.tell(Step::Focus(n));
         }
-        if how & SEND_CARET_LAST != 0 {
+        if away {
+            // (…the caret where it was)
+        } else if how & SEND_CARET_LAST != 0 {
             self.tell(Step::CaretLast(n));
         } else if how & SEND_CARET_END != 0 {
             self.tell(Step::CaretEnd(n));

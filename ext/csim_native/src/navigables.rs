@@ -63,6 +63,10 @@ pub(crate) struct Navigables {
     // page's where that is gone too.
     focused_child: HashMap<i32, u32>,
     system_focus: i32,
+    // …which it has lost to the user agent's own controls: sequential navigation went past the top document's last
+    // focusable area (HTML §6.6.5: "the user agent should transfer focus to its own controls"), its focus chain empty
+    // until a focusing steps' take it back.
+    system_focus_lost: bool,
     // The realm of the script the isolate runs now, which its callbacks are called in: HTML's entry realm — the realm of
     // the most recently entered realm execution context ("prepare to run script"): a script the host evaluates in a
     // realm's document, an event listener another realm's dispatch calls (events.js `invokeEntries`) — none between them.
@@ -887,7 +891,38 @@ impl RealmArena {
             at = parent;
         }
         self.navigables.system_focus = self.window_key(at);
-        self.focus_chain() != before
+        self.navigables.system_focus_lost = false;
+        let changed = self.focus_chain() != before;
+        if changed {
+            self.refresh_focus_hidden();
+        }
+        changed
+    }
+    // …or out of the top-level traversable altogether, to the user agent's controls (`system_focus_lost`). Whether that
+    // changed the focus chain.
+    pub(crate) fn lose_system_focus(&mut self) -> bool {
+        let changed = !self.navigables.system_focus_lost;
+        self.navigables.system_focus_lost = true;
+        if changed {
+            self.refresh_focus_hidden();
+        }
+        changed
+    }
+    // Whether realm `realm`'s document is on its top-level traversable's focus chain: each ancestor's focused area its
+    // navigable's container, up to a top-level traversable that has not lost the system focus. (Each window's chain its
+    // own: every window the driver shows is focused as a headless browser's tab is — only the one the focus left for the
+    // user agent's controls is not.)
+    pub(crate) fn on_focus_chain(&self, realm: i32) -> bool {
+        let nav = &self.navigables;
+        let mut at = realm;
+        for _ in 0..MAX_NESTING {
+            let Some(&parent) = nav.parents.get(&at) else { break };
+            if nav.navigable_ids.get(&at).is_none_or(|id| nav.focused_child.get(&parent) != Some(id)) {
+                return false;
+            }
+            at = parent;
+        }
+        !(nav.system_focus_lost && self.window_key(at) == nav.system_focus)
     }
     // The realms whose documents have focus (HTML "has focus steps"): the top-level traversable's with system focus — the
     // page's where that window is gone — and down each focused area that is a child navigable's container to its active
@@ -895,6 +930,9 @@ impl RealmArena {
     // viewport.
     pub(crate) fn focus_chain(&self) -> Vec<i32> {
         let nav = &self.navigables;
+        if nav.system_focus_lost {
+            return Vec::new();
+        }
         let key = nav.system_focus;
         // (…a window closing keeps it until the close is made and it is discarded — HTML moves no focus at `close()`, which
         // only queues "definitely close"; Chrome 157 keeps it on a pop-up whose close is declined, measured 2026-11-19)
@@ -1418,6 +1456,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setFocusedRealm", set_focused_realm, context_id);
     crate::dom::register(scope, ns, "focusChain", focus_chain, context_id);
     crate::dom::register(scope, ns, "focusedRealm", focused_realm, context_id);
+    crate::dom::register(scope, ns, "loseSystemFocus", lose_system_focus, context_id);
     crate::dom::register(scope, ns, "hasFocus", has_focus, context_id);
     crate::dom::register(scope, ns, "navigableRealms", navigable_realms, context_id);
     crate::dom::register(scope, ns, "realmsMadeUnder", realms_made_under, context_id);
@@ -1568,10 +1607,15 @@ fn set_focused_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     rv.set_bool(crate::dom::dom(scope).arena.set_focused_realm(realm));
 }
-// __dom.focusedRealm() -> the realm of the document the top-level focused area is in: the focus chain's last.
+// __dom.focusedRealm() -> the realm of the document the top-level focused area is in: the focus chain's last; -1 where
+// the focus is the user agent's (`lose_system_focus`).
 fn focused_realm(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let chain = crate::dom::dom(scope).arena.focus_chain();
-    rv.set_int32(chain.last().copied().unwrap_or(0));
+    rv.set_int32(chain.last().copied().unwrap_or(-1));
+}
+// __dom.loseSystemFocus() -> whether the focus left the top-level traversable for the user agent's controls just now.
+fn lose_system_focus(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(crate::dom::dom(scope).arena.lose_system_focus());
 }
 // __dom.focusChain() -> the realms whose documents have focus (`focus_chain`).
 fn focus_chain(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

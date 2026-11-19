@@ -175,6 +175,9 @@ impl RealmArena {
     // `:focus`: the focused element — and every shadow host whose shadow tree holds it (HTML "focused area" for
     // the purposes of `:focus`), compared host by host up from it.
     pub(crate) fn is_focused(&self, id: NodeId) -> bool {
+        if self.focus_hidden {
+            return false;
+        }
         if self.has_state(id, STATE_FOCUSED) {
             return true;
         }
@@ -199,7 +202,7 @@ impl RealmArena {
     // the flat tree (including non-element nodes, such as text nodes) matches the conditions for matching :focus" — a slot
     // and what holds it in its shadow tree, its assigned control focused: Chrome), as `:hover` and `:active`.
     pub(crate) fn has_focus_within(&self, id: NodeId) -> bool {
-        self.focus.is_some_and(|f| crate::geometry::flat_inclusive_ancestor(self, id, f))
+        !self.focus_hidden && self.focus.is_some_and(|f| crate::geometry::flat_inclusive_ancestor(self, id, f))
     }
     // `:hover`: the hovered element and its FLAT-TREE ancestors (HTML §4.16.3, "Per the definition in Selectors, :hover also
     // matches flat tree ancestors of elements that are designated" — a slot and what holds it in its shadow tree, its

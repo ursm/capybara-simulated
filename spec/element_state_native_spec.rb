@@ -599,10 +599,14 @@ RSpec.describe 'element state in the native arena', engine_global: true do
       expect(session.evaluate_script('window.__log')).to eq(%w[change blur focusout])
     end
 
+    # The iframe is the parent's focused area, but no `:focus` (HTML §4.16.3: an element has the focus for `:focus` when
+    # "it is not itself a navigable container" — the SPEC over Chrome, which matches it), so nothing around it matches
+    # `:focus-within` either (Selectors 4: a descendant "that matches :focus"); the field in the frame does.
     it "makes the iframe the parent's focused and hovered element" do
       session.within_frame('fr') { session.find('#inner').click }
       expect(session.evaluate_script('document.activeElement.id')).to eq('fr')
-      expect(native_ids('#fr:focus, #wrap:focus-within')).to eq(%w[wrap fr])
+      expect(native_ids('#fr:focus, #wrap:focus-within')).to eq([])
+      expect(session.evaluate_script("document.getElementById('fr').contentDocument.querySelectorAll(':focus').length")).to eq(1)
       session.within_frame('fr') { session.find('#ip').hover }
       expect(native_ids('#wrap:hover, #fr:hover')).to eq(%w[wrap fr])
       session.find('#outer').hover

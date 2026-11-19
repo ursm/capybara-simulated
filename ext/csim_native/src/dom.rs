@@ -1200,6 +1200,9 @@ pub(crate) struct RealmState {
     // The realm document's focused and hovered element — the one carrying STATE_FOCUSED / STATE_HOVERED — from which
     // `:focus-within` and `:hover` walk up.
     pub(crate) focus: Option<NodeId>,
+    // …whether that one does NOT have the focus, `:focus` matching it not: its document off the focus chain, or it a
+    // container of one on it (navigables.rs `refresh_focus_hidden`).
+    pub(crate) focus_hidden: bool,
     pub(crate) hover: Option<NodeId>,
     // …and the one being activated — carrying STATE_ACTIVE — from which `:active` walks up. Each with the labeled controls
     // of the labels among them, which match too (HTML §4.16.3: "any element that is the labeled control of a label element
@@ -2062,6 +2065,28 @@ impl RealmArena {
         }
     }
 
+    // Whether each realm's focused area has NOT the focus (navigables.rs `on_focus_chain`), for `:focus` (HTML §4.16.3:
+    // "it is not itself a navigable container; and … it is one of the elements listed in the current focus chain of the
+    // top-level traversable"): a document's focused area stays its own when the focus goes elsewhere (the focus update
+    // steps designate only the new chain's), and matches only while its document is on the chain and it is no container
+    // of a document that is.
+    pub(crate) fn refresh_focus_hidden(&mut self) {
+        let realms: Vec<i32> = std::iter::once(self.cur).chain(self.parked.keys().copied()).collect();
+        for realm in realms {
+            let focus = self.realm_state(realm).and_then(|st| st.focus);
+            let hidden = !self.on_focus_chain(realm) || focus.is_some_and(|f| self.frame_realm(f).is_some());
+            let Some(st) = self.realm_state_mut(realm) else { continue };
+            if st.focus_hidden != hidden {
+                st.focus_hidden = hidden;
+                st.state_epoch += 1;
+                if let Some(f) = focus {
+                    let epoch = st.state_epoch;
+                    st.pointer_marks.note(epoch, f);
+                }
+                self.generations.bump(crate::dom::GEN_STYLE_STATE);
+            }
+        }
+    }
     // `id`'s state bits become `bits`. The realm's focused and hovered element is whichever carries that bit last.
     pub(crate) fn set_state(&mut self, id: NodeId, bits: u32) {
         self.state_epoch += 1;
@@ -2087,7 +2112,10 @@ impl RealmArena {
                 *slot = None;
             }
         }
-        if bits & STATE_FOCUSED != 0 {
+        // (…the starting point where the focus moves to it — not at every write of another bit of the element it is on,
+        // which would take back a starting point moved since: the start a Tab past the last left)
+        let focus_moved = (had ^ bits) & STATE_FOCUSED != 0;
+        if focus_moved && bits & STATE_FOCUSED != 0 {
             state.focus_start = Some(id);
         }
         // (…and a dialog shown modally goes on top, one closed off)
@@ -2113,6 +2141,10 @@ impl RealmArena {
             let controls = self.state.active.map_or_else(Vec::new, |a| self.label_controls(a));
             let old = std::mem::replace(&mut self.state.active_controls, controls);
             self.state.pointer_marks.mark(&old, &self.state.active_controls);
+        }
+        // (…and whether a focused area just designated has the focus: its document on the chain, it no container)
+        if focus_moved {
+            self.refresh_focus_hidden();
         }
     }
 

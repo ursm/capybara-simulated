@@ -185,14 +185,16 @@ RSpec.describe 'Key gestures' do
 
   # A character typed at a select picks the option its text begins with — its `input` and `change` fired (Chrome and
   # Firefox); Tab past the last element leaves the document, its focused element blurred (HTML: "the user agent should
-  # transfer focus to its own controls"; Chrome); undo with no history fires nothing (Chrome and Firefox).
+  # transfer focus to its own controls"; Chrome) — and kept as the document's focused area, `document.activeElement`,
+  # with `hasFocus()` false: the SPEC over Chrome, whose `activeElement` is the body (the focus update steps designate
+  # only the new chain's entries, and it is empty); undo with no history fires nothing (Chrome and Firefox).
   it 'picks by typeahead, leaves the document past the last Tab stop, and undoes nothing' do
     s = session_of('<select id=s><option>apple<option>banana<option>cherry</select><input id=z>')
     s.find('#s').send_keys('c')
     expect(s.evaluate_script('s.value')).to eq('cherry')
     expect(log(s).grep(/input|change/)).to eq(%w[input\ s change\ s])
     s.find('#z').send_keys(:tab)
-    expect(s.evaluate_script('document.activeElement.nodeName')).to eq('BODY')
+    expect(s.evaluate_script('[document.activeElement.id, document.hasFocus()]')).to eq(['z', false])
     expect(log(s)).to include('blur z')
     s.find('#z').send_keys('q', [:control, 'z'])
     expect(log(s).grep(/history/)).to eq([])
@@ -219,7 +221,9 @@ RSpec.describe 'Key gestures' do
 
   # Sequential focus navigation across navigables (HTML §6.6.5): Tab past the last element leaves the document, the next
   # Tab coming back in at its start, Shift + Tab at its end (Chrome); a frame's order goes on into its parent's past its
-  # end, and the parent's into a frame it comes to (Chrome and Firefox) — the keys after it typed there.
+  # end, and the parent's into a frame it comes to (Chrome and Firefox) — the keys after it typed there. Left, the
+  # document keeps `z` its `activeElement` (the SPEC over Chrome's body: see above), and the page's keys sent to it go
+  # where the focus is, the next Tab in at the start.
   it 'tabs out of the document and back, into a frame and out of it' do
     s = session_of(%(<input id=a><iframe id=fr srcdoc="<input id=in1><input id=in2>"></iframe><input id=z>))
     ae = -> { s.evaluate_script('document.activeElement.id || document.activeElement.nodeName') }
@@ -233,7 +237,7 @@ RSpec.describe 'Key gestures' do
     s.find('#a').send_keys(:tab, 'x')
     r << ae.() << s.evaluate_script("fr.contentDocument.getElementById('in1').value")
     s.within_frame('fr') { s.find('#in2').send_keys(:tab) }
-    expect(r << ae.()).to eq(%w[BODY a z fr x z])
+    expect(r << ae.()).to eq(%w[z a z fr x z])
   end
 
   # A gesture begun in a frame follows focus out of it to the page (Chrome); session keys read as an element's
@@ -255,12 +259,18 @@ RSpec.describe 'Key gestures' do
   end
 
   # Focus comes back into a frame whose document focused an element before (HTML returns early from the focusing steps
-  # only for the top-level traversable's focused area, else runs the focus update steps up the chain); what had focus in
-  # a frame loses it there as the focus leaves, the `<iframe>` firing nothing — only one focused as itself (Chrome); the
-  # windows of the documents the focus leaves and comes to their `blur` and `focus` (Chrome); and the page's keys go to
-  # the frame's field focused (Chrome and Selenium). Each window's styles current for the walk: a sheet the frame was
-  # just given hides its field from it. (Chrome 155, CDP keys giving its window the focus first; its `fr.focus()` blurs and
-  # focuses both windows once more between, which neither chain HTML's focus update steps compare holds.)
+  # only for the top-level traversable's focused area, else runs the focus update steps up the chain), and the page's
+  # keys go to the frame's field focused (Chrome and Selenium). Each window's styles current for the walk: a sheet the
+  # frame was just given hides its field from it.
+  # The events are HTML's focus update steps', the SPEC over Chrome 155 (CDP keys giving its window the focus first) on
+  # three points. The old chain is blurred and the new one focused entry by entry, the `<iframe>` among them — "If entry
+  # is an element, let blur event target be entry" — where Chrome fires nothing at it unless it was focused as itself.
+  # A Document entry's Window gets its `blur` / `focus` as its document leaves the chain or joins it, the page's never
+  # while the focus is in its frame (common to both chains) — where Chrome blurs the page's Window as a frame's field
+  # takes the focus, and flips both Windows once more on `fr.focus()`. And a document keeps its focused area as the focus
+  # leaves it (only the new chain's entries are designated) — where Chrome empties the frame's `activeElement`; it
+  # matches `:focus` no more all the same (HTML §4.16.3: an element "listed in the current focus chain"). The page's
+  # Window does get its `blur` as Tab takes the focus out to the user agent's controls, and its `focus` back (Chrome too).
   it 're-enters a frame, fires the frame chain\'s focus events, and types the page\'s keys there' do
     s = session_of(%(<input id=a><iframe id=fr srcdoc="<input id=p><input id=q><input id=r>"></iframe><input id=z>))
     s.execute_script(<<~JS)
@@ -276,14 +286,22 @@ RSpec.describe 'Key gestures' do
     log(s)
     s.execute_script("const p = fr.contentDocument.getElementById('p'); p.focus(); a.focus(); p.focus()")
     expect(path.()).to eq(['fr', 'p', true])
-    expect(log(s)).to eq(['blur a', 'winblur', 'fr:winfocus', 'fr:focus p', 'fr:blur p', 'fr:winblur', 'winfocus', 'focus a', 'blur a', 'winblur', 'fr:winfocus', 'fr:focus p'])
+    expect(log(s)).to eq(['blur a', 'focus fr', 'fr:winfocus', 'fr:focus p', 'fr:blur p', 'fr:winblur', 'blur fr', 'focus a', 'blur a', 'focus fr', 'fr:winfocus', 'fr:focus p'])
     s.send_keys('x', :tab)
     expect(path.()).to eq(['fr', 'q', true])
     s.execute_script("const st = fr.contentDocument.createElement('style'); st.textContent = '#r { visibility: hidden }'; fr.contentDocument.head.append(st)")
     log(s)
     s.send_keys(:tab)
-    expect(path.()).to eq(['z', 'BODY', false])
-    expect(log(s).grep(/^(fr:)?(win)?(focus|blur)/)).to eq(['fr:blur q', 'fr:winblur', 'winfocus', 'focus z'])
+    expect(path.()).to eq(['z', 'q', false])
+    expect(s.evaluate_script("fr.contentDocument.querySelectorAll(':focus').length")).to eq(0)
+    expect(log(s).grep(/^(fr:)?(win)?(focus|blur)/)).to eq(['fr:blur q', 'fr:winblur', 'blur fr', 'focus z'])
+    # (…Tab past the last: the focus to the user agent's controls, a new chain empty — the page's Window blurred, as
+    # Chrome does — and back at the start, its Window focused first)
+    s.send_keys(:tab)
+    expect(path.()).to eq(['z', 'q', false])
+    s.send_keys(:tab)
+    expect(path.()).to eq(['a', 'q', false])
+    expect(log(s).grep(/^(fr:)?(win)?(focus|blur)/)).to eq(['blur z', 'winblur', 'winfocus', 'focus a'])
     s.find('#a').send_keys(:tab, 'k')
     expect(path.()).to eq(['fr', 'p', true])
     expect(s.evaluate_script("fr.contentDocument.getElementById('p').value")).to eq('xk')
@@ -304,6 +322,6 @@ RSpec.describe 'Key gestures' do
     r = [path.()]
     s.execute_script('a.focus()')
     expect(r << path.()).to eq([['fr', 'BODY', true], ['a', 'BODY', false]])
-    expect(log(s)).to eq(['fr:blur p', 'focus fr', 'fr:winblur', 'winfocus', 'blur fr', 'focus a'])
+    expect(log(s)).to eq(['fr:blur p', 'fr:winblur', 'blur fr', 'focus a'])
   end
 end
