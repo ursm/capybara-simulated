@@ -324,4 +324,29 @@ RSpec.describe 'Key gestures' do
     expect(r << path.()).to eq([['fr', 'BODY', true], ['a', 'BODY', false]])
     expect(log(s)).to eq(['fr:blur p', 'fr:winblur', 'blur fr', 'focus a'])
   end
+
+  # `blur()` runs HTML's unfocusing steps: "If topDocument's node navigable has system focus, then run the focusing steps
+  # for topDocument's viewport" — topDocument the old chain's last entry, the top-level one. So a field blurred in a frame
+  # takes the focus out of the frame to the page's viewport: the field, the frame's Window and the `<iframe>` blurred, the
+  # frame's document keeping its focused area off the chain. (Chrome keeps the focus in the frame, on its viewport — the
+  # SPEC over Chrome.) "If old focus target is not one of the entries in old chain, then return": blurred again, nothing.
+  it 'blurs a field in a frame to the top-level document\'s viewport' do
+    s = session_of(%(<input id=a><iframe id=fr srcdoc="<input id=p>"></iframe>))
+    s.execute_script(<<~JS)
+      const w = fr.contentWindow, d = w.document;
+      for (const t of ['focus', 'blur']) {
+        w.addEventListener(t, (e) => { if (e.target === w) L.push('fr:win' + t) });
+        d.addEventListener(t, (e) => L.push('fr:' + t + ' ' + e.target.id), true);
+        addEventListener(t, (e) => { if (e.target === window) L.push('win' + t) });
+      }
+      d.getElementById('p').focus();
+    JS
+    log(s)
+    state = "[document.activeElement.nodeName, fr.contentDocument.activeElement.id, document.hasFocus(), fr.contentDocument.hasFocus(), fr.contentDocument.querySelectorAll(':focus').length]"
+    s.execute_script("fr.contentDocument.getElementById('p').blur()")
+    expect(s.evaluate_script(state)).to eq(['BODY', 'p', true, false, 0])
+    expect(log(s)).to eq(['fr:blur p', 'fr:winblur', 'blur fr'])
+    s.execute_script("fr.contentDocument.getElementById('p').blur()")
+    expect(log(s)).to eq([])
+  end
 end
