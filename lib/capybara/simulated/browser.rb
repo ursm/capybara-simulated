@@ -12409,12 +12409,23 @@ module Capybara
       # again and again, goes on at the next). One host call where nothing is planned.
       # (…`within` the kinds a caller takes: none taken past a plan of another kind made before, which its own caller —
       # the drain — takes in its turn: the order holds across the two)
+      # (…the plans made by the time it began, and then those the documents it made planned as they loaded of a kind it
+      # has not taken — a pop-up's newly loaded document reloading its opener — but none of a kind it took again: a
+      # `<meta>` refresh of 0, again and again, is the next pass's, as a browser's next task is:
+      # navigation_plan.rs `plannedThrough`)
       private def take_planned(within = ALL_PLANS)
+        kind = @runtime.call('plannedNext', ALL_PLANS, 0)
+        return if kind.negative?
+
+        through = @runtime.call('plannedThrough')
+        taken = 0
         PLAN_TAKES_MAX.times do
-          kind = @runtime.call('plannedNext', ALL_PLANS)
           break if kind.negative? || within.nobits?(1 << kind)
 
+          taken |= 1 << kind
           __send__(PLAN_TAKES[kind])
+          kind = @runtime.call('plannedNext', ALL_PLANS, through)
+          kind = @runtime.call('plannedNext', ALL_PLANS & ~taken, 0) if kind.negative?
         end
       end
       PLAN_TAKES_MAX = 32

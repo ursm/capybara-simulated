@@ -324,6 +324,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
     register(scope, ns, "plannedNext", planned_next, context_id);
+    register(scope, ns, "plannedThrough", planned_through, context_id);
     register(scope, ns, "navigationAwaited", navigation_awaited, context_id);
     register(scope, ns, "flushedLocation", flushed_location, context_id);
     register(scope, ns, "stopOwnLoading", stop_own_loading, context_id);
@@ -1131,13 +1132,16 @@ fn first_planned_window(scope: &mut v8::PinScope<'_, '_>) -> Option<i32> {
 // after them, which runs ahead of their responses — the documents that made them still there for it (frame_navigation.rs
 // `hold_planned_of`) — and supersedes, as it is planned, the one of its navigable (`plan_frame_submission`: Chrome, one
 // load). A frame's plan is there once the event loop's navigation turn has made it due.
+// (…`through` the last plan a pass takes, 0 any: one made by what the pass took — a document that navigates itself as it
+// loads — is the next pass's, at the next turn or drain, as a browser's next task: `plannedThrough`)
 fn planned_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     use TakeKind as K;
     let mask = args.get(0).uint32_value(scope).unwrap_or(0);
+    let through = args.get(1).number_value(scope).filter(|t| *t > 0.0).map_or(u64::MAX, |t| t as u64);
     let own = realm_id(scope, &args);
     let mut best: Option<(u64, TakeKind)> = None;
     let mut consider = |kind: TakeKind, at: Option<u64>| {
-        if let Some(at) = at.filter(|_| mask & (1 << kind as u8) != 0) {
+        if let Some(at) = at.filter(|&at| mask & (1 << kind as u8) != 0 && at <= through) {
             if best.is_none_or(|(b, _)| at < b) {
                 best = Some((at, kind));
             }
@@ -1165,6 +1169,11 @@ fn planned_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     consider(K::Navigation, plan.navigation.as_ref().filter(|n| !n.opens_window).map(|n| n.planned));
     consider(K::NewWindow, plan.navigation.as_ref().filter(|n| n.opens_window).map(|n| n.planned));
     rv.set_int32(best.map_or(-1, |b| i32::from(b.1 as u8)));
+}
+// __dom.plannedThrough() -> the order of the last plan made so far (`next_planned`): what a pass of the host's takes
+// takes up to (`plannedNext`).
+fn planned_through(_scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_double(planned_so_far() as f64);
 }
 // __dom.navigationAwaited() -> whether the calling realm's document has planned what will navigate it once the host takes it, which
 // no ongoing navigation of its records yet: a reload (HTML "apply the reload history step" sets it to "traversal"), a form's
