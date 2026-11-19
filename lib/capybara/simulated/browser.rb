@@ -1114,6 +1114,9 @@ module Capybara
         # A read since the last query owes the clock a step — pay it here, where
         # moving the clock can't strand a snapshot mid-walk (`tick_for_read`).
         settle_read_debt
+        # (…and the navigations a pass of the plan queue left made, before a query of the document they replace — any
+        # find, the first of a wait or one whose page has its match: `take_plans_left`)
+        take_plans_left
         tick_real_time if timer_wait_elapsed?
         # After the first find of a navigation, a later find IS Capybara retrying — arm the pre-tick
         # so subsequent polls advance the clock (a timer-driven element / removal the test awaits).
@@ -2310,9 +2313,17 @@ module Capybara
         transfer_buffer_fetch(out['refId'])
       end
 
-      def status_code      = @last_response_status
+      def status_code
+        take_plans_left
+        @last_response_status
+      end
+
       # Rack 3 lowercases header names; Capybara tests do `['Content-Type']`.
-      def response_headers = Browser.capitalized_headers(@last_response_headers)
+      def response_headers
+        take_plans_left
+        Browser.capitalized_headers(@last_response_headers)
+      end
+
       # Headers as Capybara's drivers name them: each word capitalized.
       def self.capitalized_headers(headers)
         (headers || {}).each_with_object({}) {|(k, v), h|
@@ -3050,10 +3061,8 @@ module Capybara
       def tick_real_time(step_ms: nil, drain: true)
         # (…a worker's timer too: its clock is the window's, which moves only as this advances it — `worker_due_within`)
         unless step_ms || @timers_active || async_io_pending? || background_steps_pending? || (!@workers.empty? && worker_next_timer_at)
-          # (…but what the last pass of the plan queue left — a page's inline script redirecting the document a navigation
-          # just made, a pop-up redirecting itself again — taken now, a pass a poll: a matcher's wait polls a page that has
-          # no timer, and a `<meta>` refresh of 0 goes on a hop a poll rather than without end: `take_planned`)
-          drain_task_intents if drain && @plans_left && !@ticking
+          # (…but what the last pass of the plan queue left taken now: a matcher's wait polls a page that has no timer)
+          take_plans_left if drain
           return
         end
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
@@ -3134,8 +3143,27 @@ module Capybara
         end
         # What the handlers that fired during the drain left to do (e.g. `setTimeout(() => location.pathname = X)`).
         # Outside the @ticking guard so the navigate's rebuild_ctx is well-clear of the V8 call we just made.
-        drain_task_intents if drain
+        return unless drain
+
+        drain_task_intents
+        take_plans_left
       end
+
+      # What the last pass of the plan queue left (`take_planned`) — a page's inline script redirecting the document a
+      # navigation just made, a pop-up redirecting itself again — taken as the driver polls: a pass at a time while one
+      # leaves something, as a browser follows a chain of redirecting documents at once, up to PLAN_PASSES_PER_POLL — a
+      # `<meta>` refresh of 0, again and again, goes on at the next poll rather than without end. Every read a Capybara
+      # wait re-calls comes here, by `tick_real_time` or directly: none sees a navigation stand still that a browser makes.
+      def take_plans_left
+        return unless @plans_left
+
+        PLAN_PASSES_PER_POLL.times do
+          break unless @plans_left && !@ticking
+
+          drain_task_intents
+        end
+      end
+      PLAN_PASSES_PER_POLL = 8
 
       # What a task the page ran left the browser to do, done: a navigation it planned (`drain_pending_navigation`), a
       # hyperlink it followed, a form it submitted, a download it started — of the first three the one planned last,
@@ -3798,6 +3826,8 @@ module Capybara
         # next visit.
         @runtime.call('setTraceActive', false)
         reset_timer_state
+        # (…and nothing the last test's pages planned is owed to a poll: `take_planned`)
+        @plans_left = false
         invalidate_find_cache
       end
 
@@ -12421,7 +12451,7 @@ module Capybara
       # has not taken — a pop-up's newly loaded document reloading its opener — but none of a kind it took again: a
       # `<meta>` refresh of 0, again and again, is the next pass's, as a browser's next task is:
       # navigation_plan.rs `plannedThrough`)
-      # (…what it leaves is owed to the next poll — `@plans_left`, `tick_real_time`)
+      # (…what it leaves is owed to the next poll — `@plans_left`, `take_plans_left`)
       private def take_planned(within = ALL_PLANS)
         kind = @runtime.call('plannedNext', ALL_PLANS, 0)
         @plans_left = !kind.negative?

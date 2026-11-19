@@ -561,6 +561,9 @@ module Capybara
       def primary_window?(browser) = browser.equal?(@browser)
       def current_window_handle    = @active_handle || PRIMARY_HANDLE
       def window_handles
+        # (…a pop-up a navigation every window's documents left planned opens — `window_opened_by` polls here:
+        # Browser#take_plans_left)
+        window_browsers.each(&:take_plans_left)
         reap_closed_windows
         [PRIMARY_HANDLE] + @aux_windows.map {|w| w[:handle] }
       end

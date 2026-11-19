@@ -139,39 +139,69 @@ RSpec.describe 'a download refused' do
 end
 
 # What a pass of the queue left — a navigation the document it made plans as it loads, of a kind the pass already took
-# (`plannedThrough`) — is taken as the driver next polls the page, a pass a poll: a matcher's wait polls a page that has
-# no timer to step, and would otherwise see the chain stop where the driver's last call left it.
+# (`plannedThrough`) — is taken as the driver next reads the page, whichever read a Capybara wait re-calls: a matcher's
+# wait polls a page that has no timer to step, and would otherwise see the chain stop where the driver's last call left it
+# (browser.rb `take_plans_left`).
 RSpec.describe 'a navigation the document a navigation made plans as it loads' do
   let(:session) do
     simulated_session(lambda {|env|
       n    = env['QUERY_STRING'].to_i
       body = if env['PATH_INFO'] == '/chain'
-               "<title>chain#{n}</title><p>c#{n}</p><script>#{"location = '/chain?#{n - 1}'" if n.positive?}</script>"
+               "<title>chain#{n}</title><p id=c#{n}>c#{n}</p><script>#{"location = '/chain?#{n - 1}'" if n.positive?}</script>"
              else
-               '<title>top</title>'
+               '<title>top</title><p>top</p>'
              end
       [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8>#{body}"]]
     })
   end
 
-  [2, 3].each do |hops|
-    it "is taken under a matcher's wait in a pop-up that redirects itself #{hops} times" do
+  waits = {
+    'has_title?' => ->(s) { s.has_title?('chain0', wait: 2) },
+    'has_css?'   => ->(s) { s.has_css?('#c0', wait: 2) },
+    'find'       => ->(s) { s.find('#c0', wait: 2).text == 'c0' }
+  }
+
+  waits.each do |name, wait|
+    [2, 3].each do |hops|
+      it "is taken under #{name} in a pop-up that redirects itself #{hops} times" do
+        session.visit '/top'
+        popup = session.window_opened_by { session.execute_script("open('/chain?#{hops}', 'chain')") }
+        expect(session.within_window(popup) { wait.(session) }).to be(true)
+      end
+    end
+
+    it "is taken under #{name} after a navigation a script the driver ran made" do
       session.visit '/top'
-      popup = session.window_opened_by { session.execute_script("open('/chain?#{hops}', 'chain')") }
-      expect(session.within_window(popup) { session.has_title?('chain0', wait: 2) }).to be(true)
+      session.execute_script("location = '/chain?1'")
+      expect(wait.(session)).to be(true)
+      expect(session).to have_text('c0')
+    end
+
+    it "is taken under #{name} after a navigation a timer made" do
+      session.visit '/top'
+      session.execute_script("setTimeout(() => { location = '/chain?1' }, 10)")
+      expect(wait.(session)).to be(true)
     end
   end
 
-  it "is taken under a matcher's wait after a navigation a script the driver ran made" do
-    session.visit '/top'
-    session.execute_script("location = '/chain?1'")
-    expect(session).to have_text('c0', wait: 2)
-    expect(session).to have_title('chain0')
+  # (…by a read that waits for nothing: the page it reads is the one a browser would show, its match or not)
+  {
+    'find'        => ->(s) { s.find('p', wait: 0).text },
+    'title'       => ->(s) { s.title },
+    'status_code' => ->(s) { s.status_code && s.evaluate_script('document.title') }
+  }.each do |name, read|
+    it "is taken by #{name} that waits for nothing" do
+      session.visit '/top'
+      session.execute_script("location = '/chain?3'")
+      expect(read.(session)).to eq(name == 'find' ? 'c0' : 'chain0')
+    end
   end
 
-  it "is taken under a matcher's wait after a navigation a timer made" do
+  # (…several passes a poll: a chain of documents each redirecting the next is followed as a browser follows it, at once,
+  # not a hop a poll — and a `<meta>` refresh of 0 that never ends goes on at the next poll, never without end)
+  it 'follows a long chain within one wait' do
     session.visit '/top'
-    session.execute_script("setTimeout(() => { location = '/chain?1' }, 10)")
-    expect(session).to have_text('c0', wait: 2)
+    session.execute_script("location = '/chain?40'")
+    expect(session).to have_title('chain0', wait: 2)
   end
 end
