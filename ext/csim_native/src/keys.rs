@@ -182,14 +182,7 @@ pub(crate) struct Chord {
 pub(crate) fn chord(parts: &[Vec<u16>]) -> Chord {
     let last = parts.iter().rposition(|p| modifier(p).is_none());
     let keys: Vec<_> = parts[..last.unwrap_or(parts.len())].iter().filter_map(|p| modifier(p)).collect();
-    let modifiers = keys.iter().fold(0, |bits, &(key, ..)| {
-        bits | match key {
-            "Control" => CTRL,
-            "Meta" => META,
-            "Alt" => ALT,
-            _ => SHIFT,
-        }
-    });
+    let modifiers = modifier_bits(&keys);
     let key = last.map_or_else(Vec::new, |i| parts[i].clone());
     let unfold = key.len() > 1 && !resolve(&key, false).named;
     Chord { modifiers, keys, key, unfold }
@@ -330,8 +323,8 @@ pub(crate) fn send_target(engine: &mut crate::style::StyleEngine, arena: &RealmA
 // checkbox or radio button clicked where that changes it — no click unchecks a radio button — or left as it is, the
 // `value` content attribute written (a checkbox's or radio's set to no boolean), an option picked, an editing host's
 // content replaced as typed — and whether it is focused first (a text control or an editing host, as Selenium's typing
-// focuses it), is an input or a textarea (a user's edit: `tooShort` / `tooLong` can apply), and is submitted after (an
-// input's value ending in a line feed, the feed no part of it: Enter pressed).
+// focuses it), is an input or a textarea (a user's edit: `tooShort` / `tooLong` can apply), and is submitted after (a
+// field's value ending in a line feed, the feed no part of it: Enter pressed).
 pub(crate) const SET_NONE: u32 = 0;
 pub(crate) const SET_TYPE: u32 = 1;
 pub(crate) const SET_LIVE: u32 = 2;
@@ -373,10 +366,11 @@ pub(crate) fn set_plan(arena: &RealmArena, id: NodeId, value: &SetValue) -> (u32
         SetValue::Bool(b) => (if *b { "true" } else { "false" }).encode_utf16().collect(),
         SetValue::Text(t) => t.clone(),
     };
-    if input && matches!(value, SetValue::Text(t) if t.last() == Some(&u16::from(b'\n'))) {
+    let line_feed = input && matches!(value, SetValue::Text(t) if t.last() == Some(&u16::from(b'\n')));
+    if line_feed {
         text.pop();
-        flags |= SET_SUBMIT;
     }
+    let submit = if line_feed { SET_SUBMIT } else { 0 };
     let kind = if textarea {
         SET_TYPE
     } else if input {
@@ -394,9 +388,10 @@ pub(crate) fn set_plan(arena: &RealmArena, id: NodeId, value: &SetValue) -> (u32
                     Some(_) => SET_UNCHANGED,
                 }
             },
-            "number" => SET_LIVE,
+            // (…the line feed typed into a field submits; a checkbox's or a radio button's value written submits nothing)
+            "number" => SET_LIVE | submit,
             "range" => SET_SANITIZED,
-            _ => SET_TYPE,
+            _ => SET_TYPE | submit,
         }
     } else if n.is_html_named("select") {
         // (…the first option of the value — the option's value, its `value` attribute else its collapsed text — that the
@@ -593,7 +588,8 @@ struct Press {
     plan: u32,
     edit: Option<(&'static str, u32)>,
     host: bool,
-    // Whether its keyup goes to another element than its keydown's events did: focus moved.
+    // The element its keydown went to, and whether its keyup goes to another than its keypress did: focus moved.
+    down: Option<NodeId>,
     moved: bool,
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -688,7 +684,7 @@ fn focus_of(arena: &RealmArena, cid: i32) -> Option<NodeId> {
     arena.realm_state(cid).and_then(|s| s.focus)
 }
 
-// The modifiers' bits of a chord's first `count` modifier keys.
+// The bits (`CTRL` …) of the modifier keys `keys` held.
 fn modifier_bits(keys: &[(&'static str, &'static str, u32)]) -> u32 {
     keys.iter().fold(0, |bits, &(key, ..)| {
         bits | match key {
@@ -834,7 +830,7 @@ impl KeyGesture {
                 Stage::Idle => match self.jobs.pop_front()? {
                     Job::Begin => self.focused = focus_of(arena, self.cid),
                     Job::Press(key, held) => {
-                        let press = Press { key, held, at: PressAt::KeyDown, blocked: false, plan: 0, edit: None, host: false, moved: false };
+                        let press = Press { key, held, at: PressAt::KeyDown, blocked: false, plan: 0, edit: None, host: false, down: None, moved: false };
                         self.stage = Stage::Press(Box::new(press));
                     },
                     Job::Modifier(ty, key, code, key_code, modifiers) => {
@@ -868,10 +864,13 @@ fn line_key(key: &[u16]) -> bool {
 }
 
 impl KeyGesture {
+    // (…a step whose outcome the stage waits on: the last it queues, as `next` hands the outcome to the stage once the
+    // queue is empty)
     fn ask(&mut self, step: Step) {
         self.queued.push_back((step, true));
     }
     fn tell(&mut self, step: Step) {
+        debug_assert!(!self.queued.back().is_some_and(|q| q.1), "a step told after one asked");
         self.queued.push_back((step, false));
     }
 
@@ -889,6 +888,7 @@ impl KeyGesture {
         match p.at {
             PressAt::KeyDown => {
                 self.follow_focus(arena);
+                p.down = Some(self.to);
                 p.at = PressAt::KeyPress;
                 self.ask(self.key_event("keydown", &p.key, p.held, !line_key(&p.key.key)));
             },
@@ -1035,7 +1035,7 @@ impl KeyGesture {
             // keydown's default action, before the key's keyup (Chrome).
             PressAt::Accelerator => {
                 p.at = PressAt::FocusNavigation;
-                if p.blocked {
+                if p.blocked || p.held & (CTRL | META) == 0 {
                     return;
                 }
                 let plan = plan(arena, self.to);
@@ -1064,9 +1064,10 @@ impl KeyGesture {
                 self.ask(self.key_event("keyup", &p.key, p.held, false));
             },
             // Space activates a focused button, checkbox or radio button on its release — the keyup's default action,
-            // so unless it, its keydown or its keypress was canceled, or focus left it.
+            // so unless it, its keydown or its keypress was canceled, or focus left the element its keydown went to.
             PressAt::Activation => {
-                if !p.blocked && !yes && !p.moved && plan(arena, self.to) & SPACE_ACTIVATES != 0 {
+                let pressed = !p.moved && p.down == Some(self.to);
+                if !p.blocked && !yes && pressed && is_units(&p.key.key, " ") && plan(arena, self.to) & SPACE_ACTIVATES != 0 {
                     self.tell(Step::Click(self.to, p.held));
                 }
                 p.at = PressAt::Done;
@@ -1211,7 +1212,13 @@ impl KeyGesture {
                 if set.how & SET_FOCUS != 0 {
                     self.tell(blank("keydown"));
                 }
-                self.tell(Step::Input { ty: "input", target: n, input_type: "", data: None, cancelable: false, target_ranges: false });
+                // (…an InputEvent where its text was typed, a plain Event where a value was picked, slid or written
+                // otherwise: HTML's "fire an event named input", Chrome and Firefox)
+                if matches!(set.how & SET_KIND, SET_TYPE | SET_LIVE) {
+                    self.tell(Step::Input { ty: "input", target: n, input_type: "", data: None, cancelable: false, target_ranges: false });
+                } else {
+                    self.tell(Step::ValueInput(n));
+                }
                 self.tell(Step::Change(n));
                 self.tell(Step::Edited(n, false));
                 if set.how & SET_FOCUS != 0 {
@@ -1403,6 +1410,11 @@ fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     answer_next(scope, rv, outcome);
 }
 
+// __dom.keyAbort(): the gesture under way dropped — its player left it by a throw — so the one it was nested in goes on.
+fn abort_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    crate::dom::dom(scope).keyboard.gestures.pop();
+}
+
 // `send_keys`' atoms, read off the own properties of the records the host made.
 fn atoms_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<Atom> {
     let Ok(list) = v8::Local::<v8::Array>::try_from(value) else { return Vec::new() };
@@ -1437,6 +1449,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "resolveKey", resolve_op, context_id);
     crate::dom::register(scope, ns, "keyGesture", gesture_op, context_id);
     crate::dom::register(scope, ns, "keyNext", next_op, context_id);
+    crate::dom::register(scope, ns, "keyAbort", abort_op, context_id);
 }
 // __dom.resolveKey(spec, shift) -> [key, code, keyCode, char (null for none), inputType (null for none), named, charCode]
 // (`resolve`; `charCode` its keypress's, `Key::char_code`).

@@ -85,6 +85,22 @@ RSpec.describe 'Key gestures' do
     s.execute_script("document.addEventListener('input', (e) => L.push(e.constructor.name + ' ' + e.composed), true)")
     %w[c s n].zip([:space, :down, :up]).each {|id, key| s.find("##{id}").send_keys(key) }
     expect(log(s).grep(/^(Event|InputEvent) /)).to eq(['Event true', 'Event true', 'Event true'])
+    # (…`set`'s too, of a picked option — a typed text's an InputEvent)
+    s.find('#s').set('a')
+    s.find('#n').set('7')
+    expect(log(s).grep(/^(Event|InputEvent) /)).to eq(['Event true', 'InputEvent true'])
+  end
+
+  # Space activates the element its keydown went to on its release — none where a keydown listener moved focus, though
+  # its keypress and keyup go where focus went (Chrome) — and `set("…\n")` submits from a field it typed into, not from
+  # a checkbox whose value it wrote.
+  it 'activates and submits only what the key was pressed at' do
+    s = session_of('<form id=f onsubmit="event.preventDefault()"><input id=c type=checkbox><button id=b type=button>b</button><button id=go>go</button></form>')
+    s.execute_script("c.addEventListener('keydown', () => b.focus())")
+    s.find('#c').send_keys(:space)
+    expect(log(s).grep(/click|key/)).to eq(['keydown c', 'keypress b', 'keyup b'])
+    s.find('#c').set("on\n")
+    expect(log(s).grep(/submit/)).to eq([])
   end
 
   # A chord's modifier keys each carry the modifiers held as it goes down or up — itself among them going down — its key
