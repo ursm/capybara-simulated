@@ -902,11 +902,28 @@ module Capybara
         # removed or re-navigated). Surface a stale element so Capybara
         # retries / reports, rather than letting realm_call fall back to the
         # main context where this frame handle would mis-resolve.
-        unless @runtime.frame_realm_alive?(@current_realm_id)
+        unless @runtime.frame_realm_alive?(@current_realm_id) || follow_frame_scope
           raise Capybara::Simulated::StaleElement,
             "frame browsing context #{@current_realm_id} was torn down (frame removed or re-navigated)"
         end
         @runtime.realm_call(@current_realm_id, name, *args)
+      end
+      # The entered frames' scope following each frame to the document its navigable shows now, where a navigation
+      # replaced the one it was entered at — however it was made: the host's fetch, the container's own path, a task —
+      # as a user's view of a frame follows it: whether the frame the scope is at has one (a frame removed, or one whose
+      # parent's document went, has none).
+      private def follow_frame_scope
+        return false if @frame_stack.empty?
+
+        @frame_stack.each do |entry|
+          next if @runtime.frame_realm_alive?(entry[:realm_id])
+
+          realm = entry[:nav] && navigable_realm(entry[:nav]) or return false
+          entry[:realm_id] = realm
+        end
+        @current_realm_id = @frame_stack.last[:realm_id]
+        invalidate_find_cache
+        true
       end
 
       # Root for a context-less find: the active frame's document (handle 0 ⇒
@@ -949,9 +966,8 @@ module Capybara
             raise Capybara::Simulated::StaleElement,
               "could not enter frame ##{target} (not a frame element, or its document failed to load)"
           end
-          # Record the iframe handle + the realm it lives in so a frame-scoped
-          # navigation can rebuild this exact frame (`reload_current_frame_realm`).
-          @frame_stack.push({realm_id: rid, iframe_handle: target.to_i, parent_realm_id: parent_realm})
+          # (…and the navigable it is of, whose next document the scope follows: `follow_frame_scope`)
+          @frame_stack.push({realm_id: rid, iframe_handle: target.to_i, parent_realm_id: parent_realm, nav: frame_navigable(rid)&.first})
           @current_realm_id = rid
           # Let the freshly built realm's inline scripts / load handlers settle
           # so a find immediately inside the block sees the loaded document.
@@ -1029,9 +1045,9 @@ module Capybara
       # frame-relative navigation and to set its request referrer, so
       # `resolve_against_current` works the same whether the navigation
       # originates in the main page or a frame.
-      # (…the page's while the entered frame's realm is gone: its rebuild, `reload_current_frame_realm`, whose new document's
-      # loads — its scripts, sheets and images, each URL resolved already — ask as it is built, before the frame is
-      # pointed at it)
+      # (…the page's while the entered frame's realm is gone: its rebuild, `reload_frame_realm_by_id`, whose new document's
+      # loads — its scripts, sheets and images, each URL resolved already — ask as it is built, before the scope follows
+      # it)
       def current_browsing_context_url
         return page_url unless @current_realm_id && @runtime.frame_realm_alive?(@current_realm_id)
         href = @runtime.realm_url(@current_realm_id)
@@ -11756,18 +11772,13 @@ module Capybara
           # (…of its session history entry, HTML "reload" applying its step: the URL its document was at as it got there,
           # whatever a `document.open()` did to the document's since — Chrome; Firefox goes on with a form planned before —
           # else, of no entry, the one it was at as `reload()` was called) — an HTTP(S) one's request made again, a POST's
-          # re-posting (isReloadNavigation), referred as its document state keeps (`navigate_realm_self`); an entered
-          # frame's of another URL made here, its scope following it (`navigate_entered_frame`); any other by its
-          # container's own path, which reuses the bytes it kept — a blob's surviving a revoke, a srcdoc's.
+          # re-posting (isReloadNavigation), referred as its document state keeps (`navigate_realm_self`); any other by
+          # its container's own path, which reuses the bytes it kept — a blob's surviving a revoke, a srcdoc's.
           history, id = frame_entry(realm_id)
           cur = history&.entry(id)
           reload_url = cur[:url] if cur && cur[:url]
-          scope = @frame_stack.find {|e| e[:realm_id] == realm_id }
-          alive = @runtime.frame_realm_alive?(realm_id)
-          if alive && http_url?(reload_url) && (cur || scope)
-            navigate_realm_self(realm_id, reload_url, cur&.[](:body), cur&.[](:content_type), handling: 'reload', replayed: id, referrer: entry_referrer(realm_id, cur || {}), initiator: realm_id)
-          elsif alive && scope && !reload_url.to_s.empty?
-            navigate_entered_frame(reload_url, scope, :reload)
+          if cur && http_url?(reload_url) && @runtime.frame_realm_alive?(realm_id)
+            navigate_realm_self(realm_id, reload_url, cur[:body], cur[:content_type], handling: 'reload', replayed: id, referrer: entry_referrer(realm_id, cur), initiator: realm_id)
           else
             # (…by the realm whose document holds its container: a nested frame's, its parent frame's)
             frame_realm_host_call(parent, 'reloadFrameByRealm', realm_id, reload_url)
@@ -12031,36 +12042,28 @@ module Capybara
       end
       # A traversal's step making frame realm `realm_id`'s document of entry `id` of `history` again (HTML "apply the
       # history step"), the entry's persisted form state restored before its container's `load` (bfcache): a document of
-      # no server's — about:blank's, a `data:` URL's, a srcdoc's, its markup the entry's — made as a navigation to it is,
-      # an entered frame's in its scope; a blob's of the blob its container loaded, else the one its URL names now in this
+      # no server's — about:blank's, a `data:` URL's, a srcdoc's, its markup the entry's — made as a navigation to it is, by
+      # its container's own path; a blob's of the blob its container loaded, else the one its URL names now in this
       # window's registry (`takeFrameNavBlob`: none a failed load at the URL); any other's request made again
       # (`navigate_realm_self`), referred as the entry's document's request was (HTML's document state), re-posting none (an
       # entry a POST made an error document: navigation_commit.rs `posts_none`), by the frame's document — "as if navigable
       # navigated itself" — or, the user's (`by_user`), by none: Sec-Fetch-Site `none`. Its document starts with the entry's
       # classic history API state, as the page's. (…its document not asked again whether it may be unloaded where the
-      # traversal asked it before its step: `unload_traversed_frames`)
+      # traversal asked it before its step: `unload_traversed_frames`; an entered frame's scope following it:
+      # `follow_frame_scope`)
       def traverse_frame_to_entry(realm_id, history, id, by_user: false)
         entry = history.entry(id)
         url = entry[:url].to_s
         return if url.empty?
 
-        scope = @frame_stack.find {|e| e[:realm_id] == realm_id }
         parent = @runtime.frame_realm_parent(realm_id)
         if about_blank_url?(url)
-          return reload_current_frame_realm('about:blank', '', 'text/html', entry: scope) if scope
-
           prompted = traversed_frame(realm_id) {|h, nav| h.take_prompted(nav) } || false
           return frame_realm_host_call(parent, 'navigateFrameByRealm', realm_id, url, nil, prompted)
         end
         srcdoc = entry[:srcdoc]
         if srcdoc || url.match?(/\Adata:/i)
           return unless prompt_to_unload_frame(realm_id)
-
-          if scope
-            # (…a data: URL's the response it holds, of an opaque origin, its scope following it)
-            _, type, body = Native.data_navigation(url) unless srcdoc
-            return reload_current_frame_realm(url, srcdoc || body.to_s, srcdoc ? 'text/html' : (type || 'text/html'), entry: scope, doc_origin: (srcdoc ? nil : 'null'))
-          end
 
           return frame_realm_host_call(parent, 'navigateFrameByRealm', realm_id, url, nil, true, srcdoc)
         end
@@ -12210,9 +12213,10 @@ module Capybara
       # one's cross-site, its Origin `null`). An HTTP(S) URL's fetched (`navigate_realm_self`); a POST to a URL no network
       # answers — about:blank's, a `data:` URL's — answered as a GET is (Chrome and Firefox alike), any other's failing
       # (navigation_fetch.rs `start`); a URL no fetch here answers (blob:, data:, about:, javascript:, a relative one) made
-      # as the container's own path makes it (`navigate_frame_by_realm`) — an entered frame's here, its scope following it
-      # (`navigate_entered_frame`). None of a frame gone since — an ancestor that navigated in the same drain discarded it —
-      # whose fetch's cookie and server side effects would be for a navigation that never commits.
+      # as the container's own path makes it (`navigate_frame_by_realm`). An entered frame's alike: the driver's scope
+      # follows its navigable to the document it makes (`follow_frame_scope`). None of a frame gone since — an ancestor
+      # that navigated in the same drain discarded it — whose fetch's cookie and server side effects would be for a
+      # navigation that never commits.
       # (…`sandbox` the container's sandboxing its plan began with: frame_navigation.rs `begin`)
       def navigate_frame_realm(realm_id, url, post = nil, handling: :push, referrer: nil, initiator: realm_id, user_activated: false, sandbox: nil)
         return if Native.navigation_hands_off(url.to_s) || !@runtime.frame_realm_alive?(realm_id)
@@ -12222,12 +12226,8 @@ module Capybara
 
         post = nil if %w[about_blank data].include?(start)
         referrer ||= realm_referrer_initiator(realm_id)
-        scope = @frame_stack.find {|e| e[:realm_id] == realm_id }
-        url = resolve_against_current(url) if scope
         if http_url?(url)
           navigate_realm_self(realm_id, url, *post, handling: handling.to_s, referrer: referrer, initiator: initiator, user_activated: user_activated)
-        elsif scope
-          navigate_entered_frame(url, scope, handling)
         else
           navigate_frame_by_realm(realm_id, url, handling, sandbox)
         end
@@ -12320,9 +12320,9 @@ module Capybara
         end
         commit_frame_document(realm_id, target, document, ctype || 'text/html', **response)
       end
-      # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
-      # recover its container element handle + parent realm, swap in a fresh realm
-      # built from `html`, re-point the iframe at it, and fire the element load.
+      # A frame's document the host makes — of its navigation's response, of a traversal's blob, an error document — in
+      # place of the one it shows: its container found in its parent realm's document, a fresh realm built from the
+      # bytes, the container re-pointed at it, the element's `load` fired; an entered frame's scope following it.
       # (…`began` the entry its navigation began where the host made the document of no fetch: `with_frame_entry`)
       def reload_frame_realm_by_id(
         realm_id,
@@ -12347,6 +12347,9 @@ module Capybara
         seed = frame_seed(parent, handle, url, csp, doc_origin) or return
         return unless unload_frame_document(parent, realm_id)
 
+        # (…the bytes a reload of it loads again none but a blob document's, which the container kept as it took them:
+        # `takeFrameNavBlob`)
+        frame_realm_host_call(parent, 'forgetFrameLoaded', realm_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
         frame_realm_host_call(parent, 'hostCommitBegins', handle)
         new_id = @runtime.reload_frame_realm(
           realm_id,
@@ -12367,7 +12370,7 @@ module Capybara
         began&.commit
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)
-          # (…an entered frame's scope following it to its new document, as `reload_current_frame_realm` keeps it)
+          # (…an entered frame's scope following it to its new document: `follow_frame_scope`, at once)
           @frame_stack.each {|e| e[:realm_id] = new_id if e[:realm_id] == realm_id }
           @current_realm_id = new_id if @current_realm_id == realm_id
           # Restore captured form state (history traversal) BEFORE the element load
@@ -12572,15 +12575,6 @@ module Capybara
 
       private
 
-      # Fetch via the Rack app and hand the body to V8 for parsing.
-      # Only follows 3xx redirects up to a small depth.
-      # ── Frame-scoped navigation ─────────────────────────────────
-      # A self-targeted link click / form submit INSIDE a `within_frame` block
-      # navigates just that frame: fetch the document and rebuild the frame's
-      # own realm, leaving the top page (its URL, history, status) untouched.
-      # Mirrors `navigate` / `navigate_post`'s fetch + redirect-follow but
-      # terminates in `reload_current_frame_realm` instead of a main-page boot.
-
       # A navigation's initiating document as its Referer is made of it: its URL and its referrer policy (the policy its
       # `<meta name="referrer">` sets) — the browsing context the page is in, its link or form or script the initiator
       # (`current_referrer_initiator`), or a frame's own document navigating itself (`realm_referrer_initiator`; realm 0
@@ -12648,122 +12642,6 @@ module Capybara
       private def initiating_realm(realm)
         realm = realm.to_i
         realm.zero? || @runtime.frame_realm_present?(realm) ? realm : 0
-      end
-
-      # An entered frame's (`scope`) navigation to a URL no fetch here answers — a `data:` URL's, about:blank's, a blob's —
-      # its document made here, of no fetch, each with its entry (`with_frame_entry`: `handling` :push, :replace; none of a
-      # reload, which replays the active one), its scope following it to the document it makes
-      # (`reload_current_frame_realm`); none of a frame whose document a `beforeunload` handler keeps, or one a handler of
-      # what began it removed (HTML "cannot navigate", Chrome).
-      private def navigate_entered_frame(url, scope, handling)
-        realm = scope[:realm_id]
-        return unless @runtime.frame_realm_alive?(realm) && prompt_to_unload_frame(realm, scope[:parent_realm_id])
-
-        replay = %w[reload traverse].include?(handling.to_s)
-        handling = nil if replay
-        if url.to_s.match?(/\Adata:/i)
-          verdict, mime, bytes = Native.data_navigation(url.to_s)
-          return save_downloaded_response(url, {'content-type' => mime}, [bytes], realm: realm) if verdict == 'download'
-
-          return with_frame_entry(realm, url, handling) do |began|
-            next commit_frame_error_document(realm, url, began: began) if verdict == 'fail'
-
-            commit_frame_document(realm, url.to_s, verdict == 'inline' ? '' : bytes, verdict == 'inline' ? 'text/html' : mime, doc_origin: 'null', began: began)
-          end
-        end
-        if about_blank_url?(url)
-          return with_frame_entry(realm, url, handling) {|began| reload_current_frame_realm('about:blank', '', 'text/html', entry: scope, began: began) }
-        end
-        # A `blob:` URL, which no server answers: the blob the container has its navigation load (`takeFrameNavBlob`:
-        # the one it began with, a reload's the one the document was loaded of, else the one it names now in this window's
-        # registry — no other window's partition) — none a failed load at the URL. (A redirect to one is followed to none:
-        # navigation_fetch.rs `redirect`.)
-        if url.to_s.match?(/\Ablob:/i)
-          return with_frame_entry(realm, url, handling) do |began|
-            blob = host_blob(frame_realm_host_call(scope[:parent_realm_id], 'takeFrameNavBlob', realm, url.to_s, replay))
-            reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: scope, began: began)
-          end
-        end
-        # (…any other — a `javascript:` URL's, a relative one's — by the container's own path)
-        navigate_frame_by_realm(realm, url, handling, nil)
-      end
-
-      # Tear down a frame's realm and rebuild it from `html`, then re-point the
-      # iframe element at the new realm. The iframe lives in the PARENT realm, so
-      # the rebind host fn runs there. `entry` defaults to the active frame; a
-      # `_parent`-targeted navigation passes an ancestor entry instead — every
-      # frame below it in the stack is destroyed along with the ancestor's old
-      # document, so we dispose those realms and leave `@current_realm_id` on the
-      # (now-gone) current frame, surfacing StaleElement for the rest of the open
-      # `within_frame` block. Its `ensure` pops back to `entry`, whose `realm_id`
-      # we've updated to the rebuilt realm.
-      #
-      # Teardown reaches the realms on the entered `@frame_stack` (the ones a
-      # find could route into). Like the self-nav path, descendant realms of the
-      # rebuilt frame that were entered-then-popped earlier (so they no longer
-      # sit on the stack) aren't disposed here — they linger, unreferenced and
-      # un-stepped, until the next full-page rebuild's `dispose_frame_realms`. A
-      # bounded per-test leak, only reachable by re-entering a sibling subframe
-      # before an ancestor `_parent` nav; not worth a JS descendant walk on this
-      # path's perf budget.
-      # (…`began` as `reload_frame_realm_by_id`'s)
-      def reload_current_frame_realm(
-        url,
-        bytes,
-        content_type,
-        entry: @frame_stack.last,
-        client_id: nil,
-        csp: nil,
-        referrer: nil,
-        referrer_policy: nil,
-        refresh: nil,
-        doc_origin: nil,
-        origin_agent_cluster: false,
-        began: nil
-      )
-        return unless entry
-        old_id = entry[:realm_id]
-        parent = entry[:parent_realm_id]
-        seed = frame_seed(parent, entry[:iframe_handle], url, csp, doc_origin) or return
-        return unless unload_frame_document(parent, old_id)
-
-        # (…the bytes a reload of it loads again none but a blob document's, which the container kept as it took them:
-        # `takeFrameNavBlob`)
-        frame_realm_host_call(parent, 'forgetFrameLoaded', old_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
-
-        frame_realm_host_call(parent, 'hostCommitBegins', entry[:iframe_handle])
-        new_id = @runtime.reload_frame_realm(
-          old_id,
-          parent.to_i,
-          url,
-          document_payload(bytes),
-          content_type,
-          client_id,
-          seed,
-          referrer:             referrer,
-          referrer_policy:      referrer_policy,
-          refresh:              refresh,
-          origin_agent_cluster: origin_agent_cluster
-        ).to_i
-        return if new_id.zero?
-        # (…the entry its navigation began made with it: `with_frame_entry`)
-        began&.commit
-        rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
-        if entry.equal?(@frame_stack.last)
-          entry[:realm_id]  = new_id
-          @current_realm_id = new_id
-        else
-          # Match by object identity (the branch was chosen by `equal?`); index
-          # by `==` could collide if two entries were ever structurally equal.
-          idx = @frame_stack.index {|e| e.equal?(entry) }
-          @frame_stack[(idx + 1)..].each {|descendant| @runtime.dispose_frame_realm(descendant[:realm_id]) }
-          entry[:realm_id] = new_id
-        end
-        # (…its container's `load` fired as the navigation's document loads, as a frame reached by its realm's is:
-        # `reload_frame_realm_by_id`)
-        frame_realm_host_call(parent, 'fireFrameElementLoad', entry[:iframe_handle])
-        invalidate_find_cache
-        settle
       end
 
       # What the container `handle` in realm `parent` gives the document it is to hold at `url` (`frameSeed`) — its
