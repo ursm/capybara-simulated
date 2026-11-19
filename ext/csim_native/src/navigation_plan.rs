@@ -156,6 +156,8 @@ pub(crate) struct RoutedSubmissions {
 struct RoutedSubmission {
     planned: u64,
     source: i32,
+    // (…going on past its document, a navigation of it taken after it was planned: `hold_of`)
+    held: bool,
     form: crate::dom::NodeId,
     request: v8::Global<v8::Value>,
     route: Route,
@@ -166,6 +168,12 @@ impl RoutedSubmissions {
     // makes them due (frame_navigation.rs `Plans::through`).
     pub(crate) fn first_planned(&self) -> Option<u64> {
         self.entries.iter().map(|e| e.planned).min()
+    }
+    // Those realm `source`'s document planned going on past it (`FrameNavigations::hold_planned_of`).
+    pub(crate) fn hold_of(&mut self, source: i32) {
+        for e in self.entries.iter_mut().filter(|e| e.source == source) {
+            e.held = true;
+        }
     }
 }
 
@@ -315,7 +323,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "submissionRoute", submission_route, context_id);
     register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
-    register(scope, ns, "takesPlanned", takes_planned, context_id);
     register(scope, ns, "plannedNext", planned_next, context_id);
     register(scope, ns, "navigationAwaited", navigation_awaited, context_id);
     register(scope, ns, "flushedLocation", flushed_location, context_id);
@@ -643,8 +650,9 @@ fn windows_planned(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallback
 // navigable, entry, same document, …]` (`FrameTraversal`). A window closed is stepped no more,
 // and plans none the host takes — nor one closing, whose navigation the task its close queued aborts (HTML "destroy a
 // top-level traversable"): taken, and let go.
-fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let windows = crate::dom::dom(scope).arena.stepped_windows();
+fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    // (…the window whose plan was made first alone, where `first`: `plannedNext`)
+    let windows = if args.get(0).is_true() { first_planned_window(scope).into_iter().collect() } else { crate::dom::dom(scope).arena.stepped_windows() };
     let mut taken = Vec::new();
     let mut waiting = Vec::new();
     let mut frames = Vec::new();
@@ -885,7 +893,7 @@ fn plan_form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         route => {
             let entries = &mut crate::dom::dom(scope).arena.routed_submissions.entries;
             entries.retain(|e| e.form != form);
-            entries.push(RoutedSubmission { planned: next_planned(), source: cid, form, request, route, referrer });
+            entries.push(RoutedSubmission { planned: next_planned(), source: cid, held: false, form, request, route, referrer });
         }
     }
     rv.set_uint32(FORM_PLANNED_TURN);
@@ -907,7 +915,7 @@ fn plan_top_level_submission(scope: &mut v8::PinScope<'_, '_>, top: i32, source:
 // (`take_submission`).
 fn hold_routed_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    crate::dom::dom(scope).arena.frame_navigations.hold_submissions_of(cid);
+    crate::frame_navigation::FrameNavigations::hold_planned_of(&mut crate::dom::dom(scope).arena, cid);
 }
 // A route as the host takes it: [kind, at, container] — "self", "top", "window" and the realm of a window's of this
 // isolate's document, "new_window" and the name it opens under ('' for `_blank`), "blocked", or for another frame's
@@ -981,7 +989,7 @@ fn take_routed_submission(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionC
         let entries = &mut arena.routed_submissions.entries;
         let Some(first) = entries.iter().position(|e| e.planned == at) else { return };
         let e = entries.remove(first);
-        if !arena.navigables.fully_active(e.source) {
+        if !e.held && !arena.navigables.fully_active(e.source) {
             continue;
         }
         return rv.set(routed_item(scope, e.source, &e.request, e.route, e.referrer));
@@ -1062,85 +1070,101 @@ fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         | (u32::from(plan.traversal_waiting()) << 6);
     rv.set_uint32(bits | frames);
 }
-// __dom.takesPlanned() -> whether anything the host's drain of what a task planned takes may be there (browser.rb
-// `takes_planned?`): the calling realm's navigation, submission, location navigation, reload or a frame's submission to
-// it, a download any realm of the isolate planned (`takeDownload`'s realms), a frame's navigation or reload the host
-// plans that is due, or a form's submission it routes that is. No take when it says none: one host call where the drain
-// made ten (the event loop's step after every script the driver runs among them).
-fn takes_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let own = realm_id(scope, &args);
-    let arena = &crate::dom::dom(scope).arena;
-    let frames = arena.frame_navigations.hosted() || arena.routed_submissions.first_planned().is_some_and(|at| arena.frame_navigations.due(at));
-    let others: Vec<i32> = arena.linked_frame_realms().into_iter().chain(arena.stepped_windows()).filter(|&r| r != own).collect();
-    let downloads = std::iter::once(own).chain(others).any(|cid| !realm(scope, cid).navigation_plan.download.is_empty());
-    let plan = plan(scope, &args);
-    let own = &plan.own;
-    rv.set_bool(
-        frames || downloads || plan.navigation.is_some() || plan.submission.is_some() || own.location.is_some() || own.reload.is_some() || own.submission.is_some()
-    );
+// What the host takes of what the documents of this isolate planned, kind by kind — each a take of the host's, by name
+// (`Native.plan_take_kinds`, browser.rb `PLAN_TAKES`): the page's location navigation, its reload, a frame's form
+// submitted to it, its own form's submission, its hyperlink's navigation, one into a new window, a download, the frames'
+// navigations, their reloads, the forms' submissions the host routes, the windows' own.
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub(crate) enum TakeKind {
+    Location,
+    Reload,
+    FrameToPage,
+    Submission,
+    Navigation,
+    NewWindow,
+    Download,
+    FrameNavigation,
+    FrameReload,
+    FrameSubmission,
+    Window,
 }
-// What the host takes of what the documents of this isolate planned, kind by kind (browser.rb `PLAN_TAKES`, by index):
-// the page's location navigation, its reload, a frame's form submitted to it, its own form's submission, its hyperlink's
-// navigation, one into a new window, a download, the frames' navigations, their reloads, the forms' submissions the
-// host routes, the windows' own.
-pub(crate) const TAKE_KINDS: u32 = 11;
-// __dom.plannedNext(mask) -> the kind (`TAKE_KINDS`, of those `mask` names) whose next plan was planned first — the
-// calling realm's, the page's, as the one queue of what its isolate's documents planned is taken in the order it was
-// planned in (HTML: each "plan to navigate" a task, each `location` a navigation begun as its script runs, in order) —
-// -1 for none planned: the host takes the plans of that kind, then asks again — the forms' submissions it routes before
-// all. A frame's plan is there once the event
-// loop's navigation turn has made it due; a window's in the order its own plan was made, a traversal waiting or a
-// document queued first.
+pub(crate) const TAKE_KIND_NAMES: [&str; 11] = [
+    "location",
+    "reload",
+    "frame_to_page",
+    "submission",
+    "navigation",
+    "new_window",
+    "download",
+    "frame_navigation",
+    "frame_reload",
+    "frame_submission",
+    "window",
+];
+// Native.plan_take_kinds -> `TAKE_KIND_NAMES`, by `TakeKind`.
+pub(crate) fn plan_take_kinds() -> Vec<&'static str> {
+    TAKE_KIND_NAMES.to_vec()
+}
+// The order the next plan of a window `window.open` made in this isolate was made in — a traversal waiting, a document
+// queued, before any — none for none.
+fn window_planned_at(scope: &mut v8::PinScope<'_, '_>, w: i32) -> Option<u64> {
+    let queued = crate::dom::dom(scope).arena.window_history(w).is_some_and(|(h, _)| h.queued_documents());
+    let plan = &realm(scope, w).navigation_plan;
+    if queued || plan.traversal_waiting() {
+        Some(0)
+    } else if plan.own.location.is_some() || plan.own.reload.is_some() || plan.own.submission.is_some() {
+        Some(plan.own.planned)
+    } else {
+        None
+    }
+}
+// …the window whose next plan was made first.
+fn first_planned_window(scope: &mut v8::PinScope<'_, '_>) -> Option<i32> {
+    let windows = crate::dom::dom(scope).arena.stepped_windows();
+    windows.into_iter().filter_map(|w| window_planned_at(scope, w).map(|at| (at, w))).min().map(|(_, w)| w)
+}
+// __dom.plannedNext(mask) -> the kind (`TakeKind`, of those `mask` names by bit) of the plan made first of all a document
+// of this isolate planned — the calling realm's, the page's — or -1 for none: the one queue they are, taken in the order
+// it was planned in, each a take of one plan, the host asking again after it. HTML: a `location`, a hyperlink, a reload
+// begin their navigation as they are planned, its fetch under way at once; a form's "plan to navigate" is a task queued
+// after them, which runs ahead of their responses — the documents that made them still there for it (frame_navigation.rs
+// `hold_planned_of`) — and supersedes, as it is planned, the one of its navigable (`plan_frame_submission`: Chrome, one
+// load). A frame's plan is there once the event loop's navigation turn has made it due.
 fn planned_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    use TakeKind as K;
     let mask = args.get(0).uint32_value(scope).unwrap_or(0);
     let own = realm_id(scope, &args);
-    let mut best: Option<(u64, i32)> = None;
-    let mut consider = |kind: u32, at: Option<u64>| {
-        if let Some(at) = at.filter(|_| mask & (1 << kind) != 0) {
+    let mut best: Option<(u64, TakeKind)> = None;
+    let mut consider = |kind: TakeKind, at: Option<u64>| {
+        if let Some(at) = at.filter(|_| mask & (1 << kind as u8) != 0) {
             if best.is_none_or(|(b, _)| at < b) {
-                best = Some((at, kind as i32));
+                best = Some((at, kind));
             }
         }
     };
     let arena = &crate::dom::dom(scope).arena;
     let frames = &arena.frame_navigations;
-    consider(7, frames.first_hosted(false));
-    consider(8, frames.first_hosted(true));
-    // (…the forms' submissions the host routes first, whenever they were planned: each a task HTML "plan to navigate"
-    // queued, which runs ahead of the parallel steps a navigation begun before it is at — a frame's form into its sibling
-    // goes on as the frame's `location` set before it navigates it, the form's document still there)
+    consider(K::FrameNavigation, frames.first_hosted(false));
+    consider(K::FrameReload, frames.first_hosted(true));
     let routed = arena.routed_submissions.first_planned().filter(|&at| frames.due(at));
     let framed = frames.first_submission().filter(|&at| frames.due(at));
-    if mask & (1 << 9) != 0 && (routed.is_some() || framed.is_some()) {
-        return rv.set_int32(9);
-    }
+    consider(K::FrameSubmission, routed.into_iter().chain(framed).min());
     let others: Vec<i32> = arena.linked_frame_realms().into_iter().chain(arena.stepped_windows()).filter(|&r| r != own).collect();
     let windows = arena.stepped_windows();
-    let queued: Vec<bool> = windows.iter().map(|&w| arena.window_history(w).is_some_and(|(h, _)| h.queued_documents())).collect();
-    let mut window_at = None;
-    for (&w, queued) in windows.iter().zip(queued) {
-        let plan = &realm(scope, w).navigation_plan;
-        let at = if queued || plan.traversal_waiting() {
-            Some(0)
-        } else if plan.own.location.is_some() || plan.own.reload.is_some() || plan.own.submission.is_some() {
-            Some(plan.own.planned)
-        } else {
-            None
-        };
-        window_at = window_at.into_iter().chain(at).min();
-    }
-    consider(10, window_at);
+    let window_at = windows.into_iter().filter_map(|w| window_planned_at(scope, w)).min();
+    consider(K::Window, window_at);
     let download = std::iter::once(own).chain(others).filter_map(|cid| realm(scope, cid).navigation_plan.download.front().map(|d| d.3)).min();
-    consider(6, download);
+    consider(K::Download, download);
     let plan = plan(scope, &args);
     let own = &plan.own;
-    consider(0, own.location.as_ref().map(|_| own.planned));
-    consider(1, own.reload.as_ref().map(|_| own.planned));
-    consider(2, own.submission.as_ref().map(|_| own.planned));
-    consider(3, plan.submission.as_ref().map(|s| s.1));
-    consider(4, plan.navigation.as_ref().filter(|n| !n.opens_window).map(|n| n.planned));
-    consider(5, plan.navigation.as_ref().filter(|n| n.opens_window).map(|n| n.planned));
-    rv.set_int32(best.map_or(-1, |b| b.1));
+    consider(K::Location, own.location.as_ref().map(|_| own.planned));
+    consider(K::Reload, own.reload.as_ref().map(|_| own.planned));
+    consider(K::FrameToPage, own.submission.as_ref().map(|_| own.planned));
+    consider(K::Submission, plan.submission.as_ref().map(|s| s.1));
+    consider(K::Navigation, plan.navigation.as_ref().filter(|n| !n.opens_window).map(|n| n.planned));
+    consider(K::NewWindow, plan.navigation.as_ref().filter(|n| n.opens_window).map(|n| n.planned));
+    rv.set_int32(best.map_or(-1, |b| i32::from(b.1 as u8)));
 }
 // __dom.navigationAwaited() -> whether the calling realm's document has planned what will navigate it once the host takes it, which
 // no ongoing navigation of its records yet: a reload (HTML "apply the reload history step" sets it to "traversal"), a form's

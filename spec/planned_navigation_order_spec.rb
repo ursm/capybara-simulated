@@ -61,15 +61,37 @@ RSpec.describe 'the navigations a page planned' do
     end
   end
 
-  # A frame's `location` and a window's set in one task are requested in that order (Chrome 157, Firefox 159).
-  it "takes a frame's navigation and a window's in the order they were planned" do
-    session, log = logged_session('<iframe id=fr src=/f0></iframe><script>window.w = open("/w0")</script>')
+  # Frames' and a window's `location` set in one task are requested in that order, plan by plan — not kind by kind
+  # (Chrome 157, Firefox 159: /f then /w).
+  it "takes frames' navigations and a window's in the order they were planned" do
+    session, log = logged_session('<iframe id=fr src=/f0></iframe><iframe id=fr2 src=/g0></iframe><script>window.w = open("/w0")</script>')
     session.visit '/two'
-    poll_until { log.include?('/w0') && log.include?('/f0') }
+    poll_until { (%w[/w0 /f0 /g0] - log).empty? }
     log.clear
-    session.execute_script("fr.contentWindow.location = '/f'; w.location = '/w'")
+    session.execute_script("fr.contentWindow.location = '/f'; w.location = '/w'; fr2.contentWindow.location = '/g'")
     session.evaluate_script('1')
-    expect(log).to eq(['/f', '/w'])
+    expect(log).to eq(%w[/f /w /g])
+  end
+
+  # A frame's `location` and then its own form submitted to its sibling: the form's task runs before the frame's
+  # navigation's response, its document still there — Chrome 157 and Firefox 159 request /z, then post.
+  it "posts a frame's form submitted after its own `location`, in that order" do
+    log = []
+    session = simulated_session(lambda {|env|
+      log << "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
+      body = case env['PATH_INFO']
+             when '/two' then '<iframe name=x src=/gx></iframe><iframe name=y src=/y0></iframe>'
+             when '/gx' then '<form id=f method=post action=/posted target=y></form>'
+             else env['PATH_INFO']
+             end
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8>#{body}"]]
+    })
+    session.visit '/two'
+    poll_until { log.include?('GET /y0') }
+    log.clear
+    session.execute_script("frames[0].location = '/z'; frames[0].f.submit()")
+    session.evaluate_script('1')
+    expect(log).to eq(['GET /z', 'POST /posted'])
   end
 
   # A form of a srcdoc frame navigates the frame to its action — about:blank's here, its query empty — not to the srcdoc

@@ -188,6 +188,12 @@ impl FrameNavigations {
     pub(crate) fn hosted(&self) -> bool {
         self.0.values().any(|n| n.host.as_ref().is_some_and(|&(at, _)| at <= self.1.through))
     }
+    // …and the submissions realm `source`'s document planned so far going on past it (`held`): its navigation taken now,
+    // their tasks — queued before its response, its document still there for them — ahead of what it makes.
+    pub(crate) fn hold_planned_of(arena: &mut crate::dom::RealmArena, source: i32) {
+        arena.frame_navigations.hold_submissions_of(source);
+        arena.routed_submissions.hold_of(source);
+    }
     // The forms' submissions realm `source`'s document made let go: its reload (Chrome and Firefox send none, measured
     // 2026-11-07), its `stop()`. Whether it had one.
     pub(crate) fn drop_submissions_of(&mut self, source: i32) -> bool {
@@ -757,12 +763,18 @@ fn navigation_turn_ran(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCall
 // the frame's now, sandbox null where the container had no attribute.
 fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let reloads = args.get(0).to_rust_string_lossy(scope) == "reload";
+    let first = args.get(1).is_true();
     let arena = &mut crate::dom::dom(scope).arena;
     let through = arena.frame_navigations.1.through;
     let wanted = |&(at, ref h): &(u64, HostNavigation)| at <= through && !matches!(h, HostNavigation::Submit { .. }) && matches!(h, HostNavigation::Reload { .. }) == reloads;
+    // (…in the order planned; the first alone where `first`)
+    let mut due: Vec<(u64, NodeId)> = arena.frame_navigations.0.iter().filter_map(|(&c, n)| n.host.as_ref().filter(|h| wanted(h)).map(|&(at, _)| (at, c))).collect();
+    due.sort_by_key(|&(at, ..)| at);
+    if first {
+        due.truncate(1);
+    }
     let mut taken: Vec<(u64, i32, HostNavigation)> = Vec::new();
-    let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(wanted)).map(|(&c, _)| c).collect();
-    for c in containers {
+    for (_, c) in due {
         let realm = arena.frame_realm(c);
         let Some(nav) = arena.frame_navigations.0.get_mut(&c) else { continue };
         let Some((at, host)) = nav.host.take() else { continue };
@@ -773,6 +785,7 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         if let HostNavigation::Navigate { sandbox, .. } = &host {
             nav.sandbox = Some(sandbox.clone());
         }
+        FrameNavigations::hold_planned_of(arena, realm);
         taken.push((at, realm, host));
     }
     taken.sort_by_key(|&(at, ..)| at);

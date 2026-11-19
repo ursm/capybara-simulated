@@ -1055,7 +1055,6 @@ module Capybara
         resolve_against_current(url, use_base: true)
       end
 
-
       def find_css(css, context_handle = nil)
         s = css.to_s
         return find_xpath(s, context_handle) if xpath_shaped?(s)
@@ -2229,12 +2228,8 @@ module Capybara
       # before Capybara's `wait_for_download` polls. (…every one planned, by the page's document or a frame's or a window's
       # of this isolate: navigation_plan.rs `takeDownload`)
       def consume_pending_download
-        loop do
-          pending = @runtime.call('takePendingDownload')
-          break unless pending.is_a?(Hash) && pending['url']
-
-          save_download(pending)
-        end
+        pending = @runtime.call('takePendingDownload')
+        save_download(pending) if pending.is_a?(Hash) && pending['url']
       end
 
       # A download's resource saved to `downloads_directory` — `download` the one a hyperlink planned (navigation_plan.rs
@@ -3147,9 +3142,6 @@ module Capybara
         drain_pending_navigation
         deliver_asked_tasks
       end
-      # Whether anything those takes take may be planned (navigation_plan.rs `takesPlanned`): one host call where nothing
-      # is — the drain after every script the driver runs — for the ten its takes would make.
-      private def takes_planned? = @runtime.call('takesPlanned') == true
 
       # Backstop on the per-frame quiescence loop — caps the event-loop turns
       # processed at a single instant so a `setInterval(0)` (always-due) busy loop
@@ -8482,7 +8474,6 @@ module Capybara
         boot_response_into_ctx(body.to_s, opaque_origin: made[:doc_origin] == 'null', coop_switch: true, content_type: made[:content_type], client_id: made[:client_id], creator: creator)
       end
 
-
       # HTML "rules for choosing a navigable": a new top-level traversable made consumes the user activation of the
       # window that chose it, realm `realm_id`'s — the engine's (user_activation.rs), in every window of its page.
       # …whether that window has it now, unconsumed: the source snapshot of a navigation its document begins of another
@@ -11389,7 +11380,7 @@ module Capybara
       # (…`windows`: the windows' navigations taken first, as they are at every drain point of the frames' — window-realm
       # self-navs are realm navs too — where the caller took them already, not)
       def consume_pending_frame_nav
-        @runtime.call('takeFrameNavigations', 'navigate').each do |realm_id, url, replace, initiator, source, policy, sandbox, activated|
+        @runtime.call('takeFrameNavigations', 'navigate', true).each do |realm_id, url, replace, initiator, source, policy, sandbox, activated|
           parent    = @runtime.frame_realm_parent(realm_id)
           container = frame_container_handle(realm_id, parent)
           referrer  = [source, policy]
@@ -11420,22 +11411,14 @@ module Capybara
       # entry it goes to, referred as that entry's document was (session_history.rs `applyTraversal`) — or,
       # one that keeps its document, its frames' each to theirs (`traverse_navigables_of`).
       # (None asked for where no window was opened.)
-      # …and those the documents they made planned as they loaded — a pop-up's script navigating its opener, another
-      # window it opened — taken with them, up to `WINDOW_NAV_ROUNDS` rounds: a document that navigates itself as it
-      # loads, again and again, goes on at the next drain.
+      # …the window's whose plan was made first, as the one queue takes it (`take_planned`).
+      # (…a traversal a script queued that makes a window's document again applied first, as the page's are: its task's the
+      # host's now — history.js `applyWindowTraversals`)
       def consume_pending_window_nav
         return if @runtime.window_realm_meta.empty?
 
-        apply_window_traversals
-        WINDOW_NAV_ROUNDS.times { break unless take_window_navigation_round }
-      end
-      WINDOW_NAV_ROUNDS = 8
-      # (…a traversal a script queued that makes a window's document again applied first, as the page's are: its task's the
-      # host's now — history.js `applyWindowTraversals`)
-      private def apply_window_traversals = @runtime.call('applyWindowTraversals')
-      # …a round of them: whether it took any.
-      private def take_window_navigation_round
-        navs = @runtime.call('takeWindowNavigations')
+        @runtime.call('applyWindowTraversals')
+        navs = @runtime.call('takeWindowNavigations', true)
         navs.each do |realm_id, kind, *plan|
           # (…a reload's waiting on the tasks queued on its window's event loop before it, run first, taken a round later:
           # `run_queued_before_reload`)
@@ -11457,7 +11440,6 @@ module Capybara
         rescue StandardError => e
           log_console('warn', "window realm self-navigation failed: #{e.message}")
         end
-        !navs.empty?
       end
       # …one of them — or the driver's own, the user's (`by_user`: Capybara's `visit` / `refresh` in the window, which no
       # document initiates — its request's `Sec-Fetch-Site: none`, an about:blank one's origin a new opaque one, its
@@ -11739,7 +11721,7 @@ module Capybara
       # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken at the event loop's
       # navigation turn, behind the tasks queued before it.
       def consume_pending_frame_reload
-        reloads = @runtime.call('takeFrameNavigations', 'reload')
+        reloads = @runtime.call('takeFrameNavigations', 'reload', true)
         reloads.each do |realm_id, reload_url|
           parent    = @runtime.frame_realm_parent(realm_id)
           container = frame_container_handle(realm_id, parent)
@@ -11780,7 +11762,7 @@ module Capybara
       # navigation finalized with it, as `consume_pending_frame_nav`'s, what it made or not, by its container taken before
       # it ran.
       def consume_pending_frame_submit
-        while (realm_id, spec, kind, at, source, policy = @runtime.call('takeRoutedSubmission'))
+        if (realm_id, spec, kind, at, source, policy = @runtime.call('takeRoutedSubmission'))
           invalidate_find_cache
           frame = {'frame' => at, 'self' => (realm_id unless @runtime.window_realm_meta.key?(realm_id))}[kind]
           parent = frame && @runtime.frame_realm_parent(frame)
@@ -12417,36 +12399,39 @@ module Capybara
         consume_sw_deferred_navigations
         take_planned
       end
-      # What the documents of this isolate planned taken as the one queue it is, in the order it was planned
-      # (navigation_plan.rs `plannedNext`): the kind planned first taken, then the next — each kind once a pass, but the
-      # windows' twice (a window's newly loaded document may plan the page's, and the page's the windows') — of the kinds
-      # `mask` names. One host call where nothing is planned.
-      private def take_planned(mask = ALL_PLANS)
-        windows = 0
-        until (kind = @runtime.call('plannedNext', mask)).negative?
-          mask &= ~(1 << kind) unless kind == WINDOW_PLANS_KIND && (windows += 1) < 2
+      # What the documents of this isolate planned taken as the one queue it is, plan by plan in the order it was planned
+      # (navigation_plan.rs `plannedNext`): the plan made first taken, the queue asked again — what that one's document
+      # planned as it loaded joining it — up to PLAN_TAKES_MAX plans a pass (a document that navigates itself as it loads,
+      # again and again, goes on at the next). One host call where nothing is planned.
+      # (…`within` the kinds a caller takes: none taken past a plan of another kind made before, which its own caller —
+      # the drain — takes in its turn: the order holds across the two)
+      private def take_planned(within = ALL_PLANS)
+        PLAN_TAKES_MAX.times do
+          kind = @runtime.call('plannedNext', ALL_PLANS)
+          break if kind.negative? || within.nobits?(1 << kind)
+
           __send__(PLAN_TAKES[kind])
         end
       end
-      # …by kind (navigation_plan.rs `TAKE_KINDS`).
-      PLAN_TAKES = %i[
-        consume_pending_location
-        consume_pending_reload
-        consume_pending_page_submission
-        consume_pending_form_submit
-        consume_pending_navigation
-        consume_pending_aux_window
-        consume_pending_download
-        consume_pending_frame_nav
-        consume_pending_frame_reload
-        consume_pending_frame_submit
-        consume_pending_window_nav
-      ].freeze
-      ALL_PLANS         = (1 << PLAN_TAKES.size) - 1
-      WINDOW_PLANS_KIND = PLAN_TAKES.index(:consume_pending_window_nav)
+      PLAN_TAKES_MAX = 32
+      # …each kind's take of one plan, by the engine's kinds (navigation_plan.rs `TakeKind`, `Native.plan_take_kinds`).
+      PLAN_TAKE_STEPS = {
+        'location'         => :consume_pending_location,
+        'reload'           => :consume_pending_reload,
+        'frame_to_page'    => :consume_pending_page_submission,
+        'submission'       => :consume_pending_form_submit,
+        'navigation'       => :consume_pending_navigation,
+        'new_window'       => :consume_pending_aux_window,
+        'download'         => :consume_pending_download,
+        'frame_navigation' => :consume_pending_frame_nav,
+        'frame_reload'     => :consume_pending_frame_reload,
+        'frame_submission' => :consume_pending_frame_submit,
+        'window'           => :consume_pending_window_nav
+      }.freeze
+      PLAN_TAKES = Native.plan_take_kinds.map { PLAN_TAKE_STEPS.fetch(_1) }.freeze
+      ALL_PLANS  = (1 << PLAN_TAKES.size) - 1
       # …those the event loop's navigation turn makes due: the frames' and the windows'.
       TURN_PLANS = %i[consume_pending_frame_nav consume_pending_frame_reload consume_pending_frame_submit consume_pending_window_nav].sum {|k| 1 << PLAN_TAKES.index(k) }
-
 
       # A script-driven `anchor.click()` / `target=_blank` navigation with no
       # Capybara action behind it (e.g. a WPT test) — open the aux window from the
@@ -12645,7 +12630,6 @@ module Capybara
           @runtime.realm_call(parent_realm_id, 'rebindFrameRealm', iframe_handle, old_id, new_id)
         end
       end
-
 
       # (…`blob`: a `blob:` URL's blob as the navigation began — `{bytes:, type:}`, `blob_snapshot` — which a revoke after
       # it began does not take back: HTML resolves the URL's blob URL entry as it parses it)
@@ -13471,7 +13455,6 @@ module Capybara
       # A preload that failed: `event.preloadResponse` rejects (Service Workers "Handle Fetch").
       PRELOAD_NETWORK_ERROR = {'networkError' => true}.freeze
 
-
       # A frame's navigation that FAILED — a network error: the frame commits an error document at the target URL (an empty
       # one, as a failed `src` does), not keeping the document it unloaded — one of inline content, made with no reserved
       # client (HTML "create a document for inline content"), so no service worker's client nor one it controls, and of a
@@ -13906,7 +13889,6 @@ module Capybara
         u = parse_url(url.to_s)
         u && %w[http: https:].include?(u[:protocol]) ? u[:origin] : nil
       end
-
 
       # Trace-wrap layer: prepended so the canonical method bodies above
       # stay un-instrumented and a no-trace caller pays only the
