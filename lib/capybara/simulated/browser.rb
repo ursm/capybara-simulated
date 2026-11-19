@@ -12773,8 +12773,9 @@ module Capybara
         navigate_with(navigation, NavigationHost.new(kind: :page, realm: 0, history: @session_history, initiator: initiator, source: referer, replayed: replayed))
       end
       # A navigation (`run_navigation`), with what its navigable's kind does around it: the page's — its tasks flushed as it
-      # went (`flush_outgoing_page_init`), which still stand where it made no document — and, where a navigation begun as
-      # its response was awaited ended it, that one's plan taken.
+      # went (`flush_outgoing_page_init`), which still stand where it made no document or parked: HTML "navigate" asks
+      # whether the page may be unloaded before the fetch whose Handle Fetch waits on an activating worker, and the page
+      # lives on through that wait as through any response awaited.
       private def navigate_with(navigation, host)
         return run_navigation(navigation, host) unless host.kind == :page
 
@@ -12789,7 +12790,9 @@ module Capybara
             # what its timers asked for.
             restore_flushed_nav_intents
           end
-          drain_pending_navigation if navigation.superseded?
+          # (…and, where one begun as its response was awaited ended it — or it parked on a worker activating, the page
+          # it would leave living on — what the page planned meanwhile taken: a timer's `location` in the wait)
+          drain_pending_navigation if navigation.superseded? || navigation.deferred?
         end
       end
       # The page's navigation `fetch` ended in `step` (navigation_commit.rs `Step`, its session history done with as that

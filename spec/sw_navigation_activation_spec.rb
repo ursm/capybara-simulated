@@ -148,6 +148,27 @@ RSpec.describe 'a navigation into the scope of an activating service worker', :e
       expect(session.current_url).to eq('https://a.test/reg')
     end
 
+    # HTML "navigate": the page asked whether it may be unloaded first ("check if unloading is canceled", in parallel
+    # before the fetch whose Handle Fetch waits on the worker) — once, the parked navigation going on with no second ask.
+    it 'asks the page whether it may be unloaded once, before it parks' do
+      session.execute_script("localStorage.asked = 0; addEventListener('beforeunload', () => { localStorage.asked++; }); location.href = '/sw/first'")
+      expect(session.title).to eq('activating')
+      activate!
+      expect(session).to have_title('FROM-SW')
+      expect(read('localStorage.asked')).to eq('1')
+    end
+
+    # …and the page it would leave lives on while it waits, as a page whose navigation's response is awaited does: what
+    # its tasks plan meanwhile — a timer's `location` — is a navigation of its own, which ends the parked one ("this will
+    # abort other ongoing navigations").
+    it "makes none a navigation the page's timer planned as it waited replaced" do
+      session.execute_script("setTimeout(() => { location.href = '/later'; }, 1000); location.href = '/sw/first'")
+      expect(session).to have_title('NET/later')
+      activate!
+      expect(session.has_title?('FROM-SW', wait: 0.5)).to be(false)
+      expect(session.current_url).to eq('https://a.test/later')
+    end
+
     it 'makes none a reload replaced' do
       session.execute_script("location.href = '/sw/first'")
       session.execute_script('location.reload()')
