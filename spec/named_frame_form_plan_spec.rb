@@ -225,10 +225,14 @@ RSpec.describe "a page form's planned navigation of a named frame" do
       end
     end
 
+    # (…a location set before the form begins its navigation — its fetch under way at once, HTML "navigate" — which the
+    # form's "plan to navigate" task, queued after it, supersedes: its request made, nothing made of its response. Chrome
+    # 157 sends GET /b1 and cancels it, Firefox 159 sends none — split, measured 2026-11-19, and racy in both by method —
+    # so the text's order: both requests, the form's document the one made)
     {
-      'a.contentWindow.x.submit(); b.contentWindow.location = "/b1"' => '/b1',
-      'b.contentWindow.location = "/b1"; a.contentWindow.x.submit()' => '/sib'
-    }.each do |js, lands|
+      'a.contentWindow.x.submit(); b.contentWindow.location = "/b1"' => ['/b1', ['GET /b1']],
+      'b.contentWindow.location = "/b1"; a.contentWindow.x.submit()' => ['/sib', ['GET /b1', 'POST /sib']]
+    }.each do |js, (lands, sent)|
       it "takes the later of a sibling's form and a location: #{js}" do
         hits = []
         session = siblings(hits)
@@ -237,7 +241,7 @@ RSpec.describe "a page form's planned navigation of a named frame" do
         session.execute_script(js)
         session.evaluate_script('1')
         expect(session.evaluate_script('b.contentWindow.location.pathname')).to eq(lands)
-        expect(hits.size).to eq(1)
+        expect(hits).to eq(sent)
       end
     end
 

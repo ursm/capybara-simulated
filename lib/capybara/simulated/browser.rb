@@ -11380,19 +11380,20 @@ module Capybara
       # (…`windows`: the windows' navigations taken first, as they are at every drain point of the frames' — window-realm
       # self-navs are realm navs too — where the caller took them already, not)
       def consume_pending_frame_nav
-        @runtime.call('takeFrameNavigations', 'navigate', true).each do |realm_id, url, replace, initiator, source, policy, sandbox, activated|
+        @runtime.call('takeFrameNavigations', 'navigate', true).each do |realm_id, url, replace, initiator, source, policy, sandbox, activated, superseded|
           parent    = @runtime.frame_realm_parent(realm_id)
           container = frame_container_handle(realm_id, parent)
           referrer  = [source, policy]
           invalidate_find_cache
           # (…made by the initiator's document: what a download its response is may be saved by)
           from_document(initiator) do
-            navigate_frame_realm(realm_id, url, handling: replace ? :replace : :push, referrer: referrer, initiator: initiator || realm_id, user_activated: activated, sandbox: sandbox)
+            navigate_frame_realm(realm_id, url, handling: replace ? :replace : :push, referrer: referrer, initiator: initiator || realm_id, user_activated: activated, sandbox: sandbox, superseded: superseded)
           end
         rescue StandardError => e
           log_console('warn', "frame self-navigation failed: #{e.message}")
         ensure
-          frame_navigation_finalized(parent, container)
+          # (…a superseded one's the form's to finalize, which goes on)
+          frame_navigation_finalized(parent, container) unless superseded
         end
       end
       # A frame navigation taken and finalized — its document made, or none (a 204, a download, a failure): the engine's
@@ -12175,7 +12176,9 @@ module Capybara
       # that navigated in the same drain discarded it — whose fetch's cookie and server side effects would be for a
       # navigation that never commits.
       # (…`sandbox` the container's sandboxing its plan began with: frame_navigation.rs `begin`)
-      def navigate_frame_realm(realm_id, url, post = nil, handling: :push, referrer: nil, initiator: realm_id, user_activated: false, sandbox: nil)
+      # (…`superseded` one a form's submission superseded after its fetch began: its request made, nothing made of its
+      # response — none at all of a URL no request is made of)
+      def navigate_frame_realm(realm_id, url, post = nil, handling: :push, referrer: nil, initiator: realm_id, user_activated: false, sandbox: nil, superseded: false)
         return if Native.navigation_hands_off(url.to_s) || !@runtime.frame_realm_alive?(realm_id)
 
         start = Native.navigation_start(url.to_s, post ? 'POST' : 'GET', false)
@@ -12184,8 +12187,8 @@ module Capybara
         post = nil if %w[about_blank data].include?(start)
         referrer ||= realm_referrer_initiator(realm_id)
         if http_url?(url)
-          navigate_realm_self(realm_id, url, *post, handling: handling.to_s, referrer: referrer, initiator: initiator, user_activated: user_activated)
-        else
+          navigate_realm_self(realm_id, url, *post, handling: handling.to_s, referrer: referrer, initiator: initiator, user_activated: user_activated, superseded: superseded)
+        elsif !superseded
           navigate_frame_by_realm(realm_id, url, handling, sandbox)
         end
       end
@@ -12212,7 +12215,7 @@ module Capybara
       # "as if navigable navigated itself"). A controlled one's hops through the SW's fetch event first (mode 'navigate' — a
       # POST's body the SW reads via event.request.text()), skipped where an https navigation sits under an insecure
       # ancestor (`sw_may_control_frame_navigation?`), its reserved client adopted by the rebuilt realm.
-      private def navigate_realm_self(realm_id, url, body = nil, content_type = nil, handling:, referrer:, initiator:, user_activated: false, replayed: nil, restored: {})
+      private def navigate_realm_self(realm_id, url, body = nil, content_type = nil, handling:, referrer:, initiator:, user_activated: false, replayed: nil, restored: {}, superseded: false)
         nav, _, _, history = frame_navigable(realm_id)
         sw = sw_registered?
         navigation = Native::Navigation.new({
@@ -12235,7 +12238,8 @@ module Capybara
           replaces:     (sw_replaced_document(realm_id) if sw),
           ancestors:    @runtime.realm_direct_call(0, 'ancestorDocuments', realm_id.to_i),
           dest:         @runtime.realm_direct_call(0, 'frameDestination', realm_id.to_i),
-          jar:          @cookie_jar
+          jar:          @cookie_jar,
+          superseded:   superseded
         })
         navigate_with(navigation, NavigationHost.new(kind: :frame, realm: realm_id, history: history, replayed: replayed, restored: restored))
       end

@@ -136,6 +136,9 @@ struct Machine {
     jar: u64,
     blob: Option<(String, Vec<u8>)>,
     flushes: bool,
+    // (…a frame's navigation a form's submission superseded after its fetch began: its request made, nothing made of
+    // its response — frame_navigation.rs `superseded`)
+    discards: bool,
     phase: Phase,
     fetch: Option<NavigationFetch>,
     entry: Option<u64>,
@@ -203,7 +206,8 @@ impl Machine {
     // `initiator`: a replay's of no initiator's client), `replaces` ([client id, origin] of the document it replaces),
     // `leaving_origin` / `opened` (a top-level one's: navigation_commit.rs `Commit::new`), `ancestors` / `dest` (a
     // frame's), `jar` (the cookie jar), `blob` ([type,
-    // bytes] of a `blob:` URL's blob as its navigation began) and `flushes` (whether the page's tasks run first).
+    // bytes] of a `blob:` URL's blob as its navigation began) and `flushes` (whether the page's tasks run first) and `superseded` (a frame's a form superseded after its fetch began:
+    // its request made, its response discarded).
     fn new(ruby: &Ruby, params: RHash) -> Result<Self, Error> {
         let get = |key: &str| params.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -267,6 +271,7 @@ impl Machine {
             jar: Option::<u64>::try_convert(get("jar")?)?.unwrap_or(0),
             blob,
             flushes: get("flushes")?.to_bool(),
+            discards: get("superseded")?.to_bool(),
             phase: Phase::Start,
             fetch: None,
             entry: None,
@@ -491,7 +496,7 @@ impl Machine {
                         return Ok(None);
                     }
                     self.phase = Phase::Entry;
-                    if let (Kind::Frame, Some(Handling::Push | Handling::Replace)) = (self.kind, self.handling) {
+                    if let (Kind::Frame, Some(Handling::Push | Handling::Replace), false) = (self.kind, self.handling, self.discards) {
                         let replace = matches!(self.handling, Some(Handling::Replace));
                         return Ok(Some(cmd(ruby, "begin_entry", &[self.url.clone().into_value_with(ruby), replace.into_value_with(ruby)])));
                     }
@@ -663,7 +668,7 @@ impl Machine {
                         Kind::Page | Kind::Window => self.mark.is_some_and(|(number, awaited)| {
                             self.history.as_ref().and_then(|h| h.ongoing_navigation(self.nav)) != number || Some(given.truthy()) != awaited
                         }),
-                        Kind::Frame => !self.ongoing(),
+                        Kind::Frame => self.discards || !self.ongoing(),
                         Kind::Container => false,
                     };
                     if superseded {

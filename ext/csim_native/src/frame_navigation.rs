@@ -69,6 +69,11 @@ struct FrameNavigation {
     held: Option<(u32, f64, v8::Global<v8::Value>)>,
     // …and the navigation the host plans to make of it, by the order it was planned in (`HostNavigation`).
     host: Option<(u64, HostNavigation)>,
+    // …and a navigation of it begun before a form's submission planned in its place — a `location`'s, a hyperlink's:
+    // its fetch under way as it was planned (HTML "navigate", in parallel after its unload check), the form's "plan to
+    // navigate" task, queued after it, superseding it as it runs — its request made, nothing made of its response
+    // (`take_frame_navigations`: the host fetches it as a superseded one).
+    superseded: Option<(u64, HostNavigation)>,
     // Whether the navigation it plans now aborted its document, planned while that one's parser was active
     // (document_state.rs `abort_parsing`): the container's load is then none of that document's (`frameLoadDue`).
     aborted_document: bool,
@@ -186,7 +191,7 @@ impl FrameNavigations {
     }
     // Whether the host plans a navigation of any frame that is due now.
     pub(crate) fn hosted(&self) -> bool {
-        self.0.values().any(|n| n.host.as_ref().is_some_and(|&(at, _)| at <= self.1.through))
+        self.0.values().any(|n| n.host.iter().chain(&n.superseded).any(|&(at, _)| at <= self.1.through))
     }
     // …and the submissions realm `source`'s document planned so far going on past it (`held`): its navigation taken now,
     // their tasks — queued before its response, its document still there for them — ahead of what it makes.
@@ -208,7 +213,7 @@ impl FrameNavigations {
     pub(crate) fn first_hosted(&self, reload: bool) -> Option<u64> {
         self.0
             .values()
-            .filter_map(|n| n.host.as_ref())
+            .flat_map(|n| n.host.iter().chain(&n.superseded))
             .filter(|&&(at, ref h)| at <= self.1.through && !matches!(h, HostNavigation::Submit { .. }) && matches!(h, HostNavigation::Reload { .. }) == reload)
             .map(|&(at, _)| at)
             .min()
@@ -610,6 +615,9 @@ pub(crate) fn plan_frame_submission(
     }
     let at = crate::navigation_plan::next_planned();
     let nav = navs.0.entry(container).or_default();
+    if matches!(nav.host, Some((_, HostNavigation::Navigate { .. }))) {
+        nav.superseded = nav.host.take();
+    }
     nav.host = Some((at, HostNavigation::Submit { request, source, referrer, held: false }));
     nav.aborted_document = false;
     navs.1.last.insert(form, (at, container));
@@ -768,29 +776,35 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let through = arena.frame_navigations.1.through;
     let wanted = |&(at, ref h): &(u64, HostNavigation)| at <= through && !matches!(h, HostNavigation::Submit { .. }) && matches!(h, HostNavigation::Reload { .. }) == reloads;
     // (…in the order planned; the first alone where `first`)
-    let mut due: Vec<(u64, NodeId)> = arena.frame_navigations.0.iter().filter_map(|(&c, n)| n.host.as_ref().filter(|h| wanted(h)).map(|&(at, _)| (at, c))).collect();
+    let mut due: Vec<(u64, NodeId, bool)> = Vec::new();
+    for (&c, n) in &arena.frame_navigations.0 {
+        due.extend(n.superseded.as_ref().filter(|h| wanted(h)).map(|&(at, _)| (at, c, true)));
+        due.extend(n.host.as_ref().filter(|h| wanted(h)).map(|&(at, _)| (at, c, false)));
+    }
     due.sort_by_key(|&(at, ..)| at);
     if first {
         due.truncate(1);
     }
-    let mut taken: Vec<(u64, i32, HostNavigation)> = Vec::new();
-    for (_, c) in due {
+    let mut taken: Vec<(u64, i32, HostNavigation, bool)> = Vec::new();
+    for (_, c, superseded) in due {
         let realm = arena.frame_realm(c);
         let Some(nav) = arena.frame_navigations.0.get_mut(&c) else { continue };
-        let Some((at, host)) = nav.host.take() else { continue };
+        let Some((at, host)) = (if superseded { nav.superseded.take() } else { nav.host.take() }) else { continue };
         // (…none of a container whose navigable has no document now, nothing to navigate)
         let Some(realm) = realm else { continue };
         // (…its navigation begun now, the container's `sandbox` as it was planned what the document it makes — or a
         // download its response is — is sandboxed by: `frame_sandbox`, `take_frame_sandbox`)
         if let HostNavigation::Navigate { sandbox, .. } = &host {
-            nav.sandbox = Some(sandbox.clone());
+            if !superseded {
+                nav.sandbox = Some(sandbox.clone());
+            }
         }
         FrameNavigations::hold_planned_of(arena, realm);
-        taken.push((at, realm, host));
+        taken.push((at, realm, host, superseded));
     }
     taken.sort_by_key(|&(at, ..)| at);
     let mut items = Vec::with_capacity(taken.len());
-    for (_, realm, host) in taken {
+    for (_, realm, host, superseded) in taken {
         let realm = v8::Integer::new(scope, realm).into();
         let item = match host {
             HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated } => {
@@ -804,6 +818,7 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
                     v8::String::new(scope, &referrer.1).unwrap().into(),
                     v8::Array::new_with_elements(scope, &[sandbox]).into(),
                     v8::Boolean::new(scope, activated).into(),
+                    v8::Boolean::new(scope, superseded).into(),
                 ];
                 v8::Array::new_with_elements(scope, &item).into()
             }
@@ -829,6 +844,7 @@ fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     arena.stop_attribute_navigation(container);
     if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
         nav.host = None;
+        nav.superseded = None;
     }
 }
 
@@ -845,6 +861,7 @@ fn cancel_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     arena.stop_attribute_navigation(container);
     if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
         nav.host.take_if(|(_, host)| matches!(host, HostNavigation::Navigate { .. }));
+        nav.superseded = None;
     }
 }
 
@@ -1190,7 +1207,7 @@ fn stop_frame(arena: &mut RealmArena, cid: i32, container: NodeId, by_stop: bool
         stopped = true;
     }
     if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
-        if nav.host.take_if(|(_, host)| by_stop || matches!(host, HostNavigation::Navigate { .. })).is_some() {
+        if nav.host.take_if(|(_, host)| by_stop || matches!(host, HostNavigation::Navigate { .. })).is_some() | nav.superseded.take().is_some() {
             stopped = true;
         }
     }
@@ -1256,6 +1273,7 @@ impl RealmArena {
         self.stop_attribute_navigation(container);
         if let Some(n) = self.frame_navigations.0.get_mut(&container) {
             n.host = None;
+            n.superseded = None;
         }
         self.get(container).map(|node| node.realm)
     }
