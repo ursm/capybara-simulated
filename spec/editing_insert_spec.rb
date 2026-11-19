@@ -208,7 +208,8 @@ RSpec.describe 'inserting in an editing host' do
       typed('a<span contenteditable="false">XY</span>b', 'e.firstChild', 0, %i[shift right], %i[shift right], 'x').first
     ]).to eq([
       '<p><ins>ab</ins></p><p><ins><br></ins></p><p><ins>Zcd</ins>ef</p>', '<p><x-y>ab</x-y></p><p><x-y><br></x-y></p><p><x-y>Zcd</x-y>ef</p>',
-      '<p><b>abcd</b></p><p>Zef</p>', '<ul><li><b>ab</b></li><li><b>Z</b></li></ul>', 'x<span contenteditable="false">XY</span>b'
+      # (…two Shift + Right select `a` and the non-editable island whole, which the typing replaces: Chrome and Firefox)
+      '<p><b>abcd</b></p><p>Zef</p>', '<ul><li><b>ab</b></li><li><b>Z</b></li></ul>', 'xb'
     ])
     across = simulated_session(lambda {|_env|
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable><p>ab</p></div><div id=f contenteditable>cd</div>']]

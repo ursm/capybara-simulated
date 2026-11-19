@@ -115,7 +115,7 @@ fn key_move(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
                     }
                 }
                 let to = crate::rendered::with_engine(scope, args, |engine, arena, now| {
-                    if word { arena.caret_word_step(engine, now, focus.0, focus.1, forward) } else { arena.caret_step(engine, now, focus.0, focus.1, forward) }
+                    if word { arena.caret_word_step(engine, now, focus.0, focus.1, forward, true) } else { arena.caret_step(engine, now, focus.0, focus.1, forward, true) }
                 })??;
                 return Some(Move::Point(to, None, false, 0));
             }

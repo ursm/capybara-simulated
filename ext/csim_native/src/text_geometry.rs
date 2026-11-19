@@ -1037,7 +1037,7 @@ fn modify_target(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackAr
     });
     let step = |scope: &mut v8::PinScope<'_, '_>, word: bool| {
         crate::rendered::with_engine(scope, args, |engine, arena, now| {
-            if word { arena.caret_word_step(engine, now, node, offset, forward) } else { arena.caret_step(engine, now, node, offset, forward) }
+            if word { arena.caret_word_step(engine, now, node, offset, forward, true) } else { arena.caret_step(engine, now, node, offset, forward, true) }
         })
         .flatten()
         .map(|at| (at, None, false))

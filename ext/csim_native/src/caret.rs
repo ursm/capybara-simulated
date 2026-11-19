@@ -90,7 +90,7 @@ impl RealmArena {
         let (at, index, text) = if is_text(n) { (node, 0, Some((node, offset))) } else { (node, offset as usize, None) };
         // (…a page the engine styles — one it does not, a DOMParser's, taken by its tags)
         let styled = element.is_some_and(|e| crate::style::primary_style(self, e).is_some());
-        let mut walk = Walk { arena: self, engine, now, styled, host, forward, at, index, text, space_seen: false, ahead: None };
+        let mut walk = Walk { arena: self, engine, now, styled, host, forward, at, index, text, space_seen: false, ahead: None, islands: false };
         // (…a space just passed where the place is in white space: what comes of it collapses)
         let behind = is_text(n).then(|| if forward { offset.checked_sub(1) } else { Some(offset) }).flatten();
         walk.space_seen = behind.and_then(|i| n.data.get(i as usize)).is_some_and(|&u| crate::rendered::is_collapsible_ws(u)) && walk.collapses(n.parent);
@@ -103,9 +103,13 @@ impl RealmArena {
     // empty leaf none at all), across a line's end it stops at the stop's edge; an atom (an image) is a stop it passes,
     // and an empty line — a `<br>` ending a line with nothing on it — one it stops on, before that `<br>`: on, the line
     // passed ended just before it; back, the next thing back ends one too (or there is none).
-    pub(crate) fn caret_step(&self, engine: &mut StyleEngine, now: f64, node: NodeId, offset: u32, forward: bool) -> Option<(NodeId, u32)> {
+    // (…`islands`: an inline non-editable island in the host one stop, as a caret moves; else stepped into, as a deletion
+    // takes it — editing_delete.rs, which deletes it whole or not at all)
+    pub(crate) fn caret_step(&self, engine: &mut StyleEngine, now: f64, node: NodeId, offset: u32, forward: bool, islands: bool) -> Option<(NodeId, u32)> {
         let mut line_end = false;
-        let mut walk = self.walk(engine, now, node, offset, forward)?.peekable();
+        let mut walk = self.walk(engine, now, node, offset, forward)?;
+        walk.islands = islands;
+        let mut walk = walk.peekable();
         while let Some(pass) = walk.next() {
             match pass {
                 // (…an editing host met from outside one is gone over: a block, its edges lines' ends — Chrome)
@@ -114,10 +118,23 @@ impl RealmArena {
                 Pass::Br { parent, to, .. } if !forward && walk.peek().is_none_or(Pass::ends_line) => return Some((parent, to)),
                 Pass::Br { .. } => line_end = true,
                 Pass::Char { leaf, from, to, .. } => return Some((leaf, if line_end { from } else { to })),
-                Pass::Atom { parent, from, to } => return Some((parent, if line_end { from } else { to })),
+                Pass::Atom { parent, from, to, island } => return Some(self.atom_stop(parent, if line_end { from } else { to }, island && !line_end)),
             }
         }
         None
+    }
+    // The stop beside an atom at `parent`'s child index `at` — past a non-editable island (`past_island`), the place in
+    // the text that goes on beside it where one does (Chrome and Firefox: past `<span contenteditable=false>abc</span>`
+    // into `def`, the caret is at `def`'s start).
+    fn atom_stop(&self, parent: NodeId, at: u32, past_island: bool) -> (NodeId, u32) {
+        let kids = self.get(parent).map(|n| &n.children[..]).unwrap_or_default();
+        let after = kids.get(at as usize).copied().filter(|&c| self.get(c).is_some_and(is_text));
+        let before = (at as usize).checked_sub(1).and_then(|i| kids.get(i)).copied().filter(|&c| self.get(c).is_some_and(is_text));
+        match (past_island, after, before) {
+            (true, Some(text), _) => (text, 0),
+            (true, None, Some(text)) => (text, self.get(text).map_or(0, |n| n.data.len() as u32)),
+            _ => (parent, at),
+        }
     }
 
     // The first caret position in `root` (the last, with `end`): where focusing an editing host with no selection in it
@@ -146,8 +163,9 @@ impl RealmArena {
     // `Selection.modify` by a word, as Chrome moves: past the white space, then to the end (the start, back) of the word
     // or the punctuation there (`word_length`); an atom is one. Across a line's end before any, to the edge of what is
     // past it: the next paragraph's start (the last's end, back) — not past an editing host, from outside one.
-    pub(crate) fn caret_word_step(&self, engine: &mut StyleEngine, now: f64, node: NodeId, offset: u32, forward: bool) -> Option<(NodeId, u32)> {
+    pub(crate) fn caret_word_step(&self, engine: &mut StyleEngine, now: f64, node: NodeId, offset: u32, forward: bool, islands: bool) -> Option<(NodeId, u32)> {
         let mut walk = self.walk(engine, now, node, offset, forward)?;
+        walk.islands = islands;
         let mut line_end = false;
         let first = loop {
             match walk.next()? {
@@ -156,7 +174,7 @@ impl RealmArena {
                 // (…and nothing past an editing host met from outside one: the focus stays — Chrome)
                 Pass::Editable => return None,
                 Pass::Char { leaf, from, .. } if line_end => return Some((leaf, from)),
-                Pass::Atom { parent, from, to } => return Some((parent, if line_end { from } else { to })),
+                Pass::Atom { parent, from, to, island } => return Some(self.atom_stop(parent, if line_end { from } else { to }, island && !line_end)),
                 Pass::Char { leaf, to, ch, .. } => break (leaf, to, ch),
             }
         };
@@ -264,7 +282,8 @@ enum Pass {
     Char { leaf: NodeId, from: u32, to: u32, ch: u32 },
     LineEnd,
     Br { parent: NodeId, from: u32, to: u32 },
-    Atom { parent: NodeId, from: u32, to: u32 },
+    // (…an element no caret goes into: an atom, or a non-editable `island`)
+    Atom { parent: NodeId, from: u32, to: u32, island: bool },
     // …and, outside any editing host, one met: a caret outside goes over it, not into it.
     Editable,
 }
@@ -283,6 +302,8 @@ struct Walk<'a> {
     // what it found looking past a space, to be passed next.
     space_seen: bool,
     ahead: Option<Pass>,
+    // Whether an inline non-editable island in the host is passed whole (`caret_step`).
+    islands: bool,
 }
 
 impl Iterator for Walk<'_> {
@@ -422,10 +443,15 @@ impl Walk<'_> {
                     }
                     continue;
                 }
-                NodeKind::Element if CARET_VOID_TAGS.contains(&&*c.local_name) => {
+                // (…an element no caret goes into — an atom, or an inline non-editable island in the editing host the walk
+                // is in: a `contenteditable=false` span — a stop the caret passes whole, before it or after it; Chrome
+                // and Firefox, WPT selection/caret/move-around-contenteditable-false. A block island stays lines a step
+                // crosses, as a deletion's joins take it: editing_delete.rs)
+                NodeKind::Element if CARET_VOID_TAGS.contains(&&*c.local_name) || (self.islands && self.host.is_some() && !arena.is_editable(child) && !self.block(child)) => {
                     let parent = self.at;
                     self.index = past;
-                    return Some((Pass::Atom { parent, from, to }, false));
+                    let island = !CARET_VOID_TAGS.contains(&&*c.local_name);
+                    return Some((Pass::Atom { parent, from, to, island }, false));
                 }
                 NodeKind::Element => {
                     self.at = child;

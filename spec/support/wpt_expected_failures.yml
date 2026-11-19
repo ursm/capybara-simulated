@@ -68155,21 +68155,6 @@ selection/bidi/modify-move-by-character.html:
 - 'Mixed context in auto-dir paragraph: move right 3 chars'
 - 'RTL-LTR context in LTR paragraph: move left 3 chars'
 - 'RTL-LTR context in LTR paragraph: move right 3 chars'
-selection/caret/move-around-contenteditable-false.html:
-- Move caret from <br> following non-editable text to end of preceding editable text
-  in next paragraph
-- 'Move caret from empty editable paragraph to editable text following non-editable
-  text in next paragraph: first arrow-right should move caret before non-editable
-  text'
-- 'Move caret from empty editable paragraph to editable text following non-editable
-  text in next paragraph: second arrow-right should move caret after non-editable
-  text'
-- 'Move caret from end of editable text node to <br> following non-editable text in
-  next paragraph: first arrow-right should move caret before non-editable text'
-- 'Move caret from end of editable text node to <br> following non-editable text in
-  next paragraph: second arrow-right should move caret after non-editable text'
-- Move caret from start of text following non-editable text to empty preceding editable
-  paragraph
 selection/caret/move-around-generated-content.html:
 - 'Moving caret between list items using arrow keys: arrow-down should move the caret
   to the final paragraph'
@@ -68181,33 +68166,6 @@ selection/contenteditable/collapse.html:
 - Selection.collapse() must succeed across siblings
 - Selection.collapse() must succeed for the ancestor
 - Selection.collapse() must succeed for the descendant
-selection/contenteditable/modify-around-non-editable-span.html:
-- getSelection().modify("move", "backward", "character") after getSelection().selectAllChildren(editingHost)
-  when " <span contenteditable=false>...</span>[]editable"
-- getSelection().modify("move", "backward", "character") after getSelection().selectAllChildren(editingHost)
-  when "editable<span contenteditable=false>...</span>[] "
-- getSelection().modify("move", "backward", "character") when " <span contenteditable=false>...</span>[]editable"
-- getSelection().modify("move", "backward", "character") when "editable<span contenteditable=false>...</span>[]
-  "
-- getSelection().modify("move", "forward", "character") after getSelection().selectAllChildren(editingHost)
-  when " []<span contenteditable=false>"
-- getSelection().modify("move", "forward", "character") after getSelection().selectAllChildren(editingHost)
-  when "editable[]<span contenteditable=false>"
-- getSelection().modify("move", "forward", "character") when " []<span contenteditable=false>"
-- getSelection().modify("move", "forward", "character") when "editable[]<span contenteditable=false>"
-- getSelection().modify("move", "left", "character") after getSelection().selectAllChildren(editingHost)
-  when " <span contenteditable=false>...</span>[]editable"
-- getSelection().modify("move", "left", "character") after getSelection().selectAllChildren(editingHost)
-  when "editable<span contenteditable=false>...</span>[] "
-- getSelection().modify("move", "left", "character") when " <span contenteditable=false>...</span>[]editable"
-- getSelection().modify("move", "left", "character") when "editable<span contenteditable=false>...</span>[]
-  "
-- getSelection().modify("move", "right", "character") after getSelection().selectAllChildren(editingHost)
-  when " []<span contenteditable=false>"
-- getSelection().modify("move", "right", "character") after getSelection().selectAllChildren(editingHost)
-  when "editable[]<span contenteditable=false>"
-- getSelection().modify("move", "right", "character") when " []<span contenteditable=false>"
-- getSelection().modify("move", "right", "character") when "editable[]<span contenteditable=false>"
 selection/drag-selection-extend-to-user-select-none.html:
 - Select user-select:text content and then extend selection to the next user-select:text
   element by crossing the user-select:none element.

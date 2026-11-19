@@ -122,7 +122,7 @@ pub(crate) fn deletion_range(
     // (…the range: the selection's, or the caret's to where a step takes it — none past the host's edge)
     let range = if collapsed {
         crate::rendered::with_engine(scope, args, |engine, arena, now| {
-            let mut to = if word { arena.caret_word_step(engine, now, sc, so, forward) } else { arena.caret_step(engine, now, sc, so, forward) }?;
+            let mut to = if word { arena.caret_word_step(engine, now, sc, so, forward, false) } else { arena.caret_step(engine, now, sc, so, forward, false) }?;
             let mut took = Took::Step;
             // (…a step into an island, or past a block atom, to its far edge: it whole)
             let whole = match island_of(arena, to.0, host) {

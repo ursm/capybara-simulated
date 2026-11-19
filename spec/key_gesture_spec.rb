@@ -155,4 +155,17 @@ RSpec.describe 'Key gestures' do
     expect(log(s).grep(/ranges/)).to eq(['ranges #text1-#text2'])
     expect(s.evaluate_script('e.innerHTML')).to eq('ac')
   end
+
+  # An arrow passes an inline non-editable island in an editing host whole — a stop before it and one after it, the
+  # latter in the text that goes on beside it — never into it (Chrome and Firefox, WPT
+  # selection/caret/move-around-contenteditable-false).
+  it 'moves the caret past a non-editable island whole' do
+    s = session_of('<div id=e contenteditable><p>abc</p><p id=q><span contenteditable=false>def</span>ghi</p></div>')
+    s.execute_script("e.focus(); getSelection().collapse(q.lastChild, 0)")
+    caret = "(() => { const r = getSelection().getRangeAt(0); return [r.startContainer.nodeName, r.startOffset] })()"
+    s.find('#e').send_keys(:left)
+    expect(s.evaluate_script(caret)).to eq(['P', 0])
+    s.find('#e').send_keys(:right)
+    expect(s.evaluate_script(caret)).to eq(['#text', 0])
+  end
 end
