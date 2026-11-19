@@ -64,6 +64,17 @@ const EDIT_WORD_BACKSPACE: u32 = 10;
 const EDIT_WORD_DELETE: u32 = 11;
 const EDIT_LINE_BACKSPACE: u32 = 12;
 const EDIT_EXTEND: u32 = 16;
+// The deletion a key makes in a text control: back or forward a character, a word (Control), or back to the line's start
+// (Control + Shift + Backspace) — keys.rs `edit`.
+pub(crate) fn control_edit(forward: bool, word: bool, line: bool) -> u32 {
+    match (line, word, forward) {
+        (true, ..) => EDIT_LINE_BACKSPACE,
+        (false, true, false) => EDIT_WORD_BACKSPACE,
+        (false, true, true) => EDIT_WORD_DELETE,
+        (false, false, false) => EDIT_BACKSPACE,
+        (false, false, true) => EDIT_DELETE,
+    }
+}
 // …made where the selection a script reads is — the start where none was ever set — as a scripted edit
 // (`execCommand`) makes it, not at the value's end, where a WebDriver key sent to the control finds its caret.
 pub(crate) const EDIT_AT_SELECTION: u32 = 32;

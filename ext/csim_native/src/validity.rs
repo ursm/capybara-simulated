@@ -785,7 +785,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "elementAncestor", element_ancestor_op, context_id);
     crate::dom::register(scope, ns, "initialiseOptions", initialise_options, context_id);
     crate::dom::register(scope, ns, "formOwner", form_owner, context_id);
-    crate::dom::register(scope, ns, "defaultButton", default_button, context_id);
     crate::dom::register(scope, ns, "formListed", form_listed, context_id);
     crate::dom::register(scope, ns, "formReset", form_reset, context_id);
     crate::dom::register(scope, ns, "optionPick", option_pick, context_id);
@@ -795,7 +794,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "formNamedItem", form_named_item, context_id);
     crate::dom::register(scope, ns, "formSupportedNames", form_supported_names, context_id);
     crate::dom::register(scope, ns, "formSubmittables", form_submittables, context_id);
-    crate::dom::register(scope, ns, "implicitSubmissionForm", implicit_submission_form, context_id);
     crate::dom::register(scope, ns, "editingHost", editing_host, context_id);
     crate::dom::register(scope, ns, "optionText", option_text_op, context_id);
     crate::dom::register(scope, ns, "editingRoot", editing_root, context_id);
@@ -823,12 +821,6 @@ fn node_test(
     let cid = crate::dom::realm_id(scope, args);
     let Some(id) = crate::dom::nid_arg(scope, args, 0) else { return rv.set_bool(false) };
     rv.set_bool(test(crate::dom::realm(scope, cid), id));
-}
-
-// __dom.implicitSubmissionForm(nid) -> [the form Enter in the control submits] or []
-// (`element_state::implicit_submission_form`).
-fn implicit_submission_form(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    nodes_answer(scope, &args, rv, |arena, id| arena.implicit_submission_form(id).into_iter().collect());
 }
 
 // __dom.isLabelable(nid) -> whether the element is labelable (`element_state::is_labelable`).
@@ -882,16 +874,6 @@ fn editing_root(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 // __dom.formOwner(nid) -> [the control's form owner] or [] (`element_state::form_owner`).
 fn form_owner(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     nodes_answer(scope, &args, rv, |arena, id| arena.form_owner(id).into_iter().collect());
-}
-
-// __dom.defaultButton(nid) -> [the form's default button] or [] (`element_state::default_button_of`), from the form's
-// tree (`form_tree`).
-fn default_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(form) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let arena = crate::dom::realm(scope, cid);
-    let button = arena.default_button_of(form);
-    rv.set(crate::dom::nodes_value(scope, cid, button.as_slice()));
 }
 
 // __dom.formSupportedNames(formNid) -> the names its named elements are reachable by (`form_supported_names`).

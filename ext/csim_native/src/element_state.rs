@@ -1107,16 +1107,21 @@ impl RealmArena {
                 )
         })
     }
-    // The form the user's Enter in `control` implicitly submits (HTML §4.10.21.2): its form owner, where `control` is a
-    // field that blocks implicit submission and the form has a default button — or, with none, where `control` is the
-    // only such field the form has.
+    // The form the user's Enter in `control` implicitly submits (HTML §4.10.21.2): its form owner, where the form has a
+    // default button and `control` is a field Enter submits from — a text entry, a date or a number field, read-only
+    // too, a checkbox or a radio button (Chrome and Firefox: HTML leaves which to the user agent, "hitting the "enter"
+    // key while a text control is focused" its example), not a range (Firefox; Chrome submits), a color or a file
+    // field (whose Enter opens its picker, Chrome) — or, with none, where `control` is the only field that blocks
+    // implicit submission the form has (Chrome; Firefox submits from a checkbox beside that one field too).
     pub(crate) fn implicit_submission_form(&self, control: NodeId) -> Option<NodeId> {
-        if !self.blocks_implicit_submission(control) {
-            return None;
-        }
+        let n = self.get(control).filter(|n| n.is_html_named("input"))?;
         let form = self.form_owner(control)?;
         if self.default_button_of(form).is_some() {
-            return Some(form);
+            let submits = n.input_has(crate::input_types::READONLY) || matches!(n.input_type(), "checkbox" | "radio");
+            return submits.then_some(form);
+        }
+        if !self.blocks_implicit_submission(control) {
+            return None;
         }
         let mut blocking = 0;
         self.find_in_tree(self.form_tree(form), |c, _| {

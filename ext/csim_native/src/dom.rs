@@ -2761,8 +2761,9 @@ pub(crate) struct Dom {
     pub(crate) offscreen_canvas_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) crypto_key_template: Option<v8::Global<v8::ObjectTemplate>>,
     pub(crate) blob_data_template: Option<v8::Global<v8::ObjectTemplate>>,
-    // The mouse pointer and the gesture it plays (pointer.rs).
+    // The mouse pointer and the gesture it plays (pointer.rs), and the keyboard's (keys.rs).
     pub(crate) mouse: crate::pointer::MousePointer,
+    pub(crate) keyboard: crate::keys::Keyboard,
     // …and a header list's (headers.rs).
     pub(crate) headers_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and an XMLHttpRequest's state's (xhr_state.rs).

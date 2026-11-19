@@ -123,6 +123,8 @@ RSpec.describe 'User action events', engine_global: true do
       'keyup KeyboardEvent true true true 0',
       'keydown KeyboardEvent true true true 0',
       'keypress KeyboardEvent true true true 0 13',
+      # (…Enter's beforeinput in a single-line field too, an `insertLineBreak` that inserts nothing: Chrome and Firefox)
+      'beforeinput InputEvent true true true 0',
       'keyup KeyboardEvent true true true 0'
     ])
     # (…Enter a line break only where there are lines, Tab no character at all, and Enter's typing done before the
