@@ -336,10 +336,14 @@ impl Machine {
     // - its origin, where it is not its initiator's: the user's replay's — of no client: HTML "If request's client is null"
     //   — the one its entry was first sent with (HTML's document state's initiator origin), `null` an opaque one's; a
     //   script's re-post's its client's, the document that asked for it (`reload_request_spec`);
-    // - a top-level replay's of no initiator — the user's — cookies judged by the initiator origin its entry keeps ("set
-    //   request's top-level navigation initiator origin to entry's document state's initiator origin", of a top-level
-    //   traversable alone); a script's by its document's site, as any navigation it begins (RFC 6265bis §5.2:
-    //   `cookie_store_spec`);
+    // - a top-level replay's of no initiator — the user's — cookies judged by the initiator origin its entry keeps; a
+    //   script's by its document's site, as any navigation it begins. HTML "create navigation params by fetching" sets
+    //   "request's top-level navigation initiator origin to entry's document state's initiator origin" for both, but
+    //   what that origin decides is Fetch's "determine the same-site mode" step 2, which is not applied as written to a
+    //   top-level GET (navigation_fetch.rs `Nav::cookies`), and RFC 6265bis §5.2 with WPT cookies/samesite
+    //   window-open-reload and form-get-blank-reload ("this is a site-initiated reload, as opposed to a reload
+    //   triggered by a user interface element": strictly same-site) judge a script's by the reloading document — Chrome
+    //   157 alike; Firefox 159 judges it, and a script's history.back(), by the entry (measured 2026-11-19);
     // - a reload through a user interface element's cross-site where the request it reloads was (RFC 6265bis §5.2) — a
     //   traversal's never: it is no reload.
     // …with what the entry it makes keeps of it: that referrer and policy, its origin (a replay's its entry's), a POST's
