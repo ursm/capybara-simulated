@@ -1831,30 +1831,10 @@ module Capybara
         settle
       end
 
-      MODIFIER_KEYS = {
-        shift:         'shiftKey',
-        left_shift:    'shiftKey',
-        right_shift:   'shiftKey',
-        control:       'ctrlKey',
-        ctrl:          'ctrlKey',
-        left_control:  'ctrlKey',
-        right_control: 'ctrlKey',
-        alt:           'altKey',
-        option:        'altKey',
-        left_alt:      'altKey',
-        right_alt:     'altKey',
-        meta:          'metaKey',
-        command:       'metaKey',
-        cmd:           'metaKey',
-        left_meta:     'metaKey',
-        right_meta:    'metaKey'
-      }.freeze
-      MODIFIER_KEY_NAMES = MODIFIER_KEYS.keys.to_set.freeze
+      # The modifier flags of a click's or a drop's keys (`[:shift, :alt]`), the engine's names (keys.rs `modifier`).
       def modifier_flags(keys)
-        Array(keys).each_with_object({}) {|k, h|
-          field = MODIFIER_KEYS[k.is_a?(Symbol) ? k : k.to_sym]
-          h[field] = true if field
-        }
+        names = Array(keys).map(&:to_s)
+        names.empty? ? {} : dom_call('keyModifiers', names)
       end
 
       # Resolve the click point against the element's laid-out box — the
@@ -1909,46 +1889,17 @@ module Capybara
         dom_call('dispatchEvent', handle, type.to_s, init)
       end
 
-      # Capybara's `send_keys` accepts Strings and Symbols (special
-      # keys: `:enter`, `:tab`, `:backspace`, …) and Array combos
-      # (modifier + key). We hand each item to JS as a tagged atom so
-      # the bridge can fire proper KeyboardEvents with `key` / `code`
-      # / `ctrlKey` / `metaKey` / `shiftKey` filled in — required by
-      # libraries that gate behaviour on the modifier flags (Redmine's
-      # jstoolbar reads `event.ctrlKey || event.metaKey` for Ctrl+B /
-      # Cmd+B; quote-reply Stimulus controllers read `event.key`).
-      # An Array combo is the canonical "modifier + key" pattern:
-      # everything but the last entry is a modifier; the last entry
-      # is the key being pressed (String char or Symbol special).
+      # Capybara's `send_keys`, as Selenium sends its arguments: a String typed a character at a time; a Symbol a key by
+      # its name (`:enter`, `:f5`) — a modifier's held for every key after it, to the end or `:null` (Selenium's
+      # `send_keys(:shift, 'a', 'b')` types `AB`); an Array a chord, its parts pressed in turn and every modifier then
+      # released. Each is handed over as an atom; the engine presses them (keys.rs `KeyGesture`) and refuses a name that
+      # names no key, which raises here as Selenium raises.
       def send_keys(handle, keys)
         mark_action_baseline
         tick_real_time
         invalidate_find_cache
         ensure_alive_after_tick(handle)
-        # Selenium's contract: a bare modifier symbol (`:shift`) at the
-        # top level "holds" the modifier from that point on. `:null`
-        # releases all modifiers. We rewrite the atom stream so each
-        # following character / key carries the accumulated modifiers.
-        held = []
-        atoms = keys.flat_map {|k|
-          case k
-          when Symbol
-            if k == :null
-              held = []; nil
-            elsif MODIFIER_KEY_NAMES.include?(k)
-              held = (held + [k.to_s]).uniq; nil
-            else
-              held.empty? ? {'kind' => 'key',  'name'  => k.to_s}
-                          : {'kind' => 'combo', 'parts' => held + [k.to_s]}
-            end
-          when String
-            held.empty? ? {'kind' => 'text', 'value' => k}
-                        : {'kind' => 'combo', 'parts' => held + [k]}
-          when Array
-            parts = k.map {|x| x.is_a?(Symbol) ? x.to_s : x.to_s }
-            {'kind' => 'combo', 'parts' => parts}
-          end
-        }.compact
+        atoms = keys.map {|k| key_atom(k) }
         # Contenteditable hosts (ProseMirror, Trix, Tiptap) reconcile
         # their view between chars; a batched `sendKeys` queues
         # all `beforeinput` events on the same microtask round and PM
@@ -1956,9 +1907,10 @@ module Capybara
         # them in order. Split multi-char text atoms into per-char
         # calls with a `settle` between so PM commits each transaction
         # before the next char arrives. Plain `<input>` / `<textarea>`
-        # don't need this — keep the single batched call there.
+        # don't need this — keep the single batched call there. (…text
+        # alone: a symbol's modifier held over the text is one call's)
         has_multichar_text = atoms.any? {|a| a['kind'] == 'text' && a['value'].to_s.length > 1 }
-        if has_multichar_text && dom_call('isContentEditable', handle)
+        if has_multichar_text && atoms.all? {|a| a['kind'] == 'text' } && dom_call('isContentEditable', handle)
           per_char = atoms.flat_map {|a|
             next a unless a['kind'] == 'text' && a['value'].to_s.length > 1
             a['value'].to_s.each_char.map {|c| {'kind' => 'text', 'value' => c} }
@@ -1981,16 +1933,42 @@ module Capybara
       # a key's before the next key's, as Chrome and Firefox run them — then the rest of it asked for (`keyResume`). A
       # gesture left by a raise is dropped, so the next one is not played under it.
       def play_keys(step, *args)
+        realm = @current_realm_id
         answer = dom_call(step, *args, true)
         while answer == 'turn'
           paused = true
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS)
           paused = false
-          answer = dom_call('keyResume')
+          answer = keyboard_call('keyResume', realm)
         end
+        raise ArgumentError, answer if answer.is_a?(String) && answer.start_with?('unknown key: ')
+
         answer
       ensure
-        dom_call('keyAbort') if paused
+        # (…a raise that left it under way drops it — never masking what was raised)
+        begin
+          keyboard_call('keyAbort', realm) if paused
+        rescue StandardError
+          nil
+        end
+      end
+
+      # A call to the keyboard of a gesture begun in realm `realm` (nil: the page's): its realm's bindings, which go on
+      # with it — or, the realm gone (a frame removed in the middle of it), the page's, the engine ending it
+      # (keys.rs `answer_next`): no stale element, as there is none the gesture still acts on.
+      private def keyboard_call(name, realm)
+        return @runtime.call(name) if realm.nil? || !@runtime.frame_realm_alive?(realm)
+
+        @runtime.realm_call(realm, name)
+      end
+
+      # The atom of one of `send_keys`' arguments (`send_keys`).
+      private def key_atom(key)
+        case key
+        when Symbol then {'kind' => 'key', 'name' => key.to_s}
+        when Array  then {'kind' => 'chord', 'parts' => key.map {|k| key_atom(k) }}
+        else {'kind' => 'text', 'value' => key.to_s}
+        end
       end
 
       def select_option(handle)
@@ -2686,26 +2664,19 @@ module Capybara
       # else is routed to the currently focused element (if any) as a
       # plain keydown/keyup pair.
       def send_session_keys(keys)
-        # Walk the key list with running modifier state so a Selenium-
-        # style `(:shift, :enter)` invocation reaches `Browser#send_keys`
-        # as one combo atom (shift held over enter), while independent
-        # non-modifier keys stay separate calls — each one settles
-        # between dispatches so a dropdown highlight (Avo Tags input's
-        # arrow navigation) commits before the next key fires. Tab is a
-        # key as any — its events, a listener's cancel, the chord held
-        # (keys.rs `FOCUS_NAVIGATION`) — and backtab Shift + Tab.
+        # Each key a call of its own to what is focused, a settle between — a dropdown highlight (Avo Tags input's arrow
+        # navigation) commits before the next key fires — the modifier keys before one held over it, as Selenium's are
+        # (`(:shift, :enter)` is Shift + Enter: keys.rs's `null` releasing them); Tab a key as any, backtab Shift + Tab.
         held = []
         Array(keys).each do |k|
-          sym = k.is_a?(Symbol) ? k : (k.respond_to?(:to_sym) ? k.to_sym : nil)
-          if sym && MODIFIER_KEY_NAMES.include?(sym)
-            held << sym
-          else
-            handle = active_element_handle
-            handle = current_document_handle if handle.nil? || handle.zero?
-            key = sym == :backtab ? :tab : k
-            chord = sym == :backtab ? held | [:shift] : held
-            send_keys(handle, [chord.empty? ? key : (chord + [key])])
+          if k.is_a?(Symbol) && !modifier_flags([k]).values.none?
+            held << k
+            next
           end
+          handle = active_element_handle
+          handle = current_document_handle if handle.nil? || handle.zero?
+          key = k == :backtab ? [:shift, :tab] : k
+          send_keys(handle, held.empty? ? [key] : [held + Array(key)])
         end
       end
 

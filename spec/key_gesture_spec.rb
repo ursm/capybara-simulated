@@ -168,4 +168,52 @@ RSpec.describe 'Key gestures' do
     s.find('#e').send_keys(:right)
     expect(s.evaluate_script(caret)).to eq(['#text', 0])
   end
+
+  # Once a task between two keys focuses a child navigable's field, the keys after it go there — the focused area of the
+  # document is inside the frame (UI Events; Chrome) — and a frame removed in the middle of the keys ends them, no raise.
+  it 'follows focus into a frame, and ends with a frame removed' do
+    s = session_of('<input id=a><iframe id=fr srcdoc="<input id=fi>"></iframe>')
+    s.execute_script("a.addEventListener('keydown', (e) => { if (e.key === 'a') setTimeout(() => fr.contentDocument.getElementById('fi').focus()) })")
+    s.find('#a').send_keys('abc')
+    expect(s.evaluate_script("[a.value, fr.contentDocument.getElementById('fi').value]")).to eq(%w[a bc])
+    s.within_frame('fr') do
+      s.execute_script("document.getElementById('fi').addEventListener('keydown', () => setTimeout(() => parent.document.getElementById('fr').remove()))")
+      expect { s.find('#fi').send_keys('xy') }.not_to raise_error
+    end
+    expect(s.all('iframe').size).to eq(0)
+  end
+
+  # A character typed at a select picks the option its text begins with — its `input` and `change` fired (Chrome and
+  # Firefox); Tab past the last element leaves the document, its focused element blurred (HTML: "the user agent should
+  # transfer focus to its own controls"; Chrome); undo with no history fires nothing (Chrome and Firefox).
+  it 'picks by typeahead, leaves the document past the last Tab stop, and undoes nothing' do
+    s = session_of('<select id=s><option>apple<option>banana<option>cherry</select><input id=z>')
+    s.find('#s').send_keys('c')
+    expect(s.evaluate_script('s.value')).to eq('cherry')
+    expect(log(s).grep(/input|change/)).to eq(%w[input\ s change\ s])
+    s.find('#z').send_keys(:tab)
+    expect(s.evaluate_script('document.activeElement.nodeName')).to eq('BODY')
+    expect(log(s)).to include('blur z')
+    s.find('#z').send_keys('q', [:control, 'z'])
+    expect(log(s).grep(/history/)).to eq([])
+  end
+
+  # `send_keys` as Selenium sends its arguments: a modifier symbol held for every key after it, an array a chord whose
+  # modifiers are released after it, and a name that names no key refused.
+  it 'presses its arguments as Selenium does' do
+    s = session_of('<input id=a>')
+    s.find('#a').send_keys(:shift, 'a', 'b')
+    s.find('#a').send_keys([:shift, 'c'], 'd')
+    expect(s.evaluate_script('a.value')).to eq('ABCd')
+    expect { s.find('#a').send_keys(:foo) }.to raise_error(ArgumentError, /unknown key: foo/)
+  end
+
+  # `set` on a field whose value its picker sets — a date, a time, a colour — fires `input` as a plain Event (Chrome).
+  it 'sets a picked value with a plain Event input' do
+    s = session_of('<input id=d type=date><input id=c type=color>')
+    s.execute_script("document.addEventListener('input', (e) => L.push(e.constructor.name), true)")
+    s.find('#d').set('2024-01-02')
+    s.find('#c').set('#ff0000')
+    expect(log(s).grep(/Event$/)).to eq(%w[Event Event])
+  end
 end

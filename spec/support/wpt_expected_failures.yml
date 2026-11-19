@@ -67909,6 +67909,11 @@ input-events/input-events-spin-button-click-on-number-input-prevent-default.html
   default prevented
 input-events/input-events-spin-button-click-on-number-input.html:
 - Number input should fire beforeinput event before the input and change event
+input-events/input-events-typing.html:
+- It triggers beforeinput and input events on typing Undo and Redo key combinations
+  with an existing history
+- It triggers beforeinput and input events on typing Undo and Redo key combinations
+  without an existing history
 input-events/select-event-drag-remove.html:
 - Drag and remove from the select event doesn't crash
 - "[harness] TIMEOUT"

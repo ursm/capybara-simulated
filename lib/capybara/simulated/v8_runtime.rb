@@ -1126,6 +1126,9 @@ module Capybara
       # document", URL about:blank, mode "quirks", as its response is `ABOUT_BLANK_RESPONSE`)
       def init_page_realm(c)
         init_realm(c)
+        # (…the keyboard's held modifiers and keys down forgotten with the page they were pressed on — a session's input
+        # state begins anew with each top-level document, as `reset!` begins one: keys.rs `RELEASE`)
+        V8Runtime.engine_call(c, 'keyRelease')
         V8Runtime.engine_call(c, 'makeInitialAboutBlank') unless @page_document
         adopt_client_id(c, @page_client_id || @browser.mint_resulting_client_id, realm_id: 0)
         @page_client_id = nil

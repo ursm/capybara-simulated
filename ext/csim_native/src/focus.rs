@@ -304,18 +304,21 @@ impl Scope {
 // The element sequential navigation moves focus to from `current` (the focused element; None for none) in the document
 // `doc`, forwards or `reverse`: stepping out scope by scope from where `current` is an item, else — focused but no item
 // (not focusable, a negative tabindex, inside an editable host) — from its place in tree order, which only tells where
-// the order goes on while that order IS tree order. At either end it wraps round. None where nothing is focusable.
+// the order goes on while that order IS tree order. None past its end: the user agent's own controls take focus (HTML
+// §6.6.5 "sequential focus navigation": "the user agent should transfer focus to its own controls"; Chrome leaves the
+// document, its body the active element — Firefox, with no controls in a headless window, keeps it). With nothing focused
+// (focus came back from them), its first (last) element; none where nothing is focusable.
 pub(crate) fn next(engine: &mut StyleEngine, arena: &RealmArena, doc: NodeId, current: Option<NodeId>, reverse: bool, now: f64) -> Option<NodeId> {
     let children = arena.get(doc)?.children.clone();
     let root = Navigator { engine, arena, now, radio_stops: HashMap::new() }.scope(None, &children);
-    let stepped = current.and_then(|cur| {
+    if let Some(cur) = current {
         let mut chain = Vec::new();
-        match root.locate(cur, &mut chain) {
+        return match root.locate(cur, &mut chain) {
             Some(k) => step_out(&chain, k, reverse),
             None => step_from_position(arena, &root, cur, reverse),
-        }
-    });
-    stepped.or_else(|| root.edge(reverse)).or_else(|| {
+        };
+    }
+    root.edge(reverse).or_else(|| {
         let mut flat = Vec::new();
         root.flatten(&mut flat);
         if reverse { flat.last().copied() } else { flat.first().copied() }

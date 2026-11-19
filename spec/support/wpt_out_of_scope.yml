@@ -69017,6 +69017,11 @@ shadow-dom/focus-navigation/reading-flow/tentative/grid-order-on-shadow-host.htm
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+shadow-dom/focus-navigation/reading-flow/tentative/grid-order-pseudo-elements.html:
+- name: Grid pseudo items are not focusable
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 shadow-dom/focus-navigation/reading-flow/tentative/grid-order-with-display-contents.html:
 - name: Grid items are in nested display contents containers.
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

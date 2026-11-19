@@ -240,26 +240,6 @@ pub(crate) fn modifier(name: &[u16]) -> Option<Key> {
     })
 }
 
-// A chord's parts (`[:control, :shift, 'a']`), read as a keyboard presses them: the modifiers before its key — every
-// part a modifier names up to the last that names none, a name that is neither dropped — held while it is pressed,
-// their bits (`CTRL` …) and keys in the order pressed; and its key, None where every part is a modifier
-// (`[:control]`). A key of more than one character that names no key is a text, typed a character at a time with the
-// modifiers held (`unfold`: `[:shift, 'side']` is S, I, D, E).
-pub(crate) struct Chord {
-    pub(crate) modifiers: u32,
-    pub(crate) keys: Vec<Key>,
-    pub(crate) key: Vec<u16>,
-    pub(crate) unfold: bool,
-}
-pub(crate) fn chord(parts: &[Vec<u16>]) -> Chord {
-    let last = parts.iter().rposition(|p| modifier(p).is_none());
-    let keys: Vec<_> = parts[..last.unwrap_or(parts.len())].iter().filter_map(|p| modifier(p)).collect();
-    let modifiers = modifier_bits(&keys);
-    let key = last.map_or_else(Vec::new, |i| parts[i].clone());
-    let unfold = key.len() > 1 && !resolve(&key, false).named;
-    Chord { modifiers, keys, key, unfold }
-}
-
 // What pressing a key on an element does besides its events, each where its events are not canceled (`plan`): the
 // element's facts the rest is decided by, and the default actions that apply.
 // (…the element a text can be typed into: an editing host's, or an `<input>` / `<textarea>` with no `readonly` or
@@ -294,9 +274,10 @@ pub(crate) const SELECT_ALL: u32 = 1 << 12;
 pub(crate) const CUT: u32 = 1 << 13;
 pub(crate) const COPY: u32 = 1 << 14;
 pub(crate) const PASTE: u32 = 1 << 15;
-// Control / Meta + Z in a typeable element: undo — with Shift, or Control + Y, redo (Chrome on Linux, Firefox).
-pub(crate) const UNDO: u32 = 1 << 16;
-pub(crate) const REDO: u32 = 1 << 17;
+// A character typed at a single `<select>`, no Control / Alt / Meta held: its typeahead — the option its text begins
+// with picked (Chrome and Firefox). (Control / Meta + Z, Y — undo, redo — take no part: with no undo history kept there
+// is nothing to undo, where Chrome and Firefox fire neither `beforeinput` nor `input`.)
+pub(crate) const TYPEAHEAD: u32 = 1 << 16;
 // Control / Meta + B, I, U in an editing host: bold, italic, underline (Chrome).
 pub(crate) const FORMAT: u32 = 1 << 18;
 // The modifiers held, as `plan` takes them.
@@ -347,9 +328,8 @@ pub(crate) fn plan(arena: &RealmArena, id: NodeId, key: &[u16], char: Option<&[u
     set(CUT, command && letter(b'x'));
     set(COPY, command && letter(b'c'));
     set(PASTE, command && letter(b'v'));
-    let shift = modifiers & SHIFT != 0;
-    set(UNDO, command && typeable && !shift && letter(b'z'));
-    set(REDO, command && typeable && ((shift && letter(b'z')) || (!shift && letter(b'y'))));
+    let single_select = tag == "select" && n.plain_attr("multiple").is_none() && !arena.is_actually_disabled(id);
+    set(TYPEAHEAD, single_select && !chord && one_character(key) && char == Some(key));
     set(FORMAT, command && host && (letter(b'b') || letter(b'i') || letter(b'u')));
     plan
 }
@@ -642,12 +622,19 @@ struct Pressed {
 
 // A gesture: what it has yet to do, the key being pressed and how far it is, and where the keys go.
 struct KeyGesture {
-    // The realm it plays in.
+    // The realm it began in, and the one it plays in now: the realm of the focused area — a child navigable's where the
+    // focused element is its container (UI Events: a key event's target is the focused area of the document).
+    root: i32,
     cid: i32,
+    // Whether the realm it plays in moved since the bindings last took a step: the next ones are the new realm's to take.
+    switched: bool,
     // The element the keys go to: the focused one, as a keyboard's go — `to` while focus stays where it was, though it
-    // took none (a paragraph in an editing host) — and the focused element (`focused`) as the last look left it.
+    // took none (a paragraph in an editing host) — and the focused area (`focused`: its realm and element) as the last look
+    // left it.
     to: NodeId,
-    focused: Option<NodeId>,
+    focused: (i32, Option<NodeId>),
+    // What a run of keys pressed at a `<select>` typed so far: its typeahead search.
+    typeahead: Vec<u16>,
     // Its jobs yet to start, and the steps the one under way has queued — the last of them, where it waits on its
     // outcome, marked so.
     jobs: std::collections::VecDeque<Job>,
@@ -722,7 +709,6 @@ enum PressAt {
     Input,
     Submit,
     Accelerator,
-    History,
     FocusNavigation,
     KeyUp,
     Activation,
@@ -740,7 +726,7 @@ struct SetJob {
 }
 #[derive(Clone, Copy, PartialEq)]
 enum SetAt {
-    Drain,
+    Turn,
     Focused,
     Write,
     Submit,
@@ -762,7 +748,7 @@ enum Step {
     Arrow(NodeId, Vec<u16>),
     StepValue(NodeId, bool),
     Commit(NodeId),
-    Click(NodeId, u32),
+    Activate(NodeId, u32),
     Submit(NodeId),
     Selection(NodeId),
     Move(NodeId, u32, bool),
@@ -773,9 +759,9 @@ enum Step {
     FocusNavigation(bool),
     SelectAll(NodeId),
     Clipboard(&'static str, NodeId),
-    Drain,
     Write(NodeId, Vec<u16>, u32),
-    Pick(NodeId),
+    // (…an option picked: its select's `input` and `change` fired, or not)
+    Pick(NodeId, bool),
     ClickResolve(NodeId),
     ClearHost(NodeId),
     // (…`set`'s events around its write, in their one order (form-fields.js `setEvents`): a keydown and a keyup of no key
@@ -835,6 +821,18 @@ fn key_event_target(arena: &RealmArena, cid: i32, n: NodeId) -> NodeId {
 fn focus_of(arena: &RealmArena, cid: i32) -> Option<NodeId> {
     arena.realm_state(cid).and_then(|s| s.focus)
 }
+// The focused area of realm `cid`'s document (HTML §6.6.1): its realm and its focused element — down through a child
+// navigable whose container is focused, to the area its document has focused (its body where that is none).
+fn focused_area(arena: &RealmArena, mut cid: i32) -> (i32, Option<NodeId>) {
+    loop {
+        let focus = focus_of(arena, cid);
+        let child = focus.and_then(|f| arena.frame_realm(f)).filter(|&c| !arena.is_dropped(c) && arena.realm_document(c).is_some());
+        match child {
+            Some(c) => cid = c,
+            None => return (cid, focus),
+        }
+    }
+}
 
 // The bits (`CTRL` …) of the modifier keys `keys` held.
 fn modifier_bits(keys: &[Key]) -> u32 {
@@ -844,9 +842,12 @@ fn modifier_bits(keys: &[Key]) -> u32 {
 impl KeyGesture {
     fn new(cid: i32, to: NodeId, turns: bool) -> Self {
         KeyGesture {
+            root: cid,
             cid,
+            switched: false,
             to,
-            focused: None,
+            focused: (cid, None),
+            typeahead: Vec::new(),
             jobs: Default::default(),
             queued: Default::default(),
             stage: Stage::Idle,
@@ -885,14 +886,11 @@ impl KeyGesture {
             self.tell(Step::Dirty(to));
         }
         self.jobs.push_back(Job::Begin);
+        let mut tokens = Vec::new();
         for atom in atoms {
-            match atom {
-                Atom::Text(text) => self.type_text(&text, 0),
-                Atom::Key(name) => self.jobs.push_back(Job::Press(resolve(&name, false), 0, Phases::Both)),
-                Atom::Chord(parts) => self.chord(&parts),
-                Atom::WebDriver(text) => self.webdriver_keys(&text),
-            }
+            atom.tokens(&mut tokens);
         }
+        self.press_keys(tokens);
     }
 
     // A text typed a character at a time — a code point, a surrogate pair's two units one character — with `held`.
@@ -902,49 +900,31 @@ impl KeyGesture {
         }
     }
 
-    // A chord — `[:control, 'a']`, `[:shift, 'side']`, `[:control]` — as a keyboard presses it (`chord`): a keydown for
-    // each modifier first, each with the modifiers held so far, itself among them (Chrome: Capybara's `should generate
-    // key events` checks their 16 / 17 / 18 keyCodes beside the key's), its key pressed with them held — a text that
-    // names no key a character at a time, each the one its key types with Shift held (`!` for `1`, `ß` as it is) — then
-    // their keyups, the last pressed first, each with the ones still held. A chord of modifiers alone presses no other key.
-    fn chord(&mut self, parts: &[Vec<u16>]) {
-        let c = chord(parts);
-        for i in 0..c.keys.len() {
-            self.jobs.push_back(Job::Modifier("keydown", c.keys[i].clone(), modifier_bits(&c.keys[..=i])));
-        }
-        if c.unfold {
-            self.type_text(&c.key, c.modifiers);
-        } else if !c.key.is_empty() {
-            self.jobs.push_back(Job::Press(resolve(&c.key, c.modifiers & SHIFT != 0), c.modifiers, Phases::Both));
-        }
-        for i in (0..c.keys.len()).rev() {
-            self.jobs.push_back(Job::Modifier("keyup", c.keys[i].clone(), modifier_bits(&c.keys[..i])));
-        }
-    }
-
-    // WebDriver's "element send keys" of `text` (the testdriver's `send_keys`): each character a key's press — one of the
-    // keys WebDriver names by a code point of its own (`webdriver_key`) that key's — a modifier's held from its press on,
-    // until the NULL key releases them all, and at the end what is still held released, the last pressed first.
-    fn webdriver_keys(&mut self, text: &[u16]) {
+    // Keys pressed as WebDriver's "dispatch actions" of a keys' string presses them (Selenium's `send_keys`): each a
+    // key's press, a character the one its key types with Shift held where Shift is (`!` for `1`, `ß` as it is); a
+    // modifier held from its press on — each keydown with the modifiers held so far, itself among them — until the NULL
+    // key releases them all, the last pressed first, each keyup with those still held; and at the end what is still held
+    // released.
+    fn press_keys(&mut self, tokens: Vec<Token>) {
         let mut held: Vec<Key> = Vec::new();
         let release = |g: &mut Self, held: &mut Vec<Key>| {
             while let Some(k) = held.pop() {
                 g.jobs.push_back(Job::Modifier("keyup", k, modifier_bits(held)));
             }
         };
-        for ch in characters(text) {
-            match webdriver_key(ch) {
-                Some(WebDriverKey::Null) => release(self, &mut held),
-                Some(WebDriverKey::Modifier(k)) => {
+        for token in tokens {
+            match token {
+                Token::Null => release(self, &mut held),
+                Token::Modifier(k) => {
                     if held.iter().all(|h| h.modifier_bit() != k.modifier_bit()) {
                         held.push(k.clone());
                         self.jobs.push_back(Job::Modifier("keydown", k, modifier_bits(&held)));
                     }
                 },
-                Some(WebDriverKey::Key(k)) => self.jobs.push_back(Job::Press(k, modifier_bits(&held), Phases::Both)),
-                None => {
+                Token::Key(k) => self.jobs.push_back(Job::Press(k, modifier_bits(&held), Phases::Both)),
+                Token::Char(ch) => {
                     let bits = modifier_bits(&held);
-                    self.jobs.push_back(Job::Press(resolve(ch, bits & SHIFT != 0), bits, Phases::Both));
+                    self.jobs.push_back(Job::Press(resolve(&ch, bits & SHIFT != 0), bits, Phases::Both));
                 },
             }
         }
@@ -954,12 +934,19 @@ impl KeyGesture {
     // The keys go to the focused element, as a keyboard's do: once focus moved since it was last looked at — a key's
     // default action (a Tab, an arrow through a radio group), a listener's `focus()` or `blur()` — to where it went
     // (`send_keys('a', :tab, 'b')` types the `b` into the next field); while it stays, to `to`. Whether they moved.
+    // Into a child navigable too: once its container is focused, the rest goes to the focused area inside it, in its
+    // realm (Chrome: a timer of the page's focusing a frame's field, the keys after it are typed there) — the gesture
+    // `switched` to it.
     fn follow_focus(&mut self, arena: &RealmArena) -> bool {
-        let focus = focus_of(arena, self.cid);
-        if focus == self.focused {
+        let area = focused_area(arena, self.root);
+        if area == self.focused {
             return false;
         }
-        self.focused = focus;
+        self.focused = area;
+        if area.0 != self.cid {
+            self.cid = area.0;
+            self.switched = true;
+        }
         let to = key_event_target(arena, self.cid, self.to);
         std::mem::replace(&mut self.to, to) != to
     }
@@ -1025,6 +1012,10 @@ impl KeyGesture {
                     if press.at != PressAt::Done {
                         self.stage = Stage::Press(press);
                     }
+                    // (…the rest the new realm's bindings take: `answer_next`)
+                    if self.switched {
+                        return Some(batch);
+                    }
                 },
                 Stage::Set(mut set) => {
                     self.set(arena, &mut set);
@@ -1033,7 +1024,7 @@ impl KeyGesture {
                     }
                 },
                 Stage::Idle => match self.jobs.pop_front()? {
-                    Job::Begin => self.focused = focus_of(arena, self.cid),
+                    Job::Begin => self.focused = focused_area(arena, self.root),
                     Job::Press(key, held, phases) => {
                         let (at, blocked, down) = match phases {
                             Phases::Up(p) => (PressAt::KeyUp, p.blocked, p.down),
@@ -1048,6 +1039,10 @@ impl KeyGesture {
                             continue;
                         }
                         self.follow_focus(arena);
+                        if self.switched {
+                            self.jobs.push_front(Job::Modifier(ty, key, modifiers));
+                            return Some(batch);
+                        }
                         let step = self.key_event(ty, &key, modifiers, false);
                         self.tell(step);
                     },
@@ -1084,11 +1079,6 @@ fn characters(text: &[u16]) -> impl Iterator<Item = &[u16]> {
 
 // A key WebDriver names by a code point of its own (WebDriver §17.4.2, the table of keys, U+E000-U+E05D): the NULL key,
 // a modifier, or a key by the name it has here.
-enum WebDriverKey {
-    Null,
-    Modifier(Key),
-    Key(Key),
-}
 const WEBDRIVER_KEYS: &[(u16, &str)] = &[
     (0xE001, "cancel"), (0xE002, "help"), (0xE003, "backspace"), (0xE004, "tab"), (0xE005, "clear"), (0xE006, "return"),
     (0xE007, "enter"), (0xE008, "shift"), (0xE009, "control"), (0xE00A, "alt"), (0xE00B, "pause"), (0xE00C, "escape"),
@@ -1104,21 +1094,66 @@ const WEBDRIVER_KEYS: &[(u16, &str)] = &[
     (0xE056, "numpad_end"), (0xE057, "numpad_home"), (0xE058, "numpad_left"), (0xE059, "numpad_up"),
     (0xE05A, "numpad_right"), (0xE05B, "numpad_down"), (0xE05C, "numpad_insert"), (0xE05D, "numpad_delete"),
 ];
-fn webdriver_key(ch: &[u16]) -> Option<WebDriverKey> {
+fn webdriver_key(ch: &[u16]) -> Option<Token> {
     let &[unit] = ch else { return None };
     if unit == 0xE000 {
-        return Some(WebDriverKey::Null);
+        return Some(Token::Null);
     }
-    let name = units(WEBDRIVER_KEYS.iter().find(|k| k.0 == unit)?.1);
-    Some(modifier(&name).map_or_else(|| WebDriverKey::Key(resolve(&name, false)), WebDriverKey::Modifier))
+    named_key(&units(WEBDRIVER_KEYS.iter().find(|k| k.0 == unit)?.1))
 }
 
-// What `send_keys` is given: a text, a key by its name, a chord, WebDriver's keys (`webdriver_keys`).
+// What `send_keys` is given (Capybara's arguments, as Selenium encodes them): a text, typed a character at a time; a key by
+// its name (a symbol: `:enter`, a modifier held from then on, `:null` releasing them); a chord (an array: its parts
+// pressed in turn, then the NULL key); WebDriver's keys (a string of the code points it names keys by: the testdriver's).
 pub(crate) enum Atom {
     Text(Vec<u16>),
     Key(Vec<u16>),
-    Chord(Vec<Vec<u16>>),
+    Chord(Vec<Atom>),
     WebDriver(Vec<u16>),
+}
+// …as the keys it presses.
+enum Token {
+    Null,
+    Modifier(Key),
+    Key(Key),
+    Char(Vec<u16>),
+}
+impl Atom {
+    fn tokens(self, out: &mut Vec<Token>) {
+        match self {
+            Atom::Text(text) => out.extend(characters(&text).map(|ch| Token::Char(ch.to_vec()))),
+            Atom::Key(name) => out.push(named_key(&name).expect("a key the bindings checked")),
+            Atom::Chord(parts) => {
+                for part in parts {
+                    part.tokens(out);
+                }
+                out.push(Token::Null);
+            },
+            Atom::WebDriver(text) => out.extend(characters(&text).map(|ch| match webdriver_key(ch) {
+                Some(token) => token,
+                None => Token::Char(ch.to_vec()),
+            })),
+        }
+    }
+    // The first key name in it that names no key.
+    fn unknown(&self) -> Option<&[u16]> {
+        match self {
+            Atom::Key(name) if named_key(name).is_none() => Some(name),
+            Atom::Chord(parts) => parts.iter().find_map(Atom::unknown),
+            _ => None,
+        }
+    }
+}
+// The key a name names: the NULL key (`null`), a modifier, or a named key — none for a name that names none.
+fn named_key(name: &[u16]) -> Option<Token> {
+    if is_units(&lower(name).encode_utf16().collect::<Vec<_>>(), "null") {
+        return Some(Token::Null);
+    }
+    if let Some(m) = modifier(name) {
+        return Some(Token::Modifier(m));
+    }
+    let k = resolve(name, false);
+    k.named.then_some(Token::Key(k))
 }
 
 // The keys that move the caret by lines, which carry what the last of them left (layout.js `forgetCaretMove`).
@@ -1154,6 +1189,9 @@ impl KeyGesture {
                     return;
                 }
                 self.follow_focus(arena);
+                if self.switched {
+                    return;
+                }
                 p.down = Some(self.to);
                 p.at = PressAt::KeyPress;
                 let step = self.key_event("keydown", &p.key, p.held, !line_key(&p.key.key));
@@ -1166,8 +1204,11 @@ impl KeyGesture {
             // where focus is once the keydown's listeners moved it: to the element they focused, to the body where they
             // blurred it (Chrome and Firefox; UI Events §3.7: a key event's target is the focused element).
             PressAt::KeyPress => {
-                p.blocked = yes;
+                p.blocked |= yes;
                 self.follow_focus(arena);
+                if self.switched {
+                    return;
+                }
                 p.at = PressAt::Defaults;
                 if !p.blocked && plan(arena, self.to) & KEYPRESS != 0 {
                     let step = self.key_event("keypress", &p.key, p.held, false);
@@ -1179,7 +1220,20 @@ impl KeyGesture {
                 p.plan = plan(arena, self.to);
                 p.host = p.plan & EDITING_HOST != 0;
                 p.at = PressAt::Selection;
+                if p.plan & TYPEAHEAD == 0 {
+                    self.typeahead.clear();
+                }
                 if p.blocked {
+                    p.at = PressAt::KeyUp;
+                    return;
+                }
+                // A character typed at a select: the option its typeahead search finds picked, its `input` and `change`
+                // fired (Chrome and Firefox: "c" picks "cherry") — the search the run of characters typed at it.
+                if p.plan & TYPEAHEAD != 0 {
+                    self.typeahead.extend_from_slice(&p.key.key);
+                    if let Some(option) = typeahead_option(arena, self.to, &self.typeahead) {
+                        self.tell(Step::Pick(option, true));
+                    }
                     p.at = PressAt::KeyUp;
                     return;
                 }
@@ -1207,7 +1261,7 @@ impl KeyGesture {
                 // (react-aria's `isVirtualClick` tells it from a mouse's) — a link's in a new window with Control /
                 // Meta held.
                 if p.plan & ENTER_ACTIVATES != 0 {
-                    self.tell(Step::Click(self.to, p.held));
+                    self.tell(Step::Activate(self.to, p.held));
                 }
             },
             PressAt::StepValue => {
@@ -1319,13 +1373,6 @@ impl KeyGesture {
                 } else if plan & (CUT | COPY | PASTE) != 0 {
                     let op = if plan & CUT != 0 { "cut" } else if plan & COPY != 0 { "copy" } else { "paste" };
                     self.tell(Step::Clipboard(op, self.to));
-                } else if plan & (UNDO | REDO) != 0 {
-                    // (…undo and redo: their `beforeinput` and `input` — no undo history is kept, so nothing is undone,
-                    // where Chrome and Firefox fire neither with no history to undo)
-                    let input_type = if plan & UNDO != 0 { "historyUndo" } else { "historyRedo" };
-                    p.edit = Some((input_type, 0));
-                    p.at = PressAt::History;
-                    self.ask(Step::Input { ty: "beforeinput", target: self.to, input_type, data: None, cancelable: true, ranges: Ranges::None });
                 } else if plan & FORMAT != 0 {
                     // (…Control + B, I, U in an editing host: its formatting command, as a user's gesture asks it —
                     // beforeinput, the edit, input: Chrome; Firefox binds none)
@@ -1338,13 +1385,6 @@ impl KeyGesture {
                     };
                     self.tell(Step::Command(command));
                 }
-            },
-            PressAt::History => {
-                if !yes {
-                    let (input_type, _) = p.edit.expect("a history step");
-                    self.tell(Step::Input { ty: "input", target: self.to, input_type, data: None, cancelable: false, ranges: Ranges::None });
-                }
-                p.at = PressAt::FocusNavigation;
             },
             // Tab's: focus moved through the document's sequential focus navigation order, back with Shift — before the
             // key's keyup, which goes to the element it focused (Chrome and Firefox).
@@ -1366,7 +1406,10 @@ impl KeyGesture {
                 if self.turn_before(arena) {
                     return;
                 }
-                p.moved = self.follow_focus(arena);
+                p.moved |= self.follow_focus(arena);
+                if self.switched {
+                    return;
+                }
                 p.at = PressAt::Activation;
                 let step = self.key_event("keyup", &p.key, p.held, false);
                 self.ask(step);
@@ -1376,7 +1419,7 @@ impl KeyGesture {
             PressAt::Activation => {
                 let pressed = !p.moved && p.down == Some(self.to);
                 if !p.blocked && !yes && pressed && is_units(&p.key.key, " ") && plan(arena, self.to) & SPACE_ACTIVATES != 0 {
-                    self.tell(Step::Click(self.to, p.held));
+                    self.tell(Step::Activate(self.to, p.held));
                 }
                 p.at = PressAt::Done;
             },
@@ -1395,8 +1438,27 @@ impl KeyGesture {
             return;
         }
         self.tell(Step::Commit(control));
-        self.tell(button.map_or(Step::Submit(form), |b| Step::Click(b, 0)));
+        self.tell(button.map_or(Step::Submit(form), |b| Step::Activate(b, 0)));
     }
+}
+
+// The option of the select `select` a typeahead `search` finds: the first that can be picked whose text begins with it,
+// ignoring case — or, where it is one character typed again and again, the next such after the one picked, round to
+// the first (Chrome and Firefox step through the options a letter begins as it is pressed again).
+fn typeahead_option(arena: &RealmArena, select: NodeId, search: &[u16]) -> Option<NodeId> {
+    let fold = |units: &[u16]| String::from_utf16_lossy(units).to_lowercase();
+    let options: Vec<NodeId> = arena.list_of_options(select).into_iter().filter(|&o| !arena.option_disabled(o)).collect();
+    let search = fold(search);
+    let first = search.chars().next()?;
+    let repeated = search.chars().all(|c| c == first);
+    let begins = |o: NodeId, with: &str| fold(&arena.option_text_units(o)).starts_with(with);
+    if !repeated {
+        return options.into_iter().find(|&o| begins(o, &search));
+    }
+    let with = first.to_string();
+    let picked = options.iter().position(|&o| arena.get(o).is_some_and(|n| n.state & crate::dom::STATE_SELECTED != 0));
+    let from = picked.map_or(0, |i| i + 1);
+    (0..options.len()).map(|k| options[(from + k) % options.len()]).find(|&o| begins(o, &with))
 }
 
 // What an insertion in an editing host inserts (dom-nodes.js `insertInEditingHost`: editing_insert.rs `editInsert`).
@@ -1436,7 +1498,7 @@ impl KeyGesture {
             set.at = SetAt::Done;
         } else if set.how & SET_FOCUS != 0 {
             self.tell(Step::Focus(set.n));
-            set.at = SetAt::Drain;
+            set.at = SetAt::Turn;
         } else {
             set.at = SetAt::Write;
         }
@@ -1453,10 +1515,10 @@ impl KeyGesture {
     fn set(&mut self, arena: &mut RealmArena, set: &mut SetJob) {
         match set.at {
             // (…the work its focus handlers queued that is due now run: none to run, no step)
-            SetAt::Drain => {
+            SetAt::Turn => {
                 set.at = SetAt::Focused;
-                if arena.work_due() {
-                    self.tell(Step::Drain);
+                if self.turns && arena.work_due() {
+                    self.tell(Step::Turn);
                 }
             },
             // Its focus handlers may have swapped the control: `<trix-editor>` focuses its inner editing host, a
@@ -1494,7 +1556,7 @@ impl KeyGesture {
                     SET_SANITIZED => self.tell(Step::Write(n, text, WRITE_SANITIZED)),
                     // (…an attribute write, recorded for MutationObserver and a context change for `[value=…]` rules)
                     SET_VALUE_ATTRIBUTE => self.tell(Step::Write(n, text, WRITE_ATTRIBUTE)),
-                    SET_OPTION => self.tell(Step::Pick(set.option.expect("an option"))),
+                    SET_OPTION => self.tell(Step::Pick(set.option.expect("an option"), false)),
                     // Selenium's `set(true)` / `set(false)`: the control clicked — the user's pointer click, the driver's
                     // own — and nothing else.
                     SET_CLICK => {
@@ -1519,7 +1581,11 @@ impl KeyGesture {
                         return;
                     },
                 }
-                self.tell(Step::SetEvents { target: n, keys: set.how & SET_FOCUS != 0, typed: matches!(set.how & SET_KIND, SET_TYPE | SET_LIVE) });
+                // (…its text typed: a textarea's, a text or number field's — a date's, a time's, a colour's value is set
+                // by its picker, whose `input` is a plain Event: Chrome, measured)
+                let typed = matches!(set.how & SET_KIND, SET_TYPE | SET_LIVE)
+                    && arena.get(n).is_some_and(|e| e.is_html_named("textarea") || e.input_has(crate::input_types::TYPED));
+                self.tell(Step::SetEvents { target: n, keys: set.how & SET_FOCUS != 0, typed });
                 // (…a value ending in a line feed submits as Enter in the field does; any other is done, the gesture's end
                 // handed over with these steps)
                 if set.how & SET_SUBMIT == 0 {
@@ -1549,33 +1615,33 @@ const WRITE_ATTRIBUTE: u32 = 2;
 // …]`.
 const KEY: u32 = 0;
 const INPUT: u32 = 1;
-const FOCUS: u32 = 3;
-const BLUR: u32 = 4;
-const CARET_END: u32 = 5;
-const CARET_LAST: u32 = 6;
-const CLOSE: u32 = 7;
-const ARROW: u32 = 8;
-const STEP_VALUE: u32 = 9;
-const COMMIT: u32 = 10;
-const CLICK: u32 = 11;
-const SUBMIT: u32 = 12;
-const SELECTION: u32 = 13;
-const MOVE: u32 = 14;
-const INSERT: u32 = 15;
-const DELETE: u32 = 16;
-const TYPE: u32 = 17;
-const EDIT_CONTROL: u32 = 18;
-const FOCUS_NAV: u32 = 19;
-const SELECT_ALL_STEP: u32 = 20;
-const CLIPBOARD: u32 = 21;
-const DRAIN: u32 = 22;
-const WRITE: u32 = 23;
-const PICK: u32 = 24;
-const CLICK_RESOLVE: u32 = 25;
-const CLEAR_HOST: u32 = 26;
-const COMMAND: u32 = 27;
-const TURN: u32 = 28;
-const SET_EVENTS: u32 = 29;
+const FOCUS: u32 = 2;
+const BLUR: u32 = 3;
+const CARET_END: u32 = 4;
+const CARET_LAST: u32 = 5;
+const CLOSE: u32 = 6;
+const ARROW: u32 = 7;
+const STEP_VALUE: u32 = 8;
+const COMMIT: u32 = 9;
+const ACTIVATE: u32 = 10;
+const SUBMIT: u32 = 11;
+const SELECTION: u32 = 12;
+const MOVE: u32 = 13;
+const INSERT: u32 = 14;
+const DELETE: u32 = 15;
+const TYPE: u32 = 16;
+const EDIT_CONTROL: u32 = 17;
+const FOCUS_NAV: u32 = 18;
+const SELECT_ALL_STEP: u32 = 19;
+const CLIPBOARD: u32 = 20;
+const WRITE: u32 = 21;
+const PICK: u32 = 22;
+const CLICK_RESOLVE: u32 = 23;
+const CLEAR_HOST: u32 = 24;
+const COMMAND: u32 = 25;
+const TURN: u32 = 26;
+const SET_EVENTS: u32 = 27;
+const SWITCH: u32 = 28;
 const CANCELABLE: u32 = 1;
 const TARGET_SELECTION: u32 = 2;
 const PLAIN: u32 = 4;
@@ -1623,7 +1689,7 @@ fn step_value<'s>(scope: &mut v8::PinScope<'s, '_>, step: Step) -> v8::Local<'s,
         Step::Arrow(el, key) => vec![int(scope, ARROW), node(scope, el), crate::dom::utf16_value(scope, &key)],
         Step::StepValue(el, up) => vec![int(scope, STEP_VALUE), node(scope, el), v8::Boolean::new(scope, up).into()],
         Step::Commit(el) => vec![int(scope, COMMIT), node(scope, el)],
-        Step::Click(el, modifiers) => vec![int(scope, CLICK), node(scope, el), int(scope, modifiers)],
+        Step::Activate(el, modifiers) => vec![int(scope, ACTIVATE), node(scope, el), int(scope, modifiers)],
         Step::Submit(form) => vec![int(scope, SUBMIT), node(scope, form)],
         Step::Selection(el) => vec![int(scope, SELECTION), node(scope, el)],
         Step::Move(el, motion, host) => vec![int(scope, MOVE), node(scope, el), int(scope, motion), v8::Boolean::new(scope, host).into()],
@@ -1634,9 +1700,8 @@ fn step_value<'s>(scope: &mut v8::PinScope<'s, '_>, step: Step) -> v8::Local<'s,
         Step::FocusNavigation(back) => vec![int(scope, FOCUS_NAV), v8::Boolean::new(scope, back).into()],
         Step::SelectAll(el) => vec![int(scope, SELECT_ALL_STEP), node(scope, el)],
         Step::Clipboard(op, el) => vec![int(scope, CLIPBOARD), name(scope, op), node(scope, el)],
-        Step::Drain => vec![int(scope, DRAIN)],
         Step::Write(el, text, how) => vec![int(scope, WRITE), node(scope, el), crate::dom::utf16_value(scope, &text), int(scope, how)],
-        Step::Pick(option) => vec![int(scope, PICK), node(scope, option)],
+        Step::Pick(option, events) => vec![int(scope, PICK), node(scope, option), v8::Boolean::new(scope, events).into()],
         Step::ClickResolve(el) => vec![int(scope, CLICK_RESOLVE), node(scope, el)],
         Step::ClearHost(el) => vec![int(scope, CLEAR_HOST), node(scope, el)],
         Step::Command(command) => vec![int(scope, COMMAND), name(scope, command)],
@@ -1655,14 +1720,22 @@ const DONE_FALSE: u32 = 2;
 
 // The gesture's next batch to the bindings, the outcome of the step they took last `outcome` — the gesture over with it
 // where it has nothing left that waits on the bindings; or, where it has no step left, its answer.
-fn answer_next(scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>, outcome: u32) {
+fn answer_next(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>, outcome: u32) {
+    let caller = crate::dom::realm_id(scope, args);
     let d = crate::dom::dom(scope);
     let Some(gesture) = d.keyboard.gestures.last_mut() else { return rv.set_bool(false) };
+    let cid = gesture.cid;
     // (…none past its realm's end: a frame whose listener removed it)
-    let batch = match d.arena.enter_known(gesture.cid) {
+    let batch = match d.arena.enter_known(cid) {
+        // (…the steps of a realm the caller is not taken by that realm's bindings: `SWITCH`)
+        Some(_) if cid != caller => return switch_to(scope, &mut rv, cid),
         Some(arena) => gesture.next(arena, outcome),
         None => None,
     };
+    if std::mem::take(&mut gesture.switched) {
+        let cid = gesture.cid;
+        return switch_to(scope, &mut rv, cid);
+    }
     let finished = gesture.finished();
     let answer = match &batch {
         Some(_) if !finished => None,
@@ -1681,6 +1754,13 @@ fn answer_next(scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8:
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
+// A batch that hands the gesture to realm `cid`'s bindings, which take its next steps (`[MORE, [SWITCH, cid]]`).
+fn switch_to(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Value>, cid: i32) {
+    let items: [v8::Local<v8::Value>; 2] = [v8::Integer::new_from_unsigned(scope, SWITCH).into(), v8::Integer::new(scope, cid).into()];
+    let step = v8::Array::new_with_elements(scope, &items).into();
+    let more = v8::Integer::new_from_unsigned(scope, MORE).into();
+    rv.set(v8::Array::new_with_elements(scope, &[more, step]).into());
+}
 // The gesture under way over: a key it left down kept down, and what it answers.
 fn finish_gesture(keyboard: &mut Keyboard) -> bool {
     let Some(gesture) = keyboard.gestures.pop() else { return false };
@@ -1698,6 +1778,8 @@ const SET: u32 = 1;
 const KEY_DOWN: u32 = 2;
 const KEY_UP: u32 = 3;
 const RELEASE: u32 = 4;
+// What a gesture of `send_keys` answers where a key name names no key: this, and the name.
+const UNKNOWN_KEY: &str = "unknown key: ";
 
 // __dom.keyGesture(kind, element, what, turns) -> the first batch of steps of a gesture of the keyboard (`answer_next`),
 // the host running the event loop at its task boundaries where `turns` (`TURN`) — `send_keys`' keys at `element` (`what`
@@ -1721,6 +1803,13 @@ fn gesture_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         SEND_KEYS => {
             let Some(n) = n else { return rv.set_bool(false) };
             let atoms = atoms_arg(scope, args.get(2));
+            // (…a name that names no key refused, as Selenium refuses it: the host raises — `UNKNOWN_KEY`)
+            if let Some(name) = atoms.iter().find_map(Atom::unknown) {
+                let mut answer = units(UNKNOWN_KEY);
+                answer.extend_from_slice(name);
+                let answer = crate::dom::utf16_value(scope, &answer);
+                return rv.set(answer);
+            }
             let (how, to) = crate::rendered::with_engine(scope, &args, |engine, arena, now| send_target(engine, arena, n, now)).unwrap_or((0, n));
             let mut gesture = KeyGesture::new(cid, n, turns);
             gesture.send_keys(crate::dom::realm(scope, cid), how, to, atoms);
@@ -1767,7 +1856,7 @@ fn gesture_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         _ => return rv.set_bool(false),
     };
     crate::dom::dom(scope).keyboard.gestures.push(gesture);
-    answer_next(scope, rv, 0);
+    answer_next(scope, &args, rv, 0);
 }
 
 // A key action of WebDriver's keyboard input source (the testdriver's `keyDown` / `keyUp`), the key `value`, at the
@@ -1784,15 +1873,15 @@ fn key_action(arena: &mut RealmArena, keyboard: &mut Keyboard, cid: i32, down: b
     gesture.jobs.push_back(Job::Begin);
     let ty = if down { "keydown" } else { "keyup" };
     match webdriver_key(&value) {
-        Some(WebDriverKey::Null) => {},
-        Some(WebDriverKey::Modifier(k)) => {
+        Some(Token::Null) => {},
+        Some(Token::Modifier(k)) => {
             keyboard.held = if down { keyboard.held | k.modifier_bit() } else { keyboard.held & !k.modifier_bit() };
             gesture.jobs.push_back(Job::Modifier(ty, k, keyboard.held));
         },
         found => {
             let held = keyboard.held;
             let key = match found {
-                Some(WebDriverKey::Key(k)) => k,
+                Some(Token::Key(k)) => k,
                 _ => resolve(&value, held & SHIFT != 0),
             };
             let phases = if down {
@@ -1813,7 +1902,7 @@ fn key_action(arena: &mut RealmArena, keyboard: &mut Keyboard, cid: i32, down: b
 // answer at its end.
 fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     let outcome = args.get(0).uint32_value(scope).unwrap_or(0);
-    answer_next(scope, rv, outcome);
+    answer_next(scope, &args, rv, outcome);
 }
 
 // __dom.keyAbort(): the gesture under way dropped — its player left it by a throw — so the one it was nested in goes on.
@@ -1821,70 +1910,61 @@ fn abort_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArgumen
     crate::dom::dom(scope).keyboard.gestures.pop();
 }
 
-// `send_keys`' atoms, read off the own properties of the records the host made.
+// `send_keys`' atoms, read off the own properties of the records the host made: `{kind: 'text', value}`, `{kind: 'key',
+// name}`, `{kind: 'chord', parts: [atom…]}`, `{kind: 'webdriver', value}`.
 fn atoms_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<Atom> {
     let Ok(list) = v8::Local::<v8::Array>::try_from(value) else { return Vec::new() };
-    let own = |scope: &mut v8::PinScope<'_, '_>, obj: v8::Local<'_, v8::Object>, k: &str| -> Option<Vec<u16>> {
-        let key: v8::Local<v8::Name> = v8::String::new(scope, k)?.into();
-        if !obj.has_own_property(scope, key)? {
-            return None;
-        }
-        let v = obj.get(scope, key.into())?;
-        (!v.is_null_or_undefined()).then(|| crate::dom::utf16_arg(scope, v))
-    };
-    let mut atoms = Vec::new();
-    for i in 0..list.length() {
-        let Some(atom) = list.get_index(scope, i).and_then(|a| a.to_object(scope)) else { continue };
-        let Some(kind) = own(scope, atom, "kind") else { continue };
-        if is_units(&kind, "text") {
-            atoms.push(Atom::Text(own(scope, atom, "value").unwrap_or_default()));
-        } else if is_units(&kind, "key") {
-            atoms.push(Atom::Key(own(scope, atom, "name").unwrap_or_default()));
-        } else if is_units(&kind, "webdriver") {
-            atoms.push(Atom::WebDriver(own(scope, atom, "value").unwrap_or_default()));
-        } else if is_units(&kind, "combo") {
-            let key: v8::Local<v8::Name> = v8::String::new(scope, "parts").unwrap().into();
-            let parts = atom.has_own_property(scope, key).unwrap_or(false).then(|| atom.get(scope, key.into())).flatten();
-            let parts = parts.and_then(|p| v8::Local::<v8::Array>::try_from(p).ok());
-            let parts = parts.map_or_else(Vec::new, |a| (0..a.length()).map(|j| a.get_index(scope, j).map_or_else(Vec::new, |v| crate::dom::utf16_arg(scope, v))).collect());
-            atoms.push(Atom::Chord(parts));
-        }
+    (0..list.length()).filter_map(|i| list.get_index(scope, i).and_then(|a| atom_arg(scope, a))).collect()
+}
+fn atom_arg<'s>(scope: &mut v8::PinScope<'s, '_>, value: v8::Local<'s, v8::Value>) -> Option<Atom> {
+    let atom = value.to_object(scope)?;
+    let text = |scope: &mut v8::PinScope<'s, '_>, k: &str| own_property(scope, atom, k).map_or_else(Vec::new, |v| crate::dom::utf16_arg(scope, v));
+    let kind = text(scope, "kind");
+    if is_units(&kind, "text") {
+        Some(Atom::Text(text(scope, "value")))
+    } else if is_units(&kind, "key") {
+        Some(Atom::Key(text(scope, "name")))
+    } else if is_units(&kind, "webdriver") {
+        Some(Atom::WebDriver(text(scope, "value")))
+    } else if is_units(&kind, "chord") {
+        Some(Atom::Chord(own_property(scope, atom, "parts").map_or_else(Vec::new, |p| atoms_arg(scope, p))))
+    } else {
+        None
     }
-    atoms
+}
+// …a record's own property `k`, none where it has none or it is null or undefined.
+fn own_property<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'s, v8::Object>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
+    let key: v8::Local<v8::Name> = v8::String::new(scope, k)?.into();
+    if !obj.has_own_property(scope, key)? {
+        return None;
+    }
+    obj.get(scope, key.into()).filter(|v| !v.is_null_or_undefined())
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "resolveKey", resolve_op, context_id);
     crate::dom::register(scope, ns, "keyGesture", gesture_op, context_id);
     crate::dom::register(scope, ns, "keyNext", next_op, context_id);
     crate::dom::register(scope, ns, "keyAbort", abort_op, context_id);
     crate::dom::register(scope, ns, "keysHeld", held_op, context_id);
+    crate::dom::register(scope, ns, "keyModifiers", modifiers_op, context_id);
+}
+// __dom.keyModifiers(names) -> the bits (CTRL | META | ALT | SHIFT) of the modifier keys `names` names (`modifier`): a
+// click's keys held, the host's.
+fn modifiers_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(names) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return rv.set_uint32(0) };
+    let mut bits = 0;
+    for i in 0..names.length() {
+        let Some(name) = names.get_index(scope, i) else { continue };
+        if let Some(k) = modifier(&crate::dom::utf16_arg(scope, name)) {
+            bits |= k.modifier_bit();
+        }
+    }
+    rv.set_uint32(bits);
 }
 // __dom.keysHeld() -> the modifiers the testdriver's keyboard holds (CTRL | META | ALT | SHIFT), which its pointer
 // actions' events carry.
 fn held_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_uint32(crate::dom::dom(scope).keyboard.held);
-}
-// __dom.resolveKey(spec, shift) -> [key, code, keyCode, char (null for none), inputType (null for none), named, charCode]
-// (`resolve`; `charCode` its keypress's, `Key::char_code`).
-fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let spec = crate::dom::utf16_arg(scope, args.get(0));
-    let shift = args.get(1).is_true();
-    let k = resolve(&spec, shift);
-    let ch: v8::Local<v8::Value> = match k.char.as_deref() {
-        Some(c) => crate::dom::utf16_value(scope, c),
-        None => v8::null(scope).into(),
-    };
-    let items: [v8::Local<v8::Value>; 7] = [
-        crate::dom::utf16_value(scope, &k.key),
-        crate::dom::utf16_value(scope, &k.code),
-        v8::Integer::new_from_unsigned(scope, k.key_code).into(),
-        ch,
-        k.input_type.and_then(|t| v8::String::new(scope, t)).map_or_else(|| v8::null(scope).into(), Into::into),
-        v8::Boolean::new(scope, k.named).into(),
-        v8::Integer::new_from_unsigned(scope, k.char_code()).into(),
-    ];
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 #[cfg(test)]
@@ -1896,45 +1976,49 @@ mod tests {
         (String::from_utf16_lossy(&k.key), String::from_utf16_lossy(&k.code), k.key_code, k.char.map(|c| String::from_utf16_lossy(&c)), k.input_type)
     }
 
-    #[test]
-    fn a_chord_holds_its_modifiers_while_its_key_is_pressed() {
-        let parts = |ps: &[&str]| ps.iter().map(|p| units(p)).collect::<Vec<_>>();
-        let c = chord(&parts(&["control", "SHIFT", "a"]));
-        assert_eq!(c.modifiers, CTRL | SHIFT);
-        let keys: Vec<_> = c.keys.iter().map(|k| (String::from_utf16_lossy(&k.code), k.key_code, k.location)).collect();
-        assert_eq!(keys, [("ControlLeft".into(), 17, 1), ("ShiftLeft".into(), 16, 1)]);
-        assert_eq!((String::from_utf16_lossy(&c.key), c.unfold), ("a".into(), false));
-        // (…every part a modifier: the chord's key none, its modifiers pressed and released alone)
-        let c = chord(&parts(&["cmd", "alt"]));
-        assert_eq!((c.modifiers, c.keys.len(), c.key.len()), (META | ALT, 2, 0));
-        // (…a modifier after the key held for none, and a name before it that is none dropped)
-        let c = chord(&parts(&["bogus", "shift", "side", "ctrl"]));
-        assert_eq!((c.modifiers, String::from_utf16_lossy(&c.key), c.unfold), (SHIFT, "side".into(), true));
-        // (…a key's name is no text to unfold)
-        assert!(!chord(&parts(&["control", "enter"])).unfold);
+    // The jobs keys pressed as Capybara's `send_keys` arguments make: a symbol `:name`, a string, an array a chord.
+    fn jobs(atoms: Vec<Atom>) -> Vec<String> {
+        let mut g = KeyGesture::new(0, NodeId { idx: 0, generation: 0 }, false);
+        let mut tokens = Vec::new();
+        for atom in atoms {
+            atom.tokens(&mut tokens);
+        }
+        g.press_keys(tokens);
+        g.jobs
+            .into_iter()
+            .map(|j| match j {
+                Job::Modifier(ty, k, held) => format!("{ty} {} {held}", String::from_utf16_lossy(&k.key)),
+                Job::Press(k, held, _) => format!("press {} {held}", String::from_utf16_lossy(&k.key)),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+    fn sym(name: &str) -> Atom {
+        Atom::Key(units(name))
+    }
+    fn text(t: &str) -> Atom {
+        Atom::Text(units(t))
     }
 
     #[test]
-    fn a_chord_presses_its_modifiers_around_its_key() {
-        let parts = |ps: &[&str]| ps.iter().map(|p| units(p)).collect::<Vec<_>>();
-        let jobs = |ps: &[&str]| {
-            let mut g = KeyGesture::new(0, NodeId { idx: 0, generation: 0 }, false);
-            g.chord(&parts(ps));
-            g.jobs
-                .into_iter()
-                .map(|j| match j {
-                    Job::Modifier(ty, k, held) => format!("{ty} {} {held}", String::from_utf16_lossy(&k.key)),
-                    Job::Press(k, held, _) => format!("press {} {held}", String::from_utf16_lossy(&k.key)),
-                    _ => unreachable!(),
-                })
-                .collect::<Vec<_>>()
-        };
-        // (…each modifier going down with those held so far, itself among them, and up with those still held; the key
-        // with all of them, Shift typing its shifted character)
-        assert_eq!(jobs(&["control", "shift", "a"]), ["keydown Control 1", "keydown Shift 9", "press A 9", "keyup Shift 1", "keyup Control 0"]);
-        // (…a modifier alone presses no other key; a text that names none unfolds a character at a time)
-        assert_eq!(jobs(&["control"]), ["keydown Control 1", "keyup Control 0"]);
-        assert_eq!(jobs(&["shift", "ab"]), ["keydown Shift 8", "press A 8", "press B 8", "keyup Shift 0"]);
+    fn keys_press_as_selenium_sends_them() {
+        // (…a chord's modifiers each going down with those held so far, itself among them, and up with those still held;
+        // its key with all of them, Shift typing its shifted character)
+        assert_eq!(
+            jobs(vec![Atom::Chord(vec![sym("control"), sym("shift"), text("a")])]),
+            ["keydown Control 1", "keydown Shift 9", "press A 9", "keyup Shift 1", "keyup Control 0"]
+        );
+        // (…a modifier alone presses no other key; a text in a chord a character at a time)
+        assert_eq!(jobs(vec![Atom::Chord(vec![sym("control")])]), ["keydown Control 1", "keyup Control 0"]);
+        assert_eq!(jobs(vec![Atom::Chord(vec![sym("shift"), text("ab")])]), ["keydown Shift 8", "press A 8", "press B 8", "keyup Shift 0"]);
+        // (…a modifier symbol held for every key after it, to the end or `:null`)
+        assert_eq!(
+            jobs(vec![sym("shift"), text("a"), sym("enter"), sym("null"), text("b")]),
+            ["keydown Shift 8", "press A 8", "press Enter 8", "keyup Shift 0", "press b 0"]
+        );
+        // (…a name that names no key, none)
+        assert_eq!(sym("foo").unknown(), Some(&units("foo")[..]));
+        assert!(Atom::Chord(vec![sym("control"), text("foo")]).unknown().is_none());
     }
 
     #[test]
@@ -1962,7 +2046,7 @@ mod tests {
         assert_eq!((String::from_utf16_lossy(&f5.key), String::from_utf16_lossy(&f5.code), f5.key_code, f5.char.is_none()), ("F5".into(), "F5".into(), 116, true));
         let n7 = resolve(&units("numpad7"), false);
         assert_eq!((String::from_utf16_lossy(&n7.code), n7.char.map(|c| String::from_utf16_lossy(&c)), n7.location), ("Numpad7".into(), Some("7".into()), 3));
-        assert!(matches!(webdriver_key(&[0xE031]), Some(WebDriverKey::Key(k)) if String::from_utf16_lossy(&k.key) == "F1"));
-        assert!(matches!(webdriver_key(&[0xE051]), Some(WebDriverKey::Modifier(k)) if k.location == 2));
+        assert!(matches!(webdriver_key(&[0xE031]), Some(Token::Key(k)) if String::from_utf16_lossy(&k.key) == "F1"));
+        assert!(matches!(webdriver_key(&[0xE051]), Some(Token::Modifier(k)) if k.location == 2));
     }
 }

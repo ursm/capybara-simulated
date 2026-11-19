@@ -163,10 +163,10 @@ fn textarea_ends(scope: &mut v8::PinScope<'_, '_>, cid: i32, n: NodeId) -> (u32,
     if sel.direction == Direction::Backward { (sel.start, sel.end) } else { (sel.end, sel.start) }
 }
 
-// __dom.keyMoveTarget(element, motion, editingHost, selectionState, laidOut) -> where `motion` (`keyMotion`) takes the
-// caret of `element` (`key_move`): `[TO_POINT, [node], offset, x | undefined, upstream, flags]`, `[TO_VALUE, anchor,
-// offset, x | undefined, upstream, flags]`, `[TO_EDIT, edit]`, `[TEXT_WANTED]` — asked again once its text is laid out
-// — undefined where it moves nowhere.
+// __dom.keyMoveTarget(element, motion, editingHost, selectionState, laidOut) -> where `motion` (keys.rs `motion`, a MOVE
+// step's) takes the caret of `element` (`key_move`): `[TO_POINT, [node], offset, x | undefined, upstream, flags]`,
+// `[TO_VALUE, anchor, offset, x | undefined, upstream, flags]`, `[TO_EDIT, edit]`, `[TEXT_WANTED]` — asked again once its
+// text is laid out — undefined where it moves nowhere.
 fn key_move_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(n) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let motion = args.get(1).uint32_value(scope).unwrap_or(0);
