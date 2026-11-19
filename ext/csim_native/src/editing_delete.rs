@@ -11,6 +11,7 @@ use crate::mutation::Change;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "editDelete", edit_delete, context_id);
+    crate::dom::register(scope, ns, "deletionRange", deletion_range_op, context_id);
 }
 
 // Whether an island holds an editing host of its own — what no step deletes (Chrome).
@@ -98,8 +99,26 @@ pub(crate) fn deletion<'s>(
     word: bool,
 ) -> Option<(i32, (NodeId, u32), Vec<Change>)> {
     let collapsed = sc == ec && so == eo;
-    let (host, ((sc, so), (ec, eo))) = selection_host(&crate::dom::dom(scope).arena, (sc, so), (ec, eo))?;
+    let (host, range, took) = deletion_range(scope, args, (sc, so), (ec, eo), forward, word)?;
     let caller = crate::dom::realm_id(scope, args);
+    let cid = crate::dom::dom(scope).arena.get(host).map(|n| n.realm)?;
+    let (caret, changes) = delete(scope, caller, steps, host, range, took, forward, collapsed)??;
+    Some((cid, caret, changes))
+}
+
+// What a deletion from the selection from `(sc, so)` to `(ec, eo)` removes: its editing host, the range — the
+// selection's, or, collapsed, the caret's to where a step back (`forward`) takes it, a character's or a `word`'s — and
+// what the step took besides; none past the host's edge.
+pub(crate) fn deletion_range(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    (sc, so): (NodeId, u32),
+    (ec, eo): (NodeId, u32),
+    forward: bool,
+    word: bool,
+) -> Option<(NodeId, ((NodeId, u32), (NodeId, u32)), Took)> {
+    let collapsed = sc == ec && so == eo;
+    let (host, ((sc, so), (ec, eo))) = selection_host(&crate::dom::dom(scope).arena, (sc, so), (ec, eo))?;
     // (…the range: the selection's, or the caret's to where a step takes it — none past the host's edge)
     let range = if collapsed {
         crate::rendered::with_engine(scope, args, |engine, arena, now| {
@@ -134,9 +153,27 @@ pub(crate) fn deletion<'s>(
         Some((((sc, so), (ec, eo)), Took::Step))
     };
     let (range, took) = range?;
-    let cid = crate::dom::dom(scope).arena.get(host).map(|n| n.realm)?;
-    let (caret, changes) = delete(scope, caller, steps, host, range, took, forward, collapsed)??;
-    Some((cid, caret, changes))
+    Some((host, range, took))
+}
+
+// __dom.deletionRange(anchorNode, anchorOffset, focusNode, focusOffset, forward, word) -> [startNode, startOffset,
+// endNode, endOffset], or undefined: the range a deletion from the selection would remove (`deletion_range`), each
+// point at the Text node beside it (ranges.rs `text_point_of`) — the target range of its `beforeinput` (Input Events
+// §4.4: "the range that will be affected"; Chrome, Firefox).
+fn deletion_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(sc), Some(ec)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2)) else { return };
+    let (so, eo) = (args.get(1).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
+    let (forward, word) = (args.get(4).is_true(), args.get(5).is_true());
+    let Some((host, (start, end), _)) = deletion_range(scope, &args, (sc, so), (ec, eo), forward, word) else { return };
+    let Some(cid) = crate::dom::dom(scope).arena.get(host).map(|n| n.realm) else { return };
+    let arena = realm(scope, cid);
+    let points = [start, end].map(|p| crate::ranges::text_point_of(arena, p));
+    let mut out = Vec::with_capacity(4);
+    for (node, offset) in points {
+        out.push(crate::dom::node_value(scope, Some(node)));
+        out.push(v8::Integer::new_from_unsigned(scope, offset).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &out).into());
 }
 
 // The deletion of the range from `start` to `end` in the editing host `host` by realm `caller`'s code — a step's, back

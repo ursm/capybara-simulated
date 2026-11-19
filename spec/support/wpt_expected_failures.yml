@@ -2488,44 +2488,24 @@ editing/other/delete-without-unwrapping-first-line-of-child-block.html:
   return a range before the child <div>
 - getTargetRanges() for Backspace at <br>{<br><div id="child">]def<br>ghi</div> should
   return a range before the child <div>
-- getTargetRanges() for Backspace at <br>{<br><div id="child">d]ef<br>ghi</div> should
-  return a range ends at start of the child <div>
 - getTargetRanges() for Backspace at abc<br><br><div id="child">[]def<br>ghi</div>
   should return a range before the child <div>
 - getTargetRanges() for Backspace at abc<br>{<br><div id="child">]def<br>ghi</div>
   should return a range before the child <div>
-- getTargetRanges() for Backspace at abc<br>{<br><div id="child">d]ef<br>ghi</div>
-  should return a range ends at start of the child <div>
 - getTargetRanges() for Backspace at {<br><br><div id="child">]def<br>ghi</div> should
   return a range before the child <div>
-- getTargetRanges() for Backspace at {<br><br><div id="child">d]ef<br>ghi</div> should
-  return a range ends at start of the child <div>
 - getTargetRanges() for Delete at <b>[]\\n</b><div id="child">def<br>ghi</div> should
   return a range before the child <div>
-- getTargetRanges() for Delete at <b>abc\\n[]\\n</b></b><div id="child">def<br>ghi</div>
-  should return a range before the child <div>
 - getTargetRanges() for Delete at <br>{<br><div id="child">]def<br>ghi</div> should
   return a range before the child <div>
-- getTargetRanges() for Delete at <br>{<br><div id="child">d]ef<br>ghi</div> should
-  return a range ends at start of the child <div>
 - getTargetRanges() for Delete at <br>{}<br><div id="child">def<br>ghi</div> should
-  return a range before the child <div>
-- getTargetRanges() for Delete at []\\n<div id="child">def<br>ghi</div> should return
-  a range before the child <div>
-- getTargetRanges() for Delete at \\n[]\\n<div id="child">def<br>ghi</div> should
   return a range before the child <div>
 - getTargetRanges() for Delete at abc<br>{<br><div id="child">]def<br>ghi</div> should
   return a range before the child <div>
-- getTargetRanges() for Delete at abc<br>{<br><div id="child">d]ef<br>ghi</div> should
-  return a range ends at start of the child <div>
 - getTargetRanges() for Delete at abc<br>{}<br><div id="child">def<br>ghi</div> should
-  return a range before the child <div>
-- getTargetRanges() for Delete at abc\\n[]\\n<div id="child">def<br>ghi</div> should
   return a range before the child <div>
 - getTargetRanges() for Delete at {<br><br><div id="child">]def<br>ghi</div> should
   return a range before the child <div>
-- getTargetRanges() for Delete at {<br><br><div id="child">d]ef<br>ghi</div> should
-  return a range ends at start of the child <div>
 - getTargetRanges() for Delete at {}<br><div id="child">def<br>ghi</div> should return
   a range before the child <div>
 editing/other/delete.html:
@@ -10583,12 +10563,8 @@ editing/other/mathml-html-serializtion-on-copy.html:
 - MathML elements should preserve structure and content during copy-paste
 editing/other/merge-span-with-style-after-backspace-having-contenteditable.html:
 - waiting for command to execute
-editing/other/merge-span-with-style-after-forwarddelete-having-contenteditable.html:
-- waiting for command to execute
 editing/other/merge-span-with-style-after-pressing-enter-followed-by-backspace-in-contenteditable-div.html:
 - waiting for command to execute
-editing/other/no-beforeinput-when-no-selection.html:
-- Typing Shift + Enter
 editing/other/non-html-document.html:
 - editing APIs on an XML document should be disabled
 editing/other/paste_text_with_text_transform.html:
@@ -64301,19 +64277,12 @@ editing/whitespaces/delete-chars-following-collapsible-white-space.html:
 - Backspace when <p>abc</p><b> d[]</b><p>efg</p>
 - Backspace when <p>abc</p><b> d[]</b><p>efg</p> after extending selection backward
 - Ctrl+Backspace when " abc[]<p>def</p>"
-- Ctrl+Backspace when "<b>abc def[]</b><p>ghi</p>"
 - Ctrl+Backspace when "<p> abc[]</p>"
-- Ctrl+Backspace when "<p><b>abc def[]</b></p>"
-- Ctrl+Backspace when "<p>abc def[]</p>"
+- Ctrl+Backspace when "<p>abc def[]<br></p>"
 - Ctrl+Backspace when "<p>abc</p> def[]"
 - Ctrl+Backspace when "<p>abc</p> def[]<p>ghi</p>"
 - Ctrl+Backspace when "<p>abc</p><b> def[]</b>"
 - Ctrl+Backspace when "<p>abc</p><b> def[]</b><p>ghi</p>"
-- Ctrl+Backspace when "<p>abc</p>def ghi[]"
-- Ctrl+Backspace when "<p>abc</p>def ghi[]<p>jkl</p>"
-- Ctrl+Backspace when "abc def[]<p>ghi</p>"
-editing/whitespaces/delete-last-word-in-inline-block-editing-host.html:
-- 'Preserve trailing white-space after deleting the last word in `display: inline-block`'
 editing/whitespaces/forwarddelete-chars-following-collapsible-white-space.html:
 - Backspace when  []a<p>bc</p>
 - Backspace when <p> []a</p>
@@ -64324,17 +64293,12 @@ editing/whitespaces/forwarddelete-chars-following-collapsible-white-space.html:
 - Backspace when <p>abc</p><b> []d</b>
 - Backspace when <p>abc</p><b> []d</b><p>efg</p>
 - Ctrl+Delete when " []abc<p>def</p>"
-- Ctrl+Delete when "<b>abc []def</b><p>ghi</p>"
 - Ctrl+Delete when "<p> []abc</p>"
-- Ctrl+Delete when "<p><b>abc []def</b></p>"
-- Ctrl+Delete when "<p>abc []def</p>"
+- Ctrl+Delete when "<p>abc []def<br></p>"
 - Ctrl+Delete when "<p>abc</p> []def"
 - Ctrl+Delete when "<p>abc</p> []def<p>ghi</p>"
 - Ctrl+Delete when "<p>abc</p><b> []def</b>"
 - Ctrl+Delete when "<p>abc</p><b> []def</b><p>ghi</p>"
-- Ctrl+Delete when "<p>abc</p>def []ghi"
-- Ctrl+Delete when "<p>abc</p>def []ghi<p>jkl</p>"
-- Ctrl+Delete when "abc []def<p>ghi</p>"
 - Delete when  []a<p>bc</p> after extending selection forward
 - Delete when <p> []a</p> after extending selection forward
 - Delete when <p><b> []a</b></p> after extending selection forward
@@ -67937,8 +67901,6 @@ html/webappapis/scripting/events/event-handler-idl-attribute-realm.window.js:
 input-events/input-events-arrow-key-on-number-input-delete-document.html:
 - Number input should not crash and not fire subsequent events when event handler
   removes document
-input-events/input-events-get-target-ranges.html:
-- getTargetRanges() returns correct range and cleared after dispatch.
 input-events/input-events-spin-button-click-on-number-input-delete-document.html:
 - Number input should not crash and not fire subsequent events when event handler
   removes document
@@ -68194,8 +68156,8 @@ selection/bidi/modify-move-by-character.html:
 - 'RTL-LTR context in LTR paragraph: move left 3 chars'
 - 'RTL-LTR context in LTR paragraph: move right 3 chars'
 selection/caret/move-around-contenteditable-false.html:
-- 'Move caret from <br> following non-editable text to end of preceding editable text
-  in next paragraph: first arrow-left should move caret before non-editable text'
+- Move caret from <br> following non-editable text to end of preceding editable text
+  in next paragraph
 - 'Move caret from empty editable paragraph to editable text following non-editable
   text in next paragraph: first arrow-right should move caret before non-editable
   text'
@@ -68206,29 +68168,15 @@ selection/caret/move-around-contenteditable-false.html:
   next paragraph: first arrow-right should move caret before non-editable text'
 - 'Move caret from end of editable text node to <br> following non-editable text in
   next paragraph: second arrow-right should move caret after non-editable text'
-- 'Move caret from start of text following non-editable text to empty preceding editable
-  paragraph: first arrow-left should move caret before non-editable text'
+- Move caret from start of text following non-editable text to empty preceding editable
+  paragraph
 selection/caret/move-around-generated-content.html:
 - 'Moving caret between list items using arrow keys: arrow-down should move the caret
   to the final paragraph'
 - 'Moving caret between list items using arrow keys: arrow-down should move the caret
   to the second list item'
 - 'Moving caret between list items using arrow keys: arrow-down should move the caret
-  to the start of the first list item'
-- 'Moving caret between list items using arrow keys: arrow-down should move the caret
   to the third list item'
-- 'Moving caret past the block-quote using arrow keys: arrow-down should move the
-  caret to the end of the quote'
-- 'Moving caret past the block-quote using arrow keys: arrow-down should move the
-  caret to the final paragraph'
-- 'Moving caret past the block-quote using arrow keys: arrow-down should move the
-  caret to the start of the block quote'
-- 'Moving caret past the block-quote using arrow keys: arrow-left should move the
-  caret to the end of the quote'
-- 'Moving caret past the block-quote using arrow keys: arrow-right should move the
-  caret forward by one character'
-- 'Moving caret past the block-quote using arrow keys: arrow-up should move the caret
-  to into the first line'
 selection/contenteditable/collapse.html:
 - Selection.collapse() must succeed across siblings
 - Selection.collapse() must succeed for the ancestor
@@ -68271,19 +68219,6 @@ selection/extend-selection-in-shadow-tree.html:
 selection/fire-selectionchange-event-on-document-if-textcontrol-element-is-in-shadow-tree.html:
 - selectionchange event fired on the document in case TextControl element is in Shadow
   Tree
-selection/fire-selectionchange-event-on-pressing-backspace.html:
-- Selectionchange event is fired after removing the range
-selection/move-by-word-korean.html:
-- Latin/Korean transition should be considered a word boundary when moving backward
-- Latin/Korean transition should be considered a word boundary when moving forward
-selection/move-by-word-with-symbol.html:
-- Symbols should be included while moving backward by word in input element
-- Symbols should be included while moving backward by word in textarea element
-- Symbols should be included while moving forward by word in input element
-- Symbols should be included while moving forward by word in textarea element
-selection/onselectstart-on-key-in-contenteditable.html:
-- Select All when 789[]<br></div>
-- Select All when 789[]<br></div>
 selection/script-and-style-elements.html:
 - 'Selection: STYLE and SCRIPT elements should be included in Selection.toString()
   if they are display!=none'

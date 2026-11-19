@@ -116,4 +116,43 @@ RSpec.describe 'Key gestures' do
     s.find('#a').send_keys([:control])
     expect(log(s)).to eq(['keydown a C', 'keyup a', 'sel 0-5'])
   end
+
+  # A keydown and a keyup are tasks of their own: what a keydown queued that is due runs before its keyup, and a key's
+  # tasks before the next key's (Chrome and Firefox: a 0 ms timer, a `select` event).
+  it 'runs the tasks a keydown queued before its keyup' do
+    s = session_of('<input id=a value=hello>')
+    s.execute_script(<<~JS)
+      a.addEventListener('keydown', (e) => setTimeout(() => L.push('timer ' + e.key)));
+      a.addEventListener('select', () => L.push('select'));
+    JS
+    s.find('#a').send_keys('x', [:control, 'a'])
+    expect(log(s).grep(/timer|select|keyup/)).to eq(['timer x', 'keyup a', 'timer Control', 'timer a', 'select', 'keyup a C', 'keyup a'])
+  end
+
+  # A key WebDriver's table names — a function key, Insert, a numpad key — has its `key`, `code` and `location`: a
+  # function key types nothing, a numpad digit its digit (Firefox, which implements the table).
+  it 'presses the keys WebDriver names as their key and code' do
+    s = session_of('<input id=a>')
+    s.execute_script("a.addEventListener('keydown', (e) => L.push([e.key, e.code, e.keyCode, e.location].join(' ')))")
+    s.find('#a').send_keys(:f5, :insert, :numpad7, [:right_shift, 'b'])
+    expect(log(s).grep(/^\S+ \S+ \d+ \d$/)).to eq(['F5 F5 116 0', 'Insert Insert 45 0', '7 Numpad7 103 3', 'Shift ShiftRight 16 2', 'B KeyB 66 0'])
+    expect(s.evaluate_script('a.value')).to eq('7B')
+  end
+
+  # Control + B in an editing host bolds the selection as a user's command — its beforeinput targeting the selection,
+  # the edit, its input (Chrome) — and Backspace's beforeinput targets the range it deletes (Chrome and Firefox).
+  it 'formats and deletes in an editing host with their target ranges' do
+    s = session_of('<div id=e contenteditable>abc</div>')
+    s.execute_script(<<~JS)
+      e.addEventListener('beforeinput', (ev) => L.push('ranges ' + ev.getTargetRanges().map((r) => r.startContainer.nodeName + r.startOffset + '-' + r.endContainer.nodeName + r.endOffset).join()));
+      e.focus(); getSelection().setBaseAndExtent(e.firstChild, 0, e.firstChild, 2);
+    JS
+    s.find('#e').send_keys([:control, 'b'])
+    expect(s.evaluate_script('e.innerHTML')).to eq('<b>ab</b>c')
+    expect(log(s).grep(/input|ranges/)).to eq(['beforeinput e formatBold', 'ranges #text0-#text2', 'input e formatBold'])
+    s.execute_script("e.innerHTML = 'abc'; getSelection().collapse(e.firstChild, 2)")
+    s.find('#e').send_keys(:backspace)
+    expect(log(s).grep(/ranges/)).to eq(['ranges #text1-#text2'])
+    expect(s.evaluate_script('e.innerHTML')).to eq('ac')
+  end
 end

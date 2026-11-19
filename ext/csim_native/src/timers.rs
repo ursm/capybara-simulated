@@ -401,6 +401,19 @@ impl RealmArena {
         self.event_loop.first.set(Some(first));
         first
     }
+    // Whether the agent's event loop has work due by now — what a step at no advance of the clock runs (keys.rs `TURN`,
+    // `DRAIN`): a task, or a rendering opportunity with an animation frame callback requested.
+    pub(crate) fn work_due(&self) -> bool {
+        if self.agent_first().is_some_and(|((Due(due), ..), _)| due <= self.event_loop.clock) {
+            return true;
+        }
+        if self.event_loop.next_frame() > self.event_loop.clock {
+            return false;
+        }
+        let mut requested = false;
+        self.each_event_loop_realm(|r| requested |= self.realm_state(r).is_some_and(|s| !s.timers.frames.is_empty()));
+        requested
+    }
     // …none of a crossing queue's turns (`Source::Turn`).
     fn agent_first_task(&self) -> Option<((Due, u8, u64, i64), i32)> {
         self.agent_first_by(|t| t.order.iter().find(|&&(.., key)| t.sources.get(&key) != Some(&Source::Turn)).copied())

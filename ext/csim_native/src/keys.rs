@@ -7,47 +7,110 @@
 
 use crate::dom::{NodeId, RealmArena};
 
-// A key: its `key`, `code`, `keyCode`, the character it types and the `inputType` of that — and whether it was named.
+// A key: its `key`, `code`, `keyCode`, its `location` (UI Events: 0 standard, 1 left, 2 right, 3 numpad), the character
+// it types and the `inputType` of that — and whether it was named.
+#[derive(Clone)]
 pub(crate) struct Key {
     pub(crate) named: bool,
     pub(crate) key: Vec<u16>,
     pub(crate) code: Vec<u16>,
     pub(crate) key_code: u32,
+    pub(crate) location: u32,
     pub(crate) char: Option<Vec<u16>>,
     pub(crate) input_type: Option<&'static str>,
 }
 
-// The keys named, by name.
-const NAMED: [(&str, &str, &str, u32, Option<&str>, Option<&str>); 17] = [
-    ("enter", "Enter", "Enter", 13, Some("\n"), Some("insertLineBreak")),
-    ("return", "Enter", "Enter", 13, Some("\n"), Some("insertLineBreak")),
-    // (…moves focus, types nothing)
-    ("tab", "Tab", "Tab", 9, None, None),
-    ("space", " ", "Space", 32, Some(" "), Some("insertText")),
-    ("backspace", "Backspace", "Backspace", 8, None, Some("deleteContentBackward")),
-    ("delete", "Delete", "Delete", 46, None, Some("deleteContentForward")),
-    ("escape", "Escape", "Escape", 27, None, None),
-    ("up", "ArrowUp", "ArrowUp", 38, None, None),
-    ("down", "ArrowDown", "ArrowDown", 40, None, None),
-    ("left", "ArrowLeft", "ArrowLeft", 37, None, None),
-    ("right", "ArrowRight", "ArrowRight", 39, None, None),
-    ("home", "Home", "Home", 36, None, None),
-    ("end", "End", "End", 35, None, None),
-    ("page_up", "PageUp", "PageUp", 33, None, None),
-    ("page_down", "PageDown", "PageDown", 34, None, None),
-    ("pageup", "PageUp", "PageUp", 33, None, None),
-    ("pagedown", "PageDown", "PageDown", 34, None, None),
+// The keys named, by name — Capybara's and Selenium's symbols, as WebDriver's table of keys gives them their `key` and
+// `code` (Firefox, measured 2026-11-19: the function keys, Insert, Pause, Help, Cancel, Clear type nothing; the numpad's
+// digits and operators type their character, `location` 3) — `keyCode` the Windows virtual key's (Chrome's).
+type Named = (&'static str, &'static str, &'static str, u32, Option<&'static str>, Option<&'static str>, u32);
+const NAMED: &[Named] = &[
+    ("enter", "Enter", "Enter", 13, Some("\n"), Some("insertLineBreak"), 0),
+    ("return", "Enter", "Enter", 13, Some("\n"), Some("insertLineBreak"), 0),
+    ("tab", "Tab", "Tab", 9, None, None, 0),
+    ("space", " ", "Space", 32, Some(" "), Some("insertText"), 0),
+    ("backspace", "Backspace", "Backspace", 8, None, Some("deleteContentBackward"), 0),
+    ("delete", "Delete", "Delete", 46, None, Some("deleteContentForward"), 0),
+    ("escape", "Escape", "Escape", 27, None, None, 0),
+    ("up", "ArrowUp", "ArrowUp", 38, None, None, 0),
+    ("down", "ArrowDown", "ArrowDown", 40, None, None, 0),
+    ("left", "ArrowLeft", "ArrowLeft", 37, None, None, 0),
+    ("right", "ArrowRight", "ArrowRight", 39, None, None, 0),
+    ("arrow_up", "ArrowUp", "ArrowUp", 38, None, None, 0),
+    ("arrow_down", "ArrowDown", "ArrowDown", 40, None, None, 0),
+    ("arrow_left", "ArrowLeft", "ArrowLeft", 37, None, None, 0),
+    ("arrow_right", "ArrowRight", "ArrowRight", 39, None, None, 0),
+    ("home", "Home", "Home", 36, None, None, 0),
+    ("end", "End", "End", 35, None, None, 0),
+    ("page_up", "PageUp", "PageUp", 33, None, None, 0),
+    ("page_down", "PageDown", "PageDown", 34, None, None, 0),
+    ("pageup", "PageUp", "PageUp", 33, None, None, 0),
+    ("pagedown", "PageDown", "PageDown", 34, None, None, 0),
+    ("insert", "Insert", "Insert", 45, None, None, 0),
+    ("cancel", "Cancel", "", 3, None, None, 0),
+    ("help", "Help", "Help", 6, None, None, 0),
+    ("clear", "Clear", "", 12, None, None, 0),
+    ("pause", "Pause", "Pause", 19, None, None, 0),
+    ("zenkaku_hankaku", "ZenkakuHankaku", "", 0, None, None, 0),
+    ("f1", "F1", "F1", 112, None, None, 0),
+    ("f2", "F2", "F2", 113, None, None, 0),
+    ("f3", "F3", "F3", 114, None, None, 0),
+    ("f4", "F4", "F4", 115, None, None, 0),
+    ("f5", "F5", "F5", 116, None, None, 0),
+    ("f6", "F6", "F6", 117, None, None, 0),
+    ("f7", "F7", "F7", 118, None, None, 0),
+    ("f8", "F8", "F8", 119, None, None, 0),
+    ("f9", "F9", "F9", 120, None, None, 0),
+    ("f10", "F10", "F10", 121, None, None, 0),
+    ("f11", "F11", "F11", 122, None, None, 0),
+    ("f12", "F12", "F12", 123, None, None, 0),
+    ("numpad0", "0", "Numpad0", 96, Some("0"), Some("insertText"), 3),
+    ("numpad1", "1", "Numpad1", 97, Some("1"), Some("insertText"), 3),
+    ("numpad2", "2", "Numpad2", 98, Some("2"), Some("insertText"), 3),
+    ("numpad3", "3", "Numpad3", 99, Some("3"), Some("insertText"), 3),
+    ("numpad4", "4", "Numpad4", 100, Some("4"), Some("insertText"), 3),
+    ("numpad5", "5", "Numpad5", 101, Some("5"), Some("insertText"), 3),
+    ("numpad6", "6", "Numpad6", 102, Some("6"), Some("insertText"), 3),
+    ("numpad7", "7", "Numpad7", 103, Some("7"), Some("insertText"), 3),
+    ("numpad8", "8", "Numpad8", 104, Some("8"), Some("insertText"), 3),
+    ("numpad9", "9", "Numpad9", 105, Some("9"), Some("insertText"), 3),
+    ("multiply", "*", "NumpadMultiply", 106, Some("*"), Some("insertText"), 3),
+    ("add", "+", "NumpadAdd", 107, Some("+"), Some("insertText"), 3),
+    ("separator", ",", "NumpadComma", 108, Some(","), Some("insertText"), 3),
+    ("subtract", "-", "NumpadSubtract", 109, Some("-"), Some("insertText"), 3),
+    ("decimal", ".", "NumpadDecimal", 110, Some("."), Some("insertText"), 3),
+    ("divide", "/", "NumpadDivide", 111, Some("/"), Some("insertText"), 3),
+    ("equals", "=", "NumpadEqual", 187, Some("="), Some("insertText"), 3),
+    ("semicolon", ";", "Semicolon", 186, Some(";"), Some("insertText"), 0),
+    ("numpad_page_up", "PageUp", "Numpad9", 33, None, None, 3),
+    ("numpad_page_down", "PageDown", "Numpad3", 34, None, None, 3),
+    ("numpad_end", "End", "Numpad1", 35, None, None, 3),
+    ("numpad_home", "Home", "Numpad7", 36, None, None, 3),
+    ("numpad_left", "ArrowLeft", "Numpad4", 37, None, None, 3),
+    ("numpad_up", "ArrowUp", "Numpad8", 38, None, None, 3),
+    ("numpad_right", "ArrowRight", "Numpad6", 39, None, None, 3),
+    ("numpad_down", "ArrowDown", "Numpad2", 40, None, None, 3),
+    ("numpad_insert", "Insert", "Numpad0", 45, None, None, 3),
+    ("numpad_delete", "Delete", "NumpadDecimal", 46, None, Some("deleteContentForward"), 3),
 ];
-// The modifiers, by name: `key`, `code`, `keyCode` — the left one of each pair.
-const MODIFIERS: [(&str, &str, &str, u32); 8] = [
-    ("shift", "Shift", "ShiftLeft", 16),
-    ("control", "Control", "ControlLeft", 17),
-    ("ctrl", "Control", "ControlLeft", 17),
-    ("alt", "Alt", "AltLeft", 18),
-    ("option", "Alt", "AltLeft", 18),
-    ("meta", "Meta", "MetaLeft", 91),
-    ("command", "Meta", "MetaLeft", 91),
-    ("cmd", "Meta", "MetaLeft", 91),
+// The modifiers, by name: `key`, `code`, `keyCode` and `location` — a name of no side the left one's.
+const MODIFIERS: &[(&str, &str, &str, u32, u32)] = &[
+    ("shift", "Shift", "ShiftLeft", 16, 1),
+    ("left_shift", "Shift", "ShiftLeft", 16, 1),
+    ("right_shift", "Shift", "ShiftRight", 16, 2),
+    ("control", "Control", "ControlLeft", 17, 1),
+    ("ctrl", "Control", "ControlLeft", 17, 1),
+    ("left_control", "Control", "ControlLeft", 17, 1),
+    ("right_control", "Control", "ControlRight", 17, 2),
+    ("alt", "Alt", "AltLeft", 18, 1),
+    ("option", "Alt", "AltLeft", 18, 1),
+    ("left_alt", "Alt", "AltLeft", 18, 1),
+    ("right_alt", "Alt", "AltRight", 18, 2),
+    ("meta", "Meta", "MetaLeft", 91, 1),
+    ("command", "Meta", "MetaLeft", 91, 1),
+    ("cmd", "Meta", "MetaLeft", 91, 1),
+    ("left_meta", "Meta", "MetaLeft", 91, 1),
+    ("right_meta", "Meta", "MetaRight", 92, 2),
 ];
 // A punctuation character's key: its `code` and `keyCode`.
 const PUNCTUATION: [(char, &str, u32); 33] = [
@@ -131,11 +194,12 @@ fn lower(spec: &[u16]) -> String {
 // character) with none, `keyCode` 0 (Chrome).
 pub(crate) fn resolve(spec: &[u16], shift: bool) -> Key {
     let named = |name: &str| {
-        NAMED.iter().find(|n| n.0 == name).map(|&(_, key, code, key_code, ch, input_type)| Key {
+        NAMED.iter().find(|n| n.0 == name).map(|&(_, key, code, key_code, ch, input_type, location)| Key {
             named: true,
             key: units(key),
             code: units(code),
             key_code,
+            location,
             char: ch.map(units),
             input_type,
         })
@@ -146,7 +210,7 @@ pub(crate) fn resolve(spec: &[u16], shift: bool) -> Key {
     match spec {
         [0x0a] => return named("enter").expect("a named key"),
         [0x09] => return named("tab").expect("a named key"),
-        [] => return Key { named: false, key: Vec::new(), code: Vec::new(), key_code: 0, char: None, input_type: None },
+        [] => return Key { named: false, key: Vec::new(), code: Vec::new(), key_code: 0, location: 0, char: None, input_type: None },
         _ => {}
     }
     let typed = shift.then(|| shifted(spec)).flatten().map_or_else(|| spec.to_vec(), |u| vec![u]);
@@ -159,13 +223,21 @@ pub(crate) fn resolve(spec: &[u16], shift: bool) -> Key {
         },
         _ => (Vec::new(), 0),
     };
-    Key { named: false, key: typed.clone(), code, key_code, char: Some(typed), input_type: Some("insertText") }
+    Key { named: false, key: typed.clone(), code, key_code, location: 0, char: Some(typed), input_type: Some("insertText") }
 }
 
 // The modifier `name` names: its `key`, `code` and `keyCode` — None for a name that is none.
-pub(crate) fn modifier(name: &[u16]) -> Option<(&'static str, &'static str, u32)> {
+pub(crate) fn modifier(name: &[u16]) -> Option<Key> {
     let name = lower(name);
-    MODIFIERS.iter().find(|m| m.0 == name).map(|&(_, key, code, key_code)| (key, code, key_code))
+    MODIFIERS.iter().find(|m| m.0 == name).map(|&(_, key, code, key_code, location)| Key {
+        named: true,
+        key: units(key),
+        code: units(code),
+        key_code,
+        location,
+        char: None,
+        input_type: None,
+    })
 }
 
 // A chord's parts (`[:control, :shift, 'a']`), read as a keyboard presses them: the modifiers before its key — every
@@ -175,7 +247,7 @@ pub(crate) fn modifier(name: &[u16]) -> Option<(&'static str, &'static str, u32)
 // modifiers held (`unfold`: `[:shift, 'side']` is S, I, D, E).
 pub(crate) struct Chord {
     pub(crate) modifiers: u32,
-    pub(crate) keys: Vec<(&'static str, &'static str, u32)>,
+    pub(crate) keys: Vec<Key>,
     pub(crate) key: Vec<u16>,
     pub(crate) unfold: bool,
 }
@@ -202,7 +274,8 @@ pub(crate) const INTERACTIVE: u32 = 1 << 3;
 pub(crate) const KEYPRESS: u32 = 1 << 4;
 // Escape's: a close request (HTML §6.4.4).
 pub(crate) const CLOSE_REQUEST: u32 = 1 << 5;
-// An arrow on a `<select>` or a radio: the adjacent option, the next or previous radio of its group.
+// An arrow on a `<select>` or a radio: the adjacent option, the next or previous radio of its group — ArrowDown /
+// ArrowUp on an `<input list>`: its datalist shown (open-ui's customizable combobox).
 pub(crate) const ARROW_CHOICE: u32 = 1 << 6;
 // ArrowUp / ArrowDown on a stepped `<input>` (number, range, date …) with no `readonly` or `disabled`: a step.
 pub(crate) const STEP: u32 = 1 << 7;
@@ -221,6 +294,11 @@ pub(crate) const SELECT_ALL: u32 = 1 << 12;
 pub(crate) const CUT: u32 = 1 << 13;
 pub(crate) const COPY: u32 = 1 << 14;
 pub(crate) const PASTE: u32 = 1 << 15;
+// Control / Meta + Z in a typeable element: undo — with Shift, or Control + Y, redo (Chrome on Linux, Firefox).
+pub(crate) const UNDO: u32 = 1 << 16;
+pub(crate) const REDO: u32 = 1 << 17;
+// Control / Meta + B, I, U in an editing host: bold, italic, underline (Chrome).
+pub(crate) const FORMAT: u32 = 1 << 18;
 // The modifiers held, as `plan` takes them.
 pub(crate) const CTRL: u32 = 1;
 pub(crate) const META: u32 = 1 << 1;
@@ -255,7 +333,8 @@ pub(crate) fn plan(arena: &RealmArena, id: NodeId, key: &[u16], char: Option<&[u
     set(KEYPRESS, !chord && (is("Enter") || (one_character(key) && char == Some(key))));
     set(CLOSE_REQUEST, is("Escape"));
     let arrow = is("ArrowDown") || is("ArrowUp") || is("ArrowLeft") || is("ArrowRight");
-    set(ARROW_CHOICE, arrow && (tag == "select" || input_type == "radio"));
+    let combobox = tag == "input" && n.input_has(crate::input_types::LIST) && n.plain_attr("list").is_some();
+    set(ARROW_CHOICE, arrow && (tag == "select" || input_type == "radio" || (combobox && (is("ArrowDown") || is("ArrowUp")))));
     set(STEP, (is("ArrowUp") || is("ArrowDown")) && tag == "input" && control && n.input_has(crate::input_types::NUMERIC));
     set(IMPLICIT_SUBMIT, is("Enter") && tag == "input" && !chord && !arena.is_actually_disabled(id));
     let link = tag == "a" && n.is_hyperlink();
@@ -268,6 +347,10 @@ pub(crate) fn plan(arena: &RealmArena, id: NodeId, key: &[u16], char: Option<&[u
     set(CUT, command && letter(b'x'));
     set(COPY, command && letter(b'c'));
     set(PASTE, command && letter(b'v'));
+    let shift = modifiers & SHIFT != 0;
+    set(UNDO, command && typeable && !shift && letter(b'z'));
+    set(REDO, command && typeable && ((shift && letter(b'z')) || (!shift && letter(b'y'))));
+    set(FORMAT, command && host && (letter(b'b') || letter(b'i') || letter(b'u')));
     plan
 }
 
@@ -532,11 +615,29 @@ fn is_units(units: &[u16], ascii: &str) -> bool {
 // fired was canceled, whether an edit changed anything — and they fire what they are told to: which event, at what,
 // with which key and modifiers, and whether at all, and which default action runs, is decided here, each step as the
 // page stands once the one before it ran (a listener may move focus, make a field read-only, take a link's `href`).
+//
+// A gesture runs in one task until a key event that is a task of its own — each keydown and keyup but a gesture's
+// first, as the platform queues each of a keyboard's events — where tasks are due before it (`TURN`, `turns`): the host
+// runs the event loop that far, as the tasks a keydown queued — a 0 ms timer, a `select` event — run before the keyup
+// in Chrome and Firefox, and then asks for the gesture's next step (`keyNext`). Steps that wait on no outcome come in a
+// batch, one host call each batch.
 #[derive(Default)]
 pub(crate) struct Keyboard {
     // The gestures being played, the innermost last: one a step of another started (a frame's, a nested drain's) plays
     // to its end before the outer one goes on.
     gestures: Vec<KeyGesture>,
+    // WebDriver's input state of the keyboard the WPT testdriver's key actions press (`KEY_DOWN` / `KEY_UP`): the
+    // modifiers held, and the keys down, by the value each was pressed by, and what their keydown left.
+    held: u32,
+    pressed: Vec<(Vec<u16>, Pressed)>,
+}
+
+// A key down, between its keydown and its keyup: whether its default actions were canceled, and the element its keydown
+// went to — what its keyup's (Space's activation) asks.
+#[derive(Clone, Copy)]
+struct Pressed {
+    blocked: bool,
+    down: Option<NodeId>,
 }
 
 // A gesture: what it has yet to do, the key being pressed and how far it is, and where the keys go.
@@ -554,20 +655,35 @@ struct KeyGesture {
     // The job under way, and whether the bindings owe its stage the outcome of the step they took last.
     stage: Stage,
     owed: bool,
-    // What it answers at its end.
+    // Whether the host runs the event loop between its tasks (`TURN`), how many of its key events were fired, and whether
+    // the boundary before the next was turned at.
+    turns: bool,
+    events: u32,
+    turned: bool,
+    // What it answers at its end, and a key it left down (`KEY_DOWN`), for the keyboard to keep.
     answer: bool,
+    left_down: Option<(Vec<u16>, Pressed)>,
 }
 
 // A job of a gesture.
 enum Job {
     // The keys' target as the steps before left it: the focused element from now on looked at.
     Begin,
-    // A key pressed and released with the modifiers `held`.
-    Press(Key, u32),
-    // A chord's modifier key pressed, or released: its `key`, `code` and `keyCode`, and the modifiers held as it is.
-    Modifier(&'static str, &'static str, &'static str, u32, u32),
+    // A key pressed with the modifiers `held` — and released, or only one of the two (a testdriver's key action).
+    Press(Key, u32, Phases),
+    // A modifier key pressed ("keydown") or released ("keyup"), with the modifiers held as it is.
+    Modifier(&'static str, Key, u32),
     // `set`'s, given the value.
     Set(SetValue),
+}
+
+// A key's press as a job takes it: down and up, or only down (its key, by `value`, kept as the keyboard's), or only up
+// (what its keydown left).
+#[derive(Clone)]
+enum Phases {
+    Both,
+    Down(Vec<u16>),
+    Up(Pressed),
 }
 
 // How far the job under way is.
@@ -581,6 +697,7 @@ enum Stage {
 struct Press {
     key: Key,
     held: u32,
+    phases: Phases,
     at: PressAt,
     // Whether its default actions are canceled: its keydown, keypress or beforeinput canceled.
     blocked: bool,
@@ -605,6 +722,7 @@ enum PressAt {
     Input,
     Submit,
     Accelerator,
+    History,
     FocusNavigation,
     KeyUp,
     Activation,
@@ -622,6 +740,7 @@ struct SetJob {
 }
 #[derive(Clone, Copy, PartialEq)]
 enum SetAt {
+    Drain,
     Focused,
     Write,
     Submit,
@@ -630,12 +749,11 @@ enum SetAt {
 
 // A step, as the bindings take it (`step_value`) — or the engine itself (`Edited`, `Dirty`).
 enum Step {
-    Key { ty: &'static str, target: NodeId, key: Vec<u16>, code: Vec<u16>, key_code: u32, char_code: u32, modifiers: u32, forget_caret: bool },
-    Input { ty: &'static str, target: NodeId, input_type: &'static str, data: Option<Vec<u16>>, cancelable: bool, target_ranges: bool },
+    Key { ty: &'static str, target: NodeId, key: Vec<u16>, code: Vec<u16>, key_code: u32, char_code: u32, location: u32, modifiers: u32, forget_caret: bool },
+    Input { ty: &'static str, target: NodeId, input_type: &'static str, data: Option<Vec<u16>>, cancelable: bool, ranges: Ranges },
     // (…an `input` that is a plain Event: HTML's "fire an event named input" of a value the user changed other than by
     // editing its text)
     ValueInput(NodeId),
-    Change(NodeId),
     Focus(NodeId),
     Blur(NodeId),
     CaretEnd(NodeId),
@@ -660,12 +778,46 @@ enum Step {
     Pick(NodeId),
     ClickResolve(NodeId),
     ClearHost(NodeId),
+    // (…`set`'s events around its write, in their one order (form-fields.js `setEvents`): a keydown and a keyup of no key
+    // around them where it typed into a field it focused — Tribute initialises its per-keystroke state in the keydown,
+    // there being no character's chain to lean on — `input` — an InputEvent where its text was typed, a plain Event
+    // where a value was picked, slid or written otherwise: HTML's "fire an event named input" — and `change` (which a
+    // checkbox's fires on a user's interaction alone, but Selenium's `set` fires both), the user's edit committed so its
+    // blur fires none again)
+    SetEvents { target: NodeId, keys: bool, typed: bool },
+    // (…an editing command a key asks, as a user's gesture asks it: its `beforeinput`, its edit, its `input` — Control + B's
+    // `bold`)
+    Command(&'static str),
+    // (…the event loop run as far as what is due now, by the host, before the next of its key events: `TURN`)
+    Turn,
     // (…the engine's own: the user edited the control or not — `change_on_blur.rs` — and it is dirtied by the user)
     Edited(NodeId, bool),
     Dirty(NodeId),
 }
 
+// The target ranges of a `beforeinput` (Input Events §4.4): none — a text control's, a step's — the selection's (an
+// insertion's), or the range a deletion back or `forward`, of a character or a `word`, removes (editing_delete.rs
+// `deletionRange`).
+#[derive(Clone, Copy)]
+enum Ranges {
+    None,
+    Selection,
+    Deletion { forward: bool, word: bool },
+}
+
 impl Key {
+    // The bit of a modifier key (`CTRL` …).
+    fn modifier_bit(&self) -> u32 {
+        if is_units(&self.key, "Control") {
+            CTRL
+        } else if is_units(&self.key, "Meta") {
+            META
+        } else if is_units(&self.key, "Alt") {
+            ALT
+        } else {
+            SHIFT
+        }
+    }
     // Its `keypress` char code, where it produces a character: Enter's a carriage return, a printable one's its
     // character's code point — UI Events' legacy `charCode`, "the Unicode reference number" — an emoji's past U+FFFF.
     fn char_code(&self) -> u32 {
@@ -685,19 +837,12 @@ fn focus_of(arena: &RealmArena, cid: i32) -> Option<NodeId> {
 }
 
 // The bits (`CTRL` …) of the modifier keys `keys` held.
-fn modifier_bits(keys: &[(&'static str, &'static str, u32)]) -> u32 {
-    keys.iter().fold(0, |bits, &(key, ..)| {
-        bits | match key {
-            "Control" => CTRL,
-            "Meta" => META,
-            "Alt" => ALT,
-            _ => SHIFT,
-        }
-    })
+fn modifier_bits(keys: &[Key]) -> u32 {
+    keys.iter().fold(0, |bits, k| bits | k.modifier_bit())
 }
 
 impl KeyGesture {
-    fn new(cid: i32, to: NodeId) -> Self {
+    fn new(cid: i32, to: NodeId, turns: bool) -> Self {
         KeyGesture {
             cid,
             to,
@@ -706,12 +851,17 @@ impl KeyGesture {
             queued: Default::default(),
             stage: Stage::Idle,
             owed: false,
+            turns,
+            events: 0,
+            turned: false,
             answer: true,
+            left_down: None,
         }
     }
 
-    // `send_keys`' keys to `n` (`atoms`: a text typed a character at a time, a key by its name, a chord), what it does to
-    // `n` first (`send_target`: focusing it, its caret at its content's end, or the viewport), and the element they go to.
+    // `send_keys`' keys to `n` (`atoms`: a text typed a character at a time, a key by its name, a chord, WebDriver's
+    // keys), what it does to `n` first (`send_target`: focusing it, its caret at its content's end, or the viewport),
+    // and the element they go to.
     fn send_keys(&mut self, arena: &mut RealmArena, how: u32, to: NodeId, atoms: Vec<Atom>) {
         let n = self.to;
         // (…keyboard-driven: `:focus-visible` applies)
@@ -738,20 +888,17 @@ impl KeyGesture {
         for atom in atoms {
             match atom {
                 Atom::Text(text) => self.type_text(&text, 0),
-                Atom::Key(name) => self.jobs.push_back(Job::Press(resolve(&name, false), 0)),
+                Atom::Key(name) => self.jobs.push_back(Job::Press(resolve(&name, false), 0, Phases::Both)),
                 Atom::Chord(parts) => self.chord(&parts),
+                Atom::WebDriver(text) => self.webdriver_keys(&text),
             }
         }
     }
 
     // A text typed a character at a time — a code point, a surrogate pair's two units one character — with `held`.
     fn type_text(&mut self, text: &[u16], held: u32) {
-        let mut i = 0;
-        while i < text.len() {
-            let wide = (0xD800..0xDC00).contains(&text[i]) && text.get(i + 1).is_some_and(|u| (0xDC00..0xE000).contains(u));
-            let end = i + if wide { 2 } else { 1 };
-            self.jobs.push_back(Job::Press(resolve(&text[i..end], held & SHIFT != 0), held));
-            i = end;
+        for ch in characters(text) {
+            self.jobs.push_back(Job::Press(resolve(ch, held & SHIFT != 0), held, Phases::Both));
         }
     }
 
@@ -762,17 +909,46 @@ impl KeyGesture {
     // their keyups, the last pressed first, each with the ones still held. A chord of modifiers alone presses no other key.
     fn chord(&mut self, parts: &[Vec<u16>]) {
         let c = chord(parts);
-        for (i, &(key, code, key_code)) in c.keys.iter().enumerate() {
-            self.jobs.push_back(Job::Modifier("keydown", key, code, key_code, modifier_bits(&c.keys[..=i])));
+        for i in 0..c.keys.len() {
+            self.jobs.push_back(Job::Modifier("keydown", c.keys[i].clone(), modifier_bits(&c.keys[..=i])));
         }
         if c.unfold {
             self.type_text(&c.key, c.modifiers);
         } else if !c.key.is_empty() {
-            self.jobs.push_back(Job::Press(resolve(&c.key, c.modifiers & SHIFT != 0), c.modifiers));
+            self.jobs.push_back(Job::Press(resolve(&c.key, c.modifiers & SHIFT != 0), c.modifiers, Phases::Both));
         }
-        for (i, &(key, code, key_code)) in c.keys.iter().enumerate().rev() {
-            self.jobs.push_back(Job::Modifier("keyup", key, code, key_code, modifier_bits(&c.keys[..i])));
+        for i in (0..c.keys.len()).rev() {
+            self.jobs.push_back(Job::Modifier("keyup", c.keys[i].clone(), modifier_bits(&c.keys[..i])));
         }
+    }
+
+    // WebDriver's "element send keys" of `text` (the testdriver's `send_keys`): each character a key's press — one of the
+    // keys WebDriver names by a code point of its own (`webdriver_key`) that key's — a modifier's held from its press on,
+    // until the NULL key releases them all, and at the end what is still held released, the last pressed first.
+    fn webdriver_keys(&mut self, text: &[u16]) {
+        let mut held: Vec<Key> = Vec::new();
+        let release = |g: &mut Self, held: &mut Vec<Key>| {
+            while let Some(k) = held.pop() {
+                g.jobs.push_back(Job::Modifier("keyup", k, modifier_bits(held)));
+            }
+        };
+        for ch in characters(text) {
+            match webdriver_key(ch) {
+                Some(WebDriverKey::Null) => release(self, &mut held),
+                Some(WebDriverKey::Modifier(k)) => {
+                    if held.iter().all(|h| h.modifier_bit() != k.modifier_bit()) {
+                        held.push(k.clone());
+                        self.jobs.push_back(Job::Modifier("keydown", k, modifier_bits(&held)));
+                    }
+                },
+                Some(WebDriverKey::Key(k)) => self.jobs.push_back(Job::Press(k, modifier_bits(&held), Phases::Both)),
+                None => {
+                    let bits = modifier_bits(&held);
+                    self.jobs.push_back(Job::Press(resolve(ch, bits & SHIFT != 0), bits, Phases::Both));
+                },
+            }
+        }
+        release(self, &mut held);
     }
 
     // The keys go to the focused element, as a keyboard's do: once focus moved since it was last looked at — a key's
@@ -788,31 +964,60 @@ impl KeyGesture {
         std::mem::replace(&mut self.to, to) != to
     }
 
-    // A key event at the keys' target.
-    fn key_event(&self, ty: &'static str, key: &Key, modifiers: u32, forget_caret: bool) -> Step {
+    // The boundary before a key event that is a task of its own — a keydown or a keyup but the gesture's first — where
+    // the host runs the event loop that far (`turns`) and a task is due by now: a `TURN` told, once. Whether it was.
+    fn turn_before(&mut self, arena: &RealmArena) -> bool {
+        if !self.turns || self.turned || self.events == 0 || !arena.work_due() {
+            return false;
+        }
+        self.turned = true;
+        self.tell(Step::Turn);
+        true
+    }
+
+    // A key event at the keys' target — a keydown or a keyup a task boundary crossed.
+    fn key_event(&mut self, ty: &'static str, key: &Key, modifiers: u32, forget_caret: bool) -> Step {
         let char_code = if ty == "keypress" { key.char_code() } else { 0 };
         // (…a keypress's key code its char code, Chrome's)
         let key_code = if ty == "keypress" { char_code } else { key.key_code };
-        Step::Key { ty, target: self.to, key: key.key.clone(), code: key.code.clone(), key_code, char_code, modifiers, forget_caret }
+        if ty != "keypress" {
+            self.events += 1;
+            self.turned = false;
+        }
+        Step::Key { ty, target: self.to, key: key.key.clone(), code: key.code.clone(), key_code, char_code, location: key.location, modifiers, forget_caret }
     }
 
-    // The next step the bindings take, the outcome of the one they took last `outcome`; None at the gesture's end.
-    fn next(&mut self, arena: &mut RealmArena, outcome: u32) -> Option<Step> {
+    // The next batch of steps the bindings take — the told steps that wait on no outcome, the step that does last — the
+    // outcome of the one they took last `outcome`; none at the gesture's end. A stage is asked for more only once the
+    // bindings took every step it queued, as it reads the page they leave; and an engine step (`Edited`, `Dirty`) is taken
+    // once the steps before it are.
+    fn next(&mut self, arena: &mut RealmArena, outcome: u32) -> Option<Vec<Step>> {
         let mut outcome = std::mem::take(&mut self.owed).then_some(outcome);
+        let mut batch = Vec::new();
         loop {
             if let Some((step, owed)) = self.queued.pop_front() {
                 match step {
+                    Step::Edited(..) | Step::Dirty(_) if !batch.is_empty() => {
+                        self.queued.push_front((step, owed));
+                        return Some(batch);
+                    },
                     Step::Edited(id, edited) => arena.mark_change(id, edited),
                     Step::Dirty(id) => {
                         let bits = arena.get(id).map_or(0, |n| n.state);
                         arena.set_state(id, bits | crate::dom::STATE_DIRTY_BY_USER);
                     },
                     _ => {
-                        self.owed = owed;
-                        return Some(step);
+                        batch.push(step);
+                        if owed {
+                            self.owed = true;
+                            return Some(batch);
+                        }
                     },
                 }
                 continue;
+            }
+            if !batch.is_empty() {
+                return Some(batch);
             }
             match std::mem::replace(&mut self.stage, Stage::Idle) {
                 Stage::Press(mut press) => {
@@ -829,14 +1034,22 @@ impl KeyGesture {
                 },
                 Stage::Idle => match self.jobs.pop_front()? {
                     Job::Begin => self.focused = focus_of(arena, self.cid),
-                    Job::Press(key, held) => {
-                        let press = Press { key, held, at: PressAt::KeyDown, blocked: false, plan: 0, edit: None, host: false, down: None, moved: false };
+                    Job::Press(key, held, phases) => {
+                        let (at, blocked, down) = match phases {
+                            Phases::Up(p) => (PressAt::KeyUp, p.blocked, p.down),
+                            _ => (PressAt::KeyDown, false, None),
+                        };
+                        let press = Press { key, held, phases, at, blocked, plan: 0, edit: None, host: false, down, moved: false };
                         self.stage = Stage::Press(Box::new(press));
                     },
-                    Job::Modifier(ty, key, code, key_code, modifiers) => {
+                    Job::Modifier(ty, key, modifiers) => {
+                        if self.turn_before(arena) {
+                            self.jobs.push_front(Job::Modifier(ty, key, modifiers));
+                            continue;
+                        }
                         self.follow_focus(arena);
-                        let key = Key { named: true, key: units(key), code: units(code), key_code, char: None, input_type: None };
-                        self.tell(self.key_event(ty, &key, modifiers, false));
+                        let step = self.key_event(ty, &key, modifiers, false);
+                        self.tell(step);
                     },
                     Job::Set(value) => {
                         let mut set = SetJob { at: SetAt::Focused, value, n: self.to, how: SET_NONE, text: Vec::new(), option: None };
@@ -849,13 +1062,63 @@ impl KeyGesture {
             }
         }
     }
+
+    // Whether it has nothing left to do once the bindings take the steps it handed them: no step it waits on the outcome
+    // of, no stage under way, no job.
+    fn finished(&self) -> bool {
+        !self.owed && self.queued.is_empty() && matches!(self.stage, Stage::Idle) && self.jobs.is_empty()
+    }
 }
 
-// What `send_keys` is given: a text, a key by its name, a chord.
+// A text's characters: its code points, a surrogate pair's two units one.
+fn characters(text: &[u16]) -> impl Iterator<Item = &[u16]> {
+    let mut i = 0;
+    std::iter::from_fn(move || {
+        let start = i;
+        let unit = *text.get(start)?;
+        let wide = (0xD800..0xDC00).contains(&unit) && text.get(start + 1).is_some_and(|u| (0xDC00..0xE000).contains(u));
+        i = start + if wide { 2 } else { 1 };
+        Some(&text[start..i])
+    })
+}
+
+// A key WebDriver names by a code point of its own (WebDriver §17.4.2, the table of keys, U+E000-U+E05D): the NULL key,
+// a modifier, or a key by the name it has here.
+enum WebDriverKey {
+    Null,
+    Modifier(Key),
+    Key(Key),
+}
+const WEBDRIVER_KEYS: &[(u16, &str)] = &[
+    (0xE001, "cancel"), (0xE002, "help"), (0xE003, "backspace"), (0xE004, "tab"), (0xE005, "clear"), (0xE006, "return"),
+    (0xE007, "enter"), (0xE008, "shift"), (0xE009, "control"), (0xE00A, "alt"), (0xE00B, "pause"), (0xE00C, "escape"),
+    (0xE00D, "space"), (0xE00E, "page_up"), (0xE00F, "page_down"), (0xE010, "end"), (0xE011, "home"), (0xE012, "left"),
+    (0xE013, "up"), (0xE014, "right"), (0xE015, "down"), (0xE016, "insert"), (0xE017, "delete"), (0xE018, "semicolon"),
+    (0xE019, "equals"), (0xE01A, "numpad0"), (0xE01B, "numpad1"), (0xE01C, "numpad2"), (0xE01D, "numpad3"),
+    (0xE01E, "numpad4"), (0xE01F, "numpad5"), (0xE020, "numpad6"), (0xE021, "numpad7"), (0xE022, "numpad8"),
+    (0xE023, "numpad9"), (0xE024, "multiply"), (0xE025, "add"), (0xE026, "separator"), (0xE027, "subtract"),
+    (0xE028, "decimal"), (0xE029, "divide"), (0xE031, "f1"), (0xE032, "f2"), (0xE033, "f3"), (0xE034, "f4"),
+    (0xE035, "f5"), (0xE036, "f6"), (0xE037, "f7"), (0xE038, "f8"), (0xE039, "f9"), (0xE03A, "f10"), (0xE03B, "f11"),
+    (0xE03C, "f12"), (0xE03D, "meta"), (0xE040, "zenkaku_hankaku"), (0xE050, "right_shift"), (0xE051, "right_control"),
+    (0xE052, "right_alt"), (0xE053, "right_meta"), (0xE054, "numpad_page_up"), (0xE055, "numpad_page_down"),
+    (0xE056, "numpad_end"), (0xE057, "numpad_home"), (0xE058, "numpad_left"), (0xE059, "numpad_up"),
+    (0xE05A, "numpad_right"), (0xE05B, "numpad_down"), (0xE05C, "numpad_insert"), (0xE05D, "numpad_delete"),
+];
+fn webdriver_key(ch: &[u16]) -> Option<WebDriverKey> {
+    let &[unit] = ch else { return None };
+    if unit == 0xE000 {
+        return Some(WebDriverKey::Null);
+    }
+    let name = units(WEBDRIVER_KEYS.iter().find(|k| k.0 == unit)?.1);
+    Some(modifier(&name).map_or_else(|| WebDriverKey::Key(resolve(&name, false)), WebDriverKey::Modifier))
+}
+
+// What `send_keys` is given: a text, a key by its name, a chord, WebDriver's keys (`webdriver_keys`).
 pub(crate) enum Atom {
     Text(Vec<u16>),
     Key(Vec<u16>),
     Chord(Vec<Vec<u16>>),
+    WebDriver(Vec<u16>),
 }
 
 // The keys that move the caret by lines, which carry what the last of them left (layout.js `forgetCaretMove`).
@@ -887,10 +1150,14 @@ impl KeyGesture {
         let plan = |arena: &RealmArena, to: NodeId| plan(arena, to, &p.key.key, p.key.char.as_deref(), p.held);
         match p.at {
             PressAt::KeyDown => {
+                if self.turn_before(arena) {
+                    return;
+                }
                 self.follow_focus(arena);
                 p.down = Some(self.to);
                 p.at = PressAt::KeyPress;
-                self.ask(self.key_event("keydown", &p.key, p.held, !line_key(&p.key.key)));
+                let step = self.key_event("keydown", &p.key, p.held, !line_key(&p.key.key));
+                self.ask(step);
             },
             // Its keypress — the legacy event of a key that produces a character: a printable key's, Enter's (a carriage
             // return), none with Control / Alt / Meta held — where its keydown was not canceled, its char code the
@@ -903,7 +1170,8 @@ impl KeyGesture {
                 self.follow_focus(arena);
                 p.at = PressAt::Defaults;
                 if !p.blocked && plan(arena, self.to) & KEYPRESS != 0 {
-                    self.ask(self.key_event("keypress", &p.key, p.held, false));
+                    let step = self.key_event("keypress", &p.key, p.held, false);
+                    self.ask(step);
                 }
             },
             PressAt::Defaults => {
@@ -932,7 +1200,7 @@ impl KeyGesture {
                 // it moved since it last was (Chrome, Firefox).
                 if p.plan & STEP != 0 {
                     p.at = PressAt::StepValue;
-                    self.ask(Step::Input { ty: "beforeinput", target: self.to, input_type: "", data: None, cancelable: true, target_ranges: false });
+                    self.ask(Step::Input { ty: "beforeinput", target: self.to, input_type: "", data: None, cancelable: true, ranges: Ranges::None });
                     return;
                 }
                 // Enter on a link, a button or a summary: its activation, a keyboard's click — no pointer, its count 0
@@ -980,8 +1248,13 @@ impl KeyGesture {
                 p.at = PressAt::Edit;
                 if let Some((input_type, bits)) = p.edit {
                     let data = (input_type == "insertText").then(|| p.key.char.clone()).flatten();
-                    let target_ranges = p.host && bits & EDIT_DELETE == 0;
-                    self.ask(Step::Input { ty: "beforeinput", target: self.to, input_type, data, cancelable: true, target_ranges });
+                    // (…an editing host's: the selection an insertion replaces, the range a deletion removes)
+                    let ranges = match (p.host, bits & EDIT_DELETE != 0) {
+                        (false, _) => Ranges::None,
+                        (true, false) => Ranges::Selection,
+                        (true, true) => Ranges::Deletion { forward: bits & EDIT_FORWARD != 0, word: bits & EDIT_WORD != 0 },
+                    };
+                    self.ask(Step::Input { ty: "beforeinput", target: self.to, input_type, data, cancelable: true, ranges });
                 }
             },
             // Home / End and the arrows move the caret (`motion`: Control a word's or the whole text's, Shift extending
@@ -1018,7 +1291,7 @@ impl KeyGesture {
                     let (input_type, _) = p.edit.expect("an edit");
                     let data = (input_type == "insertText").then(|| p.key.char.clone()).flatten();
                     self.tell(Step::Edited(self.to, true));
-                    self.tell(Step::Input { ty: "input", target: self.to, input_type, data, cancelable: false, target_ranges: false });
+                    self.tell(Step::Input { ty: "input", target: self.to, input_type, data, cancelable: false, ranges: Ranges::None });
                 }
                 p.at = PressAt::Submit;
             },
@@ -1046,7 +1319,32 @@ impl KeyGesture {
                 } else if plan & (CUT | COPY | PASTE) != 0 {
                     let op = if plan & CUT != 0 { "cut" } else if plan & COPY != 0 { "copy" } else { "paste" };
                     self.tell(Step::Clipboard(op, self.to));
+                } else if plan & (UNDO | REDO) != 0 {
+                    // (…undo and redo: their `beforeinput` and `input` — no undo history is kept, so nothing is undone,
+                    // where Chrome and Firefox fire neither with no history to undo)
+                    let input_type = if plan & UNDO != 0 { "historyUndo" } else { "historyRedo" };
+                    p.edit = Some((input_type, 0));
+                    p.at = PressAt::History;
+                    self.ask(Step::Input { ty: "beforeinput", target: self.to, input_type, data: None, cancelable: true, ranges: Ranges::None });
+                } else if plan & FORMAT != 0 {
+                    // (…Control + B, I, U in an editing host: its formatting command, as a user's gesture asks it —
+                    // beforeinput, the edit, input: Chrome; Firefox binds none)
+                    let command = if is_units(&p.key.key, "b") || is_units(&p.key.key, "B") {
+                        "bold"
+                    } else if is_units(&p.key.key, "i") || is_units(&p.key.key, "I") {
+                        "italic"
+                    } else {
+                        "underline"
+                    };
+                    self.tell(Step::Command(command));
                 }
+            },
+            PressAt::History => {
+                if !yes {
+                    let (input_type, _) = p.edit.expect("a history step");
+                    self.tell(Step::Input { ty: "input", target: self.to, input_type, data: None, cancelable: false, ranges: Ranges::None });
+                }
+                p.at = PressAt::FocusNavigation;
             },
             // Tab's: focus moved through the document's sequential focus navigation order, back with Shift — before the
             // key's keyup, which goes to the element it focused (Chrome and Firefox).
@@ -1058,10 +1356,20 @@ impl KeyGesture {
             },
             // Its keyup, where focus is now: a keydown listener that blurred the field — Discourse's Escape closing its
             // search menu — has it go to the body, not back to the field.
+            // A key only pressed (a testdriver's key action) is left down here, what its keydown left kept for its release.
             PressAt::KeyUp => {
+                if let Phases::Down(value) = &p.phases {
+                    self.left_down = Some((value.clone(), Pressed { blocked: p.blocked, down: p.down }));
+                    p.at = PressAt::Done;
+                    return;
+                }
+                if self.turn_before(arena) {
+                    return;
+                }
                 p.moved = self.follow_focus(arena);
                 p.at = PressAt::Activation;
-                self.ask(self.key_event("keyup", &p.key, p.held, false));
+                let step = self.key_event("keyup", &p.key, p.held, false);
+                self.ask(step);
             },
             // Space activates a focused button, checkbox or radio button on its release — the keyup's default action,
             // so unless it, its keydown or its keypress was canceled, or focus left the element its keydown went to.
@@ -1128,7 +1436,7 @@ impl KeyGesture {
             set.at = SetAt::Done;
         } else if set.how & SET_FOCUS != 0 {
             self.tell(Step::Focus(set.n));
-            self.tell(Step::Drain);
+            set.at = SetAt::Drain;
         } else {
             set.at = SetAt::Write;
         }
@@ -1144,6 +1452,13 @@ impl KeyGesture {
 
     fn set(&mut self, arena: &mut RealmArena, set: &mut SetJob) {
         match set.at {
+            // (…the work its focus handlers queued that is due now run: none to run, no step)
+            SetAt::Drain => {
+                set.at = SetAt::Focused;
+                if arena.work_due() {
+                    self.tell(Step::Drain);
+                }
+            },
             // Its focus handlers may have swapped the control: `<trix-editor>` focuses its inner editing host, a
             // replaceWith-style swap detaches the original and focuses its replacement — the focused one written where it
             // is inside the original, or the original left its tree — but not a control an app mounts beside it (Forem's
@@ -1204,25 +1519,11 @@ impl KeyGesture {
                         return;
                     },
                 }
-                // (…its keydown and keyup — Tribute initialises its per-keystroke state in the keydown — around the
-                // change, of no key: there is no character's chain to lean on; then `input` and `change` — which a
-                // checkbox's fires on a user's interaction alone, but Selenium's `set` fires both — the user's edit
-                // committed so its blur fires none again)
-                let blank = |ty| Step::Key { ty, target: n, key: Vec::new(), code: Vec::new(), key_code: 0, char_code: 0, modifiers: 0, forget_caret: false };
-                if set.how & SET_FOCUS != 0 {
-                    self.tell(blank("keydown"));
-                }
-                // (…an InputEvent where its text was typed, a plain Event where a value was picked, slid or written
-                // otherwise: HTML's "fire an event named input", Chrome and Firefox)
-                if matches!(set.how & SET_KIND, SET_TYPE | SET_LIVE) {
-                    self.tell(Step::Input { ty: "input", target: n, input_type: "", data: None, cancelable: false, target_ranges: false });
-                } else {
-                    self.tell(Step::ValueInput(n));
-                }
-                self.tell(Step::Change(n));
-                self.tell(Step::Edited(n, false));
-                if set.how & SET_FOCUS != 0 {
-                    self.tell(blank("keyup"));
+                self.tell(Step::SetEvents { target: n, keys: set.how & SET_FOCUS != 0, typed: matches!(set.how & SET_KIND, SET_TYPE | SET_LIVE) });
+                // (…a value ending in a line feed submits as Enter in the field does; any other is done, the gesture's end
+                // handed over with these steps)
+                if set.how & SET_SUBMIT == 0 {
+                    set.at = SetAt::Done;
                 }
             },
             // A value ending in a line feed submits as Enter in the field does.
@@ -1248,7 +1549,6 @@ const WRITE_ATTRIBUTE: u32 = 2;
 // …]`.
 const KEY: u32 = 0;
 const INPUT: u32 = 1;
-const CHANGE: u32 = 2;
 const FOCUS: u32 = 3;
 const BLUR: u32 = 4;
 const CARET_END: u32 = 5;
@@ -1273,9 +1573,15 @@ const WRITE: u32 = 23;
 const PICK: u32 = 24;
 const CLICK_RESOLVE: u32 = 25;
 const CLEAR_HOST: u32 = 26;
+const COMMAND: u32 = 27;
+const TURN: u32 = 28;
+const SET_EVENTS: u32 = 29;
 const CANCELABLE: u32 = 1;
-const TARGET_RANGES: u32 = 2;
+const TARGET_SELECTION: u32 = 2;
 const PLAIN: u32 = 4;
+const TARGET_DELETION: u32 = 8;
+const DELETION_FORWARD: u32 = 16;
+const DELETION_WORD: u32 = 32;
 fn step_value<'s>(scope: &mut v8::PinScope<'s, '_>, step: Step) -> v8::Local<'s, v8::Value> {
     let int = |scope: &mut v8::PinScope<'s, '_>, n: u32| -> v8::Local<'s, v8::Value> { v8::Integer::new_from_unsigned(scope, n).into() };
     let name = |scope: &mut v8::PinScope<'s, '_>, s: &str| -> v8::Local<'s, v8::Value> {
@@ -1283,7 +1589,7 @@ fn step_value<'s>(scope: &mut v8::PinScope<'s, '_>, step: Step) -> v8::Local<'s,
     };
     let node = |scope: &mut v8::PinScope<'s, '_>, id: NodeId| crate::dom::node_value(scope, Some(id));
     let items: Vec<v8::Local<'s, v8::Value>> = match step {
-        Step::Key { ty, target, key, code, key_code, char_code, modifiers, forget_caret } => vec![
+        Step::Key { ty, target, key, code, key_code, char_code, location, modifiers, forget_caret } => vec![
             int(scope, KEY),
             name(scope, ty),
             node(scope, target),
@@ -1293,17 +1599,22 @@ fn step_value<'s>(scope: &mut v8::PinScope<'s, '_>, step: Step) -> v8::Local<'s,
             int(scope, char_code),
             int(scope, modifiers),
             v8::Boolean::new(scope, forget_caret).into(),
+            int(scope, location),
         ],
-        Step::Input { ty, target, input_type, data, cancelable, target_ranges } => {
+        Step::Input { ty, target, input_type, data, cancelable, ranges } => {
             let data = match data {
                 Some(d) => crate::dom::utf16_value(scope, &d),
                 None => v8::null(scope).into(),
             };
-            let flags = if cancelable { CANCELABLE } else { 0 } | if target_ranges { TARGET_RANGES } else { 0 };
+            let ranges = match ranges {
+                Ranges::None => 0,
+                Ranges::Selection => TARGET_SELECTION,
+                Ranges::Deletion { forward, word } => TARGET_DELETION | if forward { DELETION_FORWARD } else { 0 } | if word { DELETION_WORD } else { 0 },
+            };
+            let flags = if cancelable { CANCELABLE } else { 0 } | ranges;
             vec![int(scope, INPUT), name(scope, ty), node(scope, target), name(scope, input_type), data, int(scope, flags)]
         },
         Step::ValueInput(el) => vec![int(scope, INPUT), name(scope, "input"), node(scope, el), name(scope, ""), v8::null(scope).into(), int(scope, PLAIN)],
-        Step::Change(el) => vec![int(scope, CHANGE), node(scope, el)],
         Step::Focus(el) => vec![int(scope, FOCUS), node(scope, el)],
         Step::Blur(el) => vec![int(scope, BLUR), node(scope, el)],
         Step::CaretEnd(el) => vec![int(scope, CARET_END), node(scope, el)],
@@ -1328,83 +1639,178 @@ fn step_value<'s>(scope: &mut v8::PinScope<'s, '_>, step: Step) -> v8::Local<'s,
         Step::Pick(option) => vec![int(scope, PICK), node(scope, option)],
         Step::ClickResolve(el) => vec![int(scope, CLICK_RESOLVE), node(scope, el)],
         Step::ClearHost(el) => vec![int(scope, CLEAR_HOST), node(scope, el)],
+        Step::Command(command) => vec![int(scope, COMMAND), name(scope, command)],
+        Step::SetEvents { target, keys, typed } => vec![int(scope, SET_EVENTS), node(scope, target), v8::Boolean::new(scope, keys).into(), v8::Boolean::new(scope, typed).into()],
+        Step::Turn => vec![int(scope, TURN)],
         Step::Edited(..) | Step::Dirty(_) => unreachable!("taken by the engine"),
     };
     v8::Array::new_with_elements(scope, &items).into()
 }
 
-// The gesture's next step to the bindings, the outcome of the one they took last `outcome` — or, at its end, what it
-// answers.
+// What a batch of steps says of the gesture after it (`[end, …steps]`): it goes on (MORE: the bindings ask for the next
+// batch with the outcome of its last step), or it is over, answering true (DONE) or false (DONE_FALSE).
+const MORE: u32 = 0;
+const DONE: u32 = 1;
+const DONE_FALSE: u32 = 2;
+
+// The gesture's next batch to the bindings, the outcome of the step they took last `outcome` — the gesture over with it
+// where it has nothing left that waits on the bindings; or, where it has no step left, its answer.
 fn answer_next(scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>, outcome: u32) {
     let d = crate::dom::dom(scope);
     let Some(gesture) = d.keyboard.gestures.last_mut() else { return rv.set_bool(false) };
     // (…none past its realm's end: a frame whose listener removed it)
-    let next = match d.arena.enter_known(gesture.cid) {
+    let batch = match d.arena.enter_known(gesture.cid) {
         Some(arena) => gesture.next(arena, outcome),
         None => None,
     };
-    match next {
-        Some(step) => {
-            let value = step_value(scope, step);
-            rv.set(value);
-        },
-        None => {
-            let answer = crate::dom::dom(scope).keyboard.gestures.pop().is_some_and(|g| g.answer);
-            rv.set_bool(answer);
-        },
+    let finished = gesture.finished();
+    let answer = match &batch {
+        Some(_) if !finished => None,
+        _ => Some(finish_gesture(&mut crate::dom::dom(scope).keyboard)),
+    };
+    let Some(batch) = batch else { return rv.set_bool(answer == Some(true)) };
+    let end = match answer {
+        None => MORE,
+        Some(true) => DONE,
+        Some(false) => DONE_FALSE,
+    };
+    let mut items = Vec::with_capacity(batch.len() + 1);
+    items.push(v8::Integer::new_from_unsigned(scope, end).into());
+    for step in batch {
+        items.push(step_value(scope, step));
     }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// The gesture under way over: a key it left down kept down, and what it answers.
+fn finish_gesture(keyboard: &mut Keyboard) -> bool {
+    let Some(gesture) = keyboard.gestures.pop() else { return false };
+    if let Some(down) = gesture.left_down {
+        keyboard.pressed.push(down);
+    }
+    gesture.answer
 }
 
-// What a gesture plays (`keyGesture`'s `kind`): `send_keys`' keys, or `set`.
+// What a gesture plays (`keyGesture`'s `kind`): `send_keys`' keys, `set`, or a key action of the WPT testdriver's — a key
+// pressed or released, as WebDriver's keyboard input source presses it — and the testdriver's keyboard released (its
+// held modifiers and keys forgotten, no event fired: an action sequence begins with none).
 const SEND_KEYS: u32 = 0;
 const SET: u32 = 1;
+const KEY_DOWN: u32 = 2;
+const KEY_UP: u32 = 3;
+const RELEASE: u32 = 4;
 
-// __dom.keyGesture(kind, element, what) -> the first step of a gesture of the keyboard at `element` — `send_keys`' keys
-// (`what` its atoms: `{kind: 'text', value}`, `{kind: 'key', name}`, `{kind: 'combo', parts}`) or `set`'s (`what` its
-// value: a boolean, null, or any other value as its string; `element` null where it vanished, the focused text control or
-// editing host taken instead) — its answer where it has none: false where there is no element to play it at.
+// __dom.keyGesture(kind, element, what, turns) -> the first batch of steps of a gesture of the keyboard (`answer_next`),
+// the host running the event loop at its task boundaries where `turns` (`TURN`) — `send_keys`' keys at `element` (`what`
+// its atoms: `{kind: 'text', value}`, `{kind: 'key', name}`, `{kind: 'combo', parts}`, `{kind: 'webdriver', value}`),
+// `set`'s (`what` its value: a boolean, null, or any other value as its string; `element` null where it vanished, the
+// focused text control or editing host taken instead), a testdriver's key action (`what` the key: a character, or a code
+// point WebDriver names a key by) — its answer where it has none: false where there is no element to play it at.
 fn gesture_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let kind = args.get(0).uint32_value(scope).unwrap_or(SEND_KEYS);
-    let n = crate::node_handle::nid_of(scope, args.get(1)).filter(|&id| crate::dom::realm(scope, cid).is_element(id));
-    if kind != SET {
-        let Some(n) = n else { return rv.set_bool(false) };
-        let atoms = atoms_arg(scope, args.get(2));
-        let (how, to) = crate::rendered::with_engine(scope, &args, |engine, arena, now| send_target(engine, arena, n, now)).unwrap_or((0, n));
-        let mut gesture = KeyGesture::new(cid, n);
-        gesture.send_keys(crate::dom::realm(scope, cid), how, to, atoms);
-        crate::dom::dom(scope).keyboard.gestures.push(gesture);
-    } else {
-        let value = args.get(2);
-        let value = if value.is_boolean() {
-            SetValue::Bool(value.is_true())
-        } else if value.is_null_or_undefined() {
-            SetValue::Text(Vec::new())
-        } else {
-            let Some(text) = value.to_string(scope) else { return };
-            SetValue::Text(crate::dom::utf16_arg(scope, text.into()))
-        };
-        // The element vanished between the test's `find` and the `set`: Forem's reply form focuses its textarea in a
-        // timer that `set`'s `tick_real_time` runs, whose focus handler hands off to Preact's `replaceTextArea` and
-        // removes the original — so whatever the page just focused, what the test meant to type into, where it is a
-        // text control or an editing host.
-        let arena = crate::dom::realm(scope, cid);
-        let n = n.or_else(|| {
-            let doc = arena.realm_document(cid)?;
-            focus_of(arena, cid).filter(|&a| {
-                Some(a) != arena.body_element(doc) && arena.get(a).is_some_and(|e| e.is_html_named("input") || e.is_html_named("textarea") || arena.is_editable(a))
-            })
-        });
-        let Some(n) = n else { return rv.set_bool(false) };
-        let mut gesture = KeyGesture::new(cid, n);
-        gesture.jobs.push_back(Job::Set(value));
-        crate::dom::dom(scope).keyboard.gestures.push(gesture);
+    let turns = args.get(3).is_true();
+    // (…none left under it of a realm gone: one a frame's navigation ended between its steps)
+    let d = crate::dom::dom(scope);
+    let gone = |g: &KeyGesture| d.arena.is_dropped(g.cid);
+    if d.keyboard.gestures.iter().any(gone) {
+        let arena = &d.arena;
+        d.keyboard.gestures.retain(|g| !arena.is_dropped(g.cid));
     }
+    let n = crate::node_handle::nid_of(scope, args.get(1)).filter(|&id| crate::dom::realm(scope, cid).is_element(id));
+    let gesture = match kind {
+        SEND_KEYS => {
+            let Some(n) = n else { return rv.set_bool(false) };
+            let atoms = atoms_arg(scope, args.get(2));
+            let (how, to) = crate::rendered::with_engine(scope, &args, |engine, arena, now| send_target(engine, arena, n, now)).unwrap_or((0, n));
+            let mut gesture = KeyGesture::new(cid, n, turns);
+            gesture.send_keys(crate::dom::realm(scope, cid), how, to, atoms);
+            gesture
+        },
+        SET => {
+            let value = args.get(2);
+            let value = if value.is_boolean() {
+                SetValue::Bool(value.is_true())
+            } else if value.is_null_or_undefined() {
+                SetValue::Text(Vec::new())
+            } else {
+                let Some(text) = value.to_string(scope) else { return };
+                SetValue::Text(crate::dom::utf16_arg(scope, text.into()))
+            };
+            // The element vanished between the test's `find` and the `set`: Forem's reply form focuses its textarea in a
+            // timer that `set`'s `tick_real_time` runs, whose focus handler hands off to Preact's `replaceTextArea` and
+            // removes the original — so whatever the page just focused, what the test meant to type into, where it is a
+            // text control or an editing host.
+            let arena = crate::dom::realm(scope, cid);
+            let n = n.or_else(|| {
+                let doc = arena.realm_document(cid)?;
+                focus_of(arena, cid).filter(|&a| {
+                    Some(a) != arena.body_element(doc) && arena.get(a).is_some_and(|e| e.is_html_named("input") || e.is_html_named("textarea") || arena.is_editable(a))
+                })
+            });
+            let Some(n) = n else { return rv.set_bool(false) };
+            let mut gesture = KeyGesture::new(cid, n, turns);
+            gesture.jobs.push_back(Job::Set(value));
+            gesture
+        },
+        KEY_DOWN | KEY_UP => {
+            let value = crate::dom::utf16_arg(scope, args.get(2));
+            let d = crate::dom::dom(scope);
+            let Some(arena) = d.arena.enter_known(cid) else { return rv.set_bool(false) };
+            let Some(gesture) = key_action(arena, &mut d.keyboard, cid, kind == KEY_DOWN, value) else { return rv.set_bool(false) };
+            gesture
+        },
+        RELEASE => {
+            let keyboard = &mut crate::dom::dom(scope).keyboard;
+            (keyboard.held, keyboard.pressed) = (0, Vec::new());
+            return rv.set_bool(true);
+        },
+        _ => return rv.set_bool(false),
+    };
+    crate::dom::dom(scope).keyboard.gestures.push(gesture);
     answer_next(scope, rv, 0);
 }
 
-// __dom.keyNext(outcome) -> the gesture's next step, the outcome of the step last handed out `outcome` (a canceled
-// event's 1; an edit's 1 where it changed something; the selection a SELECTION step reads); its answer at its end.
+// A key action of WebDriver's keyboard input source (the testdriver's `keyDown` / `keyUp`), the key `value`, at the
+// focused element of realm `cid` — else its body — the keyboard's held modifiers and keys down kept across actions: a
+// modifier held from its keydown to its keyup; any other key's keydown and what follows it as a press's (its keypress,
+// its edit), its keyup and its activation as a release's, what its keydown left read off the key kept down.
+fn key_action(arena: &mut RealmArena, keyboard: &mut Keyboard, cid: i32, down: bool, value: Vec<u16>) -> Option<KeyGesture> {
+    let doc = arena.realm_document(cid)?;
+    let fallback = arena.body_element(doc).or_else(|| arena.first_element_child(doc))?;
+    let to = key_event_target(arena, cid, fallback);
+    // (…keyboard-driven: `:focus-visible` applies)
+    arena.pointer_modality = false;
+    let mut gesture = KeyGesture::new(cid, to, false);
+    gesture.jobs.push_back(Job::Begin);
+    let ty = if down { "keydown" } else { "keyup" };
+    match webdriver_key(&value) {
+        Some(WebDriverKey::Null) => {},
+        Some(WebDriverKey::Modifier(k)) => {
+            keyboard.held = if down { keyboard.held | k.modifier_bit() } else { keyboard.held & !k.modifier_bit() };
+            gesture.jobs.push_back(Job::Modifier(ty, k, keyboard.held));
+        },
+        found => {
+            let held = keyboard.held;
+            let key = match found {
+                Some(WebDriverKey::Key(k)) => k,
+                _ => resolve(&value, held & SHIFT != 0),
+            };
+            let phases = if down {
+                Phases::Down(value)
+            } else {
+                // (…a key released that no action pressed: its keyup alone, no activation)
+                let at = keyboard.pressed.iter().position(|(v, _)| *v == value);
+                Phases::Up(at.map_or(Pressed { blocked: true, down: None }, |i| keyboard.pressed.remove(i).1))
+            };
+            gesture.jobs.push_back(Job::Press(key, held, phases));
+        },
+    }
+    Some(gesture)
+}
+
+// __dom.keyNext(outcome) -> the gesture's next batch, the outcome of the step last handed out `outcome` (a canceled
+// event's 1; an edit's 1 where it changed something; the selection a SELECTION step reads; anything after a TURN); its
+// answer at its end.
 fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     let outcome = args.get(0).uint32_value(scope).unwrap_or(0);
     answer_next(scope, rv, outcome);
@@ -1434,6 +1840,8 @@ fn atoms_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
             atoms.push(Atom::Text(own(scope, atom, "value").unwrap_or_default()));
         } else if is_units(&kind, "key") {
             atoms.push(Atom::Key(own(scope, atom, "name").unwrap_or_default()));
+        } else if is_units(&kind, "webdriver") {
+            atoms.push(Atom::WebDriver(own(scope, atom, "value").unwrap_or_default()));
         } else if is_units(&kind, "combo") {
             let key: v8::Local<v8::Name> = v8::String::new(scope, "parts").unwrap().into();
             let parts = atom.has_own_property(scope, key).unwrap_or(false).then(|| atom.get(scope, key.into())).flatten();
@@ -1450,6 +1858,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "keyGesture", gesture_op, context_id);
     crate::dom::register(scope, ns, "keyNext", next_op, context_id);
     crate::dom::register(scope, ns, "keyAbort", abort_op, context_id);
+    crate::dom::register(scope, ns, "keysHeld", held_op, context_id);
+}
+// __dom.keysHeld() -> the modifiers the testdriver's keyboard holds (CTRL | META | ALT | SHIFT), which its pointer
+// actions' events carry.
+fn held_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(crate::dom::dom(scope).keyboard.held);
 }
 // __dom.resolveKey(spec, shift) -> [key, code, keyCode, char (null for none), inputType (null for none), named, charCode]
 // (`resolve`; `charCode` its keypress's, `Key::char_code`).
@@ -1487,7 +1901,8 @@ mod tests {
         let parts = |ps: &[&str]| ps.iter().map(|p| units(p)).collect::<Vec<_>>();
         let c = chord(&parts(&["control", "SHIFT", "a"]));
         assert_eq!(c.modifiers, CTRL | SHIFT);
-        assert_eq!(c.keys, [("Control", "ControlLeft", 17), ("Shift", "ShiftLeft", 16)]);
+        let keys: Vec<_> = c.keys.iter().map(|k| (String::from_utf16_lossy(&k.code), k.key_code, k.location)).collect();
+        assert_eq!(keys, [("ControlLeft".into(), 17, 1), ("ShiftLeft".into(), 16, 1)]);
         assert_eq!((String::from_utf16_lossy(&c.key), c.unfold), ("a".into(), false));
         // (…every part a modifier: the chord's key none, its modifiers pressed and released alone)
         let c = chord(&parts(&["cmd", "alt"]));
@@ -1503,13 +1918,13 @@ mod tests {
     fn a_chord_presses_its_modifiers_around_its_key() {
         let parts = |ps: &[&str]| ps.iter().map(|p| units(p)).collect::<Vec<_>>();
         let jobs = |ps: &[&str]| {
-            let mut g = KeyGesture::new(0, NodeId { idx: 0, generation: 0 });
+            let mut g = KeyGesture::new(0, NodeId { idx: 0, generation: 0 }, false);
             g.chord(&parts(ps));
             g.jobs
                 .into_iter()
                 .map(|j| match j {
-                    Job::Modifier(ty, key, _, _, held) => format!("{ty} {key} {held}"),
-                    Job::Press(k, held) => format!("press {} {held}", String::from_utf16_lossy(&k.key)),
+                    Job::Modifier(ty, k, held) => format!("{ty} {} {held}", String::from_utf16_lossy(&k.key)),
+                    Job::Press(k, held, _) => format!("press {} {held}", String::from_utf16_lossy(&k.key)),
                     _ => unreachable!(),
                 })
                 .collect::<Vec<_>>()
@@ -1540,7 +1955,14 @@ mod tests {
         assert_eq!(shift("a"), ("A".into(), "KeyA".into(), 65));
         assert_eq!(shift(";"), (":".into(), "Semicolon".into(), 186));
         assert_eq!(shift("ß"), ("ß".into(), String::new(), 0));
-        assert_eq!(modifier(&units("Cmd")), Some(("Meta", "MetaLeft", 91)));
-        assert_eq!(modifier(&units("x")), None);
+        assert_eq!(modifier(&units("Cmd")).map(|k| (String::from_utf16_lossy(&k.code), k.key_code)), Some(("MetaLeft".into(), 91)));
+        assert!(modifier(&units("x")).is_none());
+        // (…a name of WebDriver's table: a function key types nothing, a numpad digit its digit, on the numpad)
+        let f5 = resolve(&units("f5"), false);
+        assert_eq!((String::from_utf16_lossy(&f5.key), String::from_utf16_lossy(&f5.code), f5.key_code, f5.char.is_none()), ("F5".into(), "F5".into(), 116, true));
+        let n7 = resolve(&units("numpad7"), false);
+        assert_eq!((String::from_utf16_lossy(&n7.code), n7.char.map(|c| String::from_utf16_lossy(&c)), n7.location), ("Numpad7".into(), Some("7".into()), 3));
+        assert!(matches!(webdriver_key(&[0xE031]), Some(WebDriverKey::Key(k)) if String::from_utf16_lossy(&k.key) == "F1"));
+        assert!(matches!(webdriver_key(&[0xE051]), Some(WebDriverKey::Modifier(k)) if k.location == 2));
     }
 }

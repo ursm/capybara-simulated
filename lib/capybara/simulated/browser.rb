@@ -1652,9 +1652,9 @@ module Capybara
           # the filename of the first chosen file (security-faked path).
           # setValue dispatches input + change synchronously.
           js_value = paths.first ? picked_file_name(paths.first) : ''
-          dom_call('setValue', handle, js_value)
+          play_keys('setValue', handle, js_value)
         else
-          dom_call('setValue', handle, coerced)
+          play_keys('setValue', handle, coerced)
         end
         drain_after_user_action
       end
@@ -1832,14 +1832,22 @@ module Capybara
       end
 
       MODIFIER_KEYS = {
-        shift:    'shiftKey',
-        control:  'ctrlKey',
-        ctrl:     'ctrlKey',
-        alt:      'altKey',
-        option:   'altKey',
-        meta:     'metaKey',
-        command:  'metaKey',
-        cmd:      'metaKey'
+        shift:         'shiftKey',
+        left_shift:    'shiftKey',
+        right_shift:   'shiftKey',
+        control:       'ctrlKey',
+        ctrl:          'ctrlKey',
+        left_control:  'ctrlKey',
+        right_control: 'ctrlKey',
+        alt:           'altKey',
+        option:        'altKey',
+        left_alt:      'altKey',
+        right_alt:     'altKey',
+        meta:          'metaKey',
+        command:       'metaKey',
+        cmd:           'metaKey',
+        left_meta:     'metaKey',
+        right_meta:    'metaKey'
       }.freeze
       MODIFIER_KEY_NAMES = MODIFIER_KEYS.keys.to_set.freeze
       def modifier_flags(keys)
@@ -1956,16 +1964,33 @@ module Capybara
             a['value'].to_s.each_char.map {|c| {'kind' => 'text', 'value' => c} }
           }
           head, *tail = per_char
-          dom_call('sendKeys', handle, [head])
+          play_keys('sendKeys', handle, [head])
           tail.each {|atom|
             tick_real_time
-            dom_call('sendKeys', handle, [atom])
+            play_keys('sendKeys', handle, [atom])
             settle
           }
         else
-          dom_call('sendKeys', handle, atoms)
+          play_keys('sendKeys', handle, atoms)
         end
         drain_after_user_action
+      end
+
+      # A gesture of the keyboard's (keys.rs `KeyGesture`) played, the event loop run at each of its task boundaries as far
+      # as what is due by now — the tasks a keydown queued (a 0 ms timer, a `select` event) running before its keyup, and
+      # a key's before the next key's, as Chrome and Firefox run them — then the rest of it asked for (`keyResume`). A
+      # gesture left by a raise is dropped, so the next one is not played under it.
+      def play_keys(step, *args)
+        answer = dom_call(step, *args, true)
+        while answer == 'turn'
+          paused = true
+          @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS)
+          paused = false
+          answer = dom_call('keyResume')
+        end
+        answer
+      ensure
+        dom_call('keyAbort') if paused
       end
 
       def select_option(handle)

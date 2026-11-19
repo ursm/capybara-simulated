@@ -212,7 +212,8 @@ const PLAN_MARKUP_FRAGMENT: u32 = 16;
 const PLAN_PASTED_FRAGMENT: u32 = 32;
 const PLAN_TARGET_RANGES: u32 = 64;
 fn plan_flags(step: u32, action: Action, asked: u32, plaintext: bool, pasted_markup: bool) -> u32 {
-    let user_edit = asked == GESTURE_AFTER_EVENT && matches!(action, Action::Cut | Action::Paste);
+    // (…a user's: a clipboard action's edit, or a formatting command a key asks — Control + B — keys.rs `Command`)
+    let user_edit = asked == GESTURE_AFTER_EVENT && matches!(action, Action::Cut | Action::Paste | Action::Edit);
     let html = action == Action::Html;
     (if action == Action::Cut && asked != GESTURE_EDIT { PLAN_WRITE_SELECTION } else { 0 })
         | (if user_edit && step == STEP_HOST { PLAN_TARGET_RANGES } else { 0 })

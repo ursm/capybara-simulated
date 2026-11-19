@@ -45,223 +45,14 @@
     return new Promise(function (resolve) { setTimeout(function () { resolve(value); }, 0); });
   }
 
-  // ---- keyboard: WebDriver PUA codes + trusted-input default actions -------
-  // testdriver send_keys / Actions pass raw WebDriver "Normalised key" chars in
-  // the U+E000.. PUA block; real input surfaces the named `key`. Map at least the
-  // keys whose default action this driver models (Tab → focus navigation).
-  var WD_KEYS = {
-    '\uE003': 'Backspace', '\uE004': 'Tab', '\uE006': 'Enter', '\uE007': 'Enter',
-    '\uE008': 'Shift', '\uE050': 'Shift', '\uE009': 'Control', '\uE051': 'Control',
-    '\uE00A': 'Alt', '\uE052': 'Alt', '\uE00C': 'Escape', '\uE00D': ' ', '\uE017': 'Delete',
-    '\uE00E': 'PageUp', '\uE00F': 'PageDown', '\uE010': 'End', '\uE011': 'Home',
-    '\uE012': 'ArrowLeft', '\uE013': 'ArrowUp', '\uE014': 'ArrowRight', '\uE015': 'ArrowDown'
-  };
-  function keyName(ch) { return WD_KEYS[ch] || ch; }
-  var __shiftHeld = false, __ctrlHeld = false, __metaHeld = false, __altHeld = false;
-  // Track modifier state across a key transition; returns true for a pure
-  // modifier key (no text / no further default action).
-  function trackModifier(name, down) {
-    if (name === 'Shift')   { __shiftHeld = down; return true; }
-    if (name === 'Control') { __ctrlHeld = down; return true; }
-    if (name === 'Meta')    { __metaHeld = down; return true; }
-    if (name === 'Alt')     { __altHeld  = down; return true; }
-    return false;
-  }
-  // Accelerator (Ctrl/Cmd + letter) default action on a keydown that wasn't
-  // preventDefault'd: the clipboard + select-all shortcuts. Cut / copy / paste
-  // run the user-gesture clipboard algorithm (the ClipboardEvent → cancelable
-  // beforeinput → mutate → input sequence a real accelerator fires — richer than
-  // scripted execCommand, which fires only input); see clipboardGesture.
-  function accelShortcut(letter, target) {
-    var k = String(letter).toLowerCase();
-    var clip = k === 'c' ? 'copy' : k === 'x' ? 'cut' : k === 'v' ? 'paste' : null;
-    if (clip) {
-      if (typeof W.RustyRacer.steps.clipboardGesture === 'function') W.RustyRacer.steps.clipboardGesture(clip, target.ownerDocument);
-    } else if (k === 'z') {
-      historyKeyAction(__shiftHeld ? 'historyRedo' : 'historyUndo', target);   // Ctrl/Cmd+Z, +Shift = redo
-    } else if (k === 'y') {
-      historyKeyAction('historyRedo', target);                                 // Ctrl+Y = redo (Windows)
-    } else if (k === 'b') {
-      boldKeyAction(target);                                                    // Ctrl/Cmd+B = bold
-    } else if (k === 'a') {
-      try {
-        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
-            typeof target.select === 'function') {
-          target.select();
-        } else {
-          var sel = W.getSelection && W.getSelection();
-          if (sel && target) sel.selectAllChildren(target);
-        }
-      } catch (e) {}
-    }
-  }
-
-  // ---- editing-key default actions (Actions path) -------------------------
-  // A tagName-based text control (INPUT / TEXTAREA), and the broader "editable
-  // target" an editing key may mutate: a contenteditable, or an ENABLED,
-  // NON-readonly text control. A readonly / disabled control or non-editable node
-  // takes the keydown only — no beforeinput / input, no mutation.
-  function isTextControlTarget(target) {
-    return !!(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'));
-  }
-  function isEditableTarget(target) {
-    if (!target) return false;
-    if (target.isContentEditable) return true;
-    if (isTextControlTarget(target)) return !target.disabled && !target.readOnly;
-    return false;
-  }
-  // The effective [start, end] caret of a text control. A freshly focused control
-  // whose selection was never set reports null internally; the caret then sits at
-  // the END (where typing appends), matching the engine send_keys path — the public
-  // selectionStart getter would instead read 0 and wrongly splice at the front.
-  function ctlCaret(target) {
-    var cur = target.value || '';
-    return [
-      target._selectionStart == null ? cur.length : target._selectionStart,
-      target._selectionEnd   == null ? cur.length : target._selectionEnd
-    ];
-  }
-  // Splice `insert` over a text control's selection, collapse the caret after it,
-  // and mark the control edited — the engine's (`changeEdited`, as on user input) — so a later
-  // blur fires `change` (a raw `value=` assignment would leave it unedited).
-  function spliceTextCtl(target, insert) {
-    var caret = ctlCaret(target), s = caret[0], e = caret[1], cur = target.value || '';
-    target.value = cur.slice(0, s) + insert + cur.slice(e);
-    try { target.selectionStart = target.selectionEnd = s + insert.length; } catch (_) {}
-    W.__dom.changeEdited(W.__dom.nidOf(target), true);
-  }
-  // The editing-event envelope every editing key produces: fire the cancelable
-  // beforeinput, run `mutate` (unless it was canceled), then fire the
-  // non-cancelable input — both carrying the same inputType / data / null
-  // dataTransfer, and the beforeinput its getTargetRanges() StaticRanges.
-  // `mutate` is omitted for undo/redo (no local DOM effect).
-  // Returns true if the edit proceeded, false if a listener canceled beforeinput —
-  // the caller uses this to undo any pre-beforeinput selection change on cancel.
-  function editingKeyAction(target, inputType, data, mutate, targetRanges) {
-    var IE = W.InputEvent || W.Event;
-    var bi = new IE('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: inputType, data: data, dataTransfer: null, targetRanges: targetRanges || [] });
-    dispatch(target, bi);
-    if (bi.defaultPrevented) return false;
-    if (mutate) { try { mutate(); } catch (e) {} }
-    dispatch(target, new IE('input', { bubbles: true, cancelable: false, composed: true, inputType: inputType, data: data, dataTransfer: null }));
-    return true;
-  }
-  // The current selection as beforeinput getTargetRanges() for a contenteditable
-  // edit that targets the selection (typing, formatBold, and — once extended to
-  // the range it removes — deletion). A text control reports none.
-  function ceTargetRanges(target) {
-    return (target && target.isContentEditable && typeof W.RustyRacer.steps.targetRangesFromSelection === 'function')
-      ? W.RustyRacer.steps.targetRangesFromSelection() : [];
-  }
-  // Backspace / Delete: delete the selection (deleteContent{Backward,Forward}) or,
-  // with a word modifier at a caret (Ctrl, or Alt on Mac), the adjacent word
-  // (deleteWord{…}). Non-editable / readonly target → the keydown alone stands.
-  function deleteKeyAction(forward, wordMod, target) {
-    if (!isEditableTarget(target)) return;
-    var sel = W.getSelection && W.getSelection();
-    var isTextCtl = isTextControlTarget(target);
-    var caret = isTextCtl ? ctlCaret(target) : null;
-    var collapsed = isTextCtl ? (caret[0] === caret[1]) : (!sel || sel.isCollapsed);
-    var inputType = (collapsed && wordMod)
-      ? (forward ? 'deleteWordForward' : 'deleteWordBackward')
-      : (forward ? 'deleteContentForward' : 'deleteContentBackward');
-    // For a contenteditable, extend a collapsed caret to the range the deletion
-    // will remove BEFORE firing beforeinput, so getTargetRanges() reports that
-    // range (a non-collapsed selection is already it); then delete it. Remember
-    // the original caret so a CANCELED beforeinput can restore it (extending is a
-    // visible selection change that must not survive a preventDefault).
-    var tr = [], caretBeforeExtend = null;
-    if (!isTextCtl && sel && sel.rangeCount) {
-      if (sel.isCollapsed && typeof sel.modify === 'function') {
-        var r0 = sel.getRangeAt(0);
-        caretBeforeExtend = { node: r0.startContainer, offset: r0.startOffset };
-        sel.modify('extend', forward ? 'forward' : 'backward', wordMod ? 'word' : 'character');
-      }
-      tr = ceTargetRanges(target);
-    }
-    var proceeded = editingKeyAction(target, inputType, null, function () {
-      if (isTextCtl) {
-        var cur = target.value || '', s = caret[0], e = caret[1], pos = s;
-        if (s !== e)                        { target.value = cur.slice(0, s) + cur.slice(e);     pos = s; }
-        else if (forward && s < cur.length) { target.value = cur.slice(0, s) + cur.slice(s + 1); pos = s; }
-        else if (!forward && s > 0)         { target.value = cur.slice(0, s - 1) + cur.slice(s); pos = s - 1; }
-        try { target.selectionStart = target.selectionEnd = pos; } catch (_) {}
-        W.__dom.changeEdited(W.__dom.nidOf(target), true);
-      } else if (sel && sel.rangeCount && !sel.isCollapsed) {
-        sel.getRangeAt(0).deleteContents();
-      }
-    }, tr);
-    if (!proceeded && caretBeforeExtend && typeof sel.collapse === 'function') {
-      try { sel.collapse(caretBeforeExtend.node, caretBeforeExtend.offset); } catch (e) {}
-    }
-  }
-  // Bold accelerator (Ctrl/Cmd+B) in an editable target: fire the cancelable
-  // beforeinput (formatBold, targeting the selection), then apply bold via
-  // execCommand (which performs the DOM change and fires the trailing input).
-  function boldKeyAction(target) {
-    if (!target || !target.isContentEditable) return;   // formatBold applies only in a contenteditable
-    var IE = W.InputEvent || W.Event;
-    var bi = new IE('beforeinput', { bubbles: true, cancelable: true, composed: true, inputType: 'formatBold', data: null, dataTransfer: null, targetRanges: ceTargetRanges(target) });
-    dispatch(target, bi);
-    if (bi.defaultPrevented) return;
-    try { if (D() && D().execCommand) D().execCommand('bold'); } catch (e) {}
-  }
-  // Enter: a TEXTAREA inserts a line break, a contenteditable a PARAGRAPH
-  // (insertParagraph) or — with Shift — a line break. A single-line <input> runs
-  // implicit form submission instead: no newline, no beforeinput / input. The
-  // block split or the `<br>` the engine's, as send_keys makes them.
-  function enterKeyAction(shift, target) {
-    if (!isEditableTarget(target)) return;
-    var isTextarea = target.tagName === 'TEXTAREA';
-    if (!isTextarea && !target.isContentEditable) return;   // single-line <input>: submit, not a newline
-    var inputType = (!isTextarea && !shift) ? 'insertParagraph' : 'insertLineBreak';
-    editingKeyAction(target, inputType, null, function () {
-      if (isTextarea) spliceTextCtl(target, '\n');
-      // (…the engine's insertion, `EDIT_PARAGRAPH` (2) or with Shift `EDIT_LINE_BREAK` (1): dom-nodes.js)
-      else if (typeof W.RustyRacer.steps.insertInEditingHost === 'function') W.RustyRacer.steps.insertInEditingHost(shift ? 1 : 2);
-    }, ceTargetRanges(target));
-  }
-  // Undo / Redo accelerator (Ctrl/Cmd+Z, +Shift = redo, Ctrl+Y): historyUndo /
-  // historyRedo. No undo stack is modeled — the events are what rich editors gate
-  // on, and the spec fires them even when there is nothing to undo.
-  function historyKeyAction(inputType, target) {
-    if (!isEditableTarget(target)) return;
-    editingKeyAction(target, inputType, null, null);
-  }
-  // The character a printable key produces given the held modifiers — Shift
-  // uppercases a letter (Shift+b → 'B'), which the `key` property and the
-  // beforeinput/input `data` both reflect. (Shift+non-letter symbol mapping is
-  // layout-dependent and unmodeled; only letters are adjusted.)
-  function effectiveChar(name) {
-    return (__shiftHeld && /^[a-z]$/.test(name)) ? name.toUpperCase() : name;
-  }
-  // Printable-key default action: keypress (dispatched by the caller) then
-  // beforeinput → splice the char at the caret → input, for a text control or
-  // contenteditable — the same beforeinput→mutate→input shape the engine send_keys
-  // path produces. A non-editable / readonly target gets none of it.
-  function typeCharAction(ch, target) {
-    if (!isEditableTarget(target)) return;
-    editingKeyAction(target, 'insertText', ch, function () {
-      if (isTextControlTarget(target)) spliceTextCtl(target, ch);
-      // (…the engine's insertion of text, `EDIT_TEXT` (0): dom-nodes.js)
-      else if (typeof W.RustyRacer.steps.insertInEditingHost === 'function') W.RustyRacer.steps.insertInEditingHost(0, ch);
-    }, ceTargetRanges(target));
-  }
-  // The default action this driver ties to a trusted key press. Today: Tab moves
-  // focus through the sequential-focus-navigation order (engine in dom-nodes.js).
-  // Only runs when the keydown wasn't preventDefault'd — matching real browsers.
-  function keyDefaultAction(name, keydownEv) {
-    if (keydownEv && keydownEv.defaultPrevented) return;
-    // (…Tab's none with Control / Meta / Alt held, as the engine's key plan has it: keys.rs `FOCUS_NAVIGATION`)
-    if (name === 'Tab' && !__ctrlHeld && !__metaHeld && !__altHeld && typeof W.RustyRacer.steps.advanceFocus === 'function') {
-      W.RustyRacer.steps.advanceFocus(__shiftHeld);
-    } else if ((name === 'ArrowDown' || name === 'ArrowUp' || name === 'ArrowLeft' || name === 'ArrowRight') &&
-               typeof W.RustyRacer.steps.arrowKeyDefault === 'function') {
-      // Arrow-key default on a focused radio (group navigation) / single-line select.
-      // (…as a step of the test's script, on the stack: no microtask checkpoint between a picked radio's listeners)
-      var t = D() && D().activeElement;
-      if (t) W.RustyRacer.steps.arrowKeyDefault(t, name);
-    }
+  // ---- keyboard ------------------------------------------------------------
+  // A key action — a key, by a character or the code point WebDriver names it by, pressed or released — is the
+  // engine's keyboard's (keys.rs `KeyGesture`, form-fields.js `keyAction`): its events at what is focused, the
+  // modifiers it keeps held between actions, its default actions. The modifiers held, as the engine's bits have them
+  // (CTRL 1, META 2, ALT 4, SHIFT 8), are what a pointer action's events carry too.
+  function keysHeld() {
+    var held = W.RustyRacer.steps.keysHeld();
+    return { shiftKey: (held & 8) !== 0, ctrlKey: (held & 1) !== 0, altKey: (held & 4) !== 0, metaKey: (held & 2) !== 0 };
   }
 
   // ---- cancelable-when-passive --------------------------------------------
@@ -356,8 +147,7 @@
   // canceled `pointerdown` holds back, the press's focus, `:active`, pointer capture, the click at what the press and the
   // release share.
   function mouseAction(phase, target, x, y, button) {
-    var mods = { shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, altKey: __altHeld, metaKey: __metaHeld };
-    W.RustyRacer.steps.pointerAction(phase, target, x || 0, y || 0, button || 0, mods);
+    W.RustyRacer.steps.pointerAction(phase, target, x || 0, y || 0, button || 0, keysHeld());
   }
 
   // ---- action replay -------------------------------------------------------
@@ -403,53 +193,12 @@
         t = (a.origin && a.origin.nodeType) ? a.origin : null;
         fireWheelOn(t, a.dx, a.dy);
         break;
-      case 'keyDown': {
-        var dkn = keyName(a.key);
-        var dmod = trackModifier(dkn, true);   // updates the held-modifier flags before the event/default
-        t = (D() && D().activeElement) || (D() && D().body);
-        // WebDriver special keys (arrows, Backspace, Enter, …) are PUA U+E000..F8FF.
-        var dcp = String(a.key).codePointAt(0);
-        var dspecial = dcp >= 0xE000 && dcp <= 0xF8FF;
-        var dchar = dspecial ? dkn : effectiveChar(dkn);   // Shift uppercases a printable letter
-        var dEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: dchar, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld });
-        dispatch(t, dEv);
-        // Ctrl/Cmd + printable letter is an accelerator (copy/cut/paste/select-all/
-        // undo/redo), NOT text to type — run its default action instead of inserting.
-        if (!dmod && !dspecial && (__ctrlHeld || __metaHeld)) {
-          if (!dEv.defaultPrevented) accelShortcut(dkn, t);
-          break;
-        }
-        if (!dspecial) {
-          // Printable key: keypress + beforeinput → splice the char at the caret →
-          // input, for a text control or contenteditable — mirrors send_keys.
-          // (…none with Alt held — Control / Meta made it an accelerator above — its char code the engine's: keys.rs
-          // `resolveKey`)
-          // (…and none after a canceled keydown, a canceled one typing nothing)
-          var dcode = W.__dom.resolveKey(dchar, false)[6];
-          var dkp = null;
-          if (!__altHeld && !dEv.defaultPrevented) {
-            dkp = new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dchar, keyCode: dcode, charCode: dcode, shiftKey: __shiftHeld });
-            dispatch(t, dkp);
-          }
-          if (!dEv.defaultPrevented && !(dkp && dkp.defaultPrevented)) typeCharAction(dchar, t);
-        } else if (dkn === 'Backspace' || dkn === 'Delete') {
-          if (!dEv.defaultPrevented) deleteKeyAction(dkn === 'Delete', __ctrlHeld || __altHeld || __metaHeld, t);
-        } else if (dkn === 'Enter') {
-          if (!dEv.defaultPrevented) enterKeyAction(__shiftHeld, t);
-        } else if (!dmod) {
-          keyDefaultAction(dkn, dEv);          // Tab → sequential focus navigation, etc.
-        }
+      case 'keyDown':
+        W.RustyRacer.steps.keyAction(true, a.key);
         break;
-      }
-      case 'keyUp': {
-        var ukn = keyName(a.key);
-        var ucp = String(a.key).codePointAt(0);
-        var uchar = (ucp >= 0xE000 && ucp <= 0xF8FF) ? ukn : effectiveChar(ukn);   // key held: Shift still uppercases
-        trackModifier(ukn, false);
-        t = (D() && D().activeElement) || (D() && D().body);
-        dispatch(t, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: uchar, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld }));
+      case 'keyUp':
+        W.RustyRacer.steps.keyAction(false, a.key);
         break;
-      }
       case 'pause':
       default:
         break;
@@ -457,7 +206,7 @@
   }
 
   function action_sequence(actions) {
-    __shiftHeld = __ctrlHeld = __metaHeld = __altHeld = false;   // each chain starts with no keys depressed
+    W.RustyRacer.steps.keyRelease();   // each chain starts with no keys depressed
     var state = Object.create(null);
     for (var i = 0; i < actions.length; i++) {
       var a = actions[i];
@@ -535,43 +284,6 @@
       mouseAction(1, t, x, y, 0);
       mouseAction(2, t, x, y, 0);
       mouseAction(4, t, x, y, 0);
-      return settled();
-    },
-    send_keys: function (element, keys) {
-      try { W.__dom.setPointerModality(false); } catch (e) {}   // keyboard-driven → :focus-visible applies
-      try { if (element && typeof element.focus === 'function') element.focus(); } catch (e) {}
-      var str = String(keys == null ? '' : keys);
-      __shiftHeld = __ctrlHeld = __metaHeld = __altHeld = false;   // start fresh; a modifier in
-                             // `keys` stays held for the rest of THIS call (WebDriver sticky), but
-                             // does not leak into a later send_keys / Actions chain
-      // (…a character at a time: a code point, a surrogate pair's two units one character)
-      for (var ch of str) {
-        var cp = ch.codePointAt(0);
-        // WebDriver special keys (arrows, Backspace, Enter, …) live in the PUA
-        // block U+E000..U+F8FF. They produce keydown/keyup but DON'T insert text
-        // — so no keypress, no value mutation, no `input` event for them.
-        var special = cp >= 0xE000 && cp <= 0xF8FF;
-        var kn = keyName(ch);
-        var isMod = trackModifier(kn, true);   // sets __shiftHeld for a held Shift
-        var kdEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: kn, shiftKey: __shiftHeld });
-        dispatch(element, kdEv);
-        if (!special && !kdEv.defaultPrevented) {
-          // (…its keypress the engine's char code, and none canceled typing nothing; nor a read-only control's value)
-          var kcode = W.__dom.resolveKey(kn, false)[6];
-          var kpEv = new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: kn, keyCode: kcode, charCode: kcode, shiftKey: __shiftHeld });
-          dispatch(element, kpEv);
-          try {
-            if (element && 'value' in element && !kpEv.defaultPrevented && !element.readOnly) {
-              element.value = (element.value || '') + ch;
-              var InputCtor = W.InputEvent || W.Event;
-              dispatch(element, new InputCtor('input', { bubbles: true, composed: true, data: ch }));
-            }
-          } catch (e) {}
-        } else if (!isMod) {
-          keyDefaultAction(kn, kdEv);          // Tab → sequential focus navigation
-        }
-        dispatch(element, new W.KeyboardEvent('keyup', { bubbles: true, cancelable: true, composed: true, key: kn, shiftKey: __shiftHeld }));
-      }
       return settled();
     },
     // Gestures/state we can't meaningfully back — resolve so awaiting tests proceed.

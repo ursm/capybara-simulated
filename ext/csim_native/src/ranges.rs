@@ -493,6 +493,12 @@ fn range_text_points(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     }
     rv.set(v8::Array::new_with_elements(scope, &out).into());
 }
+// …and a point so, as a node and an offset: the target range of a deletion's `beforeinput` (editing_delete.rs
+// `deletionRange`).
+pub(crate) fn text_point_of(arena: &RealmArena, (node, offset): (NodeId, u32)) -> (NodeId, u32) {
+    let p = text_point(arena, Boundary { node, offset });
+    (p.node, p.offset)
+}
 // (…a point between an element's children onto the Text node after it, at its start, else the one before it, at its
 // end; any other as it is)
 fn text_point(arena: &RealmArena, p: Boundary) -> Boundary {
