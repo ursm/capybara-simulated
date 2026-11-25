@@ -441,8 +441,6 @@ module Capybara
         # is parked here (a push-back would reorder it behind concurrent worker pushes) and
         # consumed first by the next deliver_worker_messages.
         @worker_outbox_head = nil
-        # What the service workers changed of their clients' control — their claims, their lifecycle phases — taken from
-        # the outbox and held for the window's next event-loop step (`hold_controller_changes`).
         # What the workers owe this window and what it streams, races, awaits and holds its clock for across their threads
         # — the engine's (worker_host.rs `WorkerHost`), counted with no lock: the plain messages posted to a worker that it
         # may answer (`POSTED`: `polling?` stays true while one is outstanding, so long-running compute isn't starved by the
@@ -524,8 +522,8 @@ module Capybara
         # PROCESSING a plain postMessage: one request yields MANY replies (progress updates and the final resolve), so
         # `POSTED` under-counts to none mid-handshake and settle would abandon a multi-round protocol — Tesseract's
         # createWorker load→loadLanguage→initialize→recognize, each a round-trip gated on a slow synchronous WASM step.)
-        # The worker handle counter and each worker's parked fetches (`sw_deferred_fetches`) are taken under this lock: a
-        # controlled worker's fetch reaches the host on the worker's thread.
+        # The worker handle counter and the copy-on-write `@workers` are taken under this lock: a nested worker is made and
+        # terminated on its parent's thread.
         @worker_init_lock = Mutex.new
         # This window's blob URL registry, the engine's (blob_registry.rs): what the blob URLs its contexts — its realms,
         # its workers' isolates, which see none of the page isolate's store (blob_urls.rs) — made resolve to, each
@@ -5344,7 +5342,7 @@ module Capybara
                  end
         travel = travel ? travel.to_f : @runtime.call('timeTravel').to_f
         kind   = if service then 'service' elsif shared then 'shared' else 'dedicated' end
-        @worker_host.worker_new(handle, kind, parent_worker, parent_worker ? 0 : realm_id.to_i, target, origin, epoch, shift, travel)
+        @worker_host.worker_new(handle, kind, parent_worker, parent_worker ? 0 : realm_id.to_i, target, origin, @runtime.clock, epoch, shift, travel)
         # The host's own record of it, its host I/O: its thread, its inbox, and its own runtime, published by its thread
         # once built, so the session boundary can stop the JS half without waiting for it (see `stop_worker_js`). The
         # lock is per worker rather than the shared counter mutex: the only two things that ever contend for it are that
@@ -5850,10 +5848,8 @@ module Capybara
         # A wait that ran out on a hang, a handler spinning: its isolate ended, so no later request waits it out too — a dead
         # worker routes nothing (a user agent's own "the service worker is unresponsive": Chrome after 62 s, Firefox after
         # 60 s, measured). A wait a worker's thread makes leaves it to the window.
-        if in_place && worker && (w = @workers[worker]) && @worker_host.worker_kind(worker) == 'service' &&
-           Native.sw_hung(left <= 0, w[:inbox].num_waiting.positive?, @worker_host.on_network?(worker))
-          worker_terminate(worker)
-        end
+        hung = in_place && worker && (w = @workers[worker]) && @worker_host.worker_kind(worker) == 'service' &&
+               Native.sw_hung(left <= 0, w[:inbox].num_waiting.positive?, @worker_host.on_network?(worker))
         nil
       ensure
         if in_place
@@ -5871,6 +5867,8 @@ module Capybara
         elsif follow
           window_follows_awaited_worker(follow, follower, moved)
         end
+        # (…ended once the wait's time is taken off its record, which the termination drops)
+        worker_terminate(worker) if hung
       end
       # …whether worker `handle` can answer nothing more of its own accord: waiting on its inbox, which is empty, with no
       # timer set, nor a socket or event stream it reads.
@@ -6200,6 +6198,8 @@ module Capybara
           # (…a worker waiting on it in place let go on, which a step of its window's waits for — whichever window's worker
           # it is; its answer out: the worker's time back on the window's, the window on with it — not run on past it while
           # the waiting thread wakes — the answer's time what its waiter counts to: worker_records.rs `answered_in_place`)
+          # (…a direct fetch id the session's SW host's — which every service worker is spawned on and every in-place wait
+          # asks (`sw_direct_reply`) — so unique across the windows)
           sw_browsers.each {|b| b.worker_answer_out(fid) }
           @worker_host.answered_in_place(handle.to_i, fid)
           # (…the time it took carried to the waiter: sw-client.js `interceptFetchSync`)
@@ -6918,7 +6918,6 @@ module Capybara
       end
       # …whether worker `handle` is a service worker.
       private def service_worker?(handle) = @worker_host.worker_kind(handle) == 'service'
-
 
       # (…`doomed` and — transitively — their NESTED workers, recorded with realm 0 + parent_worker: their Worker
       # objects live in the dying parents' isolates, so no one can reach them once those go. A snapshot, as a live
@@ -9754,8 +9753,6 @@ module Capybara
         # the matching decrement can't strand the counter (which would pin
         # `worker_pending?` true forever).
         busy_held = false
-        # Its thread runs (worker_records.rs): what the window's steps wait on, until it ends (the `ensure`'s).
-        @worker_host.worker_started(handle)
         # Tag this thread so blob URLs created by the worker's script are owned by
         # this handle and revoked on terminate (see blob.js `createObjectURL` / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
@@ -9882,7 +9879,7 @@ module Capybara
           # the host's step waits on, posted as it comes (sw_registry.rs `own_settled`) — the activate handler's side
           # effects (a clients.claim(), cache warm-up) already in the outbox AHEAD of it, so a page reading
           # `navigator.serviceWorker.controller` right after `wait_for_state(..., 'activated')` sees the claim.
-          event_settled:  ->(ok) { sw_post_own_marker(handle, Native.sw_own_settled(@sw_partition, handle, ok == true), outbox) },
+          event_settled:  ->(ok) { sw_post_own_marker(handle, Native.sw_own_settled(@sw_partition, handle, ok == true), outbox, settled: true) },
           fetch_respond:  ->(fetch_id, resp, realm_id, spent = 0, took = 0) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i, spent.to_f, took.to_f) },
           # A streaming respondWith frame (start / chunk / close / error) for a controlled client's
           # fetch — rides the outbox in emission order so the client realm reassembles the body
@@ -10247,7 +10244,7 @@ module Capybara
                 # AFTER the decrement, that release is lost and a parked activation
                 # hangs (activation.https 'finishing a request…' TIMEOUT). Every
                 # hold-clearing transition posts its own try_activate — this one, the
-                # extended 0-transition, unregister_client, skipWaiting, reap_worker —
+                # last extension let go, unregister_client, skipWaiting, reap_worker —
                 # so the gate's cross-thread reads only ever miss a wakeup that a later
                 # one repeats. Under the registry's lock against the main thread's
                 # increment (a lost increment would read as "no holds" with a message
@@ -10456,14 +10453,14 @@ module Capybara
       end
 
       # A service worker's own lifecycle marker (sw_registry.rs `Own`), `[phase, ok]` — none for none — posted for the host's
-      # step that waits on it; an 'activated' one its activation done at its time, which a sync request waiting in place for
-      # it reads (`sw_activated_in_place`).
-      private def sw_post_own_marker(handle, marker, outbox)
+      # step that waits on it; an 'activated' one its events `settled` its activation done at its time, which a sync request
+      # waiting in place for it reads (`sw_activated_in_place`) — not one its thread's end abandoned, which answers nothing.
+      private def sw_post_own_marker(handle, marker, outbox, settled: false)
         return unless marker
 
         phase, ok = marker
         outbox << {handle: handle, kind: 'sw_phase', phase: phase, ok: ok}
-        @worker_host.worker_activate_done(handle) if phase == 'activated'
+        @worker_host.worker_activate_done(handle) if settled && phase == 'activated'
       end
 
       # Bundlers that ship a worker inline as a Blob (Tesseract,
@@ -13504,14 +13501,14 @@ module Capybara
       # thread, its body read as the app writes it)
       # (…a worker's thread marked as it waits on the network, the app's or another host's: no hang, `await_worker_reply`)
       private def on_network
-        handle = Thread.current[:csim_worker_record]&.dig(:handle)
-        return yield unless handle
+        record = Thread.current[:csim_worker_record]
+        return yield unless record
 
         begin
-          @worker_host.on_network(handle, true)
+          record[:host].on_network(record[:handle], true)
           yield
         ensure
-          @worker_host.on_network(handle, false)
+          record[:host].on_network(record[:handle], false)
         end
       end
       def dispatch_rack_or_http(url, env, method: 'GET', body: nil, transport: nil) = on_network { dispatched(url, env, method:, body:, transport:) }

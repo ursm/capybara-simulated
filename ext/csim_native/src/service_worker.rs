@@ -719,10 +719,14 @@ fn reserving_over_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 fn reserving_waited_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     with_global(scope, &args, |g, id| g.reserved_waited(&id));
 }
-// __dom.swSelfWaits() -> the reserved clients a `clients.get` waits on whose navigations' events are unanswered.
+// __dom.swSelfWaits() -> the reserved clients a `clients.get` waits on whose navigations' events are unanswered; undefined
+// for none, no array made (asked at every idle poll of the worker's).
 fn self_waits_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let ids: Vec<String> = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.service_worker.as_ref()).map_or_else(Vec::new, |g| g.self_waits().map(str::to_owned).collect());
+    if ids.is_empty() {
+        return;
+    }
     let items: Vec<v8::Local<'_, v8::Value>> = ids.iter().filter_map(|id| v8::String::new(scope, id)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

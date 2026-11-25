@@ -42,6 +42,18 @@ RSpec.describe 'SharedWorker matching' do
     poll_until { session.evaluate_script('window.got') }
   end
 
+  # (…one made in the same task, its thread not yet run, found all the same: a shared worker is one from its constructor on)
+  it 'connects two SharedWorkers made in one task to one worker' do
+    session = simulated_session(app)
+    session.visit '/'
+    got = run(session, <<~JS)
+      const a = new SharedWorker('/count.js', 'same-task');
+      const b = new SharedWorker('/count.js', 'same-task');
+      return [await ask(a), await ask(b)];
+    JS
+    expect(got).to eq(%w[conn1/of2 conn2/of2])
+  end
+
   # (…HTML: "workerGlobalScope's credentials is not equal to options["credentials"]", Chrome and Firefox measured 2026-11-06)
   it 'fails a SharedWorker of another credentials mode than the one running' do
     session = simulated_session(app)

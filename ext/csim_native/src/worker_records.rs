@@ -70,10 +70,11 @@ impl Kind {
     }
 }
 
-// Its thread: made but not running yet, running, or ended (on its own, or terminated).
+// Its thread: running from the moment it is made (its thread's first statement may come later, but a window's step waits
+// for a booting worker, and a SharedWorker constructor finds one made in the same task), or ended (on its own, or
+// terminated).
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Life {
-    Spawning,
     Running,
     Ended,
 }
@@ -205,21 +206,22 @@ impl WorkerHost {
     }
 
     // ── What it is ──
-    // #worker_new(handle, kind, parent, realm, url, at, epoch, shift, travel) — a worker made: `kind` "dedicated", "shared"
-    // or "service", its parent worker (nil for none) and making realm, its URL, the window's time it was made at (its clock
-    // starts there, and it is due then: a booting worker runs its script before the window steps past it), and its time
+    // #worker_new(handle, kind, parent, realm, url, at, window, epoch, shift, travel) — a worker made: `kind` "dedicated",
+    // "shared" or "service", its parent worker (nil for none) and making realm, its URL, the window's time it was made at
+    // (its clock starts there, and it is due then: a booting worker runs its script before the window steps past it) and
+    // the window's clock as its last step left it (which `at`, a task's time, may be ahead of: no going back), and its time
     // origin's epoch (nil for none), shift and travel.
     #[allow(clippy::too_many_arguments)]
-    fn worker_new(&self, handle: i64, kind: String, parent: Option<i64>, realm: i64, url: String, at: f64, epoch: Option<f64>, shift: f64, travel: f64) {
+    fn worker_new(&self, handle: i64, kind: String, parent: Option<i64>, realm: i64, url: String, at: f64, window: f64, epoch: Option<f64>, shift: f64, travel: f64) {
         let record = Record {
             kind: Kind::parse(&kind),
             parent,
             realm,
             url,
-            life: Life::Spawning,
+            life: Life::Running,
             stopping: false,
             now: at,
-            window_was: at,
+            window_was: window,
             epoch,
             shift,
             travel,
@@ -288,11 +290,7 @@ impl WorkerHost {
     }
 
     // ── Its thread ──
-    // #worker_started(handle) — its thread runs; #worker_ended(handle) — …ended, on its own or terminated; its timers
-    // none.
-    fn worker_started(&self, handle: i64) {
-        self.stir(handle, (), |r| r.life = Life::Running);
-    }
+    // #worker_ended(handle) — its thread ended, on its own or terminated; its timers none.
     fn worker_ended(&self, handle: i64) {
         self.stir(handle, (), |r| {
             r.life = Life::Ended;
@@ -644,7 +642,7 @@ pub(crate) fn define(class: magnus::RClass) -> Result<(), magnus::Error> {
     class.const_set("BOOT_GUARD", BOOT_GUARD)?;
     class.const_set("POLL_INTERVAL", POLL_INTERVAL)?;
     class.const_set("ANSWER_VIRTUAL_MS", ANSWER_VIRTUAL_MS)?;
-    class.define_method("worker_new", method!(WorkerHost::worker_new, 9))?;
+    class.define_method("worker_new", method!(WorkerHost::worker_new, 10))?;
     class.define_method("worker_drop", method!(WorkerHost::worker_drop, 1))?;
     class.define_method("workers_clear", method!(WorkerHost::workers_clear, 0))?;
     class.define_method("worker_kind", method!(WorkerHost::worker_kind, 1))?;
@@ -654,7 +652,6 @@ pub(crate) fn define(class: magnus::RClass) -> Result<(), magnus::Error> {
     class.define_method("worker_url", method!(WorkerHost::worker_url, 1))?;
     class.define_method("worker_url_set", method!(WorkerHost::worker_url_set, 2))?;
     class.define_method("worker_epoch", method!(WorkerHost::worker_epoch, 1))?;
-    class.define_method("worker_started", method!(WorkerHost::worker_started, 1))?;
     class.define_method("worker_ended", method!(WorkerHost::worker_ended, 1))?;
     class.define_method("worker_script_began", method!(WorkerHost::worker_script_began, 1))?;
     class.define_method("worker_ran_for", method!(WorkerHost::worker_ran_for, 1))?;
@@ -706,13 +703,17 @@ mod tests {
 
     fn host_with(kind: &str) -> WorkerHost {
         let host = WorkerHost::new();
-        host.worker_new(1, kind.into(), None, 0, "https://a.test/w.js".into(), 100.0, None, 0.0, 0.0);
+        host.worker_new(1, kind.into(), None, 0, "https://a.test/w.js".into(), 100.0, 100.0, None, 0.0, 0.0);
         host
     }
 
     #[test]
     fn a_worker_s_clock_follows_the_window_s_and_goes_back_only_with_it() {
         let host = host_with("dedicated");
+        // (…made at a task's time ahead of the window's last step: no going back to that step)
+        host.worker_new(2, "dedicated".into(), None, 0, "u".into(), 120.0, 100.0, None, 0.0, 0.0);
+        assert_eq!(host.worker_clock_step(2, 100.0, 100.0), 0.0);
+        assert_eq!(host.worker_now(2), Some(120.0));
         assert_eq!(host.worker_clock_step(1, 150.0, 150.0), 50.0);
         assert_eq!(host.worker_clock_step(1, 120.0, 150.0), 0.0);
         assert_eq!(host.worker_now(1), Some(150.0));
@@ -725,9 +726,7 @@ mod tests {
     #[test]
     fn a_worker_is_due_in_the_lockstep_at_its_timer_or_at_once_where_asked() {
         let host = host_with("dedicated");
-        // (…not while its thread is not running)
-        assert_eq!(host.lockstep_next_at(100.0), None);
-        host.worker_started(1);
+        // (…booting, due at the time it was made)
         assert_eq!(host.lockstep_next_at(100.0), Some(100.0));
         host.worker_timers_left(1, 30.0, false);
         assert_eq!(host.lockstep_next_at(100.0), Some(130.0));
@@ -744,7 +743,6 @@ mod tests {
     #[test]
     fn a_lagging_worker_is_back_in_the_lockstep_once_it_answers() {
         let host = host_with("dedicated");
-        host.worker_started(1);
         host.worker_timers_left(1, 0.0, false);
         host.with(1, (), |r| r.lagging = true);
         assert_eq!(host.lockstep_next_at(100.0), None);
@@ -755,7 +753,6 @@ mod tests {
     #[test]
     fn a_blocked_worker_is_no_worker_the_lockstep_waits_on() {
         let host = host_with("dedicated");
-        host.worker_started(1);
         host.worker_blocked(1, 5);
         assert!(host.awaits_worker());
         assert_eq!(host.lockstep_next_at(100.0), None);
@@ -770,7 +767,6 @@ mod tests {
     #[test]
     fn a_wait_in_place_counts_the_worker_s_time_from_its_take_to_its_answer() {
         let host = host_with("service");
-        host.worker_started(1);
         host.wait_begin(1, 7, true, true);
         assert_eq!(host.wait_spent(1, 7, false), None);
         host.fetch_taken(1, 7);
@@ -789,7 +785,6 @@ mod tests {
     #[test]
     fn an_activation_wait_runs_the_worker_on_no_further_than_it_lets_it() {
         let host = host_with("service");
-        host.worker_started(1);
         let began = host.activation_wait_begin(1);
         host.worker_timers_left(1, 5000.0, false);
         assert_eq!(host.worker_idle_to(1, 100.0), 100.0 + ACTIVATION_IN_PLACE_MS);
@@ -827,9 +822,10 @@ mod tests {
     }
 
     #[test]
-    fn a_lockstep_wait_gives_up_on_a_worker_not_running() {
+    fn a_lockstep_wait_gives_up_on_a_worker_ended() {
         let host = host_with("dedicated");
-        // (…its thread never ran: no tick of it answered, the wait over at once)
+        // (…its thread ended: no tick of it answered, the wait over at once)
+        host.worker_ended(1);
         let began = Instant::now();
         host.lockstep_wait(vec![1], began);
         assert!(began.elapsed() < Duration::from_secs(1));
@@ -839,7 +835,6 @@ mod tests {
     #[test]
     fn a_lockstep_wait_ends_as_the_worker_answers_its_tick() {
         let host = std::sync::Arc::new(host_with("dedicated"));
-        host.worker_started(1);
         host.worker_script_began(1);
         assert_eq!(host.lockstep_due(100.0), vec![1]);
         let worker = std::sync::Arc::clone(&host);
@@ -857,8 +852,7 @@ mod tests {
     #[test]
     fn the_soonest_timer_is_of_the_workers_not_stopping() {
         let host = host_with("service");
-        host.worker_new(2, "dedicated".into(), Some(1), 0, "u".into(), 0.0, None, 0.0, 0.0);
-        host.worker_started(1);
+        host.worker_new(2, "dedicated".into(), Some(1), 0, "u".into(), 0.0, 0.0, None, 0.0, 0.0);
         host.worker_timers_left(1, 20.0, false);
         host.worker_timers_left(2, 10.0, false);
         assert_eq!(host.worker_next_timer(), 10.0);
