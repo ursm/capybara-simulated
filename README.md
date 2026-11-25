@@ -141,6 +141,24 @@ click_link 'Export CSV'
 expect(File.read(File.join(Capybara.save_path, 'report.csv'))).to include('id,name')
 ```
 
+### Driver options
+
+`:simulated` is registered with the defaults. To change one, register a driver of your own:
+
+```ruby
+Capybara.register_driver :simulated_mobile do |app|
+  Capybara::Simulated::Driver.new(app, viewport: [390, 844], external_frames: true)
+end
+```
+
+- `viewport:` — `[width, height]` of every window, in CSS pixels (default 1024×768).
+- `user_agent:` — the `User-Agent` the session sends and `navigator.userAgent` reports.
+- `touch:` — `true` for a touchscreen pointer.
+- `external_frames:` — whether an `<iframe>` / `<frame>` may load a document from a host your app does not serve (a
+  video embed, a payment widget). Off by default: such a frame gets the error document a browser shows for a network
+  error, and its `load` fires. No request leaves the process, and nothing waits on a connection. Turn it on to fetch
+  those documents from the network, at that network's speed, and run their scripts.
+
 ## Trace
 
 Each Capybara action (`visit`, `click`, `set`, …) is recorded as a step in a per-test trace: URL before / after, console output and network requests during the step, plus elapsed and per-step durations. On action failure (and only then, by default) the post-action DOM is captured too, and a failing example gets one **screenshot** of the state it ended in.

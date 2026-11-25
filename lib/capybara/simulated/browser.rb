@@ -212,10 +212,13 @@ module Capybara
       end
 
       def initialize(app, driver: nil, cookie_jar: nil, auth_cache: nil, local_storage: nil, session_partition: nil, sw_partition: nil, all_hosts_local: nil,
-                     client_space: '', window_number: 0)
+                     external_frames: false, client_space: '', window_number: 0)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
+        # Whether a frame's navigation may go to a host the app does not serve — off by default (the driver's
+        # `external_frames:`): `navigation_network_hop`.
+        @external_frames              = external_frames
         @browsing_context_group       = "g#{object_id}"
         # (…the thread the window's isolate is driven on: a worker's thread waiting on another worker touches nothing of
         # the window's — `await_worker_reply`)
@@ -7534,7 +7537,7 @@ module Capybara
           hop.document ||= take_rack_body(hop) if args[0] && hop.rack_body
           @runtime.realm_call(host.realm, 'navigationAwaited') == true
         when 'sw_fetch' then navigation_worker_hop(hop, *args)
-        when 'network' then navigation_network_hop(hop, *args)
+        when 'network' then navigation_network_hop(host, hop, *args)
         when 'read_body'
           hop.document ||= take_rack_body(hop)
         when 'coop_facts' then coop_facts(host.realm)
@@ -7576,9 +7579,16 @@ module Capybara
         [hop.status, hop.headers]
       end
       # …and to the network (`network`): its response `[status, headers]`, its body held unread — nil a network error.
-      private def navigation_network_hop(hop, target, method, headers, body, content_type, cookie_context)
+      # A frame's hop to a host the app does not serve (`reaches_app?`: a browser's request of it would not reach the app's
+      # server) is a network error unless the session allows external frames (`external_frames:`) — an embed's document
+      # is no test's, and its request would go out to the network (a connect that stalls, a third party's script run
+      # in-process) or, refused there, to the app with a URL it never serves. The frame gets its error document and its
+      # container's `load` fires, as for any network error (HTML; Chrome 157, measured 2026-11-26 — Firefox 159 fires none).
+      # Its other subresources go on to `dispatch_rack_or_http` as they did.
+      private def navigation_network_hop(host, hop, target, method, headers, body, content_type, cookie_context)
         close_rack_body(hop.rack_body) if hop.rack_body
         hop.rack_body = hop.document = nil
+        return nil if !@external_frames && %i[container frame].include?(host.kind) && !reaches_app?(target)
         response = dispatch_navigation_hop(target, method, headers, body: body, content_type: content_type, cookie_context: cookie_context) or return nil
         hop.status, hop.headers, hop.rack_body = response
         [hop.status, hop.headers]

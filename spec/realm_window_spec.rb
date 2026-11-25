@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A window `window.open` made in its opener's isolate (RealmWindow) is a window of the session like any other: Capybara
 # switches to it, finds, clicks, fills, evaluates, reads its URL and title, navigates it, resizes it, paints it and

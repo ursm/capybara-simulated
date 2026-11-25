@@ -4,6 +4,7 @@ require 'tempfile'
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # What the host hands a realm and what it takes back go through nothing a page can replace: a host step reads the
 # engine's answers and the host's arguments by index, not by the iterator `Array.prototype` has (engine.js `listOf`);
@@ -187,7 +188,7 @@ RSpec.describe 'the host boundary' do
 
   # (…a cross-origin frame's script among them: it stops no timer of its parent's or a sibling's by discarding their
   # realms, nor grants itself the transient activation only a user's gesture gives (HTML "activation notification"))
-  it "lets a frame's script neither discard another realm nor grant itself activation" do
+  it "lets a frame's script neither discard another realm nor grant itself activation", :every_host_local do
     session.visit '/frames'
     expect(poll_until { session.evaluate_script("window.ticks > 2 && document.getElementById('f').contentWindow.ticks > 2") }).to be(true)
     session.within_frame('x') { session.execute_script('kill()') }

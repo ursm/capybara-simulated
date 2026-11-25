@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # Worker and SharedWorker, generated from their IDL: their state in slots (no `url` of their own, which no browser
 # has), their arguments converted; a SharedWorker's port a real MessagePort, entangled with the inside port its worker's
@@ -62,7 +63,7 @@ RSpec.describe 'Worker bindings' do
 
   # A nested worker's script is judged against its parent worker's URL: in a frame of another origin, its worker's
   # same-origin child runs.
-  it "judges a nested worker's script against its parent" do
+  it "judges a nested worker's script against its parent", :every_host_local do
     session = simulated_session(app)
     session.visit '/framed'
     session.within_frame(0) do

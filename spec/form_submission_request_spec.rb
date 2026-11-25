@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 require_relative 'support/https_app_host'
+require_relative 'support/every_host_local'
 
 # HTML "submit" builds a form's request — its action, method, entries — before it plans the navigation: what the page
 # does to the form after `submit()` returns is no part of what it sends. And a form whose node document is no longer
@@ -399,7 +400,7 @@ RSpec.describe "a form submission's request" do
 
   # …and an entered frame's own navigations — a link, a form, a Location set, each hop of a redirect — the navigation
   # request's Fetch metadata (dest `iframe`) of the frame's document, cross-site and `Origin: null` for a sandboxed one.
-  it "sends the Fetch metadata of an entered frame's own navigation", :https do
+  it "sends the Fetch metadata of an entered frame's own navigation", :https, :every_host_local do
     seen = {}
     s = simulated_session(lambda {|env|
       seen[env['PATH_INFO']] = [env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_DEST'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_ORIGIN']]
@@ -426,7 +427,7 @@ RSpec.describe "a form submission's request" do
 
   # …its POST's Origin its document's — an about:blank one's its creator's — `null` past a redirect to a third origin
   # (Fetch "HTTP-redirect fetch"), and its cookies a frame's, by its ancestors (RFC 6265bis "site for cookies").
-  it "sends an entered frame's POST the Origin of its document, tainted by a redirect, and a frame's cookies" do
+  it "sends an entered frame's POST the Origin of its document, tainted by a redirect, and a frame's cookies", :every_host_local do
     seen = {}
     s = simulated_session(lambda {|env|
       key = "#{env['SERVER_NAME']}#{env['PATH_INFO']}"
@@ -464,7 +465,7 @@ RSpec.describe "a form submission's request" do
 
   # …the initiating document taken as the navigation begins (HTML's source snapshot): one its own navigation discards
   # before its other is sent — a frame navigating its parent away, then a sibling of the page — still cross-site.
-  it 'sends the Fetch metadata of the document that began a navigation, gone since' do
+  it 'sends the Fetch metadata of the document that began a navigation, gone since', :every_host_local do
     seen = {}
     s = simulated_session(lambda {|env|
       key = "#{env['SERVER_NAME']}#{env['PATH_INFO']}"

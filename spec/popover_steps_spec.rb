@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # The popover and dialog algorithms (popovers.rs, dialogs.rs, close_watchers.rs) against Chrome and Firefox, measured
 # 2026-11-25 with the probe pages under ~/.local/share/csim-bench/pop11/p (Chrome 15x headless `--dump-dom`, Firefox

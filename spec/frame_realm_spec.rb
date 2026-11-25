@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # Frame-document scripts must execute in the FRAME's realm, whichever
 # execution path the runtime routes them through. The leading-lexical and
@@ -270,7 +271,7 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
   # child still had its inherited about:blank origin) left these readable for the frame's
   # life. (A cross-origin-aware API like showPicker detects the embedding via the
   # driver-internal raw-window unwrap, not web `top.origin`.)
-  it 'gives a cross-origin child SecurityError on top.origin / parent.document, not its own origin' do
+  it 'gives a cross-origin child SecurityError on top.origin / parent.document, not its own origin', :every_host_local do
     session.evaluate_script(<<~JS)
       window.__r = 'none';
       window.addEventListener('message', (e) => { window.__r = e.data; });

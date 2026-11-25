@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # Web Storage is an area per storage key (HTML §12.2: "obtain a storage key"): the origin, and the site of the top-level
 # document it is under (storage partitioning, Chrome and Firefox both) — a frame of another origin has its own
@@ -44,7 +45,7 @@ RSpec.describe 'Web Storage origins' do
     }
   }
 
-  it "keeps a frame of another origin's areas apart, and fires `storage` at the page's origin alone" do
+  it "keeps a frame of another origin's areas apart, and fires `storage` at the page's origin alone", :every_host_local do
     s = simulated_session(app)
     s.visit '/'
     # (…the page's own frame loaded: one of another origin is built as the page first reaches it, outside the WPT
@@ -74,7 +75,7 @@ RSpec.describe 'Web Storage origins' do
     end
   }
 
-  it "keeps a third-party frame's area apart from its origin's first-party one, but under the same site, and its events" do
+  it "keeps a third-party frame's area apart from its origin's first-party one, but under the same site, and its events", :every_host_local do
     s = simulated_session(partitioned)
     s.visit '/'
     poll_until { s.within_frame('other') { s.evaluate_script('localStorage.length') } == 1 && s.within_frame('sub') { s.evaluate_script('localStorage.length') } == 1 }

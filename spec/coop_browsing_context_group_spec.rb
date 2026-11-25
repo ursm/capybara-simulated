@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A navigation response whose cross-origin opener policy its document's browsing context group cannot hold switches the
 # top-level traversable to a new browsing context group (HTML "obtain a browsing context to use for a navigation

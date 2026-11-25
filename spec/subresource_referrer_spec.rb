@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/https_app_host'
+require_relative 'support/every_host_local'
 
 # A document's subresources are requested by that document (Fetch "client"): their Referer its URL under its referrer
 # policy — or the one the element's `referrerpolicy` sets — a frame's style sheets, scripts, modules and fonts the
@@ -331,7 +332,7 @@ RSpec.describe 'a subresource request' do
 
   # A font is a CORS request of its client (CSS Fonts 4 §4.9.1): one a frame of the font's origin loads, another origin's
   # document has refused all the same, whichever asked first (Chrome).
-  it "keeps a font's CORS verdict its client's origin's" do
+  it "keeps a font's CORS verdict its client's origin's", :every_host_local do
     font = File.binread(File.expand_path('fixtures/fonts/Ahem.woff2', __dir__))
     session = simulated_session(lambda {|env|
       next [200, {'content-type' => 'font/woff2'}, [font]] if env['PATH_INFO'] == '/q.woff2'

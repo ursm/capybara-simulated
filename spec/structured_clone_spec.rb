@@ -1,12 +1,17 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # The structured clone (HTML §2.7), V8's own serializer (clone.rs) with the bindings saying what each platform object
 # serializes to: the JavaScript values with their cycles and shared references; a DOMException — any realm's — made
 # this realm's again with its name and message (a QuotaExceededError with its quota); a platform object that is not
 # [Serializable], a DataCloneError; a transfer list's ArrayBuffers and ports moved; and a FileList — the one
 # [Serializable] legacy platform object — made natively (legacy.rs), since V8's serializer takes no Proxy.
+# (…a cross-origin isolated page needs a secure context — the default host's loopback stand-in — whose frames of other
+# hosts the app serves only where frames may go to the network: `external_frames:`, the app answering what it refuses)
+Capybara.register_driver(:simulated_external_frames) {|app| Capybara::Simulated::Driver.new(app, external_frames: true) }
+
 RSpec.describe 'Structured clone of platform objects' do
   let(:app) {
     lambda do |env|
@@ -291,7 +296,7 @@ RSpec.describe 'Structured clone of platform objects' do
   # The WebAssembly JS API's deserialization steps: a module is read back in the agent cluster it was serialized in
   # alone — a frame of another site's, or of an opaque origin, gets a `messageerror` (Chrome: 127.0.0.1 → localhost, and
   # a sandboxed frame), one of the same site the module, its origin another or not.
-  it "posts a WebAssembly.Module to a frame of the agent cluster alone" do
+  it "posts a WebAssembly.Module to a frame of the agent cluster alone", :every_host_local do
     frames_app = lambda do |env|
       case env['PATH_INFO']
       when '/child'
@@ -345,7 +350,7 @@ RSpec.describe 'Structured clone of platform objects' do
         HTML
       end
     end
-    s = simulated_session(coi_app)
+    s = simulated_session(coi_app, mode: :simulated_external_frames)
     s.visit '/'
     expect(s.evaluate_script('crossOriginIsolated')).to be(true)
     s.execute_script(<<~JS)
@@ -381,7 +386,7 @@ RSpec.describe 'Structured clone of platform objects' do
         HTML
       end
     end
-    s = simulated_session(coi_app)
+    s = simulated_session(coi_app, mode: :simulated_external_frames)
     s.visit '/'
     s.execute_script(<<~JS)
       window.sab = new SharedArrayBuffer(8);
@@ -424,7 +429,7 @@ RSpec.describe 'Structured clone of platform objects' do
 
   # …and over a MessagePort whose other end a frame of another site holds, read back in THAT frame's realm (Chrome:
   # "port messageerror").
-  it 'posts a WebAssembly.Module over a port to the agent cluster of the realm holding its other end' do
+  it 'posts a WebAssembly.Module over a port to the agent cluster of the realm holding its other end', :every_host_local do
     port_app = lambda do |env|
       case env['PATH_INFO']
       when '/child'
