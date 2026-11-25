@@ -4663,8 +4663,16 @@ module Capybara
       def ws_open(request, worker = nil)
         r        = request.to_h
         queue    = worker || @websocket_queue
-        id       = @websocket_lock.synchronize { @websocket_seq += 1 }
-        client   = r['clientRealm'].to_i
+        # (…its client known from the first: an event its failure queues is delivered to it)
+        id       = @websocket_lock.synchronize {
+          (@websocket_seq += 1).tap do |n|
+            if worker
+              @websocket_workers[n] = worker.handle
+            else
+              @websocket_realms[n] = r['clientRealm'].to_i
+            end
+          end
+        }
         key      = SecureRandom.base64(16)
         # The request's hop (fetch_plan.rs): its URL, its header list and what its cache mode adds to it (`no-store`'s
         # Pragma / Cache-Control), its cookies as its client's site for cookies judges them — a frame's by its
@@ -4677,18 +4685,16 @@ module Capybara
           client_origin: r['clientOrigin'], ancestors: r['ancestors'], dest: r['dest']
         )
         step, facts = plan&.begin_hop(nil, Process.clock_gettime(Process::CLOCK_MONOTONIC))
-        raise StandardError, 'websocket handshake refused' unless step == 'dispatch'
+        # (…a request Fetch refuses a network error: the connection failed — WebSockets "establish a WebSocket
+        # connection", its response a network error)
+        unless step == 'dispatch'
+          queue << {id: id, type: '__error', message: 'websocket handshake refused'}
+          return id
+        end
 
-        _method, target, hop_headers, _drop_length, referer, cookie_context, authorization, origin, sec = facts
+        target, cookie_context = facts[1], facts[5]
         csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
-        env = rack_env_for(target, method: 'GET')
-        apply_request_headers(env, hop_headers.to_h)
-        # (…the `Accept` of a request of no destination: Fetch "fetch" step 12)
-        env['HTTP_ACCEPT'] ||= Native.default_accept(r['dest'].to_s)
-        apply_default_request_env(env, target, referer: referer, force: false, cookie_context: cookie_context)
-        env['HTTP_AUTHORIZATION'] = authorization if authorization && !env.key?('HTTP_AUTHORIZATION')
-        env['HTTP_ORIGIN'] = origin if origin
-        env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_SEC_FETCH_DEST'] = sec if sec
+        env = hop_env(facts, nil, r['dest'])
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
@@ -4713,17 +4719,15 @@ module Capybara
         @websocket_lock.synchronize do
           @websocket_sockets[id]     = csim_io
           @websocket_app_sockets[id] = app_io
-          @websocket_workers[id]     = worker.handle if worker
-          @websocket_realms[id]      = client unless worker
-          @websocket_threads[id] = Thread.new do
+          @websocket_threads[id]     = Thread.new do
             Thread.current.report_on_exception = false
             run_websocket_reader(id, csim_io, accept, queue, target, cookie_context)
           end
         end
         id
       rescue StandardError => e
-        # Nothing was registered for cleanup yet — close both pair ends here so
-        # a failed upgrade (mis-routed URL, app error) doesn't leak fds.
+        # No socket was registered for cleanup yet — close both pair ends here so a failed upgrade (mis-routed URL, app
+        # error) doesn't leak fds; its client's record goes as its `__error` is delivered.
         csim_io.close rescue nil
         app_io.close  rescue nil
         queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
@@ -4931,7 +4935,12 @@ module Capybara
               ws_write_close(sock, code ? [code].pack('n') + payload.b : ''.b) rescue nil
               queue << {id: id, type: '__close', code: code || 1005, reason: payload}
               true
+            # RFC 6455 §7.1.7: "If _The WebSocket Connection is Established_ prior to the point where the endpoint is
+            # required to _Fail the WebSocket Connection_, the endpoint SHOULD send a Close frame with an appropriate
+            # status code (Section 7.4) before proceeding to _Close the WebSocket Connection_." — 1002, a protocol error,
+            # and why (Chrome sends the same; Firefox none: measured 2026-11-26).
             else
+              ws_write_close(sock, [code].pack('n') + payload.b) rescue nil
               queue << {id: id, type: '__error', message: 'protocol error'}
               true
             end
@@ -4944,8 +4953,11 @@ module Capybara
         # Only the socket (a local) is closed here — the `@websocket_*` hashes are
         # its opener's and its teardown's, under `@websocket_lock`; a closed entry
         # just no-ops on the next access.
-        sock.close rescue nil
-        @websocket_write_lock.synchronize { @websocket_close_sent.delete(sock) }
+        # (…and let go of as a socket a Close went out on, in the one step: a Close sent after finds it closed)
+        @websocket_write_lock.synchronize do
+          sock.close rescue nil
+          @websocket_close_sent.delete(sock)
+        end
       end
 
       # Read + validate the 101 Switching Protocols response (status line +
@@ -4987,11 +4999,11 @@ module Capybara
         frame = Native.ws_frame(opcode, payload.to_s.b)
         @websocket_write_lock.synchronize { sock.write(frame) unless @websocket_close_sent.include?(sock) }
       end
-      # …a Close frame, the first alone: whichever of the page's close(), its document's going and the server's Close
-      # comes first sends it.
+      # …a Close frame, the first alone: whichever of the page's close(), its document's going, the server's Close and a
+      # failure comes first sends it — none on a socket its reader has closed.
       private def ws_write_close(sock, payload)
         frame = Native.ws_frame(0x8, payload.to_s.b)
-        @websocket_write_lock.synchronize { sock.write(frame) if @websocket_close_sent.add?(sock) }
+        @websocket_write_lock.synchronize { sock.write(frame) if !sock.closed? && @websocket_close_sent.add?(sock) }
       end
 
       # ── Hijack-aware async XHR ─────────────────────────────────────
@@ -10803,8 +10815,8 @@ module Capybara
       DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
 
       # A request a realm's script makes the host fetch (`rackFetch(request, body)`: fetch(), an XMLHttpRequest, a
-      # worker's imported script), described by name (document-origin.js `hostRequest`) — its client the realm's own
-      # document, its frame's ancestors given — and `body` its bytes.
+      # worker's imported script), described by name (fetch_request.rs `fetchRequest` / `importScriptRequest`) — its
+      # client the realm's own document, its frame's ancestors given — and `body` its bytes.
       # (…`transport` and `stream` as `rack_fetch` takes them)
       def rack_fetch_request(request, body, env_extras: nil, transport: nil, stream: false)
         r = request.to_h
@@ -10837,6 +10849,33 @@ module Capybara
           transport:             transport,
           stream:                stream
         )
+      end
+
+      # A hop's request as its FetchPlan gives it (`begin_hop`'s dispatch `facts`), as the Rack env it is sent with — of
+      # `body` (nil none), its destination `dest`, and `revalidation` the headers that revalidate a stored response.
+      private def hop_env(facts, body, dest, revalidation = nil)
+        method, target, headers, drop_length, referer, cookie_context, authorization, origin, sec = facts
+        env = rack_env_for(target, method: method, input: body || '')
+        env['REQUEST_METHOD'] = method   # env_for upcases the method; restore the exact case (open-method-case-sensitive)
+        # (…env_for sets Content-Length to the input's size, 0 for none: a bodyless request sends 0 only where its method is
+        # POST or PUT — send-entity-body-none)
+        env.delete('CONTENT_LENGTH') if drop_length
+        apply_request_headers(env, headers.to_h) unless headers.empty?
+        apply_request_headers(env, revalidation) if revalidation
+        # Fetch "fetch" step 12: a request whose header list has no `Accept` carries its destination's — an image's image
+        # types, a sheet's CSS, and `*/*` for every other (a script's, a media resource's, a worker's, a beacon's, a
+        # WebSocket's) — not the document navigation's apply_default_request_env falls back to. (A fetch()'s, an XHR's, a
+        # frame navigation's has its own already: fetch_rules.rs `defaultRequestHeaders`.)
+        env['HTTP_ACCEPT'] ||= Native.default_accept(dest.to_s)
+        # (…its cookies as the engine's cookie context for the hop has them: none where the credentials mode keeps them
+        # back — `omit` always, `same-origin` to another origin: cors-redirect-credentials / cors-cookies — and SameSite
+        # ones by the site the chain latched so far)
+        apply_default_request_env(env, target, referer: referer, force: false, cookie_context: cookie_context)
+        # (…and an authentication entry sent ahead of a challenge, the caller's own Authorization winning)
+        env['HTTP_AUTHORIZATION'] = authorization if authorization && !env.key?('HTTP_AUTHORIZATION')
+        env['HTTP_ORIGIN'] = origin if origin
+        env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_SEC_FETCH_DEST'] = sec if sec
+        env
       end
 
       # The fetch, step by step (fetch_plan.rs `FetchPlan`), of the request this describes: its client the realm that
@@ -10942,36 +10981,14 @@ module Capybara
           when 'opaque_redirect_cached'
             return opaque_redirect_hash(target, cache_entry.status, cache_headers, cache_entry.body)
           end
-          (method, target, hop_headers, drop_length, hop_referer, cookie_context, authorization, origin_value, sec_fetch,
-           revalidate), preflight = args
-          env = rack_env_for(target, method: method, input: body || '')
-          env['REQUEST_METHOD'] = method   # env_for upcases the method; restore the exact case (open-method-case-sensitive)
-          # (…env_for sets Content-Length to the input's size, 0 for none: a bodyless request sends 0 only where its method
-          # is POST or PUT — send-entity-body-none)
-          env.delete('CONTENT_LENGTH') if drop_length
-          apply_request_headers(env, hop_headers.to_h) unless hop_headers.empty?
-          apply_request_headers(env, cache_entry.revalidation_headers) if revalidate
-          # Fetch "fetch" step 12: a request whose header list has no `Accept` carries its destination's — an image's
-          # image types, a sheet's CSS, and `*/*` for every other (a script's, a media resource's, a worker's, a
-          # beacon's) — not the document navigation's apply_default_request_env falls back to. (A fetch()'s, an XHR's,
-          # a frame navigation's has its own already: fetch_rules.rs `defaultRequestHeaders`.)
-          env['HTTP_ACCEPT'] ||= Native.default_accept(dest.to_s)
-          # (…its cookies as the engine's cookie context for the hop has them: none where the credentials mode keeps them
-          # back — `omit` always, `same-origin` to another origin: cors-redirect-credentials / cors-cookies — and SameSite
-          # ones by the site the chain latched so far)
-          apply_default_request_env(env, target, referer: hop_referer, force: false, cookie_context: cookie_context)
-          # (…and an authentication entry sent ahead of a challenge, the caller's own Authorization winning)
-          env['HTTP_AUTHORIZATION'] = authorization if authorization && !env.key?('HTTP_AUTHORIZATION')
+          (method, target, hop_headers, _, hop_referer, cookie_context, _, _, _, revalidate), preflight = args
+          env = hop_env(args[0], body, dest, revalidate ? cache_entry.revalidation_headers : nil)
           # The CORS-preflight a cross-origin CORS-unsafe hop sends first, unless the cache covers it (cors.rs).
           if preflight
             unsafe, preflight_origin = preflight
             status, ph = cors_run_preflight(target, method, unsafe, preflight_origin, hop_referer)
             answer = [status.to_i, *PREFLIGHT_RESPONSE_HEADERS.map {|name| cors_value(ph, name) }, server_delay_ms_of(ph)]
             return nil unless plan.preflight_answer(answer, Process.clock_gettime(Process::CLOCK_MONOTONIC))
-          end
-          env['HTTP_ORIGIN'] = origin_value if origin_value
-          if sec_fetch
-            env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_SEC_FETCH_DEST'] = sec_fetch
           end
           if env_extras
             env.merge!(env_extras)

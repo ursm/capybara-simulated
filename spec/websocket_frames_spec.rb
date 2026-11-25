@@ -7,9 +7,11 @@ require_relative 'support/session_teardown'
 
 # What a WebSocket client makes of the frames its server writes (RFC 6455 §5, ws_frame.rs): a message's fragments
 # joined around a control frame between them, and the connection FAILED — an `error`, then a `close` of 1006, not clean,
-# and no message — on a frame the protocol forbids. Measured 2026-11-26 against a server writing the same frames by hand:
-# Chrome fails every one of these; Firefox fails all but the Close frame's (it closes a lone-byte body and a 1005 code
-# cleanly) and hands the page a masked frame's message before it fails.
+# and no message — on a frame the protocol forbids, the server sent a Close of 1002 first (RFC 6455 §7.1.7). Measured
+# 2026-11-26 against a server writing the same frames by hand: Chrome fails every one of these, with that Close; Firefox
+# fails all but the Close frame's (it closes a lone-byte body and the reserved codes 1005, 1006 and 1015 cleanly), sends
+# no Close, and hands the page a masked frame's message before it fails. A Close of any other code, assigned or not (999,
+# 1004, 2999, 5000…), closes cleanly in both.
 RSpec.describe 'WebSocket frames' do
   # A server's frame: final unless `fin: false`, unmasked unless `mask`, `rsv` its reserved bits.
   def self.frame(opcode, payload = ''.b, fin: true, mask: nil, rsv: 0)
@@ -36,6 +38,7 @@ RSpec.describe 'WebSocket frames' do
     'one_byte'      => frame(0x8, 'x'),
     'reserved_code' => frame(0x8, [1005].pack('n')),
     'server_close'  => frame(0x8, [4001].pack('n') + 'x'),
+    'odd_code'      => frame(0x8, [2999].pack('n') + 'r'),
     'bare_close'    => frame(0x8),
     # (…none of its own: it answers the client's Close with its own)
     'client_close'  => ''.b
@@ -148,9 +151,15 @@ RSpec.describe 'WebSocket frames' do
     expect(frames_sent('client_close')).to eq([[0x8, [4000].pack('n') + 'me']])
   end
 
-  (cases.keys - ['joined', 'server_close', 'bare_close', 'client_close']).each do |name|
-    it "fails the connection on a frame the protocol forbids: #{name.tr('_', ' ')}" do
+  it 'closes cleanly on a Close of an unassigned code' do
+    expect(events_of('odd_code')).to eq(['open', 'close:2999:true:r'])
+  end
+
+  (cases.keys - ['joined', 'server_close', 'bare_close', 'client_close', 'odd_code']).each do |name|
+    it "fails the connection on a frame the protocol forbids, telling the server: #{name.tr('_', ' ')}" do
       expect(events_of(name)).to eq(['open', 'error', 'close:1006:false:'])
+      # (…a Close of 1002, a protocol error, and why)
+      expect(frames_sent(name)).to match([[0x8, satisfy {|body| body.unpack1('n') == 1002 && body.bytesize > 2 }]])
     end
   end
 end
