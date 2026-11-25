@@ -428,15 +428,14 @@ pub(crate) fn worker_for_ruby(partition: u64, handle: u32) -> Option<(String, St
     let w = reg.existing(partition)?.workers.get(&handle)?;
     Some((w.script_url.clone(), w.script_type.clone(), w.state.clone(), w.registration))
 }
-// …what its isolate made known (`flag` "fetch": it has a `fetch` listener, `on` or not; "router": it added rules; "dead":
-// its thread is gone), from whichever thread.
+// …what its isolate made known (`flag` "fetch": it has a `fetch` listener, `on` or not; "router": it added rules), from
+// whichever thread. (Whether its thread is gone is its liveness cell's: worker_records.rs `Liveness`.)
 pub(crate) fn set_worker_flag_for_ruby(partition: u64, handle: u32, flag: String, on: bool) {
     let mut reg = lock();
     let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return };
     match flag.as_str() {
         "fetch" => w.fetch = Some(on),
         "router" => w.router = on,
-        "dead" if on => w.life.end(),
         _ => {}
     }
 }
@@ -1086,6 +1085,20 @@ pub(crate) fn claim_order_for_ruby(partition: u64, claims: Vec<(u32, bool)>) -> 
     let mut ordered: Vec<(u32, bool, String)> = claims.into_iter().filter_map(|(h, fetch)| scope_of(h).map(|scope| (h, fetch, scope))).collect();
     ordered.sort_by_key(|(_, _, scope)| std::cmp::Reverse(scope.len()));
     ordered
+}
+
+// A service worker whose making failed before its thread ran (its spawn raised half way): its registry entry gone, as if
+// never made — the job it was made for fails as Run Service Worker's failure does (Update: "If runResult is failure",
+// Reject Job Promise with a TypeError and Finish Job), what the host does.
+pub(crate) fn worker_unmade_for_ruby(partition: u64, handle: u32, job: Option<u32>) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        p.workers.remove(&handle);
+        if let Some(id) = job {
+            p.job_spawned(id, None, &mut out);
+        }
+    }
+    out
 }
 
 // ── A service worker's own lifecycle events, its thread's (`Own`) ──
@@ -1966,7 +1979,7 @@ mod tests {
         assert!(verdict());
         // (…one whose thread is gone holds nothing)
         hold_for_ruby(p, 1, "extended".into(), true);
-        set_worker_flag_for_ruby(p, 1, "dead".into(), true);
+        part(p, |q| q.workers[&1].life.end());
         assert!(verdict());
         clear_for_ruby(p);
     }
@@ -2033,7 +2046,7 @@ mod tests {
         worker_new(p, 3, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
         note_activating(p, "https://a.test/".into(), 3);
         assert_eq!(m("https://a.test/y", "client"), Some((3, "https://a.test/".into())));
-        set_worker_flag_for_ruby(p, 3, "dead".into(), true);
+        part(p, |q| q.workers[&3].life.end());
         assert_eq!(m("https://a.test/y", "client"), Some((1, "https://a.test/".into())));
         // (…one known to have no fetch listener and no rules takes no navigation; rules make it one that does)
         set_worker_flag_for_ruby(p, 1, "fetch".into(), false);

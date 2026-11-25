@@ -83,7 +83,8 @@ impl Datum {
             return Ok(Datum::Sym(sym.name()?.into_owned()));
         }
         if v.is_kind_of(ruby.class_integer()) {
-            return Ok(Datum::Int(magnus::TryConvert::try_convert(v)?));
+            // (…one past 64 bits no post carries: the posting code's bug, as below)
+            return magnus::TryConvert::try_convert(v).map(Datum::Int).map_err(|_| magnus::Error::new(ruby.exception_arg_error(), "a worker's post can't carry an Integer past 64 bits"));
         }
         if v.is_kind_of(ruby.class_float()) {
             return Ok(Datum::Float(magnus::TryConvert::try_convert(v)?));

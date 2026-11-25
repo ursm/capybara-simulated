@@ -5405,7 +5405,11 @@ module Capybara
           end
         ensure
           unless made
-            workers_drop(handle) || @worker_host.worker_drop(handle)
+            # (…its host record, its agent record and identity, and a service worker's registry entry — the job it was made
+            # for failed by its caller: `sw_fetch_job`)
+            workers_drop(handle)
+            @worker_host.worker_unmade(handle)
+            sw_run(Native.sw_worker_unmade(@sw_partition, handle, nil)) if service
             @worker_host.release(WorkerHost::BOOTING, 1) if owed
           end
         end
@@ -6398,18 +6402,25 @@ module Capybara
         sw_run(cmds)
         return unless registration
 
-        handle = worker_spawn(
-          script_url,
-          service:          true,
-          creator_key:      creator_key,
-          site:             site,
-          sw_scope:         scope,
-          sw_registration:  registration,
-          script_type:      script_type,
-          update_via_cache: update_via_cache,
-          sw_body:          fetched['body'],
-          sw_imports:       fetched['imports']
-        ).to_i
+        handle = begin
+          worker_spawn(
+            script_url,
+            service:          true,
+            creator_key:      creator_key,
+            site:             site,
+            sw_scope:         scope,
+            sw_registration:  registration,
+            script_type:      script_type,
+            update_via_cache: update_via_cache,
+            sw_body:          fetched['body'],
+            sw_imports:       fetched['imports']
+          ).to_i
+        rescue Exception # rubocop:disable Lint/RescueException
+          # (…a spawn that raised made no worker — none of it is left: `worker_spawn` — so the job fails as Run Service
+          # Worker's failure does, its promise rejected and its scope's queue let go, before the raise goes on)
+          sw_run(Native.sw_job_spawned(@sw_partition, id, nil))
+          raise
+        end
         sw_run(Native.sw_job_spawned(@sw_partition, id, (handle if handle.positive?)))
       end
 

@@ -293,6 +293,17 @@ impl WorkerHost {
         self.stirred.notify_all();
         gone.map(|r| (r.kind.name(), r.in_flight, r.parked))
     }
+    // #worker_unmade(handle) — a worker whose making failed before its thread ran: its record and its identity gone, as if
+    // never made.
+    fn worker_unmade(&self, handle: i64) {
+        let mut records = self.records();
+        if let Some(r) = records.map.remove(&handle) {
+            r.life.end();
+        }
+        records.identities.remove(&handle);
+        drop(records);
+        self.stirred.notify_all();
+    }
     // #workers_clear — every record gone, and every worker's identity: the session's reset.
     fn workers_clear(&self) {
         let mut records = self.records();
@@ -802,6 +813,7 @@ pub(crate) fn define(class: magnus::RClass) -> Result<(), magnus::Error> {
     class.const_set("ANSWER_VIRTUAL_MS", ANSWER_VIRTUAL_MS)?;
     class.define_method("worker_new", method!(WorkerHost::worker_new, 10))?;
     class.define_method("worker_drop", method!(WorkerHost::worker_drop, 1))?;
+    class.define_method("worker_unmade", method!(WorkerHost::worker_unmade, 1))?;
     class.define_method("workers_clear", method!(WorkerHost::workers_clear, 0))?;
     class.define_method("worker_kind", method!(WorkerHost::worker_kind, 1))?;
     class.define_method("worker_identity", method!(WorkerHost::worker_identity, 8))?;

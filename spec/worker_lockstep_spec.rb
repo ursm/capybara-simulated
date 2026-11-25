@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
-require 'timeout'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
@@ -184,27 +183,86 @@ RSpec.describe 'a worker beside a page timer, on one virtual time', engine_globa
     expect(waiter.value).to eq(:interrupted)
     expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 1
   end
-  # A worker is made at once or not at all: a spawn an interrupt ends half way (Timeout, Thread#raise) leaves no record a
-  # window's step then waits a booting worker's guard for, nor a boot owed (it took 10 s, a record with no thread).
-  it 'leaves nothing of a spawn an interrupt ended' do
-    session = simulated_session(lambda {|env|
-      next [200, {'content-type' => 'text/javascript'}, ['onmessage = () => {};']] if env['PATH_INFO'] == '/w.js'
+  # A worker is made at once or not at all: a spawn that raises at any of its steps — an interrupt landing there, a
+  # raising helper — leaves no host record, agent record, identity or boot owed (a record with no thread made a window's
+  # step wait a booting worker's 10 s guard). Each step raised at in turn.
+  describe 'a spawn that raises half way' do
+    let(:app) {
+      lambda {|env|
+        next [200, {'content-type' => 'text/javascript'}, ['onmessage = () => {};']] if env['PATH_INFO'].end_with?('.js')
 
-      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>p']]
-    })
-    session.visit '/'
-    rng   = Random.new(1)
-    worst = 0
-    40.times do
-      begin
-        Timeout.timeout(rng.rand(0.0005..0.02)) { session.execute_script("for (let i = 0; i < 5; i++) new Worker('/w.js');") }
-      rescue Timeout::Error, StandardError
-        nil
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>p']]
+      }
+    }
+    let(:host_class) { Capybara::Simulated::Native::WorkerHost }
+
+    # …the step raising once, the first time the spawn reaches it.
+    def raise_once_at(step, browser, host)
+      fired = false
+      once  = ->(original, *args, &blk) {
+        next original.call(*args, &blk) if fired
+
+        fired = true
+        raise 'stubbed spawn failure'
+      }
+      case step
+      when :owe
+        allow(host).to receive(:owe).and_wrap_original {|m, kind, n| kind == host_class::BOOTING ? once.(m, kind, n) : m.call(kind, n) }
+      when :worker_new, :worker_identity
+        allow(host).to receive(step).and_wrap_original(&once)
+      when :workers_store
+        allow(browser).to receive(:workers_store).and_wrap_original(&once)
+      when :thread
+        allow(Thread).to receive(:new).and_wrap_original {|m, *a, &b|
+          caller_locations.any? {|l| l.label.to_s.include?('worker_spawn') } ? once.(m, *a, &b) : m.call(*a, &b)
+        }
       end
-      t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      session.evaluate_script('1')
-      worst = [worst, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t].max
     end
-    expect(worst).to be < 3
+
+    %i[owe worker_new worker_identity workers_store thread].each do |step|
+      it "leaves nothing of it where #{step} raises" do
+        session = simulated_session(app)
+        session.visit '/'
+        browser = session.driver.browser
+        host    = browser.instance_variable_get(:@worker_host)
+        raise_once_at(step, browser, host)
+        begin
+          session.execute_script("new Worker('/w.js');")
+        rescue StandardError
+          nil
+        end
+        expect(browser.instance_variable_get(:@workers)).to be_empty
+        expect(host.worker_kind(1)).to be_nil
+        expect(host.worker_partition(1)).to be_nil
+        expect(host.owed(host_class::BOOTING)).to eq(0)
+        began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        session.evaluate_script('1')
+        expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 1
+        # (…and the next one made whole)
+        session.execute_script("window.w = new Worker('/w.js'); w.onmessage = () => {};")
+        expect(browser.instance_variable_get(:@workers).size).to eq(1)
+      end
+    end
+
+    # …a service worker's: its registry entry gone too, and the job it was made for failed as Run Service Worker's
+    # failure fails it (its promise a TypeError) — not left waiting for an evaluation no thread will post.
+    it "fails a service worker's job where its registry entry raises" do
+      session = simulated_session(app)
+      session.visit '/'
+      fired = false
+      allow(Capybara::Simulated::Native).to receive(:sw_worker_new).and_wrap_original {|m, *args|
+        next m.call(*args) if fired
+
+        fired = true
+        raise 'stubbed spawn failure'
+      }
+      session.execute_script(<<~JS)
+        window.got = null;
+        navigator.serviceWorker.register('/sw.js').then(() => { window.got = 'resolved'; }, (e) => { window.got = e.name; });
+      JS
+      Capybara.using_wait_time(5) do
+        expect(poll_until { session.evaluate_script('window.got') }).to eq('TypeError')
+      end
+    end
   end
 end
