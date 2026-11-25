@@ -13,7 +13,11 @@
 //   that merely drained the outbox: a worker runs on its own thread, so when its claim reaches the outbox is a matter of
 //   real time, not of the window's.
 
+use std::collections::VecDeque;
 use std::sync::{MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
+
+use magnus::{prelude::*, r_hash::ForEach, RArray, RHash, RString, Symbol, Value};
 
 use crate::worker_host::WorkerHost;
 
@@ -42,6 +46,165 @@ const AFTER_CLAIMS: [&str; 2] = ["port_message", "client_message"];
 
 fn group_of(kind: &str) -> &'static str {
     GROUPS.iter().find(|(_, kinds)| kinds.contains(&kind)).map_or(OWNER, |(group, _)| group)
+}
+
+// ── The outbox ──
+// What the workers post their window's host — from their own threads, any time — kept as plain data until the window's
+// thread takes a drain of it (`outbox_take`): each its kind and its fields as the poster gave them, a hash of symbols to
+// strings, numbers, booleans, lists and hashes, nothing of Ruby's kept (no object a GC could move or free).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Datum {
+    Nil,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    // a string, and whether it is UTF-8 (else binary)
+    Str(Vec<u8>, bool),
+    Sym(String),
+    List(Vec<Datum>),
+    Map(Vec<(Datum, Datum)>),
+}
+
+impl Datum {
+    fn read(ruby: &magnus::Ruby, v: Value) -> Result<Datum, magnus::Error> {
+        if v.is_nil() {
+            return Ok(Datum::Nil);
+        }
+        if v.is_kind_of(ruby.class_true_class()) {
+            return Ok(Datum::Bool(true));
+        }
+        if v.is_kind_of(ruby.class_false_class()) {
+            return Ok(Datum::Bool(false));
+        }
+        if let Some(s) = RString::from_value(v) {
+            let utf8 = s.enc_get() == ruby.utf8_encindex() || s.enc_get() == ruby.usascii_encindex();
+            return Ok(Datum::Str(crate::fetch_rules::ruby_bytes(s), utf8));
+        }
+        if let Some(sym) = Symbol::from_value(v) {
+            return Ok(Datum::Sym(sym.name()?.into_owned()));
+        }
+        if v.is_kind_of(ruby.class_integer()) {
+            return Ok(Datum::Int(magnus::TryConvert::try_convert(v)?));
+        }
+        if v.is_kind_of(ruby.class_float()) {
+            return Ok(Datum::Float(magnus::TryConvert::try_convert(v)?));
+        }
+        if let Some(a) = RArray::from_value(v) {
+            return Ok(Datum::List(a.into_iter().map(|e| Datum::read(ruby, e)).collect::<Result<_, _>>()?));
+        }
+        if let Some(h) = RHash::from_value(v) {
+            let mut pairs = Vec::new();
+            h.foreach(|k: Value, e: Value| {
+                pairs.push((Datum::read(ruby, k)?, Datum::read(ruby, e)?));
+                Ok(ForEach::Continue)
+            })?;
+            return Ok(Datum::Map(pairs));
+        }
+        Err(magnus::Error::new(ruby.exception_type_error(), format!("a worker's post can't hold {}", unsafe { v.classname() })))
+    }
+    fn write(&self, ruby: &magnus::Ruby) -> Value {
+        match self {
+            Datum::Nil => ruby.qnil().as_value(),
+            Datum::Bool(b) => if *b { ruby.qtrue().as_value() } else { ruby.qfalse().as_value() },
+            Datum::Int(i) => ruby.integer_from_i64(*i).as_value(),
+            Datum::Float(f) => ruby.float_from_f64(*f).as_value(),
+            Datum::Str(bytes, utf8) => {
+                let s = ruby.str_from_slice(bytes);
+                if *utf8 {
+                    let _ = s.enc_associate(ruby.utf8_encindex());
+                }
+                s.as_value()
+            }
+            Datum::Sym(name) => ruby.to_symbol(name).as_value(),
+            Datum::List(items) => {
+                let a = ruby.ary_new_capa(items.len());
+                for item in items {
+                    let _ = a.push(item.write(ruby));
+                }
+                a.as_value()
+            }
+            Datum::Map(pairs) => {
+                let h = ruby.hash_new();
+                for (k, v) in pairs {
+                    let _ = h.aset(k.write(ruby), v.write(ruby));
+                }
+                h.as_value()
+            }
+        }
+    }
+    // A posted hash's `:kind`, as a string.
+    fn kind(&self) -> String {
+        let Datum::Map(pairs) = self else { return String::new() };
+        pairs.iter().find(|(k, _)| *k == Datum::Sym("kind".into())).map_or_else(String::new, |(_, v)| match v {
+            Datum::Str(bytes, _) => String::from_utf8_lossy(bytes).into_owned(),
+            Datum::Sym(s) => s.clone(),
+            _ => String::new(),
+        })
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Outbox {
+    posted: VecDeque<(String, Datum)>,
+}
+
+impl WorkerHost {
+    fn outbox(&self) -> MutexGuard<'_, Outbox> {
+        self.outbox.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+    // #outbox_post(hash) — a worker's post, from any thread: the window's thread woken where it waits for one.
+    fn outbox_post(ruby: &magnus::Ruby, rb_self: &Self, hash: RHash) -> Result<(), magnus::Error> {
+        let datum = Datum::read(ruby, hash.as_value())?;
+        let kind = datum.kind();
+        rb_self.outbox().posted.push_back((kind, datum));
+        rb_self.outbox_posted.notify_all();
+        Ok(())
+    }
+    // #outbox_empty? -> whether nothing is posted.
+    fn outbox_empty(&self) -> bool {
+        self.outbox().posted.is_empty()
+    }
+    // #outbox_clear — every post let go of: the session's reset.
+    fn outbox_clear(&self) {
+        self.outbox().posted.clear();
+    }
+    // #outbox_wait(seconds) -> whether something is posted, waiting for it at most `seconds` with the GVL released (an
+    // interrupt of the thread ending the wait at once).
+    fn outbox_wait(&self, seconds: f64) -> bool {
+        if !self.outbox_empty() {
+            return true;
+        }
+        let deadline = Instant::now() + Duration::from_secs_f64(seconds.max(0.0));
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        self.without_gvl_interruptibly(&cancel, || {
+            let mut outbox = self.outbox();
+            loop {
+                if !outbox.posted.is_empty() {
+                    return true;
+                }
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() || cancel.load(std::sync::atomic::Ordering::Acquire) {
+                    return false;
+                }
+                outbox = self.outbox_posted.wait_timeout(outbox, left).unwrap_or_else(PoisonError::into_inner).0;
+            }
+        })
+    }
+    // #outbox_take -> a drain of what is posted, in the order a delivery takes it (`delivery_plan`): `[group, [[post,
+    // after_claim], …]]` for each group it has — nothing posted, none.
+    fn outbox_take(ruby: &magnus::Ruby, rb_self: &Self) -> RArray {
+        let drained: Vec<(String, Datum)> = rb_self.outbox().posted.drain(..).collect();
+        let plan = delivery_plan(drained.iter().map(|(kind, _)| kind.clone()).collect());
+        let groups = ruby.ary_new_capa(plan.len());
+        for (group, picks) in plan {
+            let events = ruby.ary_new_capa(picks.len());
+            for (i, after_claim) in picks {
+                let _ = events.push((drained[i].1.write(ruby), after_claim));
+            }
+            let _ = groups.push((group, events));
+        }
+        groups
+    }
 }
 
 // WorkerHost.delivery_plan(kinds) -> `[group, [[index, after_claim], …]]` for each group a drain of the outbox whose kinds
@@ -107,6 +270,12 @@ pub(crate) fn define(class: magnus::RClass) -> Result<(), magnus::Error> {
     class.define_method("changes_hold", method!(WorkerHost::changes_hold, 2))?;
     class.define_method("changes_held?", method!(WorkerHost::changes_held, 0))?;
     class.define_method("changes_take", method!(WorkerHost::changes_take, 0))?;
+    class.define_method("outbox_post", method!(WorkerHost::outbox_post, 1))?;
+    class.define_method("<<", method!(WorkerHost::outbox_post, 1))?;
+    class.define_method("outbox_empty?", method!(WorkerHost::outbox_empty, 0))?;
+    class.define_method("outbox_clear", method!(WorkerHost::outbox_clear, 0))?;
+    class.define_method("outbox_wait", method!(WorkerHost::outbox_wait, 1))?;
+    class.define_method("outbox_take", method!(WorkerHost::outbox_take, 0))?;
     Ok(())
 }
 

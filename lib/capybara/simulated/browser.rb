@@ -429,7 +429,6 @@ module Capybara
         # (…the network it emulates: online, its uploads let through — #online=, #slow_uploads=)
         @offline       = false
         @uploads_held  = false
-        @worker_outbox = Thread::Queue.new
         # …and what of a service worker job a worker's thread leaves to the main one (`run_sw_job_events`), in a queue of its
         # own: a window waiting in place for that worker's answer takes it, and none of what the outbox holds, which waits
         # for the window's next step.
@@ -437,10 +436,6 @@ module Capybara
         # …and, while a window waits so, nothing of its realms able to run, what they are told meanwhile (`sw_tell_realms`).
         @sw_waiting_in_place = false
         @sw_realm_tells = []
-        # One-slot head buffer for the settle wait: an event popped while blocking on the outbox
-        # is parked here (a push-back would reorder it behind concurrent worker pushes) and
-        # consumed first by the next deliver_worker_messages.
-        @worker_outbox_head = nil
         # What the workers owe this window and what it streams, races, awaits and holds its clock for across their threads
         # — the engine's (worker_host.rs `WorkerHost`), counted with no lock: the plain messages posted to a worker that it
         # may answer (`POSTED`: `polling?` stays true while one is outstanding, so long-running compute isn't starved by the
@@ -2111,9 +2106,7 @@ module Capybara
           # remaining iterations would STARVE the worker thread of the GVL and it would never
           # process its inbox. Block briefly on the outbox instead: this releases the GVL (the
           # worker runs) and wakes the instant it posts. The popped event is parked in
-          # (via `park_worker_reply`, which parks it in `@worker_outbox_head` — NOT pushed back,
-          # which would reorder it behind anything the worker enqueued in the meantime — so the next
-          # deliver drains it first). The budget is shared across the whole settle call, and
+          # outbox for the next deliver (`park_worker_reply`, which takes nothing from it). The budget is shared across the whole settle call, and
           # exhausting it bails to Capybara's outer poll loop — a genuinely stuck worker must not pin
           # every find's settle for SETTLE_MAX_ITER budgets. Gated on `worker_reply_pending?`, NOT
           # `worker_pending?`: `POSTED` (plain postMessage — a listen-only worker never
@@ -2122,12 +2115,12 @@ module Capybara
           # (…nor while a worker waits in place on another's answer — a dedicated worker's main script or sync XHR a service
           # worker answers, which owes a fetch: that answer comes as the window's time moves, a service worker's timer
           # running at it, which a window parked here would not move: `worker_awaits_worker?`)
-          if worker_reply_pending? && @worker_outbox.empty? && @worker_outbox_head.nil? && !worker_awaits_worker?
+          if worker_reply_pending? && @worker_host.outbox_empty? && !worker_awaits_worker?
             worker_wait_deadline ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
             park_worker_reply(worker_wait_deadline) while worker_reply_pending? &&
-              @worker_outbox.empty? && @worker_outbox_head.nil? &&
+              @worker_host.outbox_empty? &&
               Process.clock_gettime(Process::CLOCK_MONOTONIC) < worker_wait_deadline
-            next if @worker_outbox_head || !@worker_outbox.empty?
+            next if !@worker_host.outbox_empty?
             break
           end
           # No progress this iter (no DOM/URL change observed) — the
@@ -3030,7 +3023,7 @@ module Capybara
           # or a lifecycle step's task queued here, this tick's to run)
           unless sw_task_queued?
             if @workers.empty? then sleep 0.01
-            else @worker_outbox_head ||= pop_with_timeout(@worker_outbox, 0.01)
+            else @worker_host.outbox_wait(0.01)
             end
           end
           tick_real_time
@@ -3375,7 +3368,7 @@ module Capybara
       # holding the clock doesn't hide a parked timer, we simply haven't advanced to it yet.
       private def hold_for_sw_fetch(turns)
         park_worker_reply(hold_deadline(ClockHolds::FETCH))
-        reply_ready = @worker_outbox_head || !@worker_outbox.empty?
+        reply_ready = !@worker_host.outbox_empty?
         # A delivered reply refreshes the budget so the NEXT fetch in a sequence waits afresh instead
         # of inheriting a spent deadline (which would abandon it to a premature timeout).
         @clock_holds.reset(ClockHolds::FETCH) if reply_ready
@@ -3433,24 +3426,22 @@ module Capybara
       # message/broadcast reply is outstanding, so the next one waits afresh.
       private def drain_pending_message_reply
         park_worker_reply(hold_deadline(ClockHolds::MESSAGE)) while worker_message_reply_pending? &&
-          @worker_outbox.empty? && @worker_outbox_head.nil? &&
+          @worker_host.outbox_empty? &&
           hold_left?(ClockHolds::MESSAGE)
         # `deliver_worker_messages` (inside step_and_drain) refreshes the `MESSAGE` hold's budget whenever it
         # delivers a swack/bcack, so the NEXT reply in a sequence waits afresh — and it does so on
         # WHICHEVER drain path delivered the reply (this one, hold_for_sw_fetch's outbox drain, or
         # settle), which resetting only here would miss when a co-pending fetch hold delivers it.
-        step_and_drain_progressed(@runtime.run_loop_step(0)) if @worker_outbox_head || !@worker_outbox.empty?
+        step_and_drain_progressed(@runtime.run_loop_step(0)) if !@worker_host.outbox_empty?
       end
 
-      # Block up to one poll interval for a worker reply, parking it in the one-slot head buffer —
-      # NOT pushed back, which would reorder it behind anything the worker enqueued meanwhile. The
-      # `pop_with_timeout` releases the GVL so the worker thread runs and wakes us the instant it
-      # posts. No-op if a reply is already buffered or the budget is spent. Shared by `settle` and
-      # the SW-fetch hold in `run_event_loop_frame`.
+      # Block up to one poll interval for a worker's post, nothing taken from the outbox: the wait releases the GVL so the
+      # worker thread runs, and wakes the instant it posts (worker_delivery.rs `outbox_wait`). No-op if something is posted
+      # already or the budget is spent. Shared by `settle` and the SW-fetch hold in `run_event_loop_frame`.
       private def park_worker_reply(deadline)
-        return unless @worker_outbox.empty? && @worker_outbox_head.nil? &&
+        return unless @worker_host.outbox_empty? &&
                       Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
-        @worker_outbox_head = pop_with_timeout(@worker_outbox, WORKER_POLL_INTERVAL)
+        @worker_host.outbox_wait(WORKER_POLL_INTERVAL)
       end
       # The CLOCK_MONOTONIC time a clock hold of `kind` ends — its budget begun with the first step that holds for it,
       # spent across the steps after, refreshed as a reply comes in (`ClockHolds#reset`) — and whether it is still to come.
@@ -5251,8 +5242,8 @@ module Capybara
         if target.start_with?('blob:') && @driver.respond_to?(:cross_partition_blob?) && @driver.cross_partition_blob?(target, self, realm_id.to_i)
           return worker_fail(handle, 'Worker creation from a cross-partition blob URL is blocked', parent_worker)
         end
-        inbox  = Thread::Queue.new
-        outbox = @worker_outbox
+        inbox  = WorkerInbox.new(@worker_host, handle)
+        outbox = @worker_host
         # This worker's controlling SW (a dedicated/shared worker is a CLIENT: scope match on
         # its script URL, or the creator's controller for an opaque blob:/data: script).
         # Computed once here on the registry-owning thread; run_worker installs it into the
@@ -5441,7 +5432,7 @@ module Capybara
       # reaches it — in its parent worker's isolate for a nested one, which no record
       # of the worker's own names (deliver_worker_messages).
       private def worker_fail(handle, message, parent_worker = nil)
-        @worker_outbox << {handle: handle, kind: '__error', message: message, parent_worker: parent_worker}
+        @worker_host << {handle: handle, kind: '__error', message: message, parent_worker: parent_worker}
         handle
       end
 
@@ -5849,7 +5840,7 @@ module Capybara
         # worker routes nothing (a user agent's own "the service worker is unresponsive": Chrome after 62 s, Firefox after
         # 60 s, measured). A wait a worker's thread makes leaves it to the window.
         hung = in_place && worker && (w = @workers[worker]) && @worker_host.worker_kind(worker) == 'service' &&
-               Native.sw_hung(left <= 0, w[:inbox].num_waiting.positive?, @worker_host.on_network?(worker))
+               Native.sw_hung(left <= 0, @worker_host.worker_idle?(worker), @worker_host.on_network?(worker))
         nil
       ensure
         if in_place
@@ -5873,7 +5864,7 @@ module Capybara
       # …whether worker `handle` can answer nothing more of its own accord: waiting on its inbox, which is empty, with no
       # timer set, nor a socket or event stream it reads.
       private def worker_stalled?(handle)
-        (w = @workers[handle]) && @worker_host.worker_stalled?(handle, w[:inbox].empty? && w[:inbox].num_waiting.positive?, worker_reading?(handle))
+        @worker_host.worker_stalled?(handle, worker_reading?(handle))
       end
       # …the time the awaited worker moved on while the window waited — a service worker's `respondWith` timer — passed
       # for the window too: its clock moved to the worker's, no task of its run; and what the worker posted meanwhile
@@ -5976,9 +5967,7 @@ module Capybara
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
           stalled  = 0
           loop do
-            w = @workers[handle]
-            inbox_idle = w && w[:inbox].empty? && w[:inbox].num_waiting.positive?
-            case @worker_host.activation_wait(handle, began, inbox_idle == true, worker_reading?(handle))
+            case @worker_host.activation_wait(handle, began, worker_reading?(handle))
             when 'activated', 'give up' then break
             when 'stalled' then break if (stalled += 1) >= 2
             else stalled = 0
@@ -6340,7 +6329,7 @@ module Capybara
       # a wait in place polling for it instead, its outbox to stand as it is.
       private def sw_job_event(event)
         @sw_job_events << event
-        @worker_outbox << {kind: 'sw_job_event'} unless @sw_waiting_in_place
+        @worker_host << {kind: 'sw_job_event'} unless @sw_waiting_in_place
       end
       # What a worker's thread left of a job — the commands of one it scheduled, its worker's evaluation, a fetch event's end,
       # a hold let go that Try Clear and Try Activate wait on — taken, in order.
@@ -6513,17 +6502,13 @@ module Capybara
       end
       # Whether every live service worker is parked on its inbox, nothing in it — its event loop with no task running —
       # and nothing reading for it off its thread: an EventSource's or a WebSocket's reader, which pushes what it reads
-      # into that inbox — and the soonest time, on the window's clock, one has a timer set for (nil for none).
-      private def sw_workers_parked?
-        @workers.all? {|handle, w|
-          next true if !w[:thread]&.alive? || @worker_host.worker_kind(handle) != 'service'
-
-          w[:inbox].empty? && w[:inbox].num_waiting.positive? && !worker_reading?(handle)
-        }
-      end
-      private def worker_reading?(handle)
-        @event_source_lock.synchronize { @event_source_workers.any? {|id, h| h == handle && @event_source_threads[id]&.alive? } } ||
-          @websocket_lock.synchronize { @websocket_workers.value?(handle) }
+      # into that inbox (worker_records.rs `sw_parked`).
+      private def sw_workers_parked? = @worker_host.sw_parked?(reading_workers)
+      private def worker_reading?(handle) = reading_workers.include?(handle)
+      # …the workers a socket's or an event stream's reader reads for, off their threads.
+      private def reading_workers
+        sources = @event_source_lock.synchronize { @event_source_workers.filter_map {|id, h| h if @event_source_threads[id]&.alive? } }
+        sources | @websocket_lock.synchronize { @websocket_workers.values }
       end
       private def sw_next_timer_at = @worker_host.sw_next_timer_at
 
@@ -6548,7 +6533,7 @@ module Capybara
         # (…and what a worker posted since — one that caught up to the window's last step on its own, its timer due then
         # run on its idle poll — delivered first, at the window's time now: before the step goes past it to a timer of the
         # page's that its answer would have beaten, a request's timeout)
-        deliver_worker_messages unless @worker_outbox.empty? && @worker_outbox_head.nil?
+        deliver_worker_messages unless @worker_host.outbox_empty?
         start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         spent = 0.0
         WORKER_DUE_NOW_ROUNDS.times do
@@ -6645,7 +6630,7 @@ module Capybara
           if alive && w
             w[:inbox] << {kind: 'fetch', req:, fetch_id:, realm_id:}
           else
-            sw_deliver_fetch_response(handle.to_i, fetch_id, WorkerHost::FALLTHROUGH, @worker_outbox, realm_id)
+            sw_deliver_fetch_response(handle.to_i, fetch_id, WorkerHost::FALLTHROUGH, @worker_host, realm_id)
           end
         end
       end
@@ -7170,7 +7155,7 @@ module Capybara
       # alive by then, its queue taking it — or to drop, the client discarded)
       def sw_client_settled(id)
         @workers.each {|h, w| w[:inbox] << {kind: 'sw_client_settled', id: id.to_s} if w[:thread]&.alive? && service_worker?(h) }
-        @reserved_client_messages&.delete(id.to_s)&.each {|e| @worker_outbox << e }
+        @reserved_client_messages&.delete(id.to_s)&.each {|e| @worker_host << e }
         nil
       end
       # A service worker's message to client `e[:client]`, to the realm the registry says it is — none for a gone one's.
@@ -7987,7 +7972,7 @@ module Capybara
         if w[:kind] == 'service'
           # (…no request goes to it any more: the registry's matching skips it)
           Native.sw_set_worker_flag(@sw_partition, handle.to_i, 'dead', true)
-          @worker_outbox << {handle: handle.to_i, kind: 'sw_reaped'}
+          @worker_host << {handle: handle.to_i, kind: 'sw_reaped'}
         end
         # Its agents gone: the locks it held let go, its IndexedDB connections closed (agents.rs `drop_owner`).
         Native.agents_drop_owner(w[:agent_owner]) if w[:agent_owner]
@@ -8011,9 +7996,9 @@ module Capybara
           end
           next unless msg.is_a?(Hash)
           case msg[:kind]
-          when 'sw_message', 'port_msg' then @worker_outbox << {handle: handle.to_i, kind: 'swack'}
-          when 'broadcast'  then @worker_outbox << {handle: handle.to_i, kind: 'bcack'}
-          when 'fetch'      then sw_deliver_fetch_response(handle.to_i, msg[:fetch_id].to_i, WorkerHost::FALLTHROUGH, @worker_outbox, msg[:realm_id].to_i)
+          when 'sw_message', 'port_msg' then @worker_host << {handle: handle.to_i, kind: 'swack'}
+          when 'broadcast'  then @worker_host << {handle: handle.to_i, kind: 'bcack'}
+          when 'fetch'      then sw_deliver_fetch_response(handle.to_i, msg[:fetch_id].to_i, WorkerHost::FALLTHROUGH, @worker_host, msg[:realm_id].to_i)
           end
         end
         # A streaming respondWith whose worker died mid-body never emits its terminal frame: error the
@@ -8040,26 +8025,23 @@ module Capybara
         # transition like any other, so it must post its wakeup — a candidate parked on a
         # now-dead outgoing worker would otherwise only resume on unrelated client churn.
         # Rides the outbox (thread-safe; sw_try_activate is a no-op where nothing waits).
-        @worker_outbox << {handle: handle.to_i, kind: 'sw_try_activate'} if w[:kind] == 'service'
+        @worker_host << {handle: handle.to_i, kind: 'sw_try_activate'} if w[:kind] == 'service'
       end
 
       def deliver_worker_messages
-        head = @worker_outbox_head
-        @worker_outbox_head = nil
         tell_held_realms
         run_sw_job_events
-        return 0 if head.nil? && @workers.empty? && @worker_outbox.empty?
-        events = drain_queue(@worker_outbox)
-        events.unshift(head) if head
+        return 0 if @workers.empty? && @worker_host.outbox_empty?
         # The drain by kind, in the order a delivery takes them, each kind's in the order posted (worker_delivery.rs
         # `delivery_plan`): a worker-originated BroadcastChannel post ('broadcast') is fanned out on the main thread and
         # is NOT a reply; a 'bcack' acknowledges a broadcast the worker just delivered → release one broadcast-pending;
         # what no group names ('message' / '__error' / '__scripterror') a postMessage reply. A port or client message
         # carries whether a claim was posted before it.
-        plan = WorkerHost.delivery_plan(events.map {|e| e[:kind].to_s })
+        # (…the outbox the engine's, taken as a drain in that order: worker_delivery.rs `outbox_take`)
+        plan = @worker_host.outbox_take
         return 0 if plan.empty?
 
-        group = plan.to_h {|name, picks| [name, picks.map {|i, after_claim| [events[i], after_claim] }] }
+        group = plan.to_h
         group.default = [].freeze
         of = ->(name) { group[name].map(&:first) }
         broadcasts, port_ends, sw_navs, claims, sw_phases, sw_reaps, skip_waits, try_acts, fetch_resps, stream_frames, swacks, acks, msgs =
@@ -8296,7 +8278,7 @@ module Capybara
       def worker_next_timer = @worker_host.worker_next_timer
 
       def worker_pending? = worker_outbox_pending? || controller_changes_held? || @worker_host.owed?(OWED_ANY)
-      private def worker_outbox_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || !@sw_job_events.empty? || !@sw_realm_tells.empty?
+      private def worker_outbox_pending? = !@worker_host.outbox_empty? || !@sw_job_events.empty? || !@sw_realm_tells.empty?
 
       # The subset of worker pendings whose outbox reply is CONTRACTUAL (bcack / swack /
       # fetch_response are posted under `ensure`, so they arrive even when the worker-side
@@ -8323,7 +8305,7 @@ module Capybara
         worker_outbox_pending? || controller_changes_held? ||
           worker_reply_pending? ||
           @worker_host.owed?(OWED_WORK) ||
-          (!@workers.empty? && @workers.to_a.any? {|_h, w| !w[:inbox].empty? && w[:thread]&.alive? })
+          (!@workers.empty? && @worker_host.inbox_pending?)
       end
 
       # ── Windows: window.open, hyperlink and form targets ──
@@ -9491,8 +9473,7 @@ module Capybara
         end
         @worker_init_lock.synchronize { @workers = {} }
         @worker_host.workers_clear
-        @worker_outbox.clear
-        @worker_outbox_head = nil
+        @worker_host.outbox_clear
         @sw_job_events.clear
         @sw_realm_tells.clear
         @worker_host.changes_take
@@ -10199,6 +10180,7 @@ module Capybara
             # fast as its own work, on to its next timer at once, not a poll interval of real time at a time; its answer out,
             # it is the window's again: worker_records.rs `worker_at_inbox`)
             msg = pop_with_timeout(inbox, @worker_host.worker_at_inbox(handle))
+            @worker_host.worker_off_inbox(handle, !msg.nil?)
             break if msg == :terminate
             # …and the same answer from the boundary, which cannot wait for this queue.
             break if stopping.call
@@ -10628,6 +10610,23 @@ module Capybara
           break if stopping&.call
           rt.drain_timers(0)
         end
+      end
+
+      # A worker's inbox: a thread queue, host I/O, whose count the engine keeps as a message is put in — what it judges the
+      # worker idle by (worker_records.rs `queued`; its thread's taking one, `worker_off_inbox`).
+      class WorkerInbox < Thread::Queue
+        def initialize(host, handle)
+          super()
+          @host   = host
+          @handle = handle
+        end
+
+        def push(message)
+          @host.inbox_queued(@handle)
+          super
+        end
+        alias << push
+        alias enq push
       end
 
       # `Thread::Queue#pop(timeout:)` blocks releasing the GVL — fine

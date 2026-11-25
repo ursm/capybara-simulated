@@ -118,6 +118,9 @@ pub(crate) struct Record {
     answer_until: Option<f64>,
     activate_done: bool,
     on_network: bool,
+    // its inbox: the messages in it, and whether its thread waits on it now
+    queued: usize,
+    at_inbox: bool,
     // the requests of controlled clients it was sent while activating, parked until it activates: each `[request, fetch
     // id, realm]`
     parked: Vec<(String, i64, i64)>,
@@ -163,10 +166,13 @@ impl Record {
             None => start + Duration::from_secs_f64(BOOT_GUARD),
         }
     }
-    // Waiting on its inbox, which holds nothing (`inbox_idle`, the host's queue's), with no timer set nor a socket or event
-    // stream it reads (`reading`): it can answer nothing more of its own accord.
-    fn stalled(&self, inbox_idle: bool, reading: bool) -> bool {
-        inbox_idle && self.next_timer.is_some_and(|t| t < 0.0) && !reading
+    // Waiting on its inbox, which holds nothing.
+    fn idle(&self) -> bool {
+        self.at_inbox && self.queued == 0
+    }
+    // …with no timer set nor a socket or event stream it reads (`reading`): it can answer nothing more of its own accord.
+    fn stalled(&self, reading: bool) -> bool {
+        self.idle() && self.next_timer.is_some_and(|t| t < 0.0) && !reading
     }
     // Where a quiet poll of its inbox moves its clock to, the window's at `window`: on to its next timer at once while a
     // window waits on it inside its script (`answering`) — no further than such a wait lets it run — a poll interval of
@@ -242,6 +248,8 @@ impl WorkerHost {
             answer_until: None,
             activate_done: false,
             on_network: false,
+            queued: 0,
+            at_inbox: false,
             parked: Vec::new(),
             in_flight: 0,
             channels: HashMap::new(),
@@ -360,8 +368,35 @@ impl WorkerHost {
     fn worker_at_inbox(&self, handle: i64) -> f64 {
         self.stir(handle, POLL_INTERVAL, |r| {
             r.resuming = false;
+            r.at_inbox = true;
             if !r.answering.is_empty() && r.timers_due() { 0.0 } else { POLL_INTERVAL }
         })
+    }
+    // #worker_off_inbox(handle, took) — its thread back from its inbox, a message taken (`took`) or none.
+    fn worker_off_inbox(&self, handle: i64, took: bool) {
+        self.with(handle, (), |r| {
+            r.at_inbox = false;
+            if took {
+                r.queued = r.queued.saturating_sub(1);
+            }
+        });
+    }
+    // #inbox_queued(handle) — a message put in its inbox (before it is: the count never short of what is in it).
+    fn inbox_queued(&self, handle: i64) {
+        self.with(handle, (), |r| r.queued += 1);
+    }
+    // #worker_idle?(handle) -> whether it waits on its inbox, which holds nothing.
+    fn worker_idle(&self, handle: i64) -> bool {
+        self.with(handle, false, |r| r.idle())
+    }
+    // #inbox_pending? -> whether a live worker has a message in its inbox it has not taken.
+    fn inbox_pending(&self) -> bool {
+        self.records().map.values().any(|r| r.alive() && r.queued > 0)
+    }
+    // #sw_parked?(reading) -> whether every live service worker waits on its inbox, which holds nothing, with nothing read
+    // for it off its thread — none of `reading`, the workers a socket's or an event stream's reader pushes into.
+    fn sw_parked(&self, reading: Vec<i64>) -> bool {
+        self.records().map.iter().all(|(h, r)| r.kind != Kind::Service || !r.alive() || (r.idle() && !reading.contains(h)))
     }
     // #worker_idle_to(handle, window) -> where a quiet poll of its inbox moves its clock to (`Record::idle_to`).
     fn worker_idle_to(&self, handle: i64, window: f64) -> f64 {
@@ -417,7 +452,7 @@ impl WorkerHost {
         self.without_gvl_interruptibly(&cancel, || self.lockstep_wait(handles, start, &cancel));
     }
     // `f` run with the GVL released, `cancel` set and every wait on the records woken where Ruby interrupts the thread.
-    fn without_gvl_interruptibly<F: FnOnce() -> R, R>(&self, cancel: &AtomicBool, f: F) -> R {
+    pub(crate) fn without_gvl_interruptibly<F: FnOnce() -> R, R>(&self, cancel: &AtomicBool, f: F) -> R {
         struct Job<'a, F, R> {
             f: Option<F>,
             r: Option<R>,
@@ -434,9 +469,11 @@ impl WorkerHost {
             // SAFETY: the same `Job`, alive while the call it unblocks runs; only its shared parts are touched.
             let job = unsafe { &*data.cast::<Job<'_, F, R>>() };
             job.cancel.store(true, Ordering::Release);
-            // (…under the lock, so a waiter between its check and its wait cannot miss the wakeup)
+            // (…under each lock, so a waiter between its check and its wait cannot miss the wakeup)
             drop(job.host.records());
             job.host.stirred.notify_all();
+            drop(job.host.outbox.lock());
+            job.host.outbox_posted.notify_all();
         }
         let mut job = Job { f: Some(f), r: None, host: self, cancel };
         let data = (&raw mut job).cast();
@@ -567,9 +604,9 @@ impl WorkerHost {
             (moved, follow)
         })
     }
-    // #worker_stalled?(handle, inbox_idle, reading) -> `Record::stalled`.
-    fn worker_stalled(&self, handle: i64, inbox_idle: bool, reading: bool) -> bool {
-        self.with(handle, false, |r| r.stalled(inbox_idle, reading))
+    // #worker_stalled?(handle, reading) -> `Record::stalled`.
+    fn worker_stalled(&self, handle: i64, reading: bool) -> bool {
+        self.with(handle, false, |r| r.stalled(reading))
     }
     // #on_network(handle, on) / #on_network?(handle) — its thread waits on the network, its own fetch's: no hang.
     fn on_network(&self, handle: i64, on: bool) {
@@ -605,16 +642,16 @@ impl WorkerHost {
             r.now
         })
     }
-    // #activation_wait(handle, began, inbox_idle, reading) -> what the wait comes to at a poll: "activated", "wait",
+    // #activation_wait(handle, began, reading) -> what the wait comes to at a poll: "activated", "wait",
     // "stalled" (it can do nothing more of its own), or "give up" — its thread gone, or ACTIVATION_IN_PLACE_MS of its time
     // gone since `began`.
-    fn activation_wait(&self, handle: i64, began: f64, inbox_idle: bool, reading: bool) -> &'static str {
+    fn activation_wait(&self, handle: i64, began: f64, reading: bool) -> &'static str {
         self.with(handle, "give up", |r| {
             if r.activate_done {
                 "activated"
             } else if !r.alive() || r.now - began >= ACTIVATION_IN_PLACE_MS {
                 "give up"
-            } else if r.stalled(inbox_idle, reading) {
+            } else if r.stalled(reading) {
                 "stalled"
             } else {
                 "wait"
@@ -709,6 +746,11 @@ pub(crate) fn define(class: magnus::RClass) -> Result<(), magnus::Error> {
     class.define_method("worker_timers_left", method!(WorkerHost::worker_timers_left, 3))?;
     class.define_method("worker_at_inbox", method!(WorkerHost::worker_at_inbox, 1))?;
     class.define_method("worker_idle_to", method!(WorkerHost::worker_idle_to, 2))?;
+    class.define_method("worker_off_inbox", method!(WorkerHost::worker_off_inbox, 2))?;
+    class.define_method("inbox_queued", method!(WorkerHost::inbox_queued, 1))?;
+    class.define_method("worker_idle?", method!(WorkerHost::worker_idle, 1))?;
+    class.define_method("inbox_pending?", method!(WorkerHost::inbox_pending, 0))?;
+    class.define_method("sw_parked?", method!(WorkerHost::sw_parked, 1))?;
     class.define_method("worker_timers_pending?", method!(WorkerHost::worker_timers_pending, 0))?;
     class.define_method("worker_next_timer", method!(WorkerHost::worker_next_timer, 0))?;
     class.define_method("sw_next_timer_at", method!(WorkerHost::sw_next_timer_at, 0))?;
@@ -724,13 +766,13 @@ pub(crate) fn define(class: magnus::RClass) -> Result<(), magnus::Error> {
     class.define_method("wait_begin", method!(WorkerHost::wait_begin, 4))?;
     class.define_method("wait_spent", method!(WorkerHost::wait_spent, 3))?;
     class.define_method("wait_end", method!(WorkerHost::wait_end, 4))?;
-    class.define_method("worker_stalled?", method!(WorkerHost::worker_stalled, 3))?;
+    class.define_method("worker_stalled?", method!(WorkerHost::worker_stalled, 2))?;
     class.define_method("on_network", method!(WorkerHost::on_network, 2))?;
     class.define_method("on_network?", method!(WorkerHost::is_on_network, 1))?;
     class.define_method("fetch_taken", method!(WorkerHost::fetch_taken, 2))?;
     class.define_method("answered_in_place", method!(WorkerHost::answered_in_place, 2))?;
     class.define_method("activation_wait_begin", method!(WorkerHost::activation_wait_begin, 1))?;
-    class.define_method("activation_wait", method!(WorkerHost::activation_wait, 4))?;
+    class.define_method("activation_wait", method!(WorkerHost::activation_wait, 3))?;
     class.define_method("activation_wait_end", method!(WorkerHost::activation_wait_end, 2))?;
     class.define_method("fetch_parked", method!(WorkerHost::fetch_parked, 5))?;
     class.define_method("fetches_unparked", method!(WorkerHost::fetches_unparked, 1))?;
@@ -833,11 +875,11 @@ mod tests {
         let began = host.activation_wait_begin(1);
         host.worker_timers_left(1, 5000.0, false);
         assert_eq!(host.worker_idle_to(1, 100.0), 100.0 + ACTIVATION_IN_PLACE_MS);
-        assert_eq!(host.activation_wait(1, began, false, false), "wait");
+        assert_eq!(host.activation_wait(1, began, false), "wait");
         host.worker_clock_step(1, 100.0 + ACTIVATION_IN_PLACE_MS, 100.0);
-        assert_eq!(host.activation_wait(1, began, false, false), "give up");
+        assert_eq!(host.activation_wait(1, began, false), "give up");
         host.worker_activate_done(1);
-        assert_eq!(host.activation_wait(1, began, false, false), "activated");
+        assert_eq!(host.activation_wait(1, began, false), "activated");
         assert_eq!(host.activation_wait_end(1, began), (true, ACTIVATION_IN_PLACE_MS));
         assert_eq!(host.with(1, 0, |r| r.awaited), 0);
     }
@@ -845,11 +887,19 @@ mod tests {
     #[test]
     fn a_stalled_worker_has_no_timer_and_nothing_to_read() {
         let host = host_with("service");
-        assert!(!host.worker_stalled(1, true, false));
+        host.worker_at_inbox(1);
+        assert!(!host.worker_stalled(1, false));
         host.worker_timers_left(1, -1.0, false);
-        assert!(host.worker_stalled(1, true, false));
-        assert!(!host.worker_stalled(1, true, true));
-        assert!(!host.worker_stalled(1, false, false));
+        assert!(host.worker_stalled(1, false));
+        assert!(host.sw_parked(vec![]));
+        assert!(!host.worker_stalled(1, true));
+        assert!(!host.sw_parked(vec![1]));
+        // (…a message in its inbox, or its thread off it, is work)
+        host.inbox_queued(1);
+        assert!(!host.worker_stalled(1, false) && host.inbox_pending() && !host.sw_parked(vec![]));
+        host.worker_off_inbox(1, true);
+        assert!(!host.inbox_pending());
+        assert!(!host.worker_stalled(1, false));
     }
 
     #[test]
