@@ -377,6 +377,7 @@ module Capybara
         @event_source_seq     = 0
         @event_source_threads = {}
         @event_source_workers = {}   # id → the handle of the worker that opened it (none: the window's)
+        @event_source_realms  = {}   # id → the realm whose source opened it (a window's: 0 the page's)
         @event_source_lock    = Mutex.new
         @event_source_queue   = Thread::Queue.new
         # WebSocket — per-Browser handle counter, background frame-reader
@@ -4368,7 +4369,11 @@ module Capybara
         record  = Thread.current[:csim_worker_record]
         @event_source_lock.synchronize {
           id = (@event_source_seq += 1)
-          @event_source_workers[id] = worker.handle if worker
+          if worker
+            @event_source_workers[id] = worker.handle
+          else
+            @event_source_realms[id] = request['clientRealm'].to_i
+          end
           # (…made with the session's cancellation deferred, which its reader lets in to its work alone)
           @event_source_threads[id] = Thread.handle_interrupt(EventSourceCancelled => :never) {
             Thread.new do
@@ -4384,6 +4389,7 @@ module Capybara
       def event_source_close(id)
         thread = @event_source_lock.synchronize {
           @event_source_workers.delete(id.to_i)
+          @event_source_realms.delete(id.to_i)
           @event_source_threads.delete(id.to_i)
         }
         cancel_event_source_reader(thread)
@@ -4428,8 +4434,15 @@ module Capybara
         return 0 if @event_source_threads.empty? && @event_source_queue.empty?
         events = event_source_poll
         return 0 if events.empty?
-        # (…each a task of its own — see deliver_window_messages)
-        events.each {|event| @runtime.call('deliverEventSourceEvents', [event]) }
+        # (…each a task of its own — see deliver_window_messages — of the realm whose source opened its connection: none of a
+        # realm gone since)
+        # (…and its realm let go of with the last event its reader queues: its connection is over)
+        events.each do |event|
+          realm = @event_source_lock.synchronize {
+            event[:type] == '__error' || event[:type] == '__reconnect' ? @event_source_realms.delete(event[:id]) : @event_source_realms[event[:id]]
+          }.to_i
+          @runtime.realm_call(realm, 'deliverEventSourceEvents', [event]) if realm.zero? || @runtime.frame_realm_alive?(realm)
+        end
         events.size
       end
 
@@ -4601,6 +4614,7 @@ module Capybara
       def reset_event_sources
         threads = @event_source_lock.synchronize {
           @event_source_workers.clear
+          @event_source_realms.clear
           @event_source_threads.values.tap { @event_source_threads.clear }
         }
         # (…and given a moment, one for them all, to end — one in the middle of an app call ends once the app has
@@ -4639,37 +4653,26 @@ module Capybara
       }
       private_constant :WorkerSink
 
-      # (`worker`: the WorkerSink that opens it — none for a window's, whose `client` its realm describes as a request's:
-      # its id, its URL, its origin — document-origin.js `hostRequest`)
-      def ws_open(url, protocols = nil, worker = nil, client: nil)
+      # (`request` what its opening handshake asks, as the engine describes it — fetch_request.rs `webSocketRequest`: its
+      # URL, its header list, its client — `worker` the WorkerSink that opens it, none for a window's)
+      def ws_open(request, worker = nil)
+        request  = request.to_h
         queue    = worker || @websocket_queue
-        client   = client&.to_h
-        source   = worker ? worker.url : (client ? client['clientUrl'].to_s : page_url)
         id       = @websocket_lock.synchronize { @websocket_seq += 1 }
-        # ws:// → http://, wss:// → https:// for the Rack env; resolve relative
-        # against the current document (Action Cable's consumer builds an
-        # absolute ws URL, but be tolerant).
-        http_url = url.to_s.sub(/\Awss/i, 'https').sub(/\Aws/i, 'http')
-        target   = resolve_against_current(http_url)
+        target   = request['url'].to_s
+        client   = request['clientRealm'].to_i
         key      = SecureRandom.base64(16)
         csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
         env = rack_env_for(target, method: 'GET')
         # (…its cookies sent, and the handshake's Set-Cookie stored, as its client's site for cookies judges it — a
-        # worker's the site it was made with, a window's realm's: its top-level document's origin's site where every
-        # document down to its own is of it (an about:blank popup's its opener's), else none ('null', cross-site to every
-        # target) — RFC 6265bis §5.2.1)
-        judge = if worker
-                  worker_cookie_site(worker)
-                elsif client
-                  site_for_cookies(client['clientRealm'].to_i) || 'null'
-                else
-                  page_url
-                end
+        # worker's the site it was made with, a window's realm's the engine's: its top-level document's origin's site
+        # where every document down to its own is of it, else none ('null', cross-site to every target) — RFC 6265bis
+        # §5.2.1)
+        judge = worker ? worker_cookie_site(worker) : (request['siteForCookies'] || 'null')
         cookie_context = Native.cookie_context(judge, target, false)
-        # (…referred by a window's realm as its request's referrer and policy say — a srcdoc frame by its container's
-        # document, an opaque document not at all: document-origin.js `clientReferrerSource` — a worker by its script)
-        referer = client ? Native.request_referrer(client['referrerPolicy'].to_s, client['referrer'].to_s, target) : source
-        apply_default_request_env(env, target, referer: referer, cookie_context: cookie_context)
+        # (…and no Referer: its referrer is `no-referrer`)
+        apply_default_request_env(env, target, referer: nil, cookie_context: cookie_context)
+        apply_request_headers(env, request['headers'].to_h)
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
@@ -4677,11 +4680,9 @@ module Capybara
         # The opening handshake always carries its client's origin — its realm's document's (an about:blank frame's its
         # creator's), or the worker's (the UA owns this header) — server handlers echo it back (websockets/opening-
         # handshake origin test): Fetch "append a request `Origin` header", a `websocket` mode's whatever it is, an
-        # opaque one's `null`. A blob: client's is the origin its URL carries inside.
-        client_origin = client ? client['clientOrigin'].to_s : (url_origin(source.to_s.delete_prefix('blob:')) || 'null')
-        env['HTTP_ORIGIN'] = client_origin unless client_origin.empty?
-        list = Array(protocols).map(&:to_s).reject(&:empty?)
-        env['HTTP_SEC_WEBSOCKET_PROTOCOL'] = list.join(', ') unless list.empty?
+        # opaque one's `null`.
+        origin = request['clientOrigin'].to_s
+        env['HTTP_ORIGIN'] = origin unless origin.empty?
         env['rack.hijack?']  = true
         env['rack.hijack']   = -> { app_io }
         env['rack.hijack_io'] = app_io
@@ -4703,7 +4704,7 @@ module Capybara
           @websocket_sockets[id]     = csim_io
           @websocket_app_sockets[id] = app_io
           @websocket_workers[id]     = worker.handle if worker
-          @websocket_realms[id]      = client['clientRealm'].to_i if client
+          @websocket_realms[id]      = client unless worker
           @websocket_threads[id] = Thread.new do
             Thread.current.report_on_exception = false
             run_websocket_reader(id, csim_io, accept, queue, target, cookie_context)
@@ -9930,7 +9931,7 @@ module Capybara
         sw_origin = url_origin(url).to_s
         sw_hooks = {
           # The worker's WebSockets: opened and written from this thread, their events into this worker's inbox.
-          ws_open:        ->(ws_url, protocols) { ws_open(ws_url, protocols, WorkerSink.new(handle, inbox, url, 'ws')) },
+          ws_open:        ->(request) { ws_open(request, WorkerSink.new(handle, inbox, url, 'ws')) },
           ws_close:       ->(id, code, reason) { ws_close(id, code, reason, hold: false) },
           # …and its EventSources, their events into this worker's inbox too.
           es_open:        ->(request) { event_source_open(request, WorkerSink.new(handle, inbox, url, 'es')) },

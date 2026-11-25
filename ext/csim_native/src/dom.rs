@@ -2801,6 +2801,9 @@ pub(crate) struct Dom {
     // …and a WebSocket's connection's (ws_state.rs).
     pub(crate) ws_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) event_source_state_template: Option<v8::Global<v8::FunctionTemplate>>,
+    // …and the connections each realm's EventSources and WebSockets hold open (connections.rs).
+    pub(crate) event_sources: crate::connections::Registry,
+    pub(crate) web_sockets: crate::connections::Registry,
     // …and a FontFace's (font_face_state.rs) and a FontFaceSet's (font_face_set.rs).
     pub(crate) font_face_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) font_face_set_template: Option<v8::Global<v8::FunctionTemplate>>,
@@ -2863,7 +2866,7 @@ impl Dom {
             self.serialized.remove(&serialized);
         }
     }
-    // A realm's MessagePorts, BroadcastChannels, MediaQueryLists and WebAssembly resolutions let go of with its context —
+    // A realm's MessagePorts, BroadcastChannels, MediaQueryLists, WebAssembly resolutions and connections let go of with its context —
     // a frame's removed or disposed, the main realm's retired (`forgetRealmObjects`) — so a page that reuses its id, and
     // the channel names it makes again, never reaches one of the context before. Not as its arena resets: a load into
     // the same realm (a `javascript:` URL's result) keeps the Window, and what its script made with it.
@@ -2873,6 +2876,8 @@ impl Dom {
         crate::wasm::drop_realm(&mut self.wasm_resolutions, cid);
         self.broadcast_channels.drop_realm(cid);
         self.media_query_lists.drop_realm(cid);
+        self.event_sources.drop_realm(cid);
+        self.web_sockets.drop_realm(cid);
     }
 }
 

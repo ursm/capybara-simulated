@@ -1,10 +1,13 @@
 // An EventSource object's connection as the page sees it (HTML §9.2): its URL and the origin its messages carry — its
 // URL's until a response announces the connection, then the URL's that response came from — whether it sends
 // credentials, its ready state, the host's id for its connection, and what reestablishing it takes: its last event ID
-// string and its reconnection time — on a handle the bindings' object wraps
+// string and its reconnection time — and what its connection is waiting on: the host's connection, a controlling
+// service worker's answer, or its reconnection time — on a handle the bindings' object wraps
 // (`__dom.EventSourceStateBase`). The constructor's URL, `close()`, what each event the host delivers does to it, and
-// which response a controlling service worker may answer it with are here; the stream, its reading (event_stream.rs)
-// and the socket are the host's, and the events' objects the bindings'.
+// which response a controlling service worker may answer it with are here, and the realm's sources (connections.rs):
+// which one the host's events for a connection are for, and those its document's going or being stopped closes. The
+// request it makes is fetch_request.rs `eventSourceRequest`'s; the stream, its reading (event_stream.rs) and the socket
+// are the host's, and the events' objects the bindings'.
 
 use std::cell::RefCell;
 
@@ -22,6 +25,13 @@ const CLOSED: u32 = 2;
 
 // The reconnection time a source starts with (HTML: "an implementation-defined value, probably in the region of a few
 // seconds" — Chrome's).
+// What its connection waits on: nothing (constructed, or its connection never made), the host's connection (`id`), a
+// controlling service worker's answer, or its reconnection time.
+const PHASE_NONE: u8 = 0;
+const PHASE_NETWORK: u8 = 1;
+const PHASE_SERVED: u8 = 2;
+const PHASE_WAITING: u8 = 3;
+
 const DEFAULT_RECONNECTION_MS: u64 = 3000;
 // …and the longest it waits: the longest a timer can (HTML "timer initialization steps": a timeout past 2^31 - 1 ms is
 // none at all), so a stream's `retry` of more waits as long as any wait may, never not at all.
@@ -33,8 +43,11 @@ struct Source {
     with_credentials: bool,
     ready_state: u32,
     id: i32,
+    phase: u8,
     last_event_id: String,
     reconnection_ms: u64,
+    // Its entry in the realm's registry (0: none yet).
+    key: u64,
 }
 
 pub(crate) struct SourceHandle {
@@ -71,8 +84,10 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         with_credentials: args.get(3).is_true(),
         ready_state: CONNECTING,
         id: 0,
+        phase: PHASE_NONE,
         last_event_id: String::new(),
         reconnection_ms: DEFAULT_RECONNECTION_MS,
+        key: 0,
     };
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
@@ -129,6 +144,99 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "esDeliver", deliver_op, context_id);
     crate::dom::register(scope, ns, "esServed", served_op, context_id);
     crate::dom::register(scope, ns, "esReconnect", reconnect_op, context_id);
+    crate::dom::register(scope, ns, "esReconnectDue", reconnect_due_op, context_id);
+    crate::dom::register(scope, ns, "esRegister", register_op, context_id);
+    crate::dom::register(scope, ns, "esSourceOf", source_of_op, context_id);
+    crate::dom::register(scope, ns, "esDrop", drop_op, context_id);
+    crate::dom::register(scope, ns, "esAbort", abort_op, context_id);
+}
+
+// What the request a source's connection makes is of (fetch_request.rs `eventSourceRequest`): its URL, whether it sends
+// credentials, and its last event ID string.
+pub(crate) fn request_facts(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<(String, bool, String)> {
+    let s = source(scope, value)?.borrow();
+    Some((s.url.clone(), s.with_credentials, s.last_event_id.clone()))
+}
+
+// A source closed for good: its entry in the realm's registry let go of.
+fn forget(scope: &mut v8::PinScope<'_, '_>, key: u64) {
+    crate::dom::dom(scope).event_sources.remove(key);
+}
+
+// __dom.esRegister(state, target) — the source `target` (the bindings' object) wrapping `state`, made in the calling
+// realm, held in its registry until it is closed.
+fn register_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let (Ok(state), Ok(target)) = (v8::Local::<v8::Object>::try_from(args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1))) else { return };
+    let Some(source) = source(scope, state.into()) else { return };
+    if source.borrow().key != 0 {
+        return;
+    }
+    let (target, state) = (v8::Global::new(scope, target), v8::Global::new(scope, state));
+    source.borrow_mut().key = crate::dom::dom(scope).event_sources.add(cid, target, state);
+}
+
+// __dom.esSourceOf(id) -> the calling realm's source whose connection is the host's `id`, undefined for none (closed,
+// or reconnecting since).
+fn source_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let id = args.get(0).int32_value(scope).unwrap_or(0);
+    if id <= 0 {
+        return;
+    }
+    for (target, state) in crate::dom::dom(scope).event_sources.of_realm(cid) {
+        let state = v8::Local::new(scope, state);
+        if source(scope, state.into()).is_some_and(|s| { let s = s.borrow(); s.phase == PHASE_NETWORK && s.id == id }) {
+            let target = v8::Local::new(scope, target);
+            return rv.set(target.into());
+        }
+    }
+}
+
+// __dom.esDrop() -> the host's ids of the connections to close: the "unloading document cleanup steps" — each source of
+// the calling realm closed as its document goes (a frame removed or navigated), whatever its connection waits on.
+fn drop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let mut ids: Vec<v8::Local<v8::Value>> = Vec::new();
+    for entry in crate::dom::dom(scope).event_sources.take_realm(cid) {
+        let state = v8::Local::new(scope, entry.state);
+        let Some(source) = source(scope, state.into()) else { continue };
+        let mut s = source.borrow_mut();
+        if s.phase == PHASE_NETWORK && s.id > 0 {
+            ids.push(v8::Integer::new(scope, s.id).into());
+        }
+        s.ready_state = CLOSED;
+        s.phase = PHASE_NONE;
+        s.key = 0;
+    }
+    rv.set(v8::Array::new_with_elements(scope, &ids).into());
+}
+
+// __dom.esAbort() -> `[source, id, …]`: HTML "abort a document" (`window.stop()`) — its fetches cancelled, an aborted
+// network error, which fails each source of the calling realm whose connection is in flight (connecting or reading its
+// body, the host's `id`; a service worker's answer awaited, 0): each closed now, its `error` the bindings' to fire. One
+// waiting out its reconnection time has no fetch to cancel, and goes on waiting.
+fn abort_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
+    for (target, state) in crate::dom::dom(scope).event_sources.of_realm(cid) {
+        let state = v8::Local::new(scope, state);
+        let Some(source) = source(scope, state.into()) else { continue };
+        let key = {
+            let mut s = source.borrow_mut();
+            if s.phase != PHASE_NETWORK && s.phase != PHASE_SERVED {
+                continue;
+            }
+            let id = if s.phase == PHASE_NETWORK { s.id } else { 0 };
+            s.ready_state = CLOSED;
+            s.phase = PHASE_NONE;
+            items.push(v8::Local::new(scope, target).into());
+            items.push(v8::Integer::new(scope, id).into());
+            std::mem::take(&mut s.key)
+        };
+        forget(scope, key);
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // The fields `esField` reads, by number (event-source.js names them).
@@ -155,23 +263,36 @@ fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     }
 }
 
-// __dom.esSetId(state, id) — the host's id for its connection.
+// __dom.esSetId(state, id) — what its connection now waits on: the host's connection `id`, a controlling service
+// worker's answer (-1), or nothing (0: the host made none).
 fn set_id_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(source) = source(scope, args.get(0)) else { return };
     let id = args.get(1).int32_value(scope).unwrap_or(0);
-    source.borrow_mut().id = id;
+    let mut s = source.borrow_mut();
+    s.id = id.max(0);
+    s.phase = match id {
+        1.. => PHASE_NETWORK,
+        -1 => PHASE_SERVED,
+        _ => PHASE_NONE,
+    };
 }
 
 // __dom.esClose(state) -> the host's id for the connection `close()` (or the unloading document cleanup steps) closes,
 // 0 for none: the source closed, where it was not already.
 fn close_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(source) = source(scope, args.get(0)) else { return };
-    let mut s = source.borrow_mut();
-    if s.ready_state == CLOSED {
-        return rv.set_int32(0);
-    }
-    s.ready_state = CLOSED;
-    rv.set_int32(s.id);
+    let (id, key) = {
+        let mut s = source.borrow_mut();
+        if s.ready_state == CLOSED {
+            return rv.set_int32(0);
+        }
+        s.ready_state = CLOSED;
+        let id = if s.phase == PHASE_NETWORK { s.id } else { 0 };
+        s.phase = PHASE_NONE;
+        (id, std::mem::take(&mut s.key))
+    };
+    forget(scope, key);
+    rv.set_int32(id);
 }
 
 // What a delivery fires (`esDeliver`): nothing, `open`, `error`, or a message.
@@ -233,10 +354,7 @@ fn deliver_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let Some(source) = source(scope, args.get(0)) else { return };
     let kind = args.get(1).to_rust_string_lossy(scope);
     let url = text_arg(scope, &args, 2);
-    let mut s = source.borrow_mut();
-    let (ready_state, fire) = delivered(s.ready_state, &kind);
-    s.ready_state = ready_state;
-    opened_at(&mut s, fire, url);
+    let fire = changed(scope, source, |s| delivered(s.ready_state, &kind), url);
     rv.set_uint32(fire);
 }
 
@@ -247,11 +365,25 @@ fn served_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let status = args.get(1).uint32_value(scope).unwrap_or(0);
     let content_type = args.get(2).to_rust_string_lossy(scope);
     let url = text_arg(scope, &args, 3);
-    let mut s = source.borrow_mut();
-    let (ready_state, fire) = served(s.ready_state, status, &content_type);
-    s.ready_state = ready_state;
-    opened_at(&mut s, fire, url);
+    let fire = changed(scope, source, |s| served(s.ready_state, status, &content_type), url);
     rv.set_uint32(fire);
+}
+// …the source changed as `change` says of it — its ready state, and the event that fires — opened of `url`
+// (`opened_at`), forgotten where it is closed for good: the event that fires.
+fn changed(scope: &mut v8::PinScope<'_, '_>, source: &RefCell<Source>, change: impl Fn(&Source) -> (u32, u32), url: Option<String>) -> u32 {
+    let (fire, key) = {
+        let mut s = source.borrow_mut();
+        let (ready_state, fire) = change(&s);
+        s.ready_state = ready_state;
+        opened_at(&mut s, fire, url);
+        if ready_state != CLOSED {
+            return fire;
+        }
+        s.phase = PHASE_NONE;
+        (fire, std::mem::take(&mut s.key))
+    };
+    forget(scope, key);
+    fire
 }
 
 // HTML "reestablish the connection", its first task: a stream that ended — its body read to its end, or cut off — leaves
@@ -263,6 +395,8 @@ fn reconnected(s: &mut Source, last_event_id: String, retry: Option<u64>) -> Opt
         return None;
     }
     s.ready_state = CONNECTING;
+    s.phase = PHASE_WAITING;
+    s.id = 0;
     s.last_event_id = last_event_id;
     if let Some(retry) = retry {
         s.reconnection_ms = retry.min(MAX_RECONNECTION_MS);
@@ -278,6 +412,18 @@ fn reconnect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let retry = args.get(2).number_value(scope).filter(|r| *r >= 0.0).map(|r| r as u64);
     let wait = reconnected(&mut source.borrow_mut(), last_event_id, retry);
     rv.set_double(wait.map_or(-1.0, |w| w as f64));
+}
+
+// __dom.esReconnectDue(state) -> whether a source whose reconnection time has passed establishes its connection anew:
+// one still waiting it out (not closed, nor reconnected meanwhile), which then waits on nothing till it connects.
+fn reconnect_due_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(source) = source(scope, args.get(0)) else { return };
+    let mut s = source.borrow_mut();
+    let due = s.phase == PHASE_WAITING && s.ready_state == CONNECTING;
+    if due {
+        s.phase = PHASE_NONE;
+    }
+    rv.set_bool(due);
 }
 
 #[cfg(test)]
@@ -299,9 +445,19 @@ mod tests {
 
     #[test]
     fn a_source_reconnects_of_what_its_stream_left_it() {
-        let mut s = Source { url: String::new(), origin: String::new(), with_credentials: false, ready_state: OPEN, id: 1, last_event_id: String::new(), reconnection_ms: DEFAULT_RECONNECTION_MS };
+        let mut s = Source {
+            url: String::new(),
+            origin: String::new(),
+            with_credentials: false,
+            ready_state: OPEN,
+            id: 1,
+            phase: PHASE_NETWORK,
+            last_event_id: String::new(),
+            reconnection_ms: DEFAULT_RECONNECTION_MS,
+            key: 0,
+        };
         assert_eq!(reconnected(&mut s, "7".into(), None), Some(DEFAULT_RECONNECTION_MS));
-        assert_eq!((s.ready_state, s.last_event_id.as_str()), (CONNECTING, "7"));
+        assert_eq!((s.ready_state, s.phase, s.id, s.last_event_id.as_str()), (CONNECTING, PHASE_WAITING, 0, "7"));
         // (…a retry kept for every later reconnection, until another sets it)
         assert_eq!(reconnected(&mut s, "8".into(), Some(200)), Some(200));
         assert_eq!(reconnected(&mut s, "8".into(), None), Some(200));

@@ -64,6 +64,7 @@ mod editing_insert;
 mod element_state;
 mod event_handlers;
 mod event_path;
+mod connections;
 mod event_source_state;
 mod font_face_set;
 mod font_face_state;

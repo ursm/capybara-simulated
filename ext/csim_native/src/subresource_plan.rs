@@ -103,8 +103,7 @@ fn request_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     let cid = crate::dom::realm_id(scope, &args);
     let realm = crate::dom::realm(scope, cid);
     let container = realm.realm_document(cid).map_or("", |doc| realm.document_referrer_policy(doc));
-    let policy = [own, container].into_iter().find(|p| !p.is_empty()).unwrap_or(crate::url_ops::DEFAULT_POLICY);
-    if let Some(s) = v8::String::new(scope, policy) {
+    if let Some(s) = v8::String::new(scope, crate::fetch_request::request_policy(own, container)) {
         rv.set(s.into());
     }
 }

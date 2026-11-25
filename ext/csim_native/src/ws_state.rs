@@ -3,8 +3,10 @@
 // those given it once closing, which never go — the subprotocol the server chose among those offered, its binary type,
 // whether `close()` came while it was still connecting, and the host's id for its connection — on a handle the
 // bindings' object wraps (`__dom.WebSocketStateBase`). The constructor's checks, `close()`'s, and what each event the
-// host delivers does to it — the events it fires, in order — are here; the frames, the handshake and the socket are the
-// host's, and the events' objects and the messages' data the bindings'.
+// host delivers does to it — the events it fires, in order — are here, and the realm's sockets (connections.rs): which
+// one the host's events for a connection are for, and those its document's going closes. The request its opening
+// handshake makes is fetch_request.rs `webSocketRequest`'s, its frames ws_frame.rs'; the handshake and the socket are
+// the host's, and the events' objects and the messages' data the bindings'.
 
 use std::cell::RefCell;
 
@@ -36,6 +38,8 @@ struct Socket {
     fail_connecting: bool,
     id: i32,
     bad_port: bool,
+    // Its entry in the realm's registry (0: none yet).
+    key: u64,
 }
 
 pub(crate) struct SocketHandle {
@@ -100,6 +104,7 @@ fn opened(url: &str, offered: Vec<(String, Vec<u8>)>, base: Option<&str>) -> Res
         fail_connecting: false,
         id: 0,
         bad_port,
+        key: 0,
     })
 }
 
@@ -178,6 +183,68 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "wsDrained", drained_op, context_id);
     crate::dom::register(scope, ns, "wsClose", close_op, context_id);
     crate::dom::register(scope, ns, "wsDeliver", deliver_op, context_id);
+    crate::dom::register(scope, ns, "wsRegister", register_op, context_id);
+    crate::dom::register(scope, ns, "wsSocketOf", socket_of_op, context_id);
+    crate::dom::register(scope, ns, "wsDrop", drop_op, context_id);
+}
+
+// What the request its opening handshake makes is of (fetch_request.rs `webSocketRequest`): its URL and the
+// subprotocols it offers.
+pub(crate) fn request_facts(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<(String, Vec<String>)> {
+    let s = socket(scope, value)?.borrow();
+    Some((s.url.clone(), s.protocols.clone()))
+}
+
+// __dom.wsRegister(state, target) — the socket `target` (the bindings' object) wrapping `state`, made in the calling
+// realm, held in its registry until it is closed.
+fn register_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let (Ok(state), Ok(target)) = (v8::Local::<v8::Object>::try_from(args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1))) else { return };
+    let Some(socket) = socket(scope, state.into()) else { return };
+    if socket.borrow().key != 0 {
+        return;
+    }
+    let (target, state) = (v8::Global::new(scope, target), v8::Global::new(scope, state));
+    socket.borrow_mut().key = crate::dom::dom(scope).web_sockets.add(cid, target, state);
+}
+
+// __dom.wsSocketOf(id) -> the calling realm's socket whose connection is the host's `id`, undefined for none (closed,
+// or made to disappear with its document).
+fn socket_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let id = args.get(0).int32_value(scope).unwrap_or(0);
+    if id <= 0 {
+        return;
+    }
+    for (target, state) in crate::dom::dom(scope).web_sockets.of_realm(cid) {
+        let state = v8::Local::new(scope, state);
+        if socket(scope, state.into()).is_some_and(|s| s.borrow().id == id) {
+            let target = v8::Local::new(scope, target);
+            return rv.set(target.into());
+        }
+    }
+}
+
+// __dom.wsDrop() -> `[id, code, …]`: the "unloading document cleanup steps" — each socket of the calling realm made to
+// disappear as its document goes (a frame removed or navigated), unheard from now on: one still connecting or open
+// starting its closing handshake as Going Away (1001) on the host's connection `id`.
+fn drop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
+    for entry in crate::dom::dom(scope).web_sockets.take_realm(cid) {
+        let state = v8::Local::new(scope, entry.state);
+        let Some(socket) = socket(scope, state.into()) else { continue };
+        let mut s = socket.borrow_mut();
+        s.key = 0;
+        if (s.ready_state == CONNECTING || s.ready_state == OPEN) && s.id > 0 {
+            items.push(v8::Integer::new(scope, s.id).into());
+            items.push(v8::Integer::new(scope, 1001).into());
+        }
+        if s.ready_state != CLOSED {
+            s.ready_state = CLOSING;
+        }
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // The fields `wsField` reads and `wsSetField` writes, by number (websocket.js names them).
@@ -272,38 +339,33 @@ fn drained_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 
-// __dom.wsClose(state, code, reasonBytes, goingAway) -> the code to close the connection with (null for none: a bodyless
-// close frame, which the peer echoes as 1005), or undefined where nothing is sent. `close()`'s checks: a code 1000 or
+// __dom.wsClose(state, code, reasonBytes) -> the code to close the connection with (null for none: a bodyless close
+// frame, which the peer echoes as 1005), or undefined where nothing is sent. `close()`'s checks: a code 1000 or
 // 3000–4999 (InvalidAccessError — after [Clamp], so `close(2 ** 16 + 1000)` reports 65535), a reason of at most 123
 // UTF-8 bytes (SyntaxError); nothing more once closing; while connecting, the connection fails — its close abnormal
 // (1006) whatever the server's handshake says. A reason with no code goes with 1000 (the spec's "set code to 1000").
-// With `goingAway`, the "unloading document cleanup steps": one connecting or open closes as Going Away (1001).
 fn close_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(socket) = socket(scope, args.get(0)) else { return };
     let code = (!args.get(1).is_undefined()).then(|| args.get(1).uint32_value(scope).unwrap_or(0));
     let reason_bytes = (!args.get(2).is_undefined()).then(|| args.get(2).number_value(scope).unwrap_or(0.0));
-    let going_away = args.get(3).boolean_value(scope);
-    if !going_away {
-        if let Some(code) = code.filter(|&c| c != 1000 && !(3000..=4999).contains(&c)) {
-            let message = format!(
-                "Failed to execute 'close' on 'WebSocket': The close code must be either 1000, or between 3000 and 4999. {code} is neither."
-            );
-            return throw(scope, &message, "InvalidAccessError");
-        }
-        if reason_bytes.is_some_and(|n| n > 123.0) {
-            return throw(scope, "Failed to execute 'close' on 'WebSocket': The close reason must not be greater than 123 UTF-8 bytes.", "SyntaxError");
-        }
+    if let Some(code) = code.filter(|&c| c != 1000 && !(3000..=4999).contains(&c)) {
+        let message = format!(
+            "Failed to execute 'close' on 'WebSocket': The close code must be either 1000, or between 3000 and 4999. {code} is neither."
+        );
+        return throw(scope, &message, "InvalidAccessError");
+    }
+    if reason_bytes.is_some_and(|n| n > 123.0) {
+        return throw(scope, "Failed to execute 'close' on 'WebSocket': The close reason must not be greater than 123 UTF-8 bytes.", "SyntaxError");
     }
     let mut s = socket.borrow_mut();
     if s.ready_state == CLOSING || s.ready_state == CLOSED {
         return;
     }
-    if s.ready_state == CONNECTING && !going_away {
+    if s.ready_state == CONNECTING {
         s.fail_connecting = true;
     }
     s.ready_state = CLOSING;
-    let code = if going_away { Some(1001) } else { code.or(reason_bytes.map(|_| 1000)) };
-    match code {
+    match code.or(reason_bytes.map(|_| 1000)) {
         Some(code) => rv.set_uint32(code),
         None => rv.set_null(),
     }
@@ -353,6 +415,12 @@ fn deliver_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             _ => {}
         }
     }
+    // (…a socket closed for good let go of by its realm's registry)
+    let key = {
+        let mut s = socket.borrow_mut();
+        if s.ready_state == CLOSED { std::mem::take(&mut s.key) } else { 0 }
+    };
+    crate::dom::dom(scope).web_sockets.remove(key);
     let mut items: Vec<v8::Local<'_, v8::Value>> = Vec::with_capacity(events.len());
     for (name, close) in events {
         let mut fields: Vec<v8::Local<'_, v8::Value>> = vec![v8::String::new(scope, name).map_or_else(|| v8::undefined(scope).into(), Into::into)];

@@ -8,7 +8,8 @@ require_relative 'support/every_host_local'
 
 # The requests the host makes outside a fetch's or a navigation's chain judge their cookies by their client's site for
 # cookies all the same (cookie_jar.rs `context_for_ruby`): a WebSocket handshake by its document's — a cross-site one
-# sends no SameSite cookie, and its Set-Cookie stores none — and a download as the top-level navigation it is, its
+# sends no SameSite cookie, and its Set-Cookie stores none; none sends a Referer, its referrer `no-referrer` (WebSockets
+# "establish a WebSocket connection"; Chrome and Firefox send none either) — and a download as the top-level navigation it is, its
 # response's cookies stored.
 RSpec.describe "the cookies of a host's own request" do
   let(:seen) { [] }
@@ -53,8 +54,8 @@ RSpec.describe "the cookies of a host's own request" do
     s.visit 'http://b.test/echo'
     # (…the same-site one its document's SameSite cookies, its own stored; the cross-site one none, none stored)
     expect(seen).to contain_exactly(
-      ['a.test ws', 's=1; l=1', 'http://a.test', 'http://a.test/'],
-      ['b.test ws', '', 'http://a.test', 'http://a.test/'],
+      ['a.test ws', 's=1; l=1', 'http://a.test', nil],
+      ['b.test ws', '', 'http://a.test', nil],
       ['a.test echo', 's=1; l=1; ws=1'],
       ['b.test echo', 's=1; l=1']
     )
@@ -67,11 +68,11 @@ RSpec.describe "the cookies of a host's own request" do
     s.visit 'http://a.test/set'
     s.visit 'http://a.test/framed'
     s.evaluate_script('1')
-    expect(seen).to eq([['a.test ws', '', 'http://b.test', 'http://b.test/']])
+    expect(seen).to eq([['a.test ws', '', 'http://b.test', nil]])
   end
 
-  # (…an about:blank popup's by its opener's origin, which it inherits; a srcdoc frame's referred by its container's
-  # document; a sandboxed one's of the opaque origin `null`, referred by none)
+  # (…an about:blank popup's by its opener's origin, which it inherits, as a srcdoc frame's by its container's document's;
+  # a sandboxed one's of the opaque origin `null`)
   it 'judges a socket by the document it is of, whatever its URL' do
     s = every_host_local { simulated_session(app) }
     s.visit 'http://a.test/set'
@@ -87,7 +88,7 @@ RSpec.describe "the cookies of a host's own request" do
     3.times { s.evaluate_script('1') }
     expect(seen).to contain_exactly(
       ['a.test ws', 's=1; l=1', 'http://a.test', nil],
-      ['a.test ws', 's=1; l=1', 'http://a.test', 'http://a.test/'],
+      ['a.test ws', 's=1; l=1', 'http://a.test', nil],
       ['a.test ws', '', 'null', nil]
     )
   end

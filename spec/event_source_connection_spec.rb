@@ -146,4 +146,24 @@ RSpec.describe 'an EventSource connection' do
     from, = serve([302, {'Location' => "http://localhost:#{to}/"}])
     expect(first_event("http://127.0.0.1:#{from}/")).to eq(['200', "http://localhost:#{to}"])
   end
+
+  # A frame's source is its realm's (event_source_state.rs keeps each realm's): the host delivers its connection's events
+  # there — its MessageEvent the frame's — and the frame's document going closes it, the connection with it.
+  it "delivers a frame's source its messages in its realm, and closes it with the frame" do
+    port, = serve([200, {'Content-Type' => 'text/event-stream'}, "data: a\n\n"])
+    session.execute_script(<<~JS)
+      window.got = null;
+      const frame = document.body.appendChild(document.createElement('iframe'));
+      frame.src = '/frame';
+      frame.onload = () => {
+        const W = frame.contentWindow, es = new W.EventSource('http://127.0.0.1:#{port}/');
+        es.onmessage = (e) => {
+          const own = e instanceof W.MessageEvent && !(e instanceof MessageEvent);
+          frame.remove();
+          window.got = [e.data, own, es.readyState];
+        };
+      };
+    JS
+    expect(poll_until { session.evaluate_script('window.got') }).to eq(['a', true, 2])
+  end
 end

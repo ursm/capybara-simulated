@@ -2243,7 +2243,7 @@ module Capybara
         # An exception the worker's script left unhandled, reported out to its Worker object (workers.js).
         c.attach('@workerReportError', ->(message, filename, lineno, colno) { sw_hooks[:report_error]&.call(message, filename, lineno, colno); nil })
         # …its WebSockets, whose events are its own inbox's (Browser#run_worker) — `wsSend` is the window's as it is
-        c.attach('@wsOpen',  ->(url, protocols, *) { sw_hooks[:ws_open].call(url, protocols) }) if sw_hooks[:ws_open]
+        c.attach('@wsOpen',  ->(request) { sw_hooks[:ws_open].call(request) }) if sw_hooks[:ws_open]
         c.attach('@wsClose', ->(id, code, reason) { sw_hooks[:ws_close].call(id, code, reason); nil }) if sw_hooks[:ws_close]
         # …and its EventSources, likewise
         c.attach('@eventSourceOpen',  ->(request) { sw_hooks[:es_open].call(request) }) if sw_hooks[:es_open]

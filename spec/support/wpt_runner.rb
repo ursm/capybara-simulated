@@ -668,6 +668,8 @@ module WptRunner
     'handshake_no_protocol' => {protocol: ->(_c) { nil },      run: ->(conn, _c) { conn.send_close(1000) }},
     # origin_wsh.py — accept, then send back the request's Origin (the document origin the server saw).
     'origin'          => {run: ->(conn, c) { conn.send_text(c[:origin]); conn.send_close(1000) }},
+    # referrer_wsh.py — send back the handshake's Referer header (none, as Fetch makes it: its referrer is `no-referrer`).
+    'referrer'        => {run: ->(conn, c) { conn.send_text(c[:referer] || 'MISSING AS PER FETCH') }},
     # echo-cookie_wsh.py — send back the handshake's Cookie header (or "(none)").
     'echo-cookie'     => {run: ->(conn, c) { conn.send_text(c[:cookie] || '(none)'); conn.send_close(1000) }},
     # set-cookie_wsh.py — set a cookie via a handshake-response header, then keep the connection
@@ -724,6 +726,7 @@ module WptRunner
       query:        env['QUERY_STRING'].to_s,
       origin:       env['HTTP_ORIGIN'].to_s,
       cookie:       env['HTTP_COOKIE'],
+      referer:      env['HTTP_REFERER'],
     }
     name    = env['PATH_INFO'].to_s.sub(%r{\A/}, '').sub(%r{\Ahandlers/}, '').sub(/_wsh\.py\z/, '')
     handler = ws_handler_for(name)

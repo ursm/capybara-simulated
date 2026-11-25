@@ -68869,11 +68869,6 @@ websockets/mixed-content.https.any.js:
 - "[dedicatedworker] opening an insecure WebSocket in a secure context should fail"
 - "[serviceworker] opening an insecure WebSocket in a secure context should fail"
 - opening an insecure WebSocket in a secure context should fail
-websockets/referrer.any.js:
-- Ensure no Referer header is included
-- "[dedicatedworker] Ensure no Referer header is included"
-- "[dedicatedworker] [harness] TIMEOUT"
-- "[harness] TIMEOUT"
 websockets/send-many-64K-messages-with-backpressure.any.js:
 - "[dedicatedworker] sending 50 messages of size 65536 with backpressure applied should
   not hang"

@@ -63,7 +63,7 @@ module Capybara
         'logConsole'                   => ->(b, *a) { b.log_console(a[0], a[1]); nil },
         'eventSourceOpen'              => ->(b, *a) { b.event_source_open(a[0]) },
         'eventSourceClose'             => ->(b, *a) { b.event_source_close(a[0]); nil },
-        'wsOpen'                       => ->(b, *a) { b.ws_open(a[0], a[1], nil, client: a[2]) },
+        'wsOpen'                       => ->(b, *a) { b.ws_open(a[0]) },
         'wsSend'                       => ->(b, *a) { b.ws_send(a[0], a[1], a[2]); nil },
         'wsClose'                      => ->(b, *a) { b.ws_close(a[0], a[1], a[2]); nil },
         'rackFetchAsync'               => ->(b, *a) { b.rack_fetch_async(a[0], a[1]) },
