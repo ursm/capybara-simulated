@@ -184,13 +184,10 @@ fn source_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     if id <= 0 {
         return;
     }
-    for (target, state) in crate::dom::dom(scope).event_sources.of_realm(cid) {
-        let state = v8::Local::new(scope, state);
-        if source(scope, state.into()).is_some_and(|s| { let s = s.borrow(); s.phase == PHASE_NETWORK && s.id == id }) {
-            let target = v8::Local::new(scope, target);
-            return rv.set(target.into());
-        }
-    }
+    // (…the registry names a source's host id only while its connection is that one: `esSetId`, `esReconnect`)
+    let Some(target) = crate::dom::dom(scope).event_sources.of_host(cid, id).cloned() else { return };
+    let target = v8::Local::new(scope, target);
+    rv.set(target.into());
 }
 
 // __dom.esDrop() -> the host's ids of the connections to close: the "unloading document cleanup steps" — each source of
@@ -280,6 +277,8 @@ fn set_id_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         if id == 0 { std::mem::take(&mut s.key) } else { 0 }
     };
     forget(scope, key);
+    let key = source.borrow().key;
+    crate::dom::dom(scope).event_sources.set_host(key, id.max(0));
 }
 
 // __dom.esClose(state) -> the host's id for the connection `close()` (or the unloading document cleanup steps) closes,
@@ -416,6 +415,9 @@ fn reconnect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let last_event_id = args.get(1).to_rust_string_lossy(scope);
     let retry = args.get(2).number_value(scope).filter(|r| *r >= 0.0).map(|r| r as u64);
     let wait = reconnected(&mut source.borrow_mut(), last_event_id, retry);
+    // (…its old connection's id no longer its: that connection's late events find nothing)
+    let key = source.borrow().key;
+    crate::dom::dom(scope).event_sources.set_host(key, 0);
     rv.set_double(wait.map_or(-1.0, |w| w as f64));
 }
 

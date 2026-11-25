@@ -216,13 +216,9 @@ fn socket_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     if id <= 0 {
         return;
     }
-    for (target, state) in crate::dom::dom(scope).web_sockets.of_realm(cid) {
-        let state = v8::Local::new(scope, state);
-        if socket(scope, state.into()).is_some_and(|s| s.borrow().id == id) {
-            let target = v8::Local::new(scope, target);
-            return rv.set(target.into());
-        }
-    }
+    let Some(target) = crate::dom::dom(scope).web_sockets.of_host(cid, id).cloned() else { return };
+    let target = v8::Local::new(scope, target);
+    rv.set(target.into());
 }
 
 // __dom.wsDrop() -> `[id, code, …]`: the "unloading document cleanup steps" — each socket of the calling realm made to
@@ -292,7 +288,12 @@ fn set_field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let mut s = socket.borrow_mut();
     match field {
         BINARY_TYPE => s.binary_type = value.to_rust_string_lossy(scope),
-        ID => s.id = value.int32_value(scope).unwrap_or(0),
+        ID => {
+            s.id = value.int32_value(scope).unwrap_or(0);
+            let (key, id) = (s.key, s.id);
+            drop(s);
+            crate::dom::dom(scope).web_sockets.set_host(key, id);
+        }
         _ => {}
     }
 }

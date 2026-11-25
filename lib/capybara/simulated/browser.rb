@@ -377,7 +377,7 @@ module Capybara
         @event_source_seq     = 0
         @event_source_threads = {}
         @event_source_workers = {}   # id → the handle of the worker that opened it (none: the window's)
-        @event_source_realms  = {}   # id → the realm whose source opened it (a window's: 0 the page's)
+        @event_source_realms  = {}   # id → the realm whose source opened it (a window's: 0 the page's; main thread)
         @event_source_lock    = Mutex.new
         @event_source_queue   = Thread::Queue.new
         # WebSocket — per-Browser handle counter, background frame-reader
@@ -392,7 +392,7 @@ module Capybara
         # (WorkerSink) — so the id counter and the registries below are taken under `@websocket_lock`.
         @websocket_seq        = 0
         @websocket_threads    = {}
-        @websocket_sockets    = {}   # id → csim's socket end
+        @websocket_sockets    = {}   # id → csim's end of the connection (WsEnd)
         @websocket_app_sockets = {}  # id → the app's hijack end (closed on reset where the app left it open)
         @websocket_workers    = {}   # id → the handle of the worker that opened it (none: the window's)
         @websocket_realms     = {}   # id → the realm whose document opened it (a window's: 0 the page's)
@@ -406,12 +406,6 @@ module Capybara
         # page drops its document's sockets, those of the windows it keeps still held. See hold_for_ws_close (its budget
         # `ClockHolds::SOCKET_CLOSE`).
         @ws_closing           = Set.new
-        # All frame writes (the reader thread's pong replies + the main thread's
-        # send/close) go through one socket; serialise them so two threads can't
-        # interleave bytes into a corrupt frame.
-        @websocket_write_lock = Mutex.new
-        # …and the sockets a Close frame went out on, which send no other (RFC 6455 §5.5.1), under that lock.
-        @websocket_close_sent = Set.new.compare_by_identity
         # Hijacked-XHR delivery — per-Browser handle counter,
         # background threads, and a Queue of completed responses for
         # Rack calls where the middleware used `rack.hijack` to hold
@@ -4439,12 +4433,10 @@ module Capybara
         # (…each a task of its own — see deliver_window_messages — of the realm whose source opened its connection, a
         # frame's still loading its document too: none of a realm gone since, nor of a connection closed since. Its realm
         # let go of with the last event its reader queues: its connection is over)
+        # (…the realms a window's sources are of written and read on the main thread alone: no lock)
         events.each do |event|
-          realm = @event_source_lock.synchronize {
-            event[:type] == '__error' || event[:type] == '__reconnect' ? @event_source_realms.delete(event[:id]) : @event_source_realms[event[:id]]
-          }
-          next unless realm
-
+          id    = event[:id]
+          realm = (event[:type] == '__error' || event[:type] == '__reconnect' ? @event_source_realms.delete(id) : @event_source_realms[id]) or next
           @runtime.realm_call(realm, 'deliverEventSourceEvents', [event]) if realm.zero? || @runtime.frame_realm_present?(realm)
         end
         events.size
@@ -4717,12 +4709,9 @@ module Capybara
         end
         accept = Digest::SHA1.base64digest(key + WS_GUID)
         @websocket_lock.synchronize do
-          @websocket_sockets[id]     = csim_io
+          @websocket_sockets[id]     = connection = WsEnd.new(csim_io, Mutex.new, false)
           @websocket_app_sockets[id] = app_io
-          @websocket_threads[id]     = Thread.new do
-            Thread.current.report_on_exception = false
-            run_websocket_reader(id, csim_io, accept, queue, target, cookie_context)
-          end
+          @websocket_threads[id]     = websocket_reader_thread(id, connection, accept, queue, target, cookie_context)
         end
         id
       rescue StandardError => e
@@ -4738,8 +4727,8 @@ module Capybara
       # string or an ArrayBuffer/view) → opcode 0x2 vs the text 0x1. Action
       # Cable is text-only (JSON).
       def ws_send(id, data, binary = false)
-        sock = @websocket_lock.synchronize { @websocket_sockets[id.to_i] } or return
-        ws_write_frame(sock, binary ? 0x2 : 0x1, data.to_s.b)
+        connection = @websocket_lock.synchronize { @websocket_sockets[id.to_i] } or return
+        connection.send_frame(binary ? 0x2 : 0x1, data)
         nil
       rescue StandardError
         nil
@@ -4747,7 +4736,7 @@ module Capybara
 
       # (`hold`: the window's close holds the clock — a worker's, delivered by its own loop, does not)
       def ws_close(id, code = nil, reason = '', hold: true)
-        sock = @websocket_lock.synchronize { @websocket_sockets[id.to_i] } or return
+        connection = @websocket_lock.synchronize { @websocket_sockets[id.to_i] } or return
         # Send the close frame and let the close HANDSHAKE complete: the server
         # replies with its own close frame, which the reader thread surfaces as
         # the `__close` event (carrying the agreed code) before tearing the
@@ -4756,7 +4745,7 @@ module Capybara
         # closes with no status, which the peer echoes and the reader reports as
         # code 1005 (NO_STATUS), not 1000.
         payload = code.nil? ? ''.b : [code.to_i].pack('n') + reason.to_s.b
-        ws_write_close(sock, payload) rescue nil
+        connection.send_close(payload) rescue nil
         # A close handshake is now in flight — hold the clock until the reader's `__close` lands
         # (bounded by the deadline in hold_for_ws_close if the peer never replies → EOF 1006).
         @ws_closing << id.to_i if hold
@@ -4829,7 +4818,6 @@ module Capybara
           @websocket_workers.clear
           @websocket_realms.clear
         end
-        @websocket_write_lock.synchronize { @websocket_close_sent.clear }
         forget_window_websocket_events
       end
 
@@ -4839,12 +4827,12 @@ module Capybara
       # once each ended.
       private def forget_websockets(ids)
         @websocket_lock.synchronize do
-          # (…but the app's end, which is the app's to close: its server may not have read the last of csim's end yet — a
-          # Close's echo, a failure's Close — and reads EOF after it, as the reader closed csim's end. Kept until the app
-          # closes it, or until `reset_websockets` closes what the app left open.)
-          @websocket_app_sockets.reject! {|_, s| s.closed? }
           ids.each do |id|
             @websocket_sockets.delete(id)
+            # (…but the app's end, which is the app's to close: its server may not have read the last of csim's end yet
+            # — a Close's echo, a failure's Close — and reads EOF after it, as the reader closed csim's end. Kept where the
+            # app has not closed it yet, for `reset_websockets` to close what the app left open.)
+            @websocket_app_sockets.delete(id) if @websocket_app_sockets[id]&.closed?
             @websocket_threads.delete(id)
             @websocket_workers.delete(id)
             @websocket_realms.delete(id)
@@ -4881,7 +4869,7 @@ module Capybara
           @websocket_sockets.keys.select {|id| @websocket_workers[id] == worker && !kept.include?(@websocket_realms[id]) }.each do |id|
             @websocket_workers.delete(id)
             @websocket_realms.delete(id)
-            ws_write_close(@websocket_sockets.delete(id), [1001].pack('n')) rescue nil
+            @websocket_sockets.delete(id).send_close([1001].pack('n')) rescue nil
           end
         end
       end
@@ -4894,7 +4882,17 @@ module Capybara
 
       # Background-thread frame reader: verify the 101 handshake, then loop
       # decoding server→client frames into queue events until close / EOF.
-      private def run_websocket_reader(id, sock, expected_accept, client_queue, target, cookie_context)
+      # (…its thread made here, not in `ws_open`, whose block would keep the handshake's request — its env, its plan —
+      # alive as long as the connection is: garbage the collector marks again at every run)
+      private def websocket_reader_thread(*args)
+        Thread.new do
+          Thread.current.report_on_exception = false
+          run_websocket_reader(*args)
+        end
+      end
+
+      private def run_websocket_reader(id, connection, expected_accept, client_queue, target, cookie_context)
+        sock  = connection.io
         queue = WsHeard.new(client_queue, -> { @websocket_lock.synchronize { @websocket_sockets.key?(id) } })
         ok, protocol, cookies = ws_read_handshake(sock, expected_accept)
         unless ok
@@ -4912,9 +4910,12 @@ module Capybara
         # where it falls, its Close, or the connection failed for a frame the protocol forbids. A connection that ends
         # with no Close frame closes abnormally (1006).
         reader = Native::WsReader.new
+        # (…read into one buffer, which the engine copies from: a fresh 64 KiB string per read is malloc pressure that
+        # makes the GC mark every live thread's stack again and again while many connections open at once)
+        buffer = String.new(capacity: 16_384)
         loop do
           bytes = begin
-            sock.readpartial(65_536)
+            sock.readpartial(16_384, buffer)
           rescue EOFError
             queue << {id: id, type: '__close', code: 1006, reason: ''}
             break
@@ -4930,12 +4931,12 @@ module Capybara
               queue << {id: id, type: 'message', binary: true, data: payload}
               false
             when Native::WsReader::PING
-              ws_write_frame(sock, 0xA, payload)
+              connection.send_frame(0xA, payload)
               false
             # The server's Close answered with one echoing its code — none for none — where the client sent none first
             # (RFC 6455 §5.5.1; Chrome and Firefox echo the code and reason, measured 2026-11-26).
             when Native::WsReader::CLOSE
-              ws_write_close(sock, code ? [code].pack('n') + payload.b : ''.b) rescue nil
+              connection.send_close(code ? [code].pack('n') + payload.b : ''.b) rescue nil
               queue << {id: id, type: '__close', code: code || 1005, reason: payload}
               true
             # RFC 6455 §7.1.7: "If _The WebSocket Connection is Established_ prior to the point where the endpoint is
@@ -4943,7 +4944,7 @@ module Capybara
             # status code (Section 7.4) before proceeding to _Close the WebSocket Connection_." — 1002, a protocol error,
             # and why (Chrome sends the same; Firefox none: measured 2026-11-26).
             else
-              ws_write_close(sock, [code].pack('n') + payload.b) rescue nil
+              connection.send_close([code].pack('n') + payload.b) rescue nil
               queue << {id: id, type: '__error', message: 'protocol error'}
               true
             end
@@ -4956,11 +4957,7 @@ module Capybara
         # Only the socket (a local) is closed here — the `@websocket_*` hashes are
         # its opener's and its teardown's, under `@websocket_lock`; a closed entry
         # just no-ops on the next access.
-        # (…and let go of as a socket a Close went out on, in the one step: a Close sent after finds it closed)
-        @websocket_write_lock.synchronize do
-          sock.close rescue nil
-          @websocket_close_sent.delete(sock)
-        end
+        connection.close
       end
 
       # Read + validate the 101 Switching Protocols response (status line +
@@ -4994,20 +4991,36 @@ module Capybara
         [accept_ok, protocol, cookies]
       end
 
-      # Write one frame (ws_frame.rs: masked, as every frame a client sends is). Holds the per-connection write lock so the
-      # reader thread's pong and the main thread's send/close can't interleave bytes on the shared socket — and nothing
-      # after a Close frame (RFC 6455 §5.5.1: "the application MUST NOT send any more data frames after sending a Close
-      # frame").
-      private def ws_write_frame(sock, opcode, payload)
-        frame = Native.ws_frame(opcode, payload.to_s.b)
-        @websocket_write_lock.synchronize { sock.write(frame) unless @websocket_close_sent.include?(sock) }
-      end
-      # …a Close frame, the first alone: whichever of the page's close(), its document's going, the server's Close and a
-      # failure comes first sends it — none on a socket its reader has closed.
-      private def ws_write_close(sock, payload)
-        frame = Native.ws_frame(0x8, payload.to_s.b)
-        @websocket_write_lock.synchronize { sock.write(frame) if !sock.closed? && @websocket_close_sent.add?(sock) }
-      end
+      # csim's end of a WebSocket connection: its socket, the lock its writes take — the reader thread's Pong and Close
+      # and the page's send and close() go through the one socket, and two threads must not interleave bytes into a
+      # corrupt frame; the connection's own, so one connection's blocked write holds up no other — and whether a Close
+      # frame has gone out on it (RFC 6455 §5.5.1: "the application MUST NOT send any more data frames after sending a
+      # Close frame"). Its frames are the engine's (ws_frame.rs: masked, as every frame a client sends is).
+      WsEnd = Struct.new(:io, :lock, :close_sent) {
+        def send_frame(opcode, payload)
+          frame = Native.ws_frame(opcode, payload.to_s.b)
+          lock.synchronize { io.write(frame) unless close_sent }
+        end
+
+        # …a Close frame, the first alone: whichever of the page's close(), its document's going, the server's Close and
+        # a failure comes first sends it — none once its reader has closed the socket.
+        def send_close(payload)
+          frame = Native.ws_frame(0x8, payload.to_s.b)
+          lock.synchronize do
+            next if close_sent || io.closed?
+
+            self.close_sent = true
+            io.write(frame)
+          end
+        end
+
+        def close
+          lock.synchronize { io.close unless io.closed? }
+        rescue IOError
+          # (…closed meanwhile)
+        end
+      }
+      private_constant :WsEnd
 
       # ── Hijack-aware async XHR ─────────────────────────────────────
       #
