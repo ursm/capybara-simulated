@@ -198,6 +198,7 @@ mod tables;
 mod attributes;
 mod selected_content;
 mod nonce;
+mod permissions_policy;
 mod popovers;
 mod port_channels;
 mod activation;

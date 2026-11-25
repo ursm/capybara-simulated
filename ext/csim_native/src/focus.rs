@@ -568,6 +568,13 @@ pub(crate) fn dialog_focus_control_of(scope: &mut v8::PinScope<'_, '_>, dialog: 
 pub(crate) fn popover_focus_control(scope: &mut v8::PinScope<'_, '_>, popover: NodeId) -> Option<Option<NodeId>> {
     Some(ask_engine(scope, popover, |engine, arena, now| popover_control(engine, arena, popover, now))?.flatten())
 }
+// HTML's "allow focus steps" for the document of realm `realm`: allowed to use the "focus-without-user-activation"
+// feature (default allowlist 'self': a cross-origin frame its container's `allow` does not grant it to is not), or its
+// window transiently activated. What the dialog and popover focusing steps ask first; HTML asks it of `focus()`,
+// `window.focus()` and autofocus too, which do not ask it here yet.
+pub(crate) fn allow_focus_steps(arena: &mut RealmArena, realm: i32) -> bool {
+    crate::permissions_policy::allowed_to_use(arena, realm, "focus-without-user-activation") || arena.transiently_activated(realm)
+}
 // HTML's "focusing steps" for `el`, the bindings' to run (dom-nodes.js `focusElement`) — the viewport not scrolled, as
 // the dialogs' and popovers' steps ask (None: a script was terminated).
 pub(crate) fn run_focusing_steps(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> Option<()> {

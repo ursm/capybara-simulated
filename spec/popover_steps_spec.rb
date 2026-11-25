@@ -143,6 +143,31 @@ RSpec.describe 'Popover and dialog steps' do
     expect(s.evaluate_script('document.activeElement.id')).to eq('trigger')
   end
 
+  # HTML's "allow focus steps": the dialog and popover focusing steps of a cross-origin frame's document, which is not
+  # allowed to use "focus-without-user-activation" (default allowlist 'self') and has no transient activation, move no
+  # focus; its container's `allow` grants the feature. Chrome: ["", ""], ["", ""] (it ignores the `allow` token — the
+  # spec's rule kept), ["b", "c"] for a same-origin frame.
+  it 'runs no focusing steps in a cross-origin frame not allowed to focus', :every_host_local do
+    frame = <<~HTML
+      <!doctype html><meta charset=utf-8><dialog id=d><button id=b>b</button></dialog><div popover id=p><button autofocus id=c>c</button></div>
+    HTML
+    pages = lambda {|env|
+      body = env['SERVER_NAME'].start_with?('b.') || env['PATH_INFO'] == '/same' ? frame : <<~HTML
+        <!doctype html><meta charset=utf-8><body>
+        <iframe id=plain src="https://b.focus.example.test/"></iframe>
+        <iframe id=allowed allow="focus-without-user-activation" src="https://b.focus.example.test/"></iframe>
+        <iframe id=same src="/same"></iframe>
+      HTML
+      [200, {'content-type' => 'text/html'}, [body]]
+    }
+    s = simulated_session(pages)
+    s.visit 'https://a.focus.example.test/'
+    got = %w[plain allowed same].map {|f|
+      s.within_frame(f) { s.evaluate_script('(() => { d.showModal(); const one = document.activeElement.id; d.close(); p.showPopover(); return [one, document.activeElement.id]; })()') }
+    }
+    expect(got).to eq([['', ''], %w[b c], %w[b c]])
+  end
+
   # The close watcher manager (HTML §6.10): close watchers made with no user activation between them share a group,
   # which one close request (the Escape key) closes together — the last first, its `cancel` not cancelable — and a
   # CloseWatcher's requestClose() fires a cancelable `cancel` its listener may prevent (WPT close-watcher/

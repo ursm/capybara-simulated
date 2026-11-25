@@ -452,11 +452,17 @@ fn hide_popover_stack_until(scope: &mut v8::PinScope<'_, '_>, doc: NodeId, endpo
     Ok(())
 }
 
-// HTML "popover focusing steps" of `el`, just shown: a dialog's are the dialog focusing steps; any other's focus it
+// HTML "popover focusing steps" of `el`, just shown — none where its document may not take focus ("allow focus steps"):
+// a dialog's are the dialog focusing steps; any other's focus it
 // where it carries `autofocus`, else its autofocus delegate, if any — and its top-level document's autofocus is
 // processed, where that is of its origin.
 fn popover_focusing_steps(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> Option<()> {
-    if dom(scope).arena.get(el).is_some_and(|n| n.is_html_named("dialog")) {
+    let arena = &mut dom(scope).arena;
+    let Some(realm) = arena.get(el).map(|n| n.realm) else { return Some(()) };
+    if !crate::focus::allow_focus_steps(arena, realm) {
+        return Some(());
+    }
+    if arena.get(el).is_some_and(|n| n.is_html_named("dialog")) {
         return crate::dialogs::dialog_focusing_steps(scope, el);
     }
     let Some(control) = crate::focus::popover_focus_control(scope, el)? else { return Some(()) };

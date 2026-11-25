@@ -197,9 +197,15 @@ pub(crate) fn show(scope: &mut v8::PinScope<'_, '_>, dialog: NodeId, modal: bool
     alive(dialog_focusing_steps(scope, dialog))
 }
 
-// HTML "dialog focusing steps" of `dialog`: its control focused — itself where it carries `autofocus`, else its focus
-// delegate, else itself — and its top-level document's autofocus processed, where that is of its origin.
+// HTML "dialog focusing steps" of `dialog` — none where its document may not take focus ("allow focus steps"): its
+// control focused — itself where it carries `autofocus`, else its focus delegate, else itself — and its top-level
+// document's autofocus processed, where that is of its origin.
 pub(crate) fn dialog_focusing_steps(scope: &mut v8::PinScope<'_, '_>, dialog: NodeId) -> Option<()> {
+    let arena = &mut dom(scope).arena;
+    let Some(realm) = arena.get(dialog).map(|n| n.realm) else { return Some(()) };
+    if !crate::focus::allow_focus_steps(arena, realm) {
+        return Some(());
+    }
     let control = crate::focus::dialog_focus_control_of(scope, dialog)?;
     crate::focus::run_focusing_steps(scope, control)?;
     crate::autofocus::processed_for(scope, control);
