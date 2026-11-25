@@ -9891,11 +9891,16 @@ module Capybara
           soft_update:    ->                  { sw_run_here(Native.sw_soft_update(@sw_partition, handle)) },
           # An unsettled ExtendableMessageEvent.waitUntil EXTENDS this worker's lifetime:
           # while any are pending an installed successor keeps waiting (activation.https),
-          # and the 0-transition re-runs try-activate to release it.
-          extended:       ->(n) {
-            Native.sw_hold(@sw_partition, handle, 'extended', n.to_i.positive?)
-            outbox << {handle: handle, kind: 'sw_try_activate'} unless n.to_i.positive?
+          # and the last hold let go re-runs try-activate to release it (sw_registry.rs "extended").
+          extended:       ->(on) {
+            released = Native.sw_hold(@sw_partition, handle, 'extended', on == true)
+            outbox << {handle: handle, kind: 'sw_try_activate'} if on != true && released
           },
+          # Its install or activate event's lifetime promises all settled (workers.js `swFireLifecycleEvent`): the marker
+          # the host's step waits on, posted as it comes (sw_registry.rs `own_settled`) — the activate handler's side
+          # effects (a clients.claim(), cache warm-up) already in the outbox AHEAD of it, so a page reading
+          # `navigator.serviceWorker.controller` right after `wait_for_state(..., 'activated')` sees the claim.
+          event_settled:  ->(ok) { sw_post_own_marker(handle, Native.sw_own_settled(@sw_partition, handle, ok == true), outbox) },
           fetch_respond:  ->(fetch_id, resp, realm_id, spent = 0, took = 0) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i, spent.to_f, took.to_f) },
           # A streaming respondWith frame (start / chunk / close / error) for a controlled client's
           # fetch — rides the outbox in emission order so the client realm reassembles the body
@@ -10122,6 +10127,8 @@ module Capybara
             sw_job_event({handle: handle, ok: false, msg: "#{e.class}: #{e.message}"})
             return
           end
+          # (…run: the host's Install may reach it — sw_registry.rs `Own`)
+          Native.sw_own_evaluated(@sw_partition, handle)
           sw_job_event({handle: handle, ok: true})
         else
           # (…a module worker's graph of the worker's destination — HTML's fetch of its module worker script graph —
@@ -10136,54 +10143,29 @@ module Capybara
         rt.drain_microtasks
         # Drive the service worker's lifecycle: `install`, once the host's Install reaches it ('sw_install': its state and
         # its registration's told it first), then — once the host's Activate step does ('sw_activate': Try Activate let it,
-        # the outgoing worker no longer holding clients or it skipped waiting) — `activate`, each phase
-        # ADVANCING ONLY WHEN ITS `waitUntil` PROMISES HAVE ALL SETTLED — a promise parked on
-        # a client message (extendable-event-waituntil's SYN/ACK, fetch-waits-for-activate's
-        # 'ACTIVATE') settles from a later inbox dispatch, so the settle check runs at the
-        # bottom of the poll loop too, not just here at boot. Each settled phase posts a
-        # marker the client-side timeline parks its observable state on:
+        # the outgoing worker no longer holding clients or it skipped waiting) — `activate`, each fired where the engine
+        # says it is the one its isolate waits for (sw_registry.rs `Own`), its outcome the marker the host's step waits on
+        # as its `waitUntil` promises settle (`event_settled`) — one parked on a client message (extendable-event-
+        # waituntil's SYN/ACK, fetch-waits-for-activate's 'ACTIVATE') settles from a later inbox dispatch:
         #   {phase:'install', ok:} — ok:false (a rejected waitUntil) fails the version: the
         #     client marks it redundant and never activates it (Install "installFailed").
-        #   {phase:'activated'} — the activate handler's side effects (a clients.claim(),
-        #     cache warm-up) are already in the outbox AHEAD of this marker (FIFO), so a page
-        #     reading `navigator.serviceWorker.controller` right after `wait_for_state(...,
-        #     'activated')` sees the claim (activation.https setup); a rejected activate
-        #     waitUntil still activates (the spec ignores activate failure for state).
-        sw_check_phase = nil
+        #   {phase:'activated'} — a rejected activate waitUntil still activates (the spec ignores activate failure for
+        #     state).
         if service
           sw_has_fetch = !!rt.call('swHasFetchListener')
           # Publish the fetch-handler snapshot + script URL on the worker record so a NAVIGATION
           # into this SW's scope can decide (Ruby-side) whether routing through it is worthwhile,
           # and a freshly-built frame client can mint a `controller` naming this script.
           Native.sw_set_worker_flag(@sw_partition, handle, 'fetch', sw_has_fetch)
-          sw_fire_phase = lambda do |phase|
-            rt.call('swFireLifecycleEvent', phase)
+          sw_fire_event = lambda do |event|
+            next unless Native.sw_own_fire(@sw_partition, handle, event)
+
+            rt.call('swFireLifecycleEvent', event)
             # Drain microtasks AND the timers due now: a `waitUntil` promise may settle off a
             # setTimeout(0). (Not on past now: the worker's clock is the window's, which the window's
             # steps move it along — a drain of its own moved its clock 50 ms ahead of the window's for good.)
             rt.drain_microtasks
             rt.drain_timers(0)
-          end
-          # 'installation' (evaluated: waiting for the host's Install) → 'install' pending → 'activation' (installed:
-          # waiting for the host's Activate step, its activate handler not run while the outgoing worker still serves —
-          # Service Workers "Activate" dispatches it) → 'activate' pending → nil (done, or install failed — a failed version
-          # fires no activate; the client terminates this worker).
-          sw_phase_pending = 'installation'
-          sw_check_phase = lambda do
-            while %w[install activate].include?(sw_phase_pending) && (t = rt.call('swPhaseTake'))
-              if t['phase'] == 'install'
-                ok = t['ok'] != false
-                outbox << {handle: handle, kind: 'sw_phase', phase: 'install', ok: ok}
-                sw_phase_pending = ok ? 'activation' : nil
-              else
-                outbox << {handle: handle, kind: 'sw_phase', phase: 'activated'}
-                @worker_host.worker_activate_done(handle)
-                sw_phase_pending = nil
-              end
-            end
-            # Engine complete (or failed) — drop the closure so the poll loop's per-tick
-            # check costs nothing for the rest of this worker's life.
-            sw_check_phase = nil unless sw_phase_pending
           end
         end
         # Fire any timer the initial script parked BEFORE releasing the init hold — the
@@ -10322,20 +10304,12 @@ module Capybara
               # handlers schedule, a waitUntil's, not out yet — and those of the activate event and of what it is told below)
               @worker_host.owe(WorkerHost::BUSY, 1)
               busy_held = true
-              if sw_phase_pending == 'installation'
-                sw_phase_pending = 'install'
-                sw_fire_phase.call('install')
-                sw_check_phase.call
-              end
+              sw_fire_event.call('install')
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_activate'
               # The host's Activate step reached this installed worker: its activate event now.
               @worker_host.owe(WorkerHost::BUSY, 1)
               busy_held = true
-              if sw_phase_pending == 'activation'
-                sw_phase_pending = 'activate'
-                sw_fire_phase.call('activate')
-                sw_check_phase.call
-              end
+              sw_fire_event.call('activate')
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_told'
               # What the host tells every global of the registry's (`sw_tell_workers`): a worker's state, a registration's
               # `updatefound`, a job settled — its listeners' and promises' continuations drained.
@@ -10441,12 +10415,6 @@ module Capybara
             # window asked for answered as its timers' state is: `run_workers_due` waits on it — worker_records.rs)
             @worker_host.worker_timers_left(handle, stopping.call ? -1.0 : rt.call('nextTimerDelay').to_f, ticked)
             ticked = false
-            # A lifecycle phase whose `waitUntil` was parked at boot may have settled off
-            # the message dispatch / timer drain above (the extendable-event SYN/ACK, the
-            # fetch-waits-for-activate 'ACTIVATE' resolve) — advance it. `sw_check_phase`
-            # nils its own pending state when the engine completes, so this is a single
-            # host call per tick only while a service worker's lifecycle is still open.
-            sw_check_phase&.call
             # (…a service worker that can do nothing more — no message waiting, no timer, nothing in flight — while a
             # navigation's fetch event it holds waits on a `clients.get` of that navigation's own reserved client: a
             # deadlock, answered from the network: workers.js `swBreakSelfWait`)
@@ -10475,19 +10443,13 @@ module Capybara
         # (…its thread ending, on its own too — a raise — no request goes to it any more: the registry's matching skips
         # it, and its holds let go: a release a successor parked at Try Activate waits for, its wakeup posted below)
         Native.sw_set_worker_flag(@sw_partition, handle, 'dead', true) if service
-        # A service worker exiting with a lifecycle phase still OPEN — a raise on this
+        # A service worker exiting with a lifecycle event still to come or OPEN — a raise on this
         # thread, `self.close()` during a parked install waitUntil, a terminate — can
-        # never settle that phase itself, and the client timeline parked on its marker
+        # never settle it itself, and the client timeline parked on its marker
         # would hang with a phantom installing/activating worker. Post the terminal
         # marker here: an unfinished install is a FAILED install (ok:false → redundant);
-        # an unfinished activate still activates (the spec ignores activate failure).
-        if service && sw_phase_pending
-          outbox << if %w[installation install].include?(sw_phase_pending)
-            {handle: handle, kind: 'sw_phase', phase: 'install', ok: false}
-          else
-            {handle: handle, kind: 'sw_phase', phase: 'activated'}
-          end
-        end
+        # an unfinished activate still activates (the spec ignores activate failure): sw_registry.rs `own_abandoned`.
+        sw_post_own_marker(handle, Native.sw_own_abandoned(@sw_partition, handle), outbox) if service
         # (…the wakeup after the phase marker, so a clear it lets run follows the step the marker resumes)
         outbox << {handle: handle, kind: 'sw_try_activate'} if service
         # A raise between the busy bump and its matching decrement would strand the
@@ -10509,6 +10471,17 @@ module Capybara
         # dead Thread reaching the Context through what this method's closures keep is a cycle through a GC root — the
         # Context, its isolate's wrappers and every one of those closures, about 1 MB a worker, for the life of the process)
         rt = nil
+      end
+
+      # A service worker's own lifecycle marker (sw_registry.rs `Own`), `[phase, ok]` — none for none — posted for the host's
+      # step that waits on it; an 'activated' one its activation done at its time, which a sync request waiting in place for
+      # it reads (`sw_activated_in_place`).
+      private def sw_post_own_marker(handle, marker, outbox)
+        return unless marker
+
+        phase, ok = marker
+        outbox << {handle: handle, kind: 'sw_phase', phase: phase, ok: ok}
+        @worker_host.worker_activate_done(handle) if phase == 'activated'
       end
 
       # Bundlers that ship a worker inline as a Blob (Tesseract,

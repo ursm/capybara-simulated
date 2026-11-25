@@ -88,10 +88,11 @@ struct Worker {
     fetch: Option<bool>,
     router: bool,
     dead: bool,
-    // …and what holds it, set as it runs: `skipWaiting()` called, an extendable message event's `waitUntil` unsettled,
-    // the messages queued to it it has not finished dispatching, and the fetch events it took and has not answered.
+    // …and what holds it, set as it runs: `skipWaiting()` called, the extendable message events whose `waitUntil`
+    // promises are not all settled, the messages queued to it it has not finished dispatching, and the fetch events it
+    // took and has not answered.
     skip_waiting: bool,
-    extended: bool,
+    extensions: u32,
     messages: u32,
     fetches: Vec<(i64, i32)>,
     // …and, for the host, whether its next lifecycle step is queued as a task, what a step it took waits for ("install",
@@ -99,6 +100,25 @@ struct Worker {
     step_queued: bool,
     waits: Option<&'static str>,
     retired_outgoing: bool,
+    // …and where its own isolate is in its lifecycle events, its thread's to move (`Own`).
+    own: Own,
+}
+
+// Where a service worker's isolate is in its own lifecycle events (run_worker): its script not run yet; run, waiting for
+// the host's Install to reach it; its `install` event's lifetime promises pending; installed, waiting for the host's
+// Activate step; its `activate` event's pending; or done — activated, its install failed, or its thread gone. Its thread
+// fires each event as the host's step reaches it, and the outcome — every `waitUntil` promise settled, and whether any
+// rejected — is the marker the host's step waits on (Service Workers "Install": a rejected one fails the version;
+// "Activate": activated regardless).
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+enum Own {
+    #[default]
+    Evaluating,
+    Installation,
+    Install,
+    Activation,
+    Activate,
+    Done,
 }
 
 impl Worker {
@@ -109,7 +129,7 @@ impl Worker {
     // Whether it has events pending that extend its lifetime — a message it has not finished, an unsettled `waitUntil` of
     // one, a fetch event unanswered — none for one whose thread is gone.
     fn extended(&self) -> bool {
-        !self.dead && (self.extended || self.messages > 0 || !self.fetches.is_empty())
+        !self.dead && (self.extensions > 0 || self.messages > 0 || !self.fetches.is_empty())
     }
     // …or a lifecycle event of its own: its install event's, from its job's end until the step its outcome makes is
     // taken, or its activate event's, from its activating step until its activated one — none for one waiting at Try
@@ -376,12 +396,13 @@ fn worker_new(partition: u64, handle: u32, site: String, script_url: String, scr
         router: false,
         dead: false,
         skip_waiting: false,
-        extended: false,
+        extensions: 0,
         messages: 0,
         fetches: Vec::new(),
         step_queued: false,
         waits: None,
         retired_outgoing: false,
+        own: Own::Evaluating,
     };
     lock().partition(partition).workers.insert(handle, worker);
 }
@@ -416,20 +437,22 @@ pub(crate) fn set_worker_flag_for_ruby(partition: u64, handle: u32, flag: String
 pub(crate) fn worker_live_for_ruby(partition: u64, handle: u32) -> bool {
     lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| !w.dead)
 }
-// …a hold of it set or let go, from whichever thread (`what` "skip_waiting": it called `skipWaiting()`; "extended": an
-// extendable message event's `waitUntil` unsettled, `on`, or not; "message": a message queued to it, `on`, or one it
-// finished dispatching): whether it has none of those holds left — a release that may let a successor activate.
+// …a hold of it set or let go, from whichever thread (`what` "skip_waiting": it called `skipWaiting()`; "extended": one
+// more extendable message event's `waitUntil` promises pending, `on`, or one fewer; "message": a message queued to it,
+// `on`, or one it finished dispatching): whether it has none of those holds left — a release that may let a successor
+// activate.
 pub(crate) fn hold_for_ruby(partition: u64, handle: u32, what: String, on: bool) -> bool {
     let mut reg = lock();
     let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return true };
     match what.as_str() {
         "skip_waiting" => w.skip_waiting = on,
-        "extended" => w.extended = on,
+        "extended" if on => w.extensions += 1,
+        "extended" => w.extensions = w.extensions.saturating_sub(1),
         "message" if on => w.messages += 1,
         "message" => w.messages = w.messages.saturating_sub(1),
         _ => {}
     }
-    !w.extended && w.messages == 0 && w.fetches.is_empty()
+    w.extensions == 0 && w.messages == 0 && w.fetches.is_empty()
 }
 // …a fetch event of a realm's it took (`on`), or answered, or a request gave up on: where that is the last hold let go and a
 // worker waits at Try Activate or a registration to clear, whether to try them again — which most fetch events' ends have no
@@ -444,7 +467,7 @@ pub(crate) fn fetch_event_for_ruby(partition: u64, handle: u32, realm: i64, fetc
     }
     let Some(at) = w.fetches.iter().position(|e| *e == (realm, fetch)) else { return false };
     w.fetches.swap_remove(at);
-    let released = !w.extended && w.messages == 0 && w.fetches.is_empty();
+    let released = w.extensions == 0 && w.messages == 0 && w.fetches.is_empty();
     released && (!p.uninstalling.is_empty() || p.workers.values().any(|w| w.waits == Some("try_activate")))
 }
 // …whether `clients.claim()` is its to call: an active worker, activating or activated (§4.3.4).
@@ -1044,6 +1067,60 @@ pub(crate) fn note_phase_for_ruby(partition: u64, handle: u32, phase: String, ok
         }
     }
 }
+// ── A service worker's own lifecycle events, its thread's (`Own`) ──
+// Its script ran: the host's Install may reach it.
+pub(crate) fn own_evaluated_for_ruby(partition: u64, handle: u32) {
+    own(partition, handle, (), |w| w.own = Own::Installation);
+}
+// The host's step reached it with its `event` ("install" or "activate"): whether to fire it — the one it waits for, else
+// none (an `activate` never fires for a version whose install failed, nor twice).
+pub(crate) fn own_fire_for_ruby(partition: u64, handle: u32, event: String) -> bool {
+    own(partition, handle, false, |w| {
+        let next = match (w.own, event.as_str()) {
+            (Own::Installation, "install") => Own::Install,
+            (Own::Activation, "activate") => Own::Activate,
+            _ => return false,
+        };
+        w.own = next;
+        true
+    })
+}
+// Its event's lifetime promises all settled, `ok` none rejected: the marker the host's step waits on, `[phase, ok]` —
+// "install" (`ok` whether the version installed), "activated" — none where no event of its was pending.
+pub(crate) fn own_settled_for_ruby(partition: u64, handle: u32, ok: bool) -> Option<(&'static str, bool)> {
+    own(partition, handle, None, |w| match w.own {
+        Own::Install => {
+            w.own = if ok { Own::Activation } else { Own::Done };
+            Some(("install", ok))
+        }
+        Own::Activate => {
+            w.own = Own::Done;
+            Some(("activated", true))
+        }
+        _ => None,
+    })
+}
+// Its thread ended with an event of its still to come or pending, which it can never settle now: the marker that ends it
+// all the same — an unfinished install a failed one, an unfinished activation activated (Service Workers "Activate"
+// ignores how its event ends).
+pub(crate) fn own_abandoned_for_ruby(partition: u64, handle: u32) -> Option<(&'static str, bool)> {
+    own(partition, handle, None, |w| {
+        let marker = match w.own {
+            Own::Installation | Own::Install => ("install", false),
+            Own::Activation | Own::Activate => ("activated", true),
+            Own::Evaluating | Own::Done => return None,
+        };
+        w.own = Own::Done;
+        Some(marker)
+    })
+}
+fn own<R>(partition: u64, handle: u32, none: R, f: impl FnOnce(&mut Worker) -> R) -> R {
+    match lock().existing(partition).and_then(|p| p.workers.get_mut(&handle)) {
+        Some(w) => f(w),
+        None => none,
+    }
+}
+
 impl Partition {
     // The worker `handle`'s next lifecycle step, taken: "updatefound", "installed", "install_failed", "activating" —
     // where Try Activate lets it (`may_activate`) — or "activated"; else what it waits for: "install" or "activation"
@@ -1870,6 +1947,48 @@ mod tests {
         hold_for_ruby(p, 1, "extended".into(), true);
         set_worker_flag_for_ruby(p, 1, "dead".into(), true);
         assert!(verdict());
+        clear_for_ruby(p);
+    }
+
+    #[test]
+    fn a_worker_s_own_events_fire_each_once_and_end_in_their_markers() {
+        let p = partition_new_for_ruby();
+        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
+        // (…nothing fires before its script ran, nor ends: no marker of an evaluation that failed)
+        assert!(!own_fire_for_ruby(p, 1, "install".into()));
+        assert_eq!(own_abandoned_for_ruby(p, 1), None);
+        own_evaluated_for_ruby(p, 1);
+        assert!(!own_fire_for_ruby(p, 1, "activate".into()));
+        assert!(own_fire_for_ruby(p, 1, "install".into()));
+        assert!(!own_fire_for_ruby(p, 1, "install".into()));
+        assert_eq!(own_settled_for_ruby(p, 1, true), Some(("install", true)));
+        assert_eq!(own_settled_for_ruby(p, 1, true), None);
+        assert!(own_fire_for_ruby(p, 1, "activate".into()));
+        // (…a thread gone mid-activation activates all the same)
+        assert_eq!(own_abandoned_for_ruby(p, 1), Some(("activated", true)));
+        assert_eq!(own_abandoned_for_ruby(p, 1), None);
+        // (…an install that rejected, or a thread gone before it settled, fails the version: no activate after)
+        worker_new(p, 2, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
+        own_evaluated_for_ruby(p, 2);
+        own_fire_for_ruby(p, 2, "install".into());
+        assert_eq!(own_settled_for_ruby(p, 2, false), Some(("install", false)));
+        assert!(!own_fire_for_ruby(p, 2, "activate".into()));
+        worker_new(p, 3, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
+        own_evaluated_for_ruby(p, 3);
+        assert_eq!(own_abandoned_for_ruby(p, 3), Some(("install", false)));
+        clear_for_ruby(p);
+    }
+
+    #[test]
+    fn extendable_message_events_hold_their_worker_until_the_last_settles() {
+        let p = partition_new_for_ruby();
+        worker_new(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into(), Vec::new(), 0);
+        assert!(!hold_for_ruby(p, 1, "extended".into(), true));
+        assert!(!hold_for_ruby(p, 1, "extended".into(), true));
+        assert!(!hold_for_ruby(p, 1, "extended".into(), false));
+        assert!(part(p, |q| q.workers[&1].extended()));
+        assert!(hold_for_ruby(p, 1, "extended".into(), false));
+        assert!(hold_for_ruby(p, 1, "extended".into(), false));
         clear_for_ruby(p);
     }
 

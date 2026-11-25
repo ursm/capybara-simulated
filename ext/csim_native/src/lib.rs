@@ -437,6 +437,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_registered_at", magnus::function!(sw_registry::registered_at_for_ruby, 3))?;
     native.define_module_function("sw_note_phase", magnus::function!(sw_registry::note_phase_for_ruby, 4))?;
     native.define_module_function("sw_hold", magnus::function!(sw_registry::hold_for_ruby, 4))?;
+    native.define_module_function("sw_own_evaluated", magnus::function!(sw_registry::own_evaluated_for_ruby, 2))?;
+    native.define_module_function("sw_own_fire", magnus::function!(sw_registry::own_fire_for_ruby, 3))?;
+    native.define_module_function("sw_own_settled", magnus::function!(sw_registry::own_settled_for_ruby, 3))?;
+    native.define_module_function("sw_own_abandoned", magnus::function!(sw_registry::own_abandoned_for_ruby, 2))?;
     native.define_module_function("sw_step", magnus::function!(sw_registry::step_for_ruby, 2))?;
     native.define_module_function("sw_continue", magnus::function!(sw_registry::continue_for_ruby, 2))?;
     native.define_module_function("sw_resume", magnus::function!(sw_registry::resume_for_ruby, 3))?;
