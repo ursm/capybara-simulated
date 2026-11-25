@@ -23,8 +23,6 @@ const CONNECTING: u32 = 0;
 const OPEN: u32 = 1;
 const CLOSED: u32 = 2;
 
-// The reconnection time a source starts with (HTML: "an implementation-defined value, probably in the region of a few
-// seconds" — Chrome's).
 // What its connection waits on: nothing (constructed, or its connection never made), the host's connection (`id`), a
 // controlling service worker's answer, or its reconnection time.
 const PHASE_NONE: u8 = 0;
@@ -32,6 +30,8 @@ const PHASE_NETWORK: u8 = 1;
 const PHASE_SERVED: u8 = 2;
 const PHASE_WAITING: u8 = 3;
 
+// The reconnection time a source starts with (HTML: "an implementation-defined value, probably in the region of a few
+// seconds" — Chrome's).
 const DEFAULT_RECONNECTION_MS: u64 = 3000;
 // …and the longest it waits: the longest a timer can (HTML "timer initialization steps": a timeout past 2^31 - 1 ms is
 // none at all), so a stream's `retry` of more waits as long as any wait may, never not at all.
@@ -264,17 +264,22 @@ fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 }
 
 // __dom.esSetId(state, id) — what its connection now waits on: the host's connection `id`, a controlling service
-// worker's answer (-1), or nothing (0: the host made none).
+// worker's answer (-1), or nothing: 0 — the host made none, and nothing will deliver to it (its registry entry let go
+// of), or -2 — a service worker's answer read whole, its reconnection's task queued.
 fn set_id_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(source) = source(scope, args.get(0)) else { return };
     let id = args.get(1).int32_value(scope).unwrap_or(0);
-    let mut s = source.borrow_mut();
-    s.id = id.max(0);
-    s.phase = match id {
-        1.. => PHASE_NETWORK,
-        -1 => PHASE_SERVED,
-        _ => PHASE_NONE,
+    let key = {
+        let mut s = source.borrow_mut();
+        s.id = id.max(0);
+        s.phase = match id {
+            1.. => PHASE_NETWORK,
+            -1 => PHASE_SERVED,
+            _ => PHASE_NONE,
+        };
+        if id == 0 { std::mem::take(&mut s.key) } else { 0 }
     };
+    forget(scope, key);
 }
 
 // __dom.esClose(state) -> the host's id for the connection `close()` (or the unloading document cleanup steps) closes,

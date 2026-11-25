@@ -2866,10 +2866,11 @@ impl Dom {
             self.serialized.remove(&serialized);
         }
     }
-    // A realm's MessagePorts, BroadcastChannels, MediaQueryLists, WebAssembly resolutions and connections let go of with its context —
-    // a frame's removed or disposed, the main realm's retired (`forgetRealmObjects`) — so a page that reuses its id, and
-    // the channel names it makes again, never reaches one of the context before. Not as its arena resets: a load into
-    // the same realm (a `javascript:` URL's result) keeps the Window, and what its script made with it.
+    // A realm's MessagePorts, BroadcastChannels, MediaQueryLists, WebAssembly resolutions and connections let go of with
+    // its context — a frame's removed or disposed, the main realm's retired (`forgetRealmObjects`) — so a page that
+    // reuses its id, and the channel names it makes again, never reaches one of the context before. Not as its arena
+    // resets: a load into the same realm (a `javascript:` URL's result) keeps the Window, and what its script made with
+    // it.
     pub(crate) fn forget_realm_objects(&mut self, cid: i32) {
         self.message_ports.drop_realm(cid);
         self.let_go_of_messages();

@@ -1,13 +1,13 @@
 // The request a fetch() or an XMLHttpRequest's send() hands to Fetch, described once, by the engine, for whichever leg
 // answers it — and likewise those an EventSource's connection, a WebSocket's opening handshake, a worker's
-// `importScripts()` and a subresource's service worker leg make: what its caller made — a Request's request, an XHR's (request_state.rs) — with what Fetch gives it before
-// any leg does: its default headers where its author set none of their names ("fetch" steps 12-13 — a service worker's
-// fetch event sees them: Firefox shows it `Accept-Language` too, where Chrome adds that one in its network layer), its
-// referrer source its client's where it is `about:client` and its referrer policy its policy container's where it names
-// none (main fetch steps 8-9), and its client: the realm, its URL, its origin, its document's ancestors' origins. And
-// which leg that is: a preload its document has, a scheme's processor, a network error, the controlling service worker,
-// a keepalive request's own thread, or the network (fetch_rules.rs `request_route`). The bindings keep what is a
-// page's: the body, its stream, the promise or the events.
+// `importScripts()` and a subresource's service worker leg make: what its caller made — a Request's request, an XHR's
+// (request_state.rs) — with what Fetch gives it before any leg does: its default headers where its author set none of
+// their names ("fetch" steps 12-13 — a service worker's fetch event sees them: Firefox shows it `Accept-Language` too,
+// where Chrome adds that one in its network layer), its referrer source its client's where it is `about:client` and its
+// referrer policy its policy container's where it names none (main fetch steps 8-9), and its client: the realm, its URL,
+// its origin, its document's ancestors' origins. And which leg that is: a preload its document has, a scheme's
+// processor, a network error, the controlling service worker, a keepalive request's own thread, or the network
+// (fetch_rules.rs `request_route`). The bindings keep what is a page's: the body, its stream, the promise or the events.
 
 use crate::dom::{dom, realm_id, register, RealmArena};
 use crate::fetch_rules::{ROUTE_NETWORK, ROUTE_SERVICE_WORKER};
@@ -310,12 +310,14 @@ fn event_source_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
 
 // __dom.webSocketRequest(state) -> [route, request]: the request a WebSocket's opening handshake makes (WebSockets
 // "establish a WebSocket connection", Fetch §7) of the socket `state` wraps (ws_state.rs) — a GET of its URL, its scheme
-// `ws` made `http` and `wss` `https`, its subprotocols offered in `Sec-WebSocket-Protocol`, its mode `websocket`, its
-// credentials mode `include`, the HTTP cache bypassed (`no-store`), no redirect followed (`error`) — and its referrer
-// `no-referrer`: it sends no `Referer` (Chrome and Firefox send none either, even under `unsafe-url`). No service worker
-// answers it (its service-workers mode is `none`): the network does. Its client's site for cookies beside it, which its
-// cookies are judged by (referrer.rs `site_for_cookies`, undefined for none: an opaque one; a worker's is its own, which
-// the host knows).
+// `ws` made `http` and `wss` `https` — and its header list as it goes on the wire: the subprotocols it offers
+// (`Sec-WebSocket-Protocol`), the `Accept` of a request of no destination (Fetch "fetch" step 12), the `Pragma` and
+// `Cache-Control` of its cache mode `no-store` (Fetch "HTTP-network-or-cache fetch"), and its Fetch Metadata — its mode
+// `websocket`, its destination none, its client's relation to its URL (an opaque client's cross-site). Its credentials
+// mode is `include` (its cookies the host's: the client's site for cookies beside it, referrer.rs `site_for_cookies`,
+// undefined for none — an opaque one; a worker's is its own, which the host knows); its redirect mode `error` (the host
+// follows none); its referrer `no-referrer` — no `Referer` (Chrome and Firefox send none either, even under
+// `unsafe-url`). No service worker answers it (its service-workers mode is `none`): the network does.
 fn web_socket_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some((url, protocols)) = crate::ws_state::request_facts(scope, args.get(0)) else { return };
@@ -328,16 +330,21 @@ fn web_socket_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let client = Client::of(arena, cid);
     let site = crate::referrer::site_for_cookies(arena, cid);
     let offered = protocols.join(", ");
-    let headers = if offered.is_empty() { vec![] } else { vec![("Sec-WebSocket-Protocol", offered.as_str())] };
+    let fetch_site = if client.origin == "null" { "cross-site" } else { crate::referrer::fetch_site(&client.origin, &url) };
+    let mut headers = vec![
+        ("Accept", crate::fetch_rules::default_accept("")),
+        ("Pragma", "no-cache"),
+        ("Cache-Control", "no-cache"),
+        ("Sec-Fetch-Dest", "empty"),
+        ("Sec-Fetch-Mode", "websocket"),
+        ("Sec-Fetch-Site", fetch_site),
+    ];
+    if !offered.is_empty() {
+        headers.push(("Sec-WebSocket-Protocol", &offered));
+    }
     let fields = vec![
-        ("method", text(scope, "GET")),
         ("url", text(scope, &url)),
         ("headers", text_header_record(scope, &headers)),
-        ("mode", text(scope, "websocket")),
-        ("credentials", text(scope, "include")),
-        ("redirect", text(scope, "error")),
-        ("cache", text(scope, "no-store")),
-        ("referrer", text(scope, "no-referrer")),
         ("siteForCookies", or_undefined(scope, site.as_deref())),
     ];
     let described = host_record(scope, fields, &client);

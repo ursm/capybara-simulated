@@ -9,8 +9,8 @@ require_relative 'support/every_host_local'
 # The requests the host makes outside a fetch's or a navigation's chain judge their cookies by their client's site for
 # cookies all the same (cookie_jar.rs `context_for_ruby`): a WebSocket handshake by its document's — a cross-site one
 # sends no SameSite cookie, and its Set-Cookie stores none; none sends a Referer, its referrer `no-referrer` (WebSockets
-# "establish a WebSocket connection"; Chrome and Firefox send none either) — and a download as the top-level navigation it is, its
-# response's cookies stored.
+# "establish a WebSocket connection"; Chrome and Firefox send none either) — and a download as the top-level
+# navigation it is, its response's cookies stored.
 RSpec.describe "the cookies of a host's own request" do
   let(:seen) { [] }
   let(:app) {

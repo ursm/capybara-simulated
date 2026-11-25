@@ -4434,14 +4434,16 @@ module Capybara
         return 0 if @event_source_threads.empty? && @event_source_queue.empty?
         events = event_source_poll
         return 0 if events.empty?
-        # (…each a task of its own — see deliver_window_messages — of the realm whose source opened its connection: none of a
-        # realm gone since)
-        # (…and its realm let go of with the last event its reader queues: its connection is over)
+        # (…each a task of its own — see deliver_window_messages — of the realm whose source opened its connection, a
+        # frame's still loading its document too: none of a realm gone since, nor of a connection closed since. Its realm
+        # let go of with the last event its reader queues: its connection is over)
         events.each do |event|
           realm = @event_source_lock.synchronize {
             event[:type] == '__error' || event[:type] == '__reconnect' ? @event_source_realms.delete(event[:id]) : @event_source_realms[event[:id]]
-          }.to_i
-          @runtime.realm_call(realm, 'deliverEventSourceEvents', [event]) if realm.zero? || @runtime.frame_realm_alive?(realm)
+          }
+          next unless realm
+
+          @runtime.realm_call(realm, 'deliverEventSourceEvents', [event]) if realm.zero? || @runtime.frame_realm_present?(realm)
         end
         events.size
       end
@@ -4901,7 +4903,7 @@ module Capybara
             queue << {id: id, type: '__close', code: 1006, reason: ''}
             break
           end
-          ended = reader.feed(bytes).any? do |kind, payload, code|
+          ended = reader.feed(bytes).any? {|kind, payload, code|
             case kind
             when Native::WsReader::TEXT
               queue << {id: id, type: 'message', data: payload}
@@ -4921,7 +4923,7 @@ module Capybara
               queue << {id: id, type: '__error', message: 'protocol error'}
               true
             end
-          end
+          }
           break if ended
         end
       rescue StandardError => e
