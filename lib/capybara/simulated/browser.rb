@@ -11410,7 +11410,7 @@ module Capybara
       # document that began it where that is another's than the page's with the Referer it sends, its source's
       # activation, a `blob:` one's blob as it began (location.js `dispatchNav`).
       def consume_pending_location
-        url, replace, initiator_realm, source, policy, activated, blob, ongoing, document = @runtime.call('takeLocation')
+        url, replace, initiator_realm, source, policy, activated, blob, ongoing, document, container = @runtime.call('takeLocation')
         return unless url
         return in_top_context { commit_javascript_document(url, document) } if document
 
@@ -11422,7 +11422,7 @@ module Capybara
         realm, referrer = initiator_realm ? [initiator_realm.to_i, [source, policy]] : [0, realm_referrer_initiator(0)]
         blob = host_blob(blob)
         in_top_context do
-          navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i)
+          navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i, container: container)
         end
       end
       # The document a `javascript:` URL's string result makes of the page (HTML "navigate to a javascript: URL", navigation_plan.rs
@@ -11559,7 +11559,7 @@ module Capybara
         history = window_history(realm_id) or return
         case kind
         when 'location'
-          url, replace, initiator, source, policy, activated, blob, begun = plan
+          url, replace, initiator, source, policy, activated, blob, begun, _document, container = plan
           handling = replace ? 'replace' : 'push'
         when 'reload'
           activated, blob = plan
@@ -11596,7 +11596,8 @@ module Capybara
           begun:          begun&.to_i,
           initiator:      (navigation_source(initiator) if initiator),
           referrer:       ([source, policy.to_s] if source),
-          source_policy:  (policy_container(initiator) if initiator && !by_user),
+          # (…its source's policy container as its plan snapshotted it: navigation_plan.rs `Location::container`)
+          source_policy:  container || (policy_container(initiator) if initiator && !by_user),
           activated:      activated == true,
           sw:             ([@sw_partition, true, nil] if sw),
           defers:         true,
@@ -11904,16 +11905,18 @@ module Capybara
       def inherited_referrer_policy(realm) = realm_referrer_initiator(realm.to_i)[1]
       # …what a frame's document at `url` is made of (`document_init`) in frame realm `realm`, its container's document realm
       # `parent`'s: its response's fields as its build read them (`policy`, `refresh`, `origin_agent_cluster`, `csp` —
-      # frame_response.rs, by the same reader) — a local URL's `policy` the one its navigation carried, its initiator's,
-      # else its container's document's policy container — and the policy container its navigable's entry kept, a reload's
+      # frame_response.rs, by the same reader) — a local URL's policy container its initiator's (`source_policy`), else
+      # the one its navigation carried, else its container's document's — and the policy container its navigable's entry kept, a reload's
       # or a traversal's (`entry_policy_container`), kept by it where it is a new one's; where a service worker may control
       # it, a fetch's matched in its top-level site, else (about:blank, srcdoc, a blob) its creator's, its container's
       # document's (Service Workers §2.5.1).
-      def frame_document_init(url, parent, realm, policy: nil, csp: nil, refresh: nil, origin_agent_cluster: false, **made)
+      # (…`source_policy` the policy container of the document that began its navigation where another than its
+      # container's did — a sibling frame's script, a link targeting it: frame_navigation.rs `take_frame_source`)
+      def frame_document_init(url, parent, realm, policy: nil, csp: nil, source_policy: nil, refresh: nil, origin_agent_cluster: false, **made)
         url = url.to_s
         if (local = url.empty? || url.match?(/\A(?:about|blob|data):/i))
           container = policy_container(parent)
-          initiator = policy ? [policy, nil] : container
+          initiator = source_policy || (policy ? [policy, csp] : container)
         end
         if sw_registered?
           sw = http_url?(url) ? [@sw_partition, blob_partition_site(parent)] : [@sw_partition, nil, sw_client_id(parent), document_origin(parent)]
@@ -12719,11 +12722,14 @@ module Capybara
       # content type]).
       # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares and whose origin a POST's Origin carries, that
       # document's — one of an opaque origin, a sandboxed frame's, cross-site to every URL: `initiating_document`)
-      # (…`ongoing` the number of the navigation it is, where its plan began it: `navigate_top_level`)
-      def navigate_top_from(realm, initiator, url, post: nil, replace: false, blob: nil, user_activated: false, ongoing: nil)
+      # (…`ongoing` the number of the navigation it is, where its plan began it: `navigate_top_level` — and `container` the
+      # policy container of its source as the plan snapshotted it, navigation_plan.rs `Location::container`: that
+      # document's now otherwise)
+      def navigate_top_from(realm, initiator, url, post: nil, replace: false, blob: nil, user_activated: false, ongoing: nil, container: nil)
         source, policy = initiator
         site           = realm_creator_url(realm)
         initiating     = initiating_document(realm)
+        initiating[:source_policy] = container if container
         from_document(realm) do
           handling = replace ? 'replace' : 'push'
           if post

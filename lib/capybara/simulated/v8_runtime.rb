@@ -1223,12 +1223,13 @@ module Capybara
           policy_header = nil,
           refresh = nil,
           origin_agent_cluster = false,
-          csp = nil
+          csp = nil,
+          source = nil
         ) {
           RuntimeShared.safe_call do
             create_frame_realm(c, url, body, content_type, parent_id, container, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport, client_id, frame_margins,
                                frame_sandbox, referrer: referrer, referrer_policy: policy_header, refresh: refresh,
-                               origin_agent_cluster: origin_agent_cluster == true, csp: csp)
+                               origin_agent_cluster: origin_agent_cluster == true, csp: csp, source_policy: source)
           end
         })
         # …and a frame's initial about:blank navigated to a document of its origin: loaded into the same realm, its Window
@@ -1251,7 +1252,8 @@ module Capybara
           policy_header = nil,
           refresh = nil,
           origin_agent_cluster = false,
-          csp = nil
+          csp = nil,
+          source = nil
         ) {
           RuntimeShared.safe_call do
             reuse_frame_realm(
@@ -1268,7 +1270,8 @@ module Capybara
               referrer_policy:      policy_header,
               refresh:              refresh,
               origin_agent_cluster: origin_agent_cluster == true,
-              csp:                  csp
+              csp:                  csp,
+              source_policy:        source
             )
           end
         })
@@ -1390,7 +1393,8 @@ module Capybara
         referrer_policy: nil,
         refresh: nil,
         origin_agent_cluster: false,
-        csp: nil
+        csp: nil,
+        source_policy: nil
       )
         realm = parent_ctx.create_context
         # (…its depth and its parent the engine's once its container's navigable is given it, before its document loads:
@@ -1423,7 +1427,8 @@ module Capybara
           referrer_policy:      referrer_policy,
           refresh:              refresh,
           origin_agent_cluster: origin_agent_cluster,
-          csp:                  csp
+          csp:                  csp,
+          source_policy:        source_policy
         )
         realm.id
       rescue StandardError => e
@@ -1489,7 +1494,8 @@ module Capybara
         referrer_policy: nil,
         refresh: nil,
         origin_agent_cluster: false,
-        csp: nil
+        csp: nil,
+        source_policy: nil
       )
         # Pass the URL + document body as call ARGUMENTS, not interpolated into
         # an eval string: the marshaller carries them losslessly, so arbitrary
@@ -1516,6 +1522,7 @@ module Capybara
           referrer:             referrer,
           policy:               referrer_policy,
           csp:                  csp,
+          source_policy:        source_policy,
           refresh:              refresh,
           origin_agent_cluster: origin_agent_cluster
         )

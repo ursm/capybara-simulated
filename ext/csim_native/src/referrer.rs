@@ -216,6 +216,14 @@ fn parent(arena: &RealmArena, r: i32) -> i32 {
 // The referrer source and policy of a request the document of realm `r` makes (Referrer Policy "determine request's
 // referrer" steps 2-3): its URL under its policy — an iframe srcdoc document's its container document's, under that
 // one's unless its own sets one — and one of an opaque origin's `no-referrer`, a step before.
+// The policy container of realm `r`'s document, `(referrer policy, CSP list)`: what a navigation it begins snapshots as
+// its source's (HTML's source snapshot params' source policy container, document_init.rs `policy_container`) — the
+// page's for a realm unknown, as `document` reads it.
+pub(crate) fn policy_container(arena: &mut RealmArena, r: i32) -> (String, Option<String>) {
+    let doc = document(arena, r);
+    let csp = arena.enter(doc.realm).location.csp.clone();
+    (doc.policy.to_owned(), csp)
+}
 fn referrer_source(arena: &mut RealmArena, r: i32) -> (String, &'static str) {
     let doc = document(arena, r);
     if doc.opaque {

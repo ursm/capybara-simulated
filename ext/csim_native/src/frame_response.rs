@@ -31,12 +31,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // window is read before the navigation under way has its response, which this leaves to that navigation's build —
 // `[FRAME_DEFERRED]`, `[FRAME_KEPT]`, or `[FRAME_BUILD, url, locationHref,
 // body, contentType, javascriptSource, aboutBase, clientId, referrer, policy, refresh, documentOrigin, locationOrigin,
-// sandbox, originAgentCluster, csp]`: the document's URL, the one its location reports (about:srcdoc, about:blank), its body
+// sandbox, originAgentCluster, csp, source]`: the document's URL, the one its location reports (about:srcdoc, about:blank), its body
 // (its bytes, a srcdoc's text), its type, the script a javascript: URL runs in it, the base URL an about: document
 // inherits from its creator, the client id its navigation reserved, the Referer its request sent and the Referrer-Policy
 // and Refresh its response set (null for none), its origins (`frame_origins`), its sandboxing flags and whether its
 // response asked for an origin-keyed agent cluster (structured_field.rs `is_true`), and its response's
-// Content-Security-Policy, its policy container's (null for none) — read as document_init.rs reads the host's.
+// Content-Security-Policy, its policy container's (null for none) — read as document_init.rs reads the host's — and the
+// policy container `[referrer policy, csp]` of the document that began its navigation where another than its container's
+// did (null: that one), which a document of a local URL clones.
 fn frame_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     // (…a container of no node, or no host: no document made, as for a build parked)
     let deferred = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>| {
@@ -106,6 +108,7 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
             }
             r.referrer = Some(String::from_utf16_lossy(&content.referrer)).filter(|s| !s.is_empty());
             r.policy = Some(String::from_utf16_lossy(&content.policy)).filter(|s| !s.is_empty());
+            r.csp = Some(String::from_utf16_lossy(&content.csp)).filter(|s| !s.is_empty());
         }
         FrameSource::Srcdoc(text_of) => r.body = text(scope, &text_of),
         // (…its initial about:blank document's referrer its creator's URL, this document's: HTML "create a new browsing
@@ -153,7 +156,7 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
             if let Some((bytes, content_type)) = response {
                 let content_type = if content_type.is_empty() { "text/html".to_owned() } else { content_type };
                 let units = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
-                let content = Content { url: units(&url), bytes: bytes.clone(), content_type: units(&content_type), referrer: Vec::new(), policy: Vec::new() };
+                let content = Content { url: units(&url), bytes: bytes.clone(), content_type: units(&content_type), referrer: Vec::new(), policy: Vec::new(), csp: Vec::new() };
                 realm(scope, cid).keep_frame_loaded(container, content);
                 r.body = crate::dom::u8_array(scope, bytes);
                 r.content_type = content_type;
@@ -179,7 +182,20 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
     // (…the sandboxing its initial about:blank document is made with the container's as it stands, which leaves the
     // navigation its own: HTML "create a new child navigable")
     let sandbox = if initial { arena.frame_sandbox(container) } else { arena.take_frame_sandbox(container) };
-    let mut created = crate::realm_location::frame_origins(arena, cid, &r.url, sandbox.as_deref(), r.csp.as_deref());
+    // (…and the policy container of the document that began its navigation, where another than this one did: a sibling
+    // frame's script, a link targeting it — `take_frame_source` — which a document of a local URL clones, its CSP list's
+    // `sandbox` sandboxing it as its response's would; this document's own otherwise: document_init.rs
+    // `policy_container`, which the host asks again with it)
+    let source = if initial { None } else { arena.take_frame_source(container) };
+    let local = r.url.is_empty() || srcdoc || ["about:", "blob:", "data:"].iter().any(|p| r.url.get(..p.len()).is_some_and(|u| u.eq_ignore_ascii_case(p)));
+    let inherited = if !local {
+        None
+    } else if srcdoc {
+        arena.location.csp.clone()
+    } else {
+        source.as_ref().map_or_else(|| arena.location.csp.clone(), |s| s.1.clone())
+    };
+    let mut created = crate::realm_location::frame_origins(arena, cid, &r.url, sandbox.as_deref(), r.csp.as_deref().or(inherited.as_deref()));
     if r.error {
         created.document = Some("null".to_owned());
     }
@@ -219,6 +235,14 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
         v8::Integer::new_from_unsigned(scope, created.sandbox).into(),
         v8::Boolean::new(scope, r.origin_agent_cluster).into(),
         text_or_null(scope, r.csp.as_deref()),
+        match source {
+            Some((policy, csp)) => {
+                let policy = text(scope, &policy);
+                let csp = text_or_null(scope, csp.as_deref());
+                v8::Array::new_with_elements(scope, &[policy, csp]).into()
+            }
+            None => v8::null(scope).into(),
+        },
     ];
     Ok(v8::Array::new_with_elements(scope, &items).into())
 }

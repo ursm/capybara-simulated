@@ -115,5 +115,25 @@ RSpec.describe 'a document a navigation commits' do
       expect(poll_until { session.current_url == 'about:blank' }).to be(true)
       expect(submit_a_form(session)).to eq('about:blank')
     end
+
+    # …its initiator's being the document that began its navigation, not its container's: a frame sandboxed by its CSP
+    # that navigates itself to about:blank leaves a document sandboxed as it was, under a parent of no CSP (Chrome 157 and
+    # Firefox 159, 2026-11-26: its form submits nothing, and does with `allow-forms`). (A sandboxed frame navigates no
+    # sibling: both refuse it, "does not have permission to navigate the target frame".)
+    it "is a frame's, the policy container of the document that navigated it" do
+      framed = lambda {|env|
+        case env['PATH_INFO']
+        when '/a' then [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-scripts allow-same-origin'}, ['<!doctype html><p>a']]
+        else [200, {'content-type' => 'text/html'}, ['<!doctype html><iframe name=a src=/a></iframe>']]
+        end
+      }
+      session = simulated_session(framed)
+      session.visit '/'
+      session.within_frame('a') { session.execute_script("location = 'about:blank'") }
+      expect(poll_until { session.evaluate_script('frames.a.location.href') == 'about:blank' }).to be(true)
+      session.execute_script(%q(const d = frames.a.document; d.body.innerHTML = '<form action="http://www.example.com/submitted"><input name=q value=1></form>'; d.forms[0].submit()))
+      session.evaluate_script('1')
+      expect(session.evaluate_script('frames.a.location.href')).to eq('about:blank')
+    end
   end
 end

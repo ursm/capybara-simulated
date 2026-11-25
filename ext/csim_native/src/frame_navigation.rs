@@ -34,6 +34,9 @@ pub(crate) struct Content {
     // makes it with (a javascript: URL's result its frame's active document's: HTML), each empty for none.
     pub(crate) referrer: Vec<u16>,
     pub(crate) policy: Vec<u16>,
+    // …and the CSP list of the policy container it is made with (a javascript: URL's result its frame's active document's:
+    // HTML "evaluate a javascript: URL"), empty for none.
+    pub(crate) csp: Vec<u16>,
 }
 
 #[derive(Default)]
@@ -55,6 +58,10 @@ struct FrameNavigation {
     // …and whether its container's document's window had transient activation then (`begin`): HTML's source snapshot
     // params', the navigation's request's user-activation (Fetch's `Sec-Fetch-User`).
     activated: bool,
+    // …and the policy container of the document that began it, as it did — a host navigation's initiator's (a sibling
+    // frame's script, a link targeting it: `HostNavigation::Navigate`); none for one its container's document began, whose
+    // own it is — taken by the document it makes (`take_frame_source`, frame_response.rs).
+    source: Option<(String, Option<String>)>,
     history: Option<Vec<u16>>,
     reload: Option<Vec<u16>>,
     // When the element's last `load` fired, on the virtual clock: a navigation begun at that same instant waits a
@@ -137,7 +144,9 @@ const URL_NAV: u32 = 1 << 14;
 // `formSerialize`), the realm of the form's document and the Referer that one sends. Taken once the event loop's
 // navigation turn has run (`Plans::through`), HTML's parallel steps as what is due before them has run.
 pub(crate) enum HostNavigation {
-    Navigate { url: String, replace: bool, initiator: i32, referrer: (String, String), sandbox: Option<String>, activated: bool },
+    // (…`container` the policy container of the document that began it as it did, HTML's source snapshot params' — what
+    // the document of a local URL it makes clones: referrer.rs `policy_container`)
+    Navigate { url: String, replace: bool, initiator: i32, referrer: (String, String), sandbox: Option<String>, activated: bool, container: (String, Option<String>) },
     // (…of the URL its document was at as `reload()` was called: HTML appends its traversal steps then, and they apply to the
     // entry as it stood — a `document.open()` after it moves the document's URL, not that)
     Reload { url: String },
@@ -420,6 +429,7 @@ fn begin(arena: &mut crate::dom::RealmArena, container: NodeId) {
     let nav = arena.frame_navigation(container);
     nav.sandbox = Some(sandbox);
     nav.activated = activated;
+    nav.source = None;
 }
 impl crate::dom::RealmArena {
     // The `sandbox` attribute the document the container's navigation makes is sandboxed by: as the navigation under way
@@ -429,6 +439,11 @@ impl crate::dom::RealmArena {
             Some(snapshot) => snapshot,
             None => self.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned),
         }
+    }
+    // …and the policy container of the document that began it, taken by the document it makes — none where its
+    // container's document began it (`FrameNavigation::source`).
+    pub(crate) fn take_frame_source(&mut self, container: NodeId) -> Option<(String, Option<String>)> {
+        self.frame_navigations.0.get_mut(&container).and_then(|nav| nav.source.take())
     }
     // …taken by the document it makes: the next navigation's its own.
     pub(crate) fn take_frame_sandbox(&mut self, container: NodeId) -> Option<String> {
@@ -487,6 +502,7 @@ fn release_frame_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let arena = &mut crate::dom::dom(scope).arena;
     if let Some(nav) = arena.live_container(realm).and_then(|c| arena.frame_navigations.0.get_mut(&c)) {
         nav.sandbox = None;
+        nav.source = None;
     }
 }
 // __dom.takeFrameSandbox(containerNid) -> `RealmArena::take_frame_sandbox` (null: none): the document the navigation
@@ -559,12 +575,13 @@ fn frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let content_type = utf16_value(scope, &content.content_type);
     let referrer = utf16_value(scope, &content.referrer);
     let policy = utf16_value(scope, &content.policy);
-    rv.set(v8::Array::new_with_elements(scope, &[url, bytes, content_type, referrer, policy]).into());
+    let csp = utf16_value(scope, &content.csp);
+    rv.set(v8::Array::new_with_elements(scope, &[url, bytes, content_type, referrer, policy, csp]).into());
 }
 
-// __dom.setFrameContent(containerNid, slot, url, bytes, contentType[, referrer[, policy]]) — the document the navigation
-// carries in `slot`: `url`, `bytes` (a Uint8Array), `contentType`, the Referer its request sent and the referrer policy it
-// is made with; none where no bytes are given (`setFrameContent(nid, slot)`).
+// __dom.setFrameContent(containerNid, slot, url, bytes, contentType[, referrer[, policy[, csp]]]) — the document the
+// navigation carries in `slot`: `url`, `bytes` (a Uint8Array), `contentType`, the Referer its request sent and the
+// referrer policy and CSP list it is made with; none where no bytes are given (`setFrameContent(nid, slot)`).
 fn set_frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let slot = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
@@ -577,8 +594,8 @@ fn set_frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         let url = utf16_arg(scope, args.get(2));
         let content_type = utf16_arg(scope, args.get(4));
         let text = |scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>| if v.is_null_or_undefined() { Vec::new() } else { utf16_arg(scope, v) };
-        let (referrer, policy) = (text(scope, args.get(5)), text(scope, args.get(6)));
-        Content { url, bytes, content_type, referrer, policy }
+        let (referrer, policy, csp) = (text(scope, args.get(5)), text(scope, args.get(6)), text(scope, args.get(7)));
+        Content { url, bytes, content_type, referrer, policy, csp }
     });
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
@@ -717,12 +734,13 @@ fn plan_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         return rv.set_uint32(PLANNED_FRAGMENT);
     }
     let referrer = crate::referrer::navigation_referrer(arena, initiator, &policy);
+    let source = crate::referrer::policy_container(arena, initiator);
     let sandbox = arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
     let aborted = abort_document(arena, target);
     arena.stop_attribute_navigation(container);
     let nav = arena.frame_navigation(container);
     nav.aborted_document = aborted;
-    let host = HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated };
+    let host = HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated, container: source };
     nav.host = Some((crate::navigation_plan::next_planned(), host));
     rv.set_uint32(PLANNED);
 }
@@ -794,9 +812,10 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         let Some(realm) = realm else { continue };
         // (…its navigation begun now, the container's `sandbox` as it was planned what the document it makes — or a
         // download its response is — is sandboxed by: `frame_sandbox`, `take_frame_sandbox`)
-        if let HostNavigation::Navigate { sandbox, .. } = &host {
+        if let HostNavigation::Navigate { sandbox, container, .. } = &host {
             if !superseded {
                 nav.sandbox = Some(sandbox.clone());
+                nav.source = Some(container.clone());
             }
         }
         FrameNavigations::hold_planned_of(arena, realm);
@@ -807,7 +826,7 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     for (_, realm, host, superseded) in taken {
         let realm = v8::Integer::new(scope, realm).into();
         let item = match host {
-            HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated } => {
+            HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated, .. } => {
                 let sandbox = sandbox.map_or_else(|| v8::null(scope).into(), |s| v8::String::new(scope, &s).unwrap().into());
                 let item = [
                     realm,
@@ -1538,7 +1557,7 @@ fn frame_load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         if let Some((bytes, content_type)) = response {
             let content_type = if content_type.is_empty() { "text/html".to_owned() } else { content_type };
             let units = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
-            let content = Content { url: units(&url), bytes, content_type: units(&content_type), referrer: Vec::new(), policy: Vec::new() };
+            let content = Content { url: units(&url), bytes, content_type: units(&content_type), referrer: Vec::new(), policy: Vec::new(), csp: Vec::new() };
             crate::dom::realm(scope, cid).frame_navigation(container).contents[CONTENT_NAV] = Some(content);
         }
     }
