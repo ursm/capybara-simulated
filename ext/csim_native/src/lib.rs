@@ -356,6 +356,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("site", magnus::function!(realm_location::site_for_ruby, 1))?;
     native.define_module_function("document_params", magnus::function!(response_headers::document_params, 3))?;
     native.define_module_function("initialize_document", magnus::function!(document_init::initialize_document, 1))?;
+    native.define_module_function("document_commit_order", magnus::function!(document_init::commit_order_for_ruby, 0))?;
     native.define_module_function("header_map", magnus::function!(response_headers::header_map_for_ruby, 1))?;
     native.define_module_function("location_fields", magnus::function!(response_headers::location_fields_for_ruby, 1))?;
     native.define_module_function("redirect_locations", magnus::function!(response_headers::redirect_locations_for_ruby, 2))?;

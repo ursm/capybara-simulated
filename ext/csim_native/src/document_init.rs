@@ -74,7 +74,9 @@ pub(crate) fn url_origin(url: &str) -> Option<String> {
 // navigation the worker answered all the same: its sandbox is its response's to say (WPT sandboxed-iframe-fetch-event).
 // A worker still activating that handles fetches, the navigation having given up waiting for it and gone to the
 // network (browser.rb `sw_activation_awaited`, CLAUDE.md's accepted cost), controls none: Create Fetch Event and Dispatch
-// step 15 would have waited for it.
+// step 15 would have waited for it. (The host asks `Created` of a frame's document alone: a top-level about:blank or
+// `blob:` one is controlled by none, where §2.5 is "not fully specified yet" and Chrome 157 and Firefox 159 agree —
+// browser.rb `page_document_init`.)
 #[derive(Debug, PartialEq)]
 pub(crate) enum Control<'a> {
     Fetched { site: &'a str },
@@ -91,6 +93,23 @@ fn controller(partition: u64, url: &str, origin: Option<&str>, control: Control<
         Control::Created { creator: Some((client, creator_origin)) } if creator_origin == origin => crate::sw_registry::client_controller(partition, client),
         Control::Created { .. } => None,
     }
+}
+
+// The order a navigation's commit replaces the document its navigable is at, one for the page, a window and a frame
+// (browser.rb `commit_steps`): the document it leaves unloaded with its descendants first (HTML "unload a document and
+// its descendants": each child navigable's document before its own — unload_walks.rs), as `pagehide` and `unload` run
+// in it while it is fully active still; then its controls' state saved to the entry it leaves, as its handlers left it
+// (HTML "save persisted state", the active entry's, before the next is activated); then the traversable's document
+// state the next document's (its target name — `window.name` — the next one's) and the traversals the leaving document
+// queued let go; then the opener policy the response committed, the browsing context group left where it says (HTML
+// "obtain a browsing context to use for a navigation response", decided before the unload — session_history.rs
+// `opener_policy_verdict` — taken now, its pagehide judged by its own policy); then what the leaving document owned
+// discarded — its workers, its service worker clients, its sockets, its realms — before the next is made of the realm
+// its navigable has. A step a kind has none of (a frame's document state is its traversable's) it skips.
+pub(crate) const COMMIT_ORDER: [&str; 6] = ["unload", "save_state", "show", "clear_traversals", "commit_policy", "discard"];
+// Native.document_commit_order -> `COMMIT_ORDER`.
+pub(crate) fn commit_order_for_ruby() -> Vec<&'static str> {
+    COMMIT_ORDER.to_vec()
 }
 
 // HTML "create and initialize a Document object" step 7: the document a navigation makes keeps the Window of the one it

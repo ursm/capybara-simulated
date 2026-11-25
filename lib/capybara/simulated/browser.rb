@@ -2407,7 +2407,10 @@ module Capybara
       # …the page's next document's: of the response the page has (`@last_response_headers`), at its URL, its referrer the
       # Referer its navigation sent (`@current_referer`) — `made` what its navigation makes of it besides; controlled where
       # a fetch made it (`controlled` false: a `javascript:` URL's, an initial about:blank) by the worker its URL matches in
-      # its own top-level site.
+      # its own top-level site. (…a top-level about:blank or `blob:` document by none, a window's too: Service Workers
+      # §2.5.1 would give it its creator's, but §2.5 says it is "not fully specified yet", and Chrome 157 and Firefox 159
+      # agree on none — measured 2026-11-25: a pop-up its controlled opener navigates to either fetches from the network,
+      # its `controller` null)
       # (…its policy container the one its entry kept, a reload's or a traversal's: `entry_policy_container` — kept by it
       # where it is a new one's)
       private def page_document_init(controlled: true, **made)
@@ -11698,23 +11701,25 @@ module Capybara
       # replaces unloaded, as the page's: `commit_coop`)
       private def replace_window_document(realm_id, body, init, client_id: nil, reuses:, keep_traversals: false, opener_policy: nil)
         keeps = reuses && @runtime.realm_call(realm_id, 'keepsWindowFor', init['url'], init['csp'], *init['origin'])
-        # (…the document it replaces unloaded first, its frames' with it — HTML "unload a document and its descendants", as
-        # the page's is: `boot_response_into_ctx` — while its realms still live, an initial about:blank's too, its renewed
-        # Document visible all the same)
-        @runtime.realm_call(realm_id, 'fireWindowUnloadDeep')
-        # (…the entry it leaves taking its controls' state as its handlers left it, which a traversal back to it restores, as
-        # the page's: `capture_left_page_form_state` — none of an initial about:blank, which no entry is of; then the
-        # window's session history the next document's, as the page's: its document state the one `window.name` reads, the
-        # traversals the one it replaces queued let go of with it — but a `javascript:` URL's — its frames new navigables)
-        if (history = window_history(realm_id))
-          if (id = history.take_leaving) && (state = @runtime.realm_call(realm_id, 'captureFormState'))
+        # (…the document it replaces gone in the order every commit takes, as the page's: `commit_steps` — unloaded first,
+        # its frames' with it, while its realms still live, an initial about:blank's too, its renewed Document visible all
+        # the same; the entry it leaves taking its controls' state as its handlers left it, which a traversal back to it
+        # restores — none of an initial about:blank, which no entry is of; then the window's session history the next
+        # document's: its document state the one `window.name` reads, the traversals the one it replaces queued let go of
+        # with it — but a `javascript:` URL's — its opener policy the response's, its frames new navigables)
+        history = window_history(realm_id)
+        commit_steps(
+          unload:           -> { @runtime.realm_call(realm_id, 'fireWindowUnloadDeep') },
+          save_state:       lambda {
+            next unless history && (id = history.take_leaving) && (state = @runtime.realm_call(realm_id, 'captureFormState'))
+
             history.update(id, {form_state: state})
-          end
-          history.commit_opener_policy(opener_policy) if opener_policy
-          history.show
-          history.clear_queued unless keep_traversals
-          history.rebuilt
-        end
+          },
+          show:             -> { history&.show },
+          clear_traversals: -> { history&.clear_queued unless keep_traversals },
+          commit_policy:    -> { history&.commit_opener_policy(opener_policy) if opener_policy },
+          discard:          -> { history&.rebuilt }
+        )
         return @runtime.reuse_window_realm(realm_id, body.to_s, init, client_id: client_id) if keeps
 
         @runtime.reload_window_realm(realm_id, body.to_s, init, client_id: client_id, viewport: @runtime.realm_call(realm_id, 'viewportSize'))
@@ -12423,12 +12428,20 @@ module Capybara
         return if handle.zero?
         # (…none where its container is gone: no document of it made unsandboxed, as an empty seed would)
         seed = frame_seed(parent, handle, url, csp, doc_origin) or return
-        return unless unload_frame_document(parent, realm_id)
+        # (…the document it shows gone in the order every commit takes, as the page's: `commit_steps` — unloaded, none
+        # made where a handler of that removed the frame; then what it owned let go, its realm's with it as the next is
+        # made: the bytes a reload of it loads again none but a blob document's, which the container kept as it took them —
+        # `takeFrameNavBlob`. Its document state is its traversable's, its controls' state saved as its navigation began:
+        # `begin_frame_entry`)
+        committing = commit_steps(
+          unload:  -> { :abort unless unload_frame_document(parent, realm_id) },
+          discard: lambda {
+            frame_realm_host_call(parent, 'forgetFrameLoaded', realm_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
+            frame_realm_host_call(parent, 'hostCommitBegins', handle)
+          }
+        )
+        return unless committing
 
-        # (…the bytes a reload of it loads again none but a blob document's, which the container kept as it took them:
-        # `takeFrameNavBlob`)
-        frame_realm_host_call(parent, 'forgetFrameLoaded', realm_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
-        frame_realm_host_call(parent, 'hostCommitBegins', handle)
         new_id = @runtime.reload_frame_realm(
           realm_id,
           parent.to_i,
@@ -13023,6 +13036,14 @@ module Capybara
       # (realm_location.rs `pageSandbox` of no Content-Security-Policy).
       private def coop_leaving_facts(realm) = [document_origin(realm).to_s, @runtime.realm_call(realm, 'initialAboutBlank') == true]
       private def coop_facts(realm) = [*coop_leaving_facts(realm), @runtime.realm_call(realm, 'navigationSandbox', nil).to_i]
+      # A commit's replacing of the document its navigable is at, in the one order the engine gives every kind's (the
+      # page's, a window's, a frame's: document_init.rs `COMMIT_ORDER`): `steps` the host's for its kind by name — one it
+      # has none of left out — none after one that answered `:abort` (a frame a handler of its unload removed). Whether all
+      # ran.
+      private def commit_steps(**steps)
+        Browser.document_commit_order.all? {|name| (step = steps[name]).nil? || step.call != :abort }
+      end
+      def self.document_commit_order = (@document_commit_order ||= Native.document_commit_order.map(&:to_sym).freeze)
       # The page's document committed, of opener policy `coop` and origin `origin` — the one place every commit goes through
       # (a response's, an about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context
       # group is to be left for a new one where needed (session_history.rs `commit_opener_policy`), `carried` what its
@@ -13084,34 +13105,41 @@ module Capybara
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
-        # …and the document it replaces unloaded first (HTML "unload a document and its descendants"): its pagehide and
-        # unload, and its frames', while its realms still live — what their handlers send (a beacon, a keepalive fetch)
-        # is the old document's, its fetch group's quota with it (`keepalive_retire` below). (…what they do to the session
-        # history taken by none: navigables.rs `session_history_takes`, HTML's explicit step over Chrome, which keeps a
-        # pagehide's pushState)
-        fire_document_teardown
-        # (…its controls' state, as its handlers left it, kept by the entry it leaves)
-        capture_left_page_form_state
-        # (…the document state the next one is of the one its `window.name` reads and writes from here on: the leaving
-        # one's pagehide wrote its own)
-        @session_history.show
-        # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone — but for those the
-        # host applies after it, `keep_traversals`: `commit_javascript_document`)
-        @session_history.clear_queued unless keep_traversals
-        # The outgoing page's raced fetches die with its VM (fetch ids are per-VM) —
-        # a leg delivering after this point would resolve the NEW page's same-
-        # numbered fetch with the old page's response.
-        @worker_host.races_clear
-        terminate_document_workers
-        sw_unload_document_clients
-        drop_document_websockets
-        # (…its opener policy, what a navigation of the page after is judged by — committed once the document it replaces
-        # unloaded, whose handlers' `window.open` its own policy judges — the page's browsing context group left for a new
-        # one where it needs, and the next document as cross-origin isolated as that makes it: `commit_coop`)
-        unless initial
-          switch, isolated = commit_coop(init['openerPolicy'], init['responseOrigin'], coop_switch)
-          leave_browsing_context_group(isolated) if switch
-        end
+        # …and the document it replaces gone, in the order every commit takes (`commit_steps`, document_init.rs
+        # `COMMIT_ORDER`): unloaded first (HTML "unload a document and its descendants"): its pagehide and unload, and its
+        # frames', while its realms still live — what their handlers send (a beacon, a keepalive fetch) is the old
+        # document's, its fetch group's quota with it (`keepalive_retire` below). (…what they do to the session history
+        # taken by none: navigables.rs `session_history_takes`, HTML's explicit step over Chrome, which keeps a pagehide's
+        # pushState)
+        commit_steps(
+          unload:           -> { fire_document_teardown },
+          # (…its controls' state, as its handlers left it, kept by the entry it leaves)
+          save_state:       -> { capture_left_page_form_state },
+          # (…the document state the next one is of the one its `window.name` reads and writes from here on: the leaving
+          # one's pagehide wrote its own)
+          show:             -> { @session_history.show },
+          # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone — but for those the
+          # host applies after it, `keep_traversals`: `commit_javascript_document`)
+          clear_traversals: -> { @session_history.clear_queued unless keep_traversals },
+          # (…its opener policy, what a navigation of the page after is judged by — committed once the document it replaces
+          # unloaded, whose handlers' `window.open` its own policy judges — the page's browsing context group left for a
+          # new one where it needs, and the next document as cross-origin isolated as that makes it: `commit_coop`)
+          commit_policy:    lambda {
+            next if initial
+
+            switch, isolated = commit_coop(init['openerPolicy'], init['responseOrigin'], coop_switch)
+            leave_browsing_context_group(isolated) if switch
+          },
+          # The outgoing page's raced fetches die with its VM (fetch ids are per-VM) — a leg delivering after this point
+          # would resolve the NEW page's same-numbered fetch with the old page's response — and its workers, its service
+          # worker clients and its sockets with it.
+          discard:          lambda {
+            @worker_host.races_clear
+            terminate_document_workers
+            sw_unload_document_clients
+            drop_document_websockets
+          }
+        )
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
         # (…its time origin now, as `Date` reads it: the wall clock's, as its server's `Time.now` is — not where the last
