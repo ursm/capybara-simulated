@@ -2573,7 +2573,7 @@ mod tests {
     #[test]
     fn an_entry_of_the_same_document_shares_what_it_was_reached_by() {
         let h = history();
-        let reached = Data { texts: [None, Some("/r".into()), None, None, None, None], cross_site: Some(true), post: Some((Arc::from(&b"q=1"[..]), None)), ..Default::default() };
+        let reached = Data { texts: [None, Some("/r".into()), None, None, None, None, None, None], cross_site: Some(true), post: Some((Arc::from(&b"q=1"[..]), None)), ..Default::default() };
         h.push(TOP, TOP, "/a".into(), false, reached);
         let pushed = h.push(TOP, TOP, "/b".into(), true, Data::default()).unwrap();
         let other = h.push(TOP, TOP, "/c".into(), false, Data::default()).unwrap();
