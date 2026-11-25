@@ -1460,6 +1460,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "hasFocus", has_focus, context_id);
     crate::dom::register(scope, ns, "navigableRealms", navigable_realms, context_id);
     crate::dom::register(scope, ns, "realmsMadeUnder", realms_made_under, context_id);
+    crate::dom::register(scope, ns, "discardedRealmList", discarded_realm_list, context_id);
     crate::dom::register(scope, ns, "frameContainer", frame_container, context_id);
     crate::dom::register(scope, ns, "nested", nested, context_id);
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
@@ -1638,6 +1639,15 @@ fn realms_made_under(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     let realms = crate::dom::realm(scope, cid).realms_made_under(realm);
+    rv.set(realm_array(scope, &realms));
+}
+// __dom.discardedRealmList() -> the realms whose contexts are disposed and not yet dropped (`discarded`): a frame the
+// page removed or navigated, a window reloaded, a frame of a page left while a window it opened is kept — whose arenas,
+// the documents a script of a kept window may still read through a WindowProxy it held (Chrome measured: its title and
+// text its document's), the host drops as the page goes and no window is kept (v8_runtime.rb `dispose_frame_realms`).
+fn discarded_realm_list(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let mut realms: Vec<i32> = crate::dom::dom(scope).arena.navigables.discarded.iter().copied().collect();
+    realms.sort_unstable();
     rv.set(realm_array(scope, &realms));
 }
 pub(crate) fn realm_array<'s>(scope: &mut v8::PinScope<'s, '_>, realms: &[i32]) -> v8::Local<'s, v8::Value> {

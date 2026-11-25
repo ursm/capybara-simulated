@@ -617,41 +617,33 @@ module Capybara
         end
         # Free each frame realm's native arena (an isolate-global Dom entry keyed by its context_id)
         # before disposing the realm — otherwise a page's frame arenas accumulate across visits — and
-        # those the page disposed before it went (`discarded_realm_ids`: a frame removed or navigated),
-        # whose arenas, and their marks as discarded, lived on until now. Done from the main context
+        # those the engine keeps as discarded (navigables.rs `discardedRealmList`: a frame removed or navigated, its
+        # context disposed), whose arenas, and their marks as discarded, lived on until now. Done from the main context
         # (its engine's `dropRealm` frees ANY realm's arena); main (id 0) is untouched.
         going = (@frame_realms&.keys || []) - kept
         # (…where windows are kept, which may hold WindowProxies of the frames going: each proxy of one answering as its
         # browsing context's gone — `closed`, no `parent` — platform-globals.js `realmHooks.evictWindowProxy` — and its window
-        # neutered, which a held proxy still reads its document through)
+        # neutered, which a held proxy still reads its document through: discarded, its arena kept while any window is —
+        # a script of one may hold a WindowProxy of such a frame and read the document it showed, as Chrome's does
+        # (measured: `closed` true, `parent` null, its title and text its document's) — and dropped with the last window
+        # kept, whose heap alone knows whether one still does)
         unless kept.empty?
           going.each do |id|
             evict_window_proxies(id)
             (V8Runtime.engine_call(@ctx, 'neuterDetachedWindow', id) if @ctx) rescue nil
           end
         end
-        # (…their arenas — the documents a held proxy still reads, as Chrome's does — dropped once no window is kept:
-        # `frame_realms_held`)
-        if kept.empty?
-          ids = (going + discarded_realm_ids + frame_realms_held).uniq
-          frame_realms_held.clear
-        else
-          # (…and those of frames the page's or a window's script removed since, which a window's script may hold a
-          # document of just the same)
-          ids = []
-          frame_realms_held.concat(going, discarded_realm_ids)
-        end
         # (…and the blob URLs each realm going with the page made — a frame's, a same-isolate popup's — revoked as its
         # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
         going.each {|id| @browser.revoke_realm_blobs(id) rescue nil }
-        if @ctx && !ids.empty?
-          ids.each do |id|
+        if @ctx && kept.empty?
+          discarded = Array(V8Runtime.engine_call(@ctx, 'discardedRealmList')).select {|id| id.positive? && !@frame_realms&.key?(id) }
+          (going | discarded).each do |id|
             V8Runtime.engine_call(@ctx, 'dropRealm', id.to_i)
           rescue StandardError
             nil
           end
         end
-        discarded_realm_ids.clear
         window_realms_changed
         return if @frame_realms.nil?
         going.each {|id| @frame_realms.delete(id).dispose rescue nil }
@@ -669,14 +661,6 @@ module Capybara
       # The realms made in realm `id`'s document's frames, and in theirs, … — each after those made in its own, the order
       # they are disposed in (navigables.rs `realms_made_under`).
       private def realms_made_under(id) = Array(realm_direct_call(0, 'realmsMadeUnder', id.to_i))
-      # The frame realms the page disposed (`dispose_frame_realm`), its page leave to drop.
-      def discarded_realm_ids = (@discarded_realm_ids ||= [])
-      # …and those of the page's frames its navigation disposed under kept windows: their arenas kept while any window
-      # is — a script of one may hold a WindowProxy of such a frame (its proxies answer as their browsing contexts' gone,
-      # `realmHooks.evictWindowProxy`) and read the document it showed, as Chrome's does (measured: `closed` true, `parent` null,
-      # its title and text its document's). Whether one still does is its heap's to know — the realm that evicted the
-      # proxy, whose finalizers could tell, is the page's that goes — so they go with the last window kept.
-      def frame_realms_held = (@frame_realms_held ||= [])
 
       # Frame-scoped navigation: tear down the realm `old_id` and build a fresh
       # one for the same `<iframe>` from the just-fetched document, returning the
@@ -832,7 +816,6 @@ module Capybara
         evict_lost_window_proxies
         fr = frame_realms.delete(id)
         retire_realm(fr) if fr
-        discarded_realm_ids << id.to_i
         nil
       end
 
