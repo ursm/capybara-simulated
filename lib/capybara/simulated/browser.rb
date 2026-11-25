@@ -6258,12 +6258,35 @@ module Capybara
       # Update Worker State: the worker `handle` in `state`, which every global's ServiceWorker of it takes, its
       # `statechange` fired (and, activated, a client it now controls has its `ready`) — where that is a change. Each a task of
       # its own event loop: a worker's queued as it is told — the block's task queued behind it — a realm's run here.
+      # (…its registration's versions told first, as the registry's step has them — Service Workers "Update Registration
+      # State" before "Update Worker State" — each environment's object taking them in a task of its own event loop, in the
+      # order of the host's steps)
       private def sw_update_worker_state(handle, state)
         changed = Native.sw_set_worker_state(@sw_partition, handle.to_i, state.to_s)
-        sw_tell_workers('swWorkerStateChanged', handle.to_i, state.to_s) if changed
+        versions = changed && sw_registration_versions(handle)
+        if changed
+          sw_tell_workers('swRegistrationVersions', *versions) if versions
+          sw_tell_workers('swWorkerStateChanged', handle.to_i, state.to_s)
+        end
         yield if block_given?
-        sw_tell_realms('swWorkerStateChanged', handle.to_i, state.to_s) if changed
+        if changed
+          sw_tell_realms('swRegistrationVersions', *versions) if versions
+          sw_tell_realms('swWorkerStateChanged', handle.to_i, state.to_s)
+        end
         nil
+      end
+      # …`[registration, installing, waiting, active]` of worker `handle`'s registration, nil for none.
+      private def sw_registration_versions(handle)
+        registration = Native.sw_worker(@sw_partition, handle.to_i)&.last
+        return nil unless registration&.positive?
+
+        [registration, *sw_versions_now(registration)]
+      end
+      # …registration `id`'s versions `[installing, waiting, active]` as the registry has them now, and each one's state
+      # after them (nil for none): what an object of it, or of a worker of it, a realm makes as it is told starts from.
+      private def sw_versions_now(id)
+        handles = Native.sw_versions(@sw_partition, id).to_a
+        handles + handles.map {|h| h && Native.sw_worker(@sw_partition, h)&.[](2) }
       end
 
       # ── The Register, Update and Unregister jobs (Service Workers §8) ──
@@ -6448,7 +6471,9 @@ module Capybara
           when 'queue_job'     then @runtime.call('swQueueJob', n)
           when 'fetch'         then sw_fetch_job(n)
           when 'report_client' then sw_report_client(n)
-          when 'settled'       then sw_broadcast('swJobSettled', n, *args)
+          # (…with its registration's versions as this step leaves them, which an object of it a realm makes as the promise
+          # resolves starts from — the next version's later steps reaching it after, in order: `swRegistrationVersions`)
+          when 'settled'       then sw_broadcast('swJobSettled', n, *args, *(args[0].to_i.positive? ? sw_versions_now(args[0].to_i) : []))
           end
         end
         nil
