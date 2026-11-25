@@ -108,6 +108,10 @@ impl Lifecycle {
     pub(crate) fn is_aborted(&self) -> bool {
         self.aborted
     }
+    // Whether its load has fired, or begun to: nothing more delays it.
+    pub(crate) fn is_load_fired(&self) -> bool {
+        self.load_fired
+    }
     // Whether it is being parsed: loading, its parser not aborted.
     pub(crate) fn is_parsing(&self) -> bool {
         self.ready == READY_LOADING && !self.aborted
@@ -548,7 +552,7 @@ fn parsing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
 // __dom.docLoadFired(docNid) -> whether its load has fired, or begun to: nothing more delays it.
 fn load_fired(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    rv.set_bool(crate::dom::dom(scope).arena.document_states.lifecycle(doc).load_fired);
+    rv.set_bool(crate::dom::dom(scope).arena.document_states.lifecycle(doc).is_load_fired());
 }
 
 // __dom.docCompleteInitial(docNid) — a new window's initial about:blank, which no parse makes (HTML "create a new

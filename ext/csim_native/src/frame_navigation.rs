@@ -45,7 +45,7 @@ struct FrameNavigation {
     // …the turn its build was parked in (`DEFERRED_SW`), its replay's place among the others'.
     deferred_at: u32,
     // (…which of its navigations a `load` it queued is of: one another superseded fires for nothing — the element's
-    // bookkeeping of its loads, `frameLoadBegin` / `frameLoadDue`; whether a navigation is the navigable's ongoing one is
+    // bookkeeping of its loads, `frameLoadBegin` / `load_due`; whether a navigation is the navigable's ongoing one is
     // its traversable's record, session_history.rs `begin_navigation_of`)
     generation: u32,
     // The URL the navigation started with — the `src` attribute's value then, none where it had none (`Some(None)`):
@@ -82,7 +82,7 @@ struct FrameNavigation {
     // (`take_frame_navigations`: the host fetches it as a superseded one).
     superseded: Option<(u64, HostNavigation)>,
     // Whether the navigation it plans now aborted its document, planned while that one's parser was active
-    // (document_state.rs `abort_parsing`): the container's load is then none of that document's (`frameLoadDue`).
+    // (document_state.rs `abort_parsing`): the container's load is then none of that document's (`load_due`).
     aborted_document: bool,
     contents: [Option<Content>; CONTENT_SLOTS],
     // While its navigable has no realm made: the user activation the window of its initial about:blank document has
@@ -101,7 +101,35 @@ struct FrameNavigation {
     // which that document's time origin is (HTML "create a new browsing context and document"), however much later its
     // realm is made: navigables.rs `set_frame_realm`.
     created: Option<f64>,
+    // The steps of its element's `load` for the navigations begun of it, the latest last (`LoadRun`) — and those that came
+    // to run while its build was under way, held (`BUILDING`): what a build makes is what the frame's `load` follows and
+    // another build begins from (`frameBuildEnd` hands them back).
+    runs: Vec<LoadRun>,
+    after_build: Vec<(u32, u32)>,
 }
+
+// The steps of a container's `load` for one navigation (`frameLoadBegin`), which the bindings run as its tasks, its load gate
+// and its microtask come (`frameLoadNext`): what each does next is decided here, from the run's own state.
+#[derive(Clone, Copy)]
+struct LoadRun {
+    id: u32,
+    generation: u32,
+    // Its document left unloaded on its task, none built (`LOAD_COMMIT`), rather than built (`LOAD_BUILD`).
+    commit: bool,
+    // The frame's realm as it began, while its document is still to be asked whether it may be unloaded on its first task
+    // (`PROMPT_OWED`: HTML "navigate" asks in parallel with the task that began it) — and the one being asked.
+    ask: Option<i32>,
+    asking: i32,
+    // The load gate its build runs under (bridge.entry.js `subresourceGate`), the page's load waiting for it.
+    gate: Option<u32>,
+    // Its response in later, as its server took its time (frame_response.rs `FRAME_LATER`): built again then, its `load`
+    // waiting for that.
+    building: bool,
+    load_queued: bool,
+}
+// (…as many of a container's as may still have steps to run: an older one's are those of a superseded navigation, which
+// come to nothing — and to nothing all the same where its run has gone)
+const LOAD_RUNS_KEPT: usize = 8;
 
 // Its element's `load` fired or queued (frame-nav.js `FN_LOAD_FIRED`).
 pub(crate) const LOAD_FIRED: u32 = 1 << 0;
@@ -168,6 +196,8 @@ pub(crate) struct FrameNavigations(HashMap<NodeId, FrameNavigation>, Plans);
 struct Plans {
     // (…the parked builds' numbers, `FrameNavigation::deferred_at`)
     deferrals: u32,
+    // (…the load runs' numbers, `LoadRun::id`)
+    load_runs: u32,
     last: HashMap<NodeId, (u64, NodeId)>,
     // The host's navigations as a flush of the page's due tasks began, and those the tasks planned
     // (navigation_plan.rs `flushBegin`).
@@ -335,11 +365,12 @@ impl RealmArena {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "frameLoadBegin", frame_load_begin, context_id);
-    crate::dom::register(scope, ns, "frameLoadDue", frame_load_due, context_id);
+    crate::dom::register(scope, ns, "frameLoadNext", frame_load_next, context_id);
+    crate::dom::register(scope, ns, "frameLoadGate", frame_load_gate, context_id);
     crate::dom::register(scope, ns, "frameNav", frame_nav, context_id);
-    crate::dom::register(scope, ns, "frameNavGeneration", frame_nav_generation, context_id);
     crate::dom::register(scope, ns, "frameAttributesNavigate", frame_attributes_navigate, context_id);
     crate::dom::register(scope, ns, "takeSwDeferredFrames", take_sw_deferred_frames, context_id);
+    crate::dom::register(scope, ns, "swDeferredReplays", sw_deferred_replays, context_id);
     crate::dom::register(scope, ns, "setFrameNav", set_frame_nav, context_id);
     crate::dom::register(scope, ns, "loadDelay", load_delay, context_id);
     crate::dom::register(scope, ns, "oweContainerLoad", owe_container_load, context_id);
@@ -881,7 +912,7 @@ fn cancel_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 }
 
 // __dom.frameLoadFired(containerNid, now, committed) — the element's `load` fires now, at `now` on the virtual clock
-// (what paces the next: `frameLoadBegin`) — outside `frameLoadDue`: the load its document's delayed own reached it with,
+// (what paces the next: `frameLoadBegin`) — outside `load_due`: the load its document's delayed own reached it with,
 // or (`committed`) the one of a navigation the host committed, which is the navigation it
 // awaited completing and its load the once-per-navigation one.
 fn frame_load_fired(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -909,40 +940,29 @@ fn frame_navigation_begins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     arena.set_frame_nav(container, PROMPT_OWED, later && !prompted);
     rv.set_bool(later);
 }
-// __dom.frameNavAsks(containerNid, generation, asked) -> the realm whose document the navigation's task asks whether it may
-// be unloaded, -1 for none: the one it owes, its navigation still the latest (`generation`, none for a build that does not
-// know: the host's forced one) and no document above it asking already — and, a navigation a later one replaced, `asked`,
-// the one that was to be asked, while it still is the frame's: HTML "navigate" asks, and only then looks whether it is
-// still the ongoing one.
+// __dom.frameNavAsks(containerNid) -> the realm whose document the container's latest navigation asks now whether it may
+// be unloaded (`RealmArena::frame_nav_asks`), -1 for none: the one it owes, no document above it asking already.
 fn frame_nav_asks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_int32(-1);
-    let Some(container) = nid_arg(scope, &args, 0) else { return };
-    let generation = if args.get(1).is_undefined() { None } else { args.get(1).uint32_value(scope) };
-    let asked = args.get(2).int32_value(scope).unwrap_or(-1);
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_int32(-1) };
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let realm = arena.frame_realm(container);
-    let latest = generation.is_none_or(|g| arena.frame_navigations.0.get(&container).is_some_and(|n| n.generation == g));
-    if !latest {
-        if arena.is_connected(container) && asked >= 0 && realm == Some(asked) {
-            rv.set_int32(asked);
-        }
-        return;
-    }
-    if !arena.frame_nav_has(container, PROMPT_OWED) {
-        return;
-    }
-    arena.set_frame_nav(container, PROMPT_OWED, false);
-    if let Some(realm) = realm.filter(|&r| !arena.ancestor_unloading(r)) {
-        rv.set_int32(realm);
-    }
+    rv.set_int32(crate::dom::realm(scope, cid).frame_nav_asks(container, None, -1));
 }
-// __dom.frameNavGeneration(containerNid) -> the number of the container's latest navigation, as `frameLoadBegin` answers
-// it: whether the one a task was queued for still is.
-fn frame_nav_generation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
-    let cid = realm_id(scope, &args);
-    rv.set_uint32(crate::dom::realm(scope, cid).frame_navigations.0.get(&container).map_or(0, |n| n.generation));
+impl RealmArena {
+    // The realm whose document the navigation `generation` of the container (none: its latest) asks now whether it may be
+    // unloaded, `asked` the frame's realm as that navigation began — -1 for none. A superseded one's task asks the document
+    // it was to ask where it still is the frame's.
+    fn frame_nav_asks(&mut self, container: NodeId, generation: Option<u32>, asked: i32) -> i32 {
+        let realm = self.frame_realm(container);
+        let latest = generation.is_none_or(|g| self.load_latest(container, g));
+        if !latest {
+            return if self.is_connected(container) && asked >= 0 && realm == Some(asked) { asked } else { -1 };
+        }
+        if !self.frame_nav_has(container, PROMPT_OWED) {
+            return -1;
+        }
+        self.set_frame_nav(container, PROMPT_OWED, false);
+        realm.filter(|&r| !self.ancestor_unloading(r)).unwrap_or(-1)
+    }
 }
 // What HTML "navigate" makes of the URL the container's attributes give, as they are processed: no entry where the frame
 // has no document yet (its first navigation, which its initial about:blank's entry takes), a navigation within its document
@@ -1016,6 +1036,17 @@ fn take_sw_deferred_frames(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     parked.sort_unstable_by_key(|&(at, _)| at);
     let items: Vec<v8::Local<v8::Value>> = parked.iter().map(|(_, id)| v8::Number::new(scope, id.to_f64()).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.swDeferredReplays(containerNid) -> whether a build parked on a service worker still activating begins again now,
+// its replay's task come (`takeSwDeferredFrames`): parked no more either way, begun again where the container is still
+// connected — its whole navigation's steps, the build re-parking where another worker of its scope is activating.
+fn sw_deferred_replays(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    arena.set_frame_nav(container, DEFERRED_SW, false);
+    rv.set_bool(arena.is_connected(container));
 }
 
 // Whether a connected container of realm `cid`'s documents owes its element's `load`: HTML's iframe, which delays its
@@ -1482,14 +1513,14 @@ const LOAD_BUILD: u32 = 2;
 const LOAD_TASK: u32 = 3;
 const LOAD_COMMIT: u32 = 4;
 const FRAME_NAV_PACE_MS: f64 = 4.0;
-// …and as it comes to fire (`frameLoadDue`): nothing (a navigation superseded it, or its document's own delayed load
+// …and as it comes to fire (`load_due`): nothing (a navigation superseded it, or its document's own delayed load
 // fires it after itself), the load it owed paid with no event (its container gone), or its `load`.
 const DUE_NONE: u32 = 0;
 const DUE_PAID: u32 = 1;
 const DUE_FIRE: u32 = 2;
 
-// __dom.frameLoadBegin(container, initialInsertion, now, host) -> [step, delay, generation]
-// of the container's `load` (`LOAD_*`, its delay in virtual ms, the navigation it is for): once per navigation — not on
+// __dom.frameLoadBegin(container, initialInsertion, now, host) -> [step, delay, run]
+// of the container's `load` (`LOAD_*`, its delay in virtual ms, the run of its steps: `LoadRun`): once per navigation — not on
 // every connect step, nor its own build; a removal and a reassigned `src` / `srcdoc` clear the guard — owed from now until
 // it fires, delaying its document's own; at once on its initial insertion where it navigates to about:blank (Chrome and
 // Firefox: inside the `appendChild`, which a listener added after it never sees); else, where its document is built as
@@ -1497,8 +1528,8 @@ const DUE_FIRE: u32 = 2;
 // so a revoke right after the insertion still loads: the navigation took its reference here — then its load. `host`
 // the bindings' (subresource-host.js), `now` the virtual clock.
 fn frame_load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let answer = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>, step: u32, delay: f64, generation: u32| {
-        let items = [v8::Integer::new_from_unsigned(scope, step).into(), v8::Number::new(scope, delay).into(), v8::Integer::new_from_unsigned(scope, generation).into()];
+    let answer = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>, step: u32, delay: f64, run: u32| {
+        let items = [v8::Integer::new_from_unsigned(scope, step).into(), v8::Number::new(scope, delay).into(), v8::Integer::new_from_unsigned(scope, run).into()];
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     };
     let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return answer(scope, rv, LOAD_NONE, 0.0, 0) };
@@ -1516,11 +1547,13 @@ fn frame_load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let generation = nav.generation;
     let delay = if nav.loaded_at.is_some_and(|at| now - at < FRAME_NAV_PACE_MS) { FRAME_NAV_PACE_MS } else { 0.0 };
     if initial && arena.navigates_to_blank(container, doc) {
-        return answer(scope, rv, LOAD_NOW, 0.0, generation);
+        let run = arena.begin_load_run(container, generation, false);
+        return answer(scope, rv, LOAD_NOW, 0.0, run);
     }
     if !arena.builds_eagerly(container, doc) {
-        let step = if arena.frame_nav_has(container, COMMIT_PENDING) { LOAD_COMMIT } else { LOAD_TASK };
-        return answer(scope, rv, step, delay, generation);
+        let commit = arena.frame_nav_has(container, COMMIT_PENDING);
+        let run = arena.begin_load_run(container, generation, commit);
+        return answer(scope, rv, if commit { LOAD_COMMIT } else { LOAD_TASK }, delay, run);
     }
     let held = arena.frame_navigations.0.get(&container).is_some_and(|n| n.contents[CONTENT_NAV].is_some());
     let src = arena.get(container).and_then(|n| n.plain_attr("src")).map(str::to_owned).filter(|_| !held);
@@ -1534,27 +1567,24 @@ fn frame_load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
             crate::dom::realm(scope, cid).frame_navigation(container).contents[CONTENT_NAV] = Some(content);
         }
     }
-    crate::dom::realm(scope, cid).set_frame_nav(container, BUILD_QUEUED, true);
-    answer(scope, rv, LOAD_BUILD, delay, generation);
+    let arena = crate::dom::realm(scope, cid);
+    arena.set_frame_nav(container, BUILD_QUEUED, true);
+    let run = arena.begin_load_run(container, generation, false);
+    answer(scope, rv, LOAD_BUILD, delay, run);
 }
-// __dom.frameLoadDue(container, generation, now) -> `DUE_*` of the container's `load` for navigation `generation` as it
-// comes to fire, at `now` on the virtual clock (kept as when its last `load` fired, which paces the next).
-fn frame_load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_uint32(DUE_NONE);
-    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
-    let generation = args.get(1).uint32_value(scope).unwrap_or(0);
-    let now = args.get(2).number_value(scope).unwrap_or(0.0);
-    let cid = realm_id(scope, &args);
+// The container's `load` for navigation `generation` as it comes to fire (`DUE_*`), at `now` on the virtual clock (kept as
+// when its last `load` fired, which paces the next).
+fn load_due(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, generation: u32, now: f64) -> u32 {
     let arena = crate::dom::realm(scope, cid);
     if !arena.is_connected(container) {
-        return rv.set_uint32(DUE_PAID);
+        return DUE_PAID;
     }
     if arena.frame_navigation(container).generation != generation {
-        return;
+        return DUE_NONE;
     }
     // (…none past the nesting limit, which makes it no document: navigables.rs `MAX_FRAME_DEPTH`)
     if arena.realm_tree(cid).1 >= crate::navigables::MAX_FRAME_DEPTH {
-        return rv.set_uint32(DUE_PAID);
+        return DUE_PAID;
     }
     // (…none, and none owed, for a document whose navigable planned another navigation while its parser was active — its
     // location set, a form submitted to it, its reload: HTML "navigate" aborts it ("abort a document and its
@@ -1563,27 +1593,242 @@ fn frame_load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     // document waiting on nothing, as Chrome fires only its page's load. One planned by its load's handlers once it
     // loaded leaves its load the container's to fire: "completely finish loading" queues it as the load task ends.)
     if arena.frame_navigations.0.get(&container).is_some_and(|n| n.aborted_document && n.host.is_some()) {
-        return rv.set_uint32(DUE_PAID);
+        return DUE_PAID;
     }
     // (…nor in a document that has unloaded, its realm's document gone — a navigation of its navigable replaced it: Chrome
     // fires none of its frames' loads, rv-sf-probe `u_nested`. One the navigation aborted that is still active — a 204, a
     // download, a navigation stopped, which make no document — fires them still: `t_204_late`)
     if arena.realm_document(cid).is_none() {
-        return rv.set_uint32(DUE_PAID);
+        return DUE_PAID;
     }
     // (…nor for a document `stop()` aborted as it parsed: Chrome and Firefox fire neither its load nor this one)
     if arena.frame_realm(container).and_then(|frame| arena.realm_document(frame)).is_some_and(|doc| arena.document_states.lifecycle(doc).is_aborted()) {
-        return rv.set_uint32(DUE_PAID);
+        return DUE_PAID;
     }
     // (…none yet where the frame's document has its load delayed — its images fetched — which fires this one with its
     // own, after it: the container's load comes after its document's)
     if let Some(frame) = arena.frame_realm(container) {
         if owe_container_load_of(scope, frame) {
-            return;
+            return DUE_NONE;
         }
     }
     crate::dom::realm(scope, cid).frame_navigation(container).loaded_at = Some(now);
-    rv.set_uint32(DUE_FIRE);
+    DUE_FIRE
+}
+
+// The phases of a load run's steps (`frameLoadNext`): its navigation's task (`LOAD_PHASE_RUN`) — on the first, where its
+// document is to be asked whether it may be unloaded, that alone; the build under its load gate, then its `load` queued
+// (`LOAD_PHASE_BUILD`), or the build alone, held while another was under way (`LOAD_PHASE_BUILD_ONLY`); its `load`
+// (`LOAD_PHASE_FIRE`), or at once, inside the insertion (`LOAD_PHASE_FIRE_NOW`) — those the bindings run — and those the
+// bindings come back with, its answer to the step it was handed.
+const LOAD_PHASE_RUN: u32 = 0;
+const LOAD_PHASE_BUILD: u32 = 1;
+const LOAD_PHASE_BUILD_ONLY: u32 = 2;
+const LOAD_PHASE_FIRE: u32 = 3;
+const LOAD_PHASE_FIRE_NOW: u32 = 4;
+const LOAD_PHASE_ASKED: u32 = 5;
+const LOAD_PHASE_ASK_DONE: u32 = 6;
+const LOAD_PHASE_GATE_TAKEN: u32 = 7;
+const LOAD_PHASE_BUILT: u32 = 8;
+const LOAD_PHASE_BUILT_ONLY: u32 = 9;
+const LOAD_PHASE_QUEUE_LOAD: u32 = 10;
+const LOAD_PHASE_COMMITTED: u32 = 11;
+// What the bindings do next (`frameLoadNext`), then coming back with the phase it names: nothing more; ask realm `arg`'s
+// document whether it may be unloaded (answer 1: it may); abort realm `arg`'s document and its descendants; end the
+// navigation, declined ("finalize a cross-document navigation"); queue the run's task again; take load gate `arg`; build the
+// frame (answer: the milliseconds its response is late by, `frameLater`); queue the build again under a load gate that
+// holds the page's load, that late; unload the document the frame leaves (`commitFrameNavigation`); queue its `load` as a
+// microtask; fire it (`arg` 1: inside the insertion); pay it with none fired.
+const LOAD_DONE: u32 = 0;
+const LOAD_ASK: u32 = 1;
+const LOAD_ABORT: u32 = 2;
+const LOAD_FINALIZE: u32 = 3;
+const LOAD_QUEUE: u32 = 4;
+const LOAD_TAKE_GATE: u32 = 5;
+const LOAD_BUILD_NOW: u32 = 6;
+const LOAD_LATER: u32 = 7;
+const LOAD_UNLOAD: u32 = 8;
+const LOAD_MICROTASK: u32 = 9;
+const LOAD_FIRE: u32 = 10;
+const LOAD_PAY: u32 = 11;
+
+impl RealmArena {
+    fn begin_load_run(&mut self, container: NodeId, generation: u32, commit: bool) -> u32 {
+        self.frame_navigations.1.load_runs = self.frame_navigations.1.load_runs.wrapping_add(1);
+        let id = self.frame_navigations.1.load_runs;
+        let ask = self.frame_nav_has(container, PROMPT_OWED).then(|| self.frame_realm(container).unwrap_or(-1));
+        let nav = self.frame_navigation(container);
+        if nav.runs.len() >= LOAD_RUNS_KEPT {
+            nav.runs.remove(0);
+        }
+        nav.runs.push(LoadRun { id, generation, commit, ask, asking: -1, gate: None, building: false, load_queued: false });
+        id
+    }
+    fn load_run(&mut self, container: NodeId, id: u32) -> Option<&mut LoadRun> {
+        self.frame_navigations.0.get_mut(&container)?.runs.iter_mut().find(|r| r.id == id)
+    }
+    // A step of run `id` come to run while the frame's build is under way: held till it ends.
+    fn hold_load_step(&mut self, container: NodeId, id: u32, phase: u32) {
+        self.frame_navigation(container).after_build.push((id, phase));
+    }
+    // The steps held while the build was under way, which the bindings run again as it ends (`frameBuildEnd`).
+    pub(crate) fn take_after_build(&mut self, container: NodeId) -> Vec<(u32, u32)> {
+        self.frame_navigations.0.get_mut(&container).map(|n| std::mem::take(&mut n.after_build)).unwrap_or_default()
+    }
+    // Whether the frame's navigation is still navigation `generation`.
+    fn load_latest(&self, container: NodeId, generation: u32) -> bool {
+        self.frame_navigations.0.get(&container).is_some_and(|n| n.generation == generation)
+    }
+}
+
+// The next thing run `id`'s steps do as the bindings run phase `phase` of them, `answer` theirs to the last step — `(what,
+// the phase to come back with, its argument)` (`LOAD_*`): the order of HTML "navigate"'s steps for an iframe, its build
+// (`frameWindow`) and the iframe load event steps.
+fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: u32, mut phase: u32, answer: f64, now: f64) -> (u32, u32, i32) {
+    let done = (LOAD_DONE, LOAD_PHASE_RUN, 0);
+    loop {
+        let arena = crate::dom::realm(scope, cid);
+        let Some(run) = arena.load_run(container, id).map(|r| *r) else {
+            // (…a run gone: a superseded navigation's, whose `load` is owed no more — but paid where its container is gone)
+            let fire = matches!(phase, LOAD_PHASE_FIRE | LOAD_PHASE_FIRE_NOW);
+            return if fire && !arena.is_connected(container) { (LOAD_PAY, LOAD_PHASE_RUN, 0) } else { done };
+        };
+        let latest = arena.load_latest(container, run.generation);
+        let update = |arena: &mut RealmArena, change: &dyn Fn(&mut LoadRun)| {
+            if let Some(r) = arena.load_run(container, id) {
+                change(r);
+            }
+        };
+        match phase {
+            LOAD_PHASE_RUN => {
+                // (…its first task, where its document is to be asked: that alone, the rest on a task after it — what its
+                // handlers queue, a message to the page, runs with that document still the frame's)
+                if let Some(asked) = run.ask {
+                    update(arena, &|r| r.ask = None);
+                    let realm = arena.frame_nav_asks(container, Some(run.generation), asked);
+                    if realm >= 0 {
+                        update(arena, &|r| r.asking = realm);
+                        return (LOAD_ASK, LOAD_PHASE_ASKED, realm);
+                    }
+                    return (LOAD_QUEUE, LOAD_PHASE_RUN, 0);
+                }
+                if run.commit {
+                    if !latest {
+                        return done;
+                    }
+                    if arena.frame_nav_has(container, COMMIT_PENDING) {
+                        return (LOAD_UNLOAD, LOAD_PHASE_COMMITTED, 0);
+                    }
+                    phase = LOAD_PHASE_COMMITTED;
+                    continue;
+                }
+                match run.gate {
+                    Some(gate) => return (LOAD_TAKE_GATE, LOAD_PHASE_GATE_TAKEN, gate as i32),
+                    None => phase = LOAD_PHASE_QUEUE_LOAD,
+                }
+            }
+            // (…none going on where the user declines to unload it — HTML "navigate", aborted: the document the frame's own,
+            // its container's load delayed by the navigation no more — and, going on, its document aborted with its
+            // descendants where its load has yet to fire: HTML "navigate", "queue a global task … to abort a document and
+            // its descendants given navigable's active document" — a parse that waits on a server's time stops there, and
+            // "the end" with it (rv-sf-probe `y_frame_resrc150`, `z_frame_module_abort`), the container's load, which the
+            // navigation owes now, still held)
+            LOAD_PHASE_ASKED => {
+                if answer == 0.0 {
+                    return (LOAD_FINALIZE, LOAD_PHASE_RUN, 0);
+                }
+                let realm = run.asking;
+                let loading = arena.realm_document(realm).is_some_and(|d| !arena.document_states.lifecycle(d).is_load_fired());
+                if latest && loading {
+                    return (LOAD_ABORT, LOAD_PHASE_ASK_DONE, realm);
+                }
+                phase = LOAD_PHASE_ASK_DONE;
+            }
+            LOAD_PHASE_ASK_DONE => return (LOAD_QUEUE, LOAD_PHASE_RUN, 0),
+            LOAD_PHASE_COMMITTED => return (LOAD_MICROTASK, LOAD_PHASE_RUN, 0),
+            LOAD_PHASE_GATE_TAKEN => phase = LOAD_PHASE_QUEUE_LOAD,
+            // The build (`frameWindow`), where the navigation is still the frame's latest, the frame connected and not built
+            // already — a read of its `contentWindow` as its parent parsed made it, and reaching into a frame that has a
+            // document in flight is how a planned navigation got lost (reparent-form-during-planned-navigation-task).
+            LOAD_PHASE_BUILD | LOAD_PHASE_BUILD_ONLY => {
+                let then = if phase == LOAD_PHASE_BUILD { LOAD_PHASE_QUEUE_LOAD } else { u32::MAX };
+                if arena.frame_nav_has(container, BUILDING) {
+                    arena.hold_load_step(container, id, LOAD_PHASE_BUILD_ONLY);
+                } else if latest {
+                    arena.set_frame_nav(container, BUILD_QUEUED, false);
+                    let built = arena.frame_realm(container).is_some() && !arena.frame_nav_has(container, COMMIT_PENDING);
+                    if arena.is_connected(container) && !built {
+                        return (LOAD_BUILD_NOW, if then == u32::MAX { LOAD_PHASE_BUILT_ONLY } else { LOAD_PHASE_BUILT }, 0);
+                    }
+                }
+                if then == u32::MAX {
+                    return done;
+                }
+                phase = then;
+            }
+            // (…its response in later: built again then, under a gate that holds the page's load, its `load` waiting)
+            LOAD_PHASE_BUILT | LOAD_PHASE_BUILT_ONLY => {
+                let building = answer > 0.0;
+                update(arena, &|r| r.building = building);
+                let then = if phase == LOAD_PHASE_BUILT { LOAD_PHASE_QUEUE_LOAD } else { u32::MAX };
+                if building {
+                    arena.set_frame_nav(container, BUILD_QUEUED, true);
+                    return (LOAD_LATER, if then == u32::MAX { LOAD_PHASE_RUN } else { then }, 0);
+                }
+                if then == u32::MAX {
+                    return done;
+                }
+                phase = then;
+            }
+            // Its `load` as a microtask, once: after the build, whoever ran it — the page's `load` flushing it ahead of the
+            // task, whose handler's message to the page comes after the `load` of its frame — none while it is to be built
+            // again, nor while it is parked on a service worker still activating (Handle Fetch waits for 'activated'), which
+            // begins it all again as the activation settles (`takeSwDeferredFrames`).
+            LOAD_PHASE_QUEUE_LOAD => {
+                if run.load_queued || run.building || arena.frame_nav_has(container, DEFERRED_SW) {
+                    return done;
+                }
+                update(arena, &|r| r.load_queued = true);
+                return (LOAD_MICROTASK, LOAD_PHASE_RUN, 0);
+            }
+            // (…none while its build is under way: after it)
+            LOAD_PHASE_FIRE | LOAD_PHASE_FIRE_NOW => {
+                if arena.frame_nav_has(container, BUILDING) {
+                    arena.hold_load_step(container, id, LOAD_PHASE_FIRE);
+                    return done;
+                }
+                return match load_due(scope, cid, container, run.generation, now) {
+                    DUE_PAID => (LOAD_PAY, LOAD_PHASE_RUN, 0),
+                    DUE_FIRE => (LOAD_FIRE, LOAD_PHASE_RUN, i32::from(phase == LOAD_PHASE_FIRE_NOW)),
+                    _ => done,
+                };
+            }
+            _ => return done,
+        }
+    }
+}
+// __dom.frameLoadNext(container, run, phase, answer, now) -> the next thing the bindings do (`load_next`): `what` in the
+// low 4 bits, the phase to come back with in the next 4, its argument above.
+fn frame_load_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_int32(0);
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let id = args.get(1).uint32_value(scope).unwrap_or(0);
+    let phase = args.get(2).uint32_value(scope).unwrap_or(u32::MAX);
+    let answer = args.get(3).number_value(scope).unwrap_or(0.0);
+    let now = args.get(4).number_value(scope).unwrap_or(0.0);
+    let cid = realm_id(scope, &args);
+    let (what, next, arg) = load_next(scope, cid, container, id, phase, answer, now);
+    rv.set_int32(what as i32 | (next as i32) << 4 | arg << 8);
+}
+// __dom.frameLoadGate(container, run, gate) — the load gate run `run`'s build runs under (`LoadRun::gate`).
+fn frame_load_gate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let id = args.get(1).uint32_value(scope).unwrap_or(0);
+    let gate = args.get(2).uint32_value(scope);
+    let cid = realm_id(scope, &args);
+    if let Some(run) = crate::dom::realm(scope, cid).load_run(container, id) {
+        run.gate = gate;
+    }
 }
 
 // The URL a container's navigation goes to, as its attributes give it: the one the navigation under way started with,

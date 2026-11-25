@@ -391,11 +391,19 @@ fn frame_build_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).begin_frame_build(container));
 }
-// __dom.frameBuildEnd(containerNid) — the frame's build done (`end_frame_build`).
-fn frame_build_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.frameBuildEnd(containerNid) -> the frame's build done (`end_frame_build`): the steps of its `load` held while it
+// was under way, to run again — `[run, phase, …]` (frame_navigation.rs `frameLoadNext`).
+fn frame_build_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).end_frame_build(container);
+    let arena = crate::dom::realm(scope, cid);
+    arena.end_frame_build(container);
+    let held = arena.take_after_build(container);
+    if held.is_empty() {
+        return;
+    }
+    let items: Vec<v8::Local<'_, v8::Value>> = held.iter().flat_map(|&(run, phase)| [run, phase]).map(|n| v8::Integer::new_from_unsigned(scope, n).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 pub(crate) fn define(native: magnus::RModule) -> Result<(), magnus::Error> {
