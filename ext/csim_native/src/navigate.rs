@@ -873,6 +873,13 @@ impl Navigation {
     fn superseded(&self) -> bool {
         self.0.borrow().superseded
     }
+    // #source_policy -> the referrer policy of the document that initiated it as it began (HTML's source snapshot params'
+    // source policy container): the one a document of a local URL it makes clones (document_init.rs
+    // `policy_container`) — none for one no document initiated, the user's.
+    fn source_policy(&self) -> Option<String> {
+        let m = self.0.borrow();
+        m.referrer.as_ref().filter(|_| !m.by_user).map(|r| r.1.clone())
+    }
     // #resume: a parked navigation (`defer`) taken again — #next goes on with it, its wait asked anew.
     fn resume(&self) {
         self.0.borrow_mut().deferred = false;
@@ -891,6 +898,7 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("coop_switch?", method!(Navigation::coop_switch, 0))?;
     class.define_method("deferred?", method!(Navigation::deferred, 0))?;
     class.define_method("superseded?", method!(Navigation::superseded, 0))?;
+    class.define_method("source_policy", method!(Navigation::source_policy, 0))?;
     class.define_method("resume", method!(Navigation::resume, 0))?;
     Ok(())
 }

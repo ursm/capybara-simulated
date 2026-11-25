@@ -211,7 +211,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "navigationOrigins", navigation_origins_op, context_id);
     register(scope, ns, "setSandbox", set_sandbox, context_id);
     register(scope, ns, "takeOpenerOrigins", take_opener_origins, context_id);
-    register(scope, ns, "seedWindowDocument", seed_window_document, context_id);
+    register(scope, ns, "seedTopLevelDocument", seed_top_level_document, context_id);
+    register(scope, ns, "keepsWindowFor", keeps_window_for, context_id);
     register(scope, ns, "pageSandbox", page_sandbox, context_id);
     register(scope, ns, "popupFlags", popup_flags_op, context_id);
     register(scope, ns, "sandboxed", sandboxed_op, context_id);
@@ -383,23 +384,33 @@ fn popup_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let cid = realm_id(scope, &args);
     rv.set_uint32(crate::sandbox::popup_flags(realm(scope, cid).location.sandbox));
 }
-// __dom.seedWindowDocument(url, csp) — the calling realm's document, one a navigation of a window `window.open` made in
-// this isolate makes at `url` whose response's Content-Security-Policy is `csp` (null for none), seeded before it loads:
-// sandboxed as its window is — HTML "determine the creation sandboxing flags" for a top-level navigable: its popup
-// sandboxing flag set (session_history.rs `popup_sandbox_of`) — and by that policy's `sandbox`, its origin a new opaque
-// one where they say so (`creation`).
-fn seed_window_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.seedTopLevelDocument(url, csp, origin, locationOrigin) — the calling realm's document, one a navigation of a
+// top-level traversable (the page's, a window's `window.open` made in this isolate) makes at `url` whose policy
+// container's Content-Security-Policy is `csp` (null for none), seeded before it loads: sandboxed as its navigable is —
+// HTML "determine the creation sandboxing flags" for a top-level navigable: its popup sandboxing flag set
+// (session_history.rs `popup_sandbox_of`) — and by that policy's `sandbox`; its origin a new opaque one where they say
+// so, else `origin` and `locationOrigin` where the navigation gave it one its URL does not say (document_init.rs: an
+// about:blank one's its initiator's, 'null' a new opaque one), else its URL's (`creation`).
+fn seed_top_level_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| (!args.get(i).is_null_or_undefined()).then(|| args.get(i).to_rust_string_lossy(scope));
     let url = args.get(0).to_rust_string_lossy(scope);
-    let csp = (!args.get(1).is_null_or_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
+    let csp = text(scope, 1);
+    let (origin, location_origin) = (text(scope, 2), text(scope, 3));
     let cid = realm_id(scope, &args);
     let popup = crate::session_history::popup_sandbox_of(crate::dom::realm(scope, cid), cid);
     let flags = popup | crate::sandbox::sandboxing(csp.as_deref(), None);
     let arena = realm(scope, cid);
-    let created = creation(arena, cid, &url, flags);
+    let (document, location_origin) = match origin.filter(|_| flags & crate::sandbox::ORIGIN == 0) {
+        Some(origin) => (Some(origin), location_origin),
+        None => {
+            let created = creation(arena, cid, &url, flags);
+            (created.document, created.location.map(str::to_owned))
+        }
+    };
     let location = &mut arena.location;
-    location.set_sandbox(created.sandbox);
-    location.set_document_origin(created.document);
-    location.origin_override = created.location.map(str::to_owned);
+    location.set_sandbox(flags);
+    location.set_document_origin(document);
+    location.origin_override = location_origin;
 }
 // __dom.sandboxed(flag, nid) -> whether the document of the realm node `nid` is in — the calling realm's for null — is
 // sandboxed by `flag` (`SANDBOXED_*`, the bindings' names for sandbox.rs's flags): against scripts (scripting disabled —
@@ -452,6 +463,20 @@ fn origin_domain_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(realm(scope, cid).location.domain.is_some());
 }
 
+// __dom.keepsWindowFor(url, csp, origin) -> whether the document a navigation of the calling realm's navigable makes at
+// `url` keeps its Window (document_init.rs `keeps_window`): its response's Content-Security-Policy `csp` (null none),
+// `origin` the document's where its URL does not say it (an about:blank one's, its initiator's; undefined its URL's).
+fn keeps_window_for(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| (!args.get(i).is_null_or_undefined()).then(|| args.get(i).to_rust_string_lossy(scope));
+    let url = text(scope, 0).unwrap_or_default();
+    let csp = text(scope, 1);
+    let origin = text(scope, 2).or_else(|| crate::document_init::url_origin(&url));
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let initial = arena.realm_document(cid).and_then(|d| arena.get(d)).is_some_and(|n| n.state & crate::dom::STATE_INITIAL_ABOUT_BLANK != 0);
+    let location = &arena.location;
+    rv.set_bool(crate::document_init::keeps_window(initial, location.origin(), location.domain.is_some(), origin.as_deref(), csp.as_deref()));
+}
 // __dom.originKey() -> the key the calling realm's origin is matched by (`RealmLocation::origin_key`).
 fn origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);

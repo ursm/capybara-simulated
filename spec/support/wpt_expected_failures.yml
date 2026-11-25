@@ -68343,8 +68343,6 @@ service-workers/service-worker/immutable-prototype-serviceworker.https.html:
 - worker prototype chain should be immutable
 service-workers/service-worker/local-url-inherit-controller.https.html:
 - Data URL worker should not inherit service worker controller.
-- Same-origin blob URL iframe should inherit service worker controller.
-- Same-origin blob URL iframe should intercept fetch().
 - Same-origin blob URL sharedworker should inherit service worker controller.
 - Same-origin blob URL sharedworker should intercept fetch().
 service-workers/service-worker/multipart-image.https.html:

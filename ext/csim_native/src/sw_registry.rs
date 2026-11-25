@@ -1234,6 +1234,12 @@ pub(crate) fn controller_for_ruby(partition: u64, handle: u32, live: bool) -> Op
     let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map_or_else(String::new, |r| r.scope.clone());
     Some((handle, w.intercepts(), w.script_url.clone(), scope))
 }
+// …and the controller client `id` has now, in that shape — an about:blank or a `blob:` document's creator's, which a
+// document of its origin it makes takes (document_init.rs `controller`): none of a worker gone.
+pub(crate) fn client_controller(partition: u64, id: &str) -> Option<(u32, bool, String, String)> {
+    let handle = lock().existing(partition)?.clients.iter().find(|c| c.id == id)?.controller?;
+    controller_for_ruby(partition, handle, true)
+}
 // ── What the host does ──
 // What a job's or a lifecycle's step makes the host do, in order — the registry's state committed first, each a Ruby
 // array `[kind, *arguments]`.

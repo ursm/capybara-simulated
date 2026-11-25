@@ -745,16 +745,17 @@ module Capybara
       # Navigate a window realm (`win.location = …`): a FRESH realm for the new
       # document, like reload_frame_realm — an in-place `loadDocument` on an
       # already-loaded realm does NOT re-run inline scripts, but a fresh realm does.
-      # Returns the new realm's context id; `made` what its response gives the document (`create_window_realm`).
-      def reload_window_realm(old_id, url, body, content_type, **made)
+      # Returns the new realm's context id; `init` what the document is made of (Browser#document_init), `client_id` the
+      # client its navigation reserved, `viewport` the window's.
+      def reload_window_realm(old_id, body, init, client_id: nil, viewport: nil)
         meta = window_realm_meta[old_id] || {}
         # Like reload_frame_realm, a re-navigated window discards its child browsing contexts — dispose
         # the descendant frame realms too, not just old_id, so a popup's iframes don't linger.
         dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_window_realm(
-          url, body, content_type,
+          init['url'], body, nil,
           opener_id: meta[:opener_id], window_key: meta[:window_key], retarget_from: old_id, group: meta[:group],
-          about_base: meta[:about_base], **made
+          about_base: meta[:about_base], init: init, client_id: client_id, viewport: viewport
         )
       end
       # The navigation's reserved client id — the realm ADOPTS it as its service-worker Client identity
@@ -1497,17 +1498,23 @@ module Capybara
         refresh: nil,
         origin_agent_cluster: false
       )
+        # What it is made of — its policy container, its referrer, its Refresh, its controller: Browser#frame_document_init
+        # (document_init.rs) — and its classic history API state, a traversal's to its entry (`reload_frame_realm`).
+        init = @browser.frame_document_init(
+          url, parent_id,
+          content_type:         content_type,
+          origin:               doc_origin,
+          referrer:             referrer,
+          policy:               referrer_policy,
+          refresh:              refresh,
+          origin_agent_cluster: origin_agent_cluster
+        )
+        init['historyState'] = history_state[0] if history_state
         # Pass the URL + document body as call ARGUMENTS, not interpolated into
         # an eval string: the marshaller carries them losslessly, so arbitrary
         # HTML / control bytes survive (Ruby's String#inspect is NOT a faithful
         # JS string escaper — it mangles \a, \e, and binary bytes).
         V8Runtime.engine_call(realm, 'updateLocation', url.to_s) unless url.to_s.empty?
-        # (…and its classic history API state, a traversal's to its entry: `reload_frame_realm`)
-        V8Runtime.engine_call(realm, 'setHistoryState', history_state[0]) if history_state
-        # (…and its referrer, its navigation's request's — and the referrer policy its response's header sets, or, a srcdoc
-        # or initial about:blank document, that of its container's document, whose policy container it clones: HTML)
-        inherited = referrer_policy || (url.to_s.match?(/\Aabout:(?:srcdoc|blank)\b/i) ? @browser.inherited_referrer_policy(parent_id) : nil)
-        V8Runtime.engine_call(realm, 'setPendingReferrer', referrer.to_s, inherited.to_s) unless referrer.to_s.empty? && inherited.to_s.empty?
         adopt_client_id(realm, client_id)
         # The realm's document is the active document of the container's navigable (its nid, in the parent realm) —
         # BEFORE the document loads, so a frame whose load handler reads window.name (its navigable's target name, made
@@ -1518,66 +1525,34 @@ module Capybara
         # its initial about:blank where it is about:blank: `first_frame_realm?`; a container inserted again a new
         # navigable's)
         retarget_from = link ? realm_call(parent_id.to_i, 'linkFrameRealm', link, realm.id).to_i : -1
-        # The frame's viewport is its container's content box, measured by the parent realm. Seed it
-        # BEFORE the document loads so load-time `innerWidth` reads and `@media` evaluation see the
-        # frame's own size rather than the top window's. `nil` = an unrendered container, which is a
-        # 0x0 window — pass it through rather than skipping, or the frame keeps the top-level size.
-        V8Runtime.engine_call(realm, 'frameViewportChanged', viewport)
-        # …and the container's `marginwidth` / `marginheight`, which the framed body's first style already reads.
-        V8Runtime.engine_call(realm, 'frameMarginsChanged', *margins) if margins
-        # Seed the frame's sandboxing and its document origin (opaque/inherited) BEFORE the
-        # document loads, so its load-time scripts read the right self.origin and run (or
-        # not) under its sandbox. nil → a real-URL frame whose origin is its own location origin.
-        # (…a realm kept for the document — its initial about:blank's, `reuse_frame_realm` — reseeded whatever it had)
-        # (…an origin inherited the parent's, which made it: the one record, its domain with it — realm_location.rs
-        # `inherit_origin`)
-        V8Runtime.engine_call(realm, 'setSandbox', sandbox.to_i) unless sandbox.to_i.zero? && !reused
-        V8Runtime.engine_call(realm, 'setDocumentOrigin', doc_origin&.to_s, parent_id.to_i) unless doc_origin.nil? && !reused
-        # The frame's location.origin (opaque "null" for about:blank / srcdoc /
-        # javascript:); decoupled from the location string so navigation is intact.
-        V8Runtime.engine_call(realm, 'setLocationOrigin', location_origin&.to_s) unless location_origin.nil? && !reused
-        # (…and its agent, its origin known: realm_location.rs `origin_keyed_cluster`)
-        V8Runtime.engine_call(realm, 'obtainAgentCluster', origin_agent_cluster == true)
-        # An about:blank / about:srcdoc frame's URL is opaque, but its base URL (for
-        # relative-URL resolution) is INHERITED from the creator. Seed that inherited
-        # base BEFORE the document loads so its load-time scripts resolve relative URLs
-        # against the parent, even though location.href reports about:blank/srcdoc.
-        V8Runtime.engine_call(realm, 'setAboutBaseURL', about_base.to_s) unless about_base.to_s.empty? && !reused
-        # If a service worker's scope covers this frame's URL, the frame is a CONTROLLED client:
-        # wire its `navigator.serviceWorker.controller` BEFORE its document loads, so the frame's
-        # load-time scripts see the controller and route their subresource fetch() / XHR / EventSource
-        # through the SW's fetch event (fetch-event-network-error's controllee fires XHRs during load).
-        # The frame never called register(), so its per-realm registration Map is empty — set the
-        # controller directly from Ruby's scope→handle mirror. An OPAQUE child (about:blank / srcdoc)
-        # has no scope of its own, so it INHERITS its parent frame's controller (HTML: an about:blank
-        # document is controlled by its creator) — the controller its creator has now, from the client
-        # registry, which wiring it here records before the load: a NESTED frame built during this
-        # frame's load inherits it too.
-        opaque = opaque_frame_url?(url)
-        # A sandboxed frame WITHOUT allow-same-origin has an OPAQUE origin (doc origin 'null'), which
-        # is cross-origin to everything — so it is NOT CONTROLLED AT ALL. It inherits no controller
-        # from its creator (srcdoc-iframe: "sandboxed srcdoc should not inherit"), its subresource
-        # fetches never reach the SW, and it is absent from `clients.matchAll()`. Excluding it from
-        # only the client registry would not hold: a controlled frame's first subresource fetch
-        # re-registers it lazily from the fetch event (js/src/workers.js clientFor). The SW does still
-        # answer its NAVIGATION request, because a CSP-header sandbox is knowable only FROM that
-        # response (sandboxed-iframe-fetch-event, "Service worker should NOT control the sandboxed
-        # page"). allow-same-origin restores the parent origin, and a real-URL frame carries no
-        # explicit origin at all (nil = its own location origin) — both are controlled normally.
-        if doc_origin.to_s != 'null'
-          ctrl   = @browser.sw_client_controller_for(url.to_s, @browser.blob_partition_site(parent_id))
-          ctrl ||= @browser.sw_inherited_controller_for(parent_id) if opaque
-          if ctrl
-            # Wiring the controller is what registers this frame as a client — the realm reports
-            # itself from installController (js/src/sw-client.js), before the document below loads.
-            V8Runtime.engine_call(realm, 'swSetControllerDirect', *ctrl)
-          end
+        load_document(realm, body, init) do
+          # The frame's viewport is its container's content box, measured by the parent realm. Seed it
+          # BEFORE the document loads so load-time `innerWidth` reads and `@media` evaluation see the
+          # frame's own size rather than the top window's. `nil` = an unrendered container, which is a
+          # 0x0 window — pass it through rather than skipping, or the frame keeps the top-level size.
+          V8Runtime.engine_call(realm, 'frameViewportChanged', viewport)
+          # …and the container's `marginwidth` / `marginheight`, which the framed body's first style already reads.
+          V8Runtime.engine_call(realm, 'frameMarginsChanged', *margins) if margins
+          # Seed the frame's sandboxing and its document origin (opaque/inherited) BEFORE the
+          # document loads, so its load-time scripts read the right self.origin and run (or
+          # not) under its sandbox. nil → a real-URL frame whose origin is its own location origin.
+          # (…a realm kept for the document — its initial about:blank's, `reuse_frame_realm` — reseeded whatever it had)
+          # (…an origin inherited the parent's, which made it: the one record, its domain with it — realm_location.rs
+          # `inherit_origin`)
+          V8Runtime.engine_call(realm, 'setSandbox', sandbox.to_i) unless sandbox.to_i.zero? && !reused
+          V8Runtime.engine_call(realm, 'setDocumentOrigin', doc_origin&.to_s, parent_id.to_i) unless doc_origin.nil? && !reused
+          # The frame's location.origin (opaque "null" for about:blank / srcdoc /
+          # javascript:); decoupled from the location string so navigation is intact.
+          V8Runtime.engine_call(realm, 'setLocationOrigin', location_origin&.to_s) unless location_origin.nil? && !reused
+          # An about:blank / about:srcdoc frame's URL is opaque, but its base URL (for
+          # relative-URL resolution) is INHERITED from the creator. Seed that inherited
+          # base BEFORE the document loads so its load-time scripts resolve relative URLs
+          # against the parent, even though location.href reports about:blank/srcdoc.
+          V8Runtime.engine_call(realm, 'setAboutBaseURL', about_base.to_s) unless about_base.to_s.empty? && !reused
+          # The navigable's WindowProxy, held in any realm, its new document's window's from its first script on — as a
+          # window's (`create_window_realm`).
+          retarget_window_proxies(retarget_from, realm.id) if retarget_from >= 0
         end
-        # The navigable's WindowProxy, held in any realm, its new document's window's from its first script on — as a
-        # window's (`create_window_realm`).
-        retarget_window_proxies(retarget_from, realm.id) if retarget_from >= 0
-        # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
-        walks_guarded { V8Runtime.engine_call(realm, 'loadDocument', body.to_s, content_type.to_s, refresh) }
         # This document, loaded, refreshes the service-worker client record it made as it began loading
         # (bridge.entry.js loadDocument) — an UNCONTROLLED context is still a client of its origin
         # and must show up in `matchAll({includeUncontrolled: true})`.
@@ -1619,64 +1594,29 @@ module Capybara
       end
 
       # A document a navigation of a window `window.open` made in this isolate made, loaded into realm `realm` — a new
-      # one's, or the one of its initial about:blank, whose Window it keeps (`reuse_window_realm`): its URL, its origins
-      # (its URL's own, but an about:blank one's, which its initiator's are — `doc_origin` / `location_origin`), its
-      # referrer, its sandboxing, the client its navigation reserved, its classic history API state — a replay's its entry's
-      # (Browser#commit_window_navigation) — then its parse and its scripts, and its `load`.
-      private def load_window_document(
-        realm,
-        url,
-        body,
-        content_type,
-        history_state: nil,
-        doc_origin: nil,
-        location_origin: nil,
-        about_base: nil,
-        referrer: nil,
-        referrer_policy: nil,
-        csp: nil,
-        client_id: nil,
-        refresh: nil,
-        sandbox: nil,
-        controlled: true,
-        origin_agent_cluster: false
-      )
-        V8Runtime.engine_call(realm, 'updateLocation', url.to_s)
+      # one's, or the one of its initial about:blank, whose Window it keeps (`reuse_window_realm`): made of `init`
+      # (Browser#document_init: its URL, its origins, its policy container, its referrer, its controller, a replay's
+      # classic history API state), the client its navigation reserved (`client_id`) — then its parse and its scripts.
+      private def load_window_document(realm, body, init, client_id: nil)
+        V8Runtime.engine_call(realm, 'updateLocation', init['url'])
         # (…its `Date` what its server rendered it with: the host's clock's offset, where that has moved since its opener's
         # document was booted)
         V8Runtime.engine_call(realm, 'setTimeTravel', @browser.window_travel_offset_ms)
-        # (…a navigation's to about:blank its base URL the initiator's: HTML "navigate", the about base URL)
-        V8Runtime.engine_call(realm, 'setAboutBaseURL', about_base.to_s) if !about_base.to_s.empty? && url.to_s.match?(/\Aabout:blank(?:[?#]|\z)/i)
-        # (…its referrer the Referer its navigation sent, its policy its response's: HTML "create and initialize a
-        # Document object"; its sandboxing a CSP `sandbox`'s)
-        V8Runtime.engine_call(realm, 'setPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
         adopt_client_id(realm, client_id)
-        if doc_origin
-          # (…an about:blank one a navigation made its initiator's origins, its navigable's sandboxing: `navigationOrigins`)
-          V8Runtime.engine_call(realm, 'setSandbox', sandbox.to_i) if sandbox.to_i.positive?
-          V8Runtime.engine_call(realm, 'setDocumentOrigin', doc_origin.to_s)
-          V8Runtime.engine_call(realm, 'setLocationOrigin', location_origin&.to_s)
-        else
-          # (…another sandboxed as its window is, and by its response's CSP `sandbox`: realm_location.rs
-          # `seedWindowDocument`)
-          V8Runtime.engine_call(realm, 'seedWindowDocument', url.to_s, csp)
-        end
-        # (…and its agent, its origin known: realm_location.rs `origin_keyed_cluster`)
-        V8Runtime.engine_call(realm, 'obtainAgentCluster', origin_agent_cluster == true)
-        # (…a CONTROLLED client where a registration's scope covers its URL, matched in its own top-level site — Service
-        # Workers "Handle Fetch": the reserved client's active service worker, which the document's client takes — wired
-        # before its scripts run, as a frame's is (`create_frame_realm`), which registers it as a client; none for one of
-        # an opaque origin, nor one no fetch made: `controlled` false)
-        if controlled && doc_origin.to_s != 'null' && (ctrl = @browser.sw_client_controller_for(url.to_s, Native.site(url.to_s)))
-          V8Runtime.engine_call(realm, 'swSetControllerDirect', *ctrl)
-        end
-        # (…its `history.state` before its scripts read it)
-        V8Runtime.engine_call(realm, 'setHistoryState', history_state) unless history_state.nil?
-        # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
-        walks_guarded { V8Runtime.engine_call(realm, 'loadDocument', body.to_s, content_type.to_s, refresh) }
+        load_document(realm, body, init) { V8Runtime.engine_call(realm, 'seedTopLevelDocument', init['url'], init['csp'], init['origin'], init['locationOrigin']) }
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         V8Runtime.engine_call(realm, 'swReportClient') rescue nil
         @browser.sw_document_loaded(realm.id)
+      end
+      # …and either's — a frame's too — made of `init` in realm `realm`, its origins seeded by the block first: its base
+      # URL, what HTML "create and initialize a Document object" makes it of (bridge.entry.js `initializeDocument`), its
+      # parse.
+      private def load_document(realm, body, init)
+        yield
+        V8Runtime.engine_call(realm, 'setAboutBaseURL', init['aboutBase']) if init['aboutBase']
+        V8Runtime.engine_call(realm, 'initializeDocument', init)
+        # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
+        walks_guarded { V8Runtime.engine_call(realm, 'loadDocument', body.to_s, init['contentType'].to_s, init['refresh']) }
       end
 
       # Navigate window realm `id` from its initial about:blank to a document of that one's origin: loaded into the same
@@ -1685,14 +1625,14 @@ module Capybara
       # listeners: `w.onload = …`) the new document's Window has (Chrome measured for `open(url)`'s; Chrome makes a new
       # Window for `open()` then `location = url`, which HTML does not). Its Document object is the one its realm has,
       # renewed (dom-nodes.js `renewDocument`) and parsed again — a gap: HTML makes a new one (CLAUDE.md).
-      def reuse_window_realm(id, url, body, content_type, **made)
+      def reuse_window_realm(id, body, init, client_id: nil)
         realm = frame_realms[id] or return nil
         # (…the initial about:blank a service-worker client no more — its document replaced, its controller none, as a
         # document's unload makes it: Handle Service Worker Client Unload — the new document a client of its own)
         V8Runtime.engine_call(realm, 'swClientDiscarded')
         @browser.sw_unregister_client(id)
         V8Runtime.engine_call(realm, 'renewDocument')
-        load_window_document(realm, url, body, content_type, **made.except(:viewport))
+        load_window_document(realm, body, init, client_id: client_id)
         id
       rescue StandardError => e
         @browser.log_console('warn', "window realm load failed: #{e.message}")
@@ -1710,32 +1650,25 @@ module Capybara
       # same-isolate Document (cross-window adoptNode works). The single isolate also
       # makes a same-origin window far cheaper than today's isolate-per-window.
       # (…`retarget_from` the realm whose document this one replaces — its window the same WindowProxy wherever a realm
-      # holds one, retargeted before the document's scripts run: `realmHooks.retargetWindowProxy` — `csp` its response's
-      # Content-Security-Policy, `client_id` the client its navigation reserved, `history_state` a replay's classic history
-      # API state; `window_name` a new window's target name, its session history's to keep from then on, as a navigation
-      # of it hands it on: navigables.rs `window_name`)
+      # holds one, retargeted before the document's scripts run: `realmHooks.retargetWindowProxy` — `init` what a
+      # navigation's document is made of (Browser#document_init), `client_id` the client its navigation reserved;
+      # `window_name` a new window's target name, its session history's to keep from then on, as a navigation of it hands
+      # it on: navigables.rs `window_name`)
       def create_window_realm(
         url,
         body,
         content_type,
         opener_id: nil,
         window_name: nil,
-        doc_origin: nil,
-        location_origin: nil,
         about_base: nil,
         window_key: nil,
         referrer: nil,
         referrer_policy: nil,
         retarget_from: nil,
-        csp: nil,
         client_id: nil,
-        refresh: nil,
-        sandbox: nil,
-        controlled: true,
-        history_state: nil,
         viewport: nil,
         group: page_group,
-        origin_agent_cluster: false
+        init: nil
       )
         realm = seed_realm_bridge(ctx.create_context, group)
         # (…the host's clock's offset its opener's time origin holds, for its initial about:blank: agent_clock.rs `TimeOrigin`)
@@ -1787,19 +1720,14 @@ module Capybara
         window_realms_changed
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
         if initial
-          walks_guarded { V8Runtime.engine_call(realm, 'loadDocument', body.to_s, content_type.to_s, refresh) }
+          walks_guarded { V8Runtime.engine_call(realm, 'loadDocument', body.to_s, content_type.to_s) }
           # As in create_frame_realm: an auxiliary window is a client of its origin too.
           V8Runtime.engine_call(realm, 'swReportClient') rescue nil
           # (…a new window's initial about:blank completely loaded as it is made, firing no load: bridge.entry.js
           # `completeInitialDocument`)
           V8Runtime.engine_call(realm, 'completeInitialDocument') rescue nil
         else
-          load_window_document(
-            realm, url, body, content_type,
-            doc_origin: doc_origin, location_origin: location_origin, about_base: about_base, referrer: referrer, referrer_policy: referrer_policy,
-            csp: csp, client_id: client_id, refresh: refresh, sandbox: sandbox, history_state: history_state, controlled: controlled,
-            origin_agent_cluster: origin_agent_cluster
-          )
+          load_window_document(realm, body, init, client_id: client_id)
         end
         realm.id
       rescue StandardError => e
