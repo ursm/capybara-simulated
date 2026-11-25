@@ -189,9 +189,27 @@ impl Record {
     }
 }
 
+// What a worker's requests and its realm carry, as it was made (HTML's worker environment settings): its storage
+// partition (its owner document's top-level site; a nested worker's its parent's; a service worker's its registration's),
+// its site for cookies (a dedicated or shared worker's, its owner document's — none, `null`, of an opaque origin's; a
+// service worker's not kept: its script's URL's), its creator's origin key and agent cluster key, and whether it is
+// cross-origin isolated and a secure context. Kept apart from the record, past its leaving the registry: a request its
+// thread — or a thread its thread spawned, a keepalive fetch's — still has in flight is the worker's all the same, until
+// the session's reset.
+#[derive(Clone, Debug, Default)]
+struct Identity {
+    partition: String,
+    site_for_cookies: Option<Option<String>>,
+    creator_key: Option<String>,
+    cluster_key: Option<String>,
+    isolated: bool,
+    secure: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct Records {
     map: HashMap<i64, Record>,
+    identities: HashMap<i64, Identity>,
 }
 
 impl WorkerHost {
@@ -265,10 +283,47 @@ impl WorkerHost {
         self.stirred.notify_all();
         gone.map(|r| (r.kind.name(), r.in_flight, r.parked))
     }
-    // #workers_clear — every record gone: the session's reset.
+    // #workers_clear — every record gone, and every worker's identity: the session's reset.
     fn workers_clear(&self) {
-        self.records().map.clear();
+        let mut records = self.records();
+        records.map.clear();
+        records.identities.clear();
+        drop(records);
         self.stirred.notify_all();
+    }
+    // #worker_identity(handle, partition, keeps_site, site_for_cookies, creator_key, cluster_key, isolated, secure) — what
+    // its requests and its realm carry, as it was made (`Identity`): `keeps_site` false for a worker that keeps no site for
+    // cookies of its own (a service worker), `site_for_cookies` nil for an opaque one's.
+    #[allow(clippy::too_many_arguments)]
+    fn worker_identity(&self, handle: i64, partition: String, keeps_site: bool, site_for_cookies: Option<String>, creator_key: Option<String>, cluster_key: Option<String>, isolated: bool, secure: bool) {
+        let identity = Identity { partition, site_for_cookies: keeps_site.then_some(site_for_cookies), creator_key, cluster_key, isolated, secure };
+        self.records().identities.insert(handle, identity);
+    }
+    fn identity<R>(&self, handle: i64, none: R, f: impl FnOnce(&Identity) -> R) -> R {
+        self.records().identities.get(&handle).map_or(none, f)
+    }
+    // #worker_partition(handle) -> its storage partition; nil for none.
+    fn worker_partition(&self, handle: i64) -> Option<String> {
+        self.identity(handle, None, |i| Some(i.partition.clone()))
+    }
+    // #worker_site_for_cookies(handle) -> `[site]` its own site for cookies — `[nil]`, an opaque one's none — or nil where it
+    // keeps none (a service worker; none known).
+    fn worker_site_for_cookies(&self, handle: i64) -> Option<(Option<String>,)> {
+        self.identity(handle, None, |i| i.site_for_cookies.clone().map(|s| (s,)))
+    }
+    // #worker_creator_key(handle) / #worker_cluster_key(handle) -> its creator's origin key / its agent cluster key.
+    fn worker_creator_key(&self, handle: i64) -> Option<String> {
+        self.identity(handle, None, |i| i.creator_key.clone())
+    }
+    fn worker_cluster_key(&self, handle: i64) -> Option<String> {
+        self.identity(handle, None, |i| i.cluster_key.clone())
+    }
+    // #worker_isolated?(handle) / #worker_secure?(handle) -> whether it is cross-origin isolated / a secure context.
+    fn worker_isolated(&self, handle: i64) -> bool {
+        self.identity(handle, false, |i| i.isolated)
+    }
+    fn worker_secure(&self, handle: i64) -> bool {
+        self.identity(handle, true, |i| i.secure)
     }
     // #worker_kind(handle) -> "dedicated", "shared" or "service"; nil for none.
     fn worker_kind(&self, handle: i64) -> Option<&'static str> {
@@ -728,6 +783,13 @@ pub(crate) fn define(class: magnus::RClass) -> Result<(), magnus::Error> {
     class.define_method("worker_drop", method!(WorkerHost::worker_drop, 1))?;
     class.define_method("workers_clear", method!(WorkerHost::workers_clear, 0))?;
     class.define_method("worker_kind", method!(WorkerHost::worker_kind, 1))?;
+    class.define_method("worker_identity", method!(WorkerHost::worker_identity, 8))?;
+    class.define_method("worker_partition", method!(WorkerHost::worker_partition, 1))?;
+    class.define_method("worker_site_for_cookies", method!(WorkerHost::worker_site_for_cookies, 1))?;
+    class.define_method("worker_creator_key", method!(WorkerHost::worker_creator_key, 1))?;
+    class.define_method("worker_cluster_key", method!(WorkerHost::worker_cluster_key, 1))?;
+    class.define_method("worker_isolated?", method!(WorkerHost::worker_isolated, 1))?;
+    class.define_method("worker_secure?", method!(WorkerHost::worker_secure, 1))?;
     class.define_method("worker_parent", method!(WorkerHost::worker_parent, 1))?;
     class.define_method("worker_realm", method!(WorkerHost::worker_realm, 1))?;
     class.define_method("worker_children", method!(WorkerHost::worker_children, 1))?;
@@ -960,6 +1022,19 @@ mod tests {
         host.lockstep_wait(vec![1], began, &cancel);
         interrupting.join().unwrap();
         assert!(began.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn a_worker_s_identity_outlives_its_record_until_the_reset() {
+        let host = host_with("dedicated");
+        host.worker_identity(1, "https://a.test".into(), true, None, Some("https://a.test".into()), None, false, true);
+        host.worker_drop(1);
+        assert_eq!(host.worker_partition(1).as_deref(), Some("https://a.test"));
+        assert_eq!(host.worker_site_for_cookies(1), Some((None,)));
+        host.worker_identity(2, String::new(), false, Some("x".into()), None, None, false, true);
+        assert_eq!(host.worker_site_for_cookies(2), None);
+        host.workers_clear();
+        assert_eq!(host.worker_partition(1), None);
     }
 
     #[test]

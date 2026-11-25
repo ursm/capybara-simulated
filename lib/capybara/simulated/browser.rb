@@ -5250,7 +5250,7 @@ module Capybara
         # isolate and the registry records it below.
         # (…of its storage key: its owner's top-level site — the creating document's, a nested worker's parent's, a service
         # worker's its registration's, `site`)
-        site ||= parent_worker ? @workers.dig(parent_worker, :partition) : blob_partition_site(realm_id.to_i)
+        site ||= parent_worker ? @worker_host.worker_partition(parent_worker) : blob_partition_site(realm_id.to_i)
         # A SharedWorker connects to the shared worker of its constructor URL and name in its storage key where one runs —
         # HTML "SharedWorker constructor" (worker_host.rs `shared_connect`) — no worker of its own spawned: its realm one
         # more of the worker's owners, its port posted to it as a connection (workers.js). One of another type or credentials
@@ -5338,25 +5338,20 @@ module Capybara
         # once built, so the session boundary can stop the JS half without waiting for it (see `stop_worker_js`). The
         # lock is per worker rather than the shared counter mutex: the only two things that ever contend for it are that
         # stop and the worker's own dispose, and holding it across a native call must not block anything else in the
-        # browser. And what its thread's requests carry, which it was made with — and its window's engine host, which its
-        # agent record is in, where its thread waits in another window's (`await_worker_reply`).
-        record = {handle: handle, host: @worker_host, thread: nil, inbox: inbox, creator_key: creator_key, cluster_key: cluster_key, isolated: !service && isolated == true, secure: service || secure == true, rt: nil, rt_lock: Mutex.new}
-        # (…its storage partition its owner document's — a nested worker's its parent's — as it was made: blob_rules.rs
-        # `partition_site`)
-        record[:partition] = site
-        # (…a dedicated worker's site for cookies its owner document's, kept as it was made — HTML's worker settings —
-        # which its fetches, on its own thread, are judged by; a nested worker's its parent's)
-        unless service
-          # (…an opaque origin's none: a sandboxed frame's)
-          record[:site_for_cookies] =
-            if Native.opaque_origin_key?(creator_key.to_s)
-              nil
-            elsif parent_worker
-              @workers.dig(parent_worker, :site_for_cookies)
-            else
-              site_for_cookies(realm_id)
-            end
-        end
+        # browser. And its window's engine host, which its agent record is in, where its thread waits in another window's
+        # (`await_worker_reply`), and which its thread's requests ask what they carry (`worker_identity`).
+        record = {handle: handle, host: @worker_host, thread: nil, inbox: inbox, rt: nil, rt_lock: Mutex.new}
+        # What its requests and its realm carry, as it was made — the engine's (worker_records.rs `Identity`): its storage
+        # partition its owner document's (a nested worker's its parent's: blob_rules.rs `partition_site`); a dedicated or
+        # shared worker's site for cookies its owner document's — HTML's worker settings — which its fetches, on its own
+        # thread, are judged by (a nested worker's its parent's, an opaque origin's none: a sandboxed frame's); its
+        # creator's origin key and agent cluster key; whether it is cross-origin isolated and a secure context.
+        cookie_site =
+          if service || Native.opaque_origin_key?(creator_key.to_s) then nil
+          elsif parent_worker then @worker_host.worker_site_for_cookies(parent_worker)&.first
+          else site_for_cookies(realm_id)
+          end
+        @worker_host.worker_identity(handle, site.to_s, !service, cookie_site, creator_key&.to_s, cluster_key&.to_s, !service && isolated == true, service || secure == true)
         # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
         # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
         # (…its bytes the first of its script resource map, which an update is byte-checked against: sw_registry.rs)
@@ -6782,7 +6777,7 @@ module Capybara
         # this is, its rivals what each realm and worker client then asks of its own document.
         candidate_scopes = Native.sw_claim(@sw_partition, handle.to_i, scope.to_s)
         # (…of the claiming registration's storage key alone, its top-level site the worker's: sw_registry.rs)
-        site = @workers.dig(handle.to_i, :partition).to_s
+        site = @worker_host.worker_partition(handle.to_i).to_s
         claim = {handle: handle, has_fetch: has_fetch, script_url: script_url, scope: scope, all_scopes: candidate_scopes, site: site}
         sw_browsers.each {|b| b.sw_claim_told(claim) }
         nil
@@ -6794,7 +6789,7 @@ module Capybara
         broadcast_to_realms('swClaimClient', *claim.values_at(:handle, :has_fetch, :script_url, :scope, :all_scopes, :site))
         # Snapshot: a live worker thread can insert into @workers (a nested spawn) mid-walk.
         @workers.to_a.each do |h, w|
-          next if !w[:thread]&.alive? || w[:partition].to_s != claim[:site] || service_worker?(h)
+          next if !w[:thread]&.alive? || @worker_host.worker_partition(h).to_s != claim[:site] || service_worker?(h)
 
           w[:inbox] << claim.merge(kind: 'claim_client')
         end
@@ -6984,12 +6979,12 @@ module Capybara
       def sw_note_worker_client(handle, url, shared, controller_handle)
         origin =
           if url.to_s.start_with?('blob:')
-            key = @workers[handle]&.dig(:creator_key).to_s
+            key = @worker_host.worker_creator_key(handle).to_s
             key.start_with?('http:', 'https:') ? key : nil
           else
             url_origin(url)
           end
-        note_client(sw_worker_client_id(handle), -handle.to_i, url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, origin, @workers.dig(handle, :partition).to_s)
+        note_client(sw_worker_client_id(handle), -handle.to_i, url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, origin, @worker_host.worker_partition(handle).to_s)
       end
 
       # A worker CLIENT's controller changed (a clients.claim() the worker isolate adopted): its
@@ -9509,7 +9504,7 @@ module Capybara
       # made in this isolate its own — '' for an opaque one; a worker's its owner document's (its record's).
       def blob_partition_site(realm = 0)
         if (record = Thread.current[:csim_worker_record])
-          return record[:partition].to_s
+          return record[:host].worker_partition(record[:handle]).to_s
         end
 
         @runtime.realm_direct_call(realm.to_i, 'blobPartitionSite').to_s
@@ -9932,7 +9927,7 @@ module Capybara
         # `stop_worker_wait` kills a worker with no runtime published, and an isolate a kill interrupted the making of is
         # no one's, 21-26 MB of it per reset)
         Thread.handle_interrupt(Object => :never) do
-          rt = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name, isolated: record&.dig(:isolated) == true, secure: record&.dig(:secure) != false)
+          rt = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name, isolated: @worker_host.worker_isolated?(handle), secure: @worker_host.worker_secure?(handle))
           record[:rt_lock].synchronize { record[:rt] = rt } if record
         end
         # …and how its clock moves on by `ms`, nothing of its run — the time a worker's answer took, which its script
@@ -9955,7 +9950,7 @@ module Capybara
           record[:agent_owner] = Native.agent_owner_new
           rt.call('realmIdentify', 'agentOwner', record[:agent_owner])
           # (…and its storage partition, its owner document's: what the blob URLs it makes and resolves are of)
-          rt.call('realmIdentify', 'partition', record[:partition].to_s) if record[:partition]
+          rt.call('realmIdentify', 'partition', @worker_host.worker_partition(handle).to_s) if @worker_host.worker_partition(handle)
         end
         # A dedicated / shared worker is a service-worker CLIENT of its origin, and the host
         # registry already records it as 'client-worker-<handle>' (sw_note_worker_client). Seed
@@ -10000,7 +9995,7 @@ module Capybara
         rt.call('setOriginKey', worker_origin_key) if worker_origin_key
         # …and its agent cluster (HTML "obtain a dedicated/shared worker agent"): a dedicated worker's its owner's, a shared
         # or service worker's one of its own — what a WebAssembly.Module it is sent is read back in (clone.rs).
-        cluster = shared || service ? "#{@browsing_context_group}|worker:#{handle}" : record&.dig(:cluster_key)
+        cluster = shared || service ? "#{@browsing_context_group}|worker:#{handle}" : @worker_host.worker_cluster_key(handle)
         rt.call('setAgentClusterKey', cluster) if cluster
         # A service worker runs in a ServiceWorkerGlobalScope: adjust the worker scope
         # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs. The
@@ -10021,7 +10016,7 @@ module Capybara
         # script URL): fetch it through the SW redirect chain NOW, on this worker's own thread
         # (worker_main_script_fetch) — per-hop interception, network fall-back included.
         if body.nil? && sw_script
-          fetched = worker_main_script_fetch(sw_script, url, handle, site: record[:partition].to_s, shared: shared, creator_client: creator_client)
+          fetched = worker_main_script_fetch(sw_script, url, handle, site: @worker_host.worker_partition(handle).to_s, shared: shared, creator_client: creator_client)
           raise "worker script blocked: #{url}" if fetched == :error
           raise "worker script not found: #{url}" unless fetched
 
@@ -10824,7 +10819,7 @@ module Capybara
             nav_dest:              nav_dest,
             dest:                  dest,
             top_url:               page_url,
-            worker:                worker&.key?(:site_for_cookies) ? [worker[:site_for_cookies]] : nil,
+            worker:                worker && worker[:host].worker_site_for_cookies(worker[:handle]),
             ua_headers:            ua_headers
           },
           [@cors_preflight_cache, @auth_cache]
