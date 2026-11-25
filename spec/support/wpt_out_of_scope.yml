@@ -62632,6 +62632,51 @@ html/semantics/interactive-elements/the-dialog-element/top-layer-stacking.tentat
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/semantics/popovers/light-dismiss-event-ordering.tentative.html:
+- name: Tests the order of pointer/mouse events during popover light dismiss.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/popovers/popover-anchor-nested-display.tentative.html:
+- name: "== html/semantics/popovers/popover-anchor-nested-display-ref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/popovers/popover-light-dismiss-command-edge-cases.tentative.html:
+- name: commandfor on auto-type button with form owner light dismisses the popover
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: commandfor on reset button with form owner light dismisses the popover
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/popovers/popover-open-overflow-display.tentative.html:
+- name: "== html/semantics/popovers/popover-open-overflow-display-ref.html"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/semantics/popovers/popover-top-layer-nesting-anchor.tentative.html:
+- name: Nested popover=auto ancestors with fullscreen
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Nested popover=auto ancestors, target is outer with fullscreen
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Single popover=auto ancestor with fullscreen
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Single popover=manual ancestor with fullscreen
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Top layer inside of nested element with fullscreen
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/webappapis/scripting/events/event-handler-onmove-01.tentative.html:
 - name: Window move event
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

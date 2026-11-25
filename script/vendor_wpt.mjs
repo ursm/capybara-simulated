@@ -92,6 +92,12 @@ const TREES = [
                                        // returnValue / cancel), <details> (toggle, exclusive accordions),
                                        // <summary> activation and the command / commandfor invokers — DOM
                                        // and event surface the app suites' modals and disclosures ride on
+  'html/semantics/popovers',           // the popover API: show / hide / toggle, the auto and hint lists, light
+                                       // dismiss, popovertarget invokers, beforetoggle / toggle and their coalescing,
+                                       // the popover focusing steps and focus restoration (positioning and rendering
+                                       // subtests need layout the gate holds them to like any other)
+  'close-watcher',                     // CloseWatcher and the close watcher manager its groups, user activation and
+                                       // close requests share with dialogs and popovers
   'html/semantics/forms',              // form submission / constraint validation / FormData / input /
                                        // select / textarea / labels — the form-driven surface every app
                                        // suite exercises (layout-dependent widget-rendering subtests are
@@ -333,12 +339,8 @@ const SUPPORT_FILES = [
   // dom/nodes/insertion-removing-steps' meta-referrer test reads the Referer its fetches carried through this echo
   // handler, from a tree we don't vendor (its other tests are of base URLs).
   'html/infrastructure/urls/terminology-0/resources/echo-referrer-text.py',
-  // html/semantics/interactive-elements' dialog and details tests drive light dismiss, close requests and toggle
-  // sources through these helpers (clickOn / sendEscKey / sendCloseRequest / the toggle-source harness, the focus
-  // utilities) by path into trees we don't vendor; each is plain testdriver code.
-  'html/semantics/popovers/resources/popover-utils.js',
-  'html/semantics/popovers/resources/toggle-event-source-test.js',
-  'close-watcher/resources/helpers.js',
+  // html/semantics/interactive-elements' dialog and details tests drive autofocus through these focus utilities, by
+  // path into a tree we don't vendor; plain testdriver code.
   'html/interaction/focus/the-autofocus-attribute/resources/utils.js',
   'pointerevents/pointerevent_support.js',
   'html/cross-origin-embedder-policy/credentialless/resources/common.js',
