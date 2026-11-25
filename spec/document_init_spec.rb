@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # What the document a navigation commits is made of is decided once, for the page and a window `window.open` made alike
 # (document_init.rs, HTML "create and initialize a Document object"): here, the service worker that controls it — the one
@@ -62,5 +63,24 @@ RSpec.describe 'a document a navigation commits' do
     session.execute_script("w.location = '/sandboxed'")
     session.switch_to_window(session.windows.last)
     expect(poll_until { session.evaluate_script('document.title').then {|t| t.empty? ? nil : t } }).to eq('network')
+  end
+
+  # …and the origin of the document a `javascript:` URL's string result makes of a window `open()` made: the document
+  # it replaces' own — here a frame's, of another origin than the page — never the page's (HTML "evaluate a javascript:
+  # URL": the new document's origin the navigable's active document's).
+  it "is a window's javascript: URL document, of the origin of the one it replaces", :every_host_local do
+    framed = lambda {|env|
+      case env['HTTP_HOST']
+      when 'b.test' then [200, {'content-type' => 'text/html'}, ['<!doctype html><script>window.w = open("")</script>']]
+      else [200, {'content-type' => 'text/html'}, ['<!doctype html><iframe src="https://b.test/fr"></iframe>']]
+      end
+    }
+    session = simulated_session(framed)
+    session.visit 'https://a.test/top'
+    session.within_frame(0) do
+      expect(poll_until { session.evaluate_script('window.w && w.origin') }).to eq('https://b.test')
+      session.execute_script(%q(w.location = 'javascript:"<p id=x>js</p>"'))
+      expect(poll_until { session.evaluate_script('w.document.getElementById("x") && w.origin') }).to eq('https://b.test')
+    end
   end
 end

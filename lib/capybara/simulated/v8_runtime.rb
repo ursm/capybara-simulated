@@ -631,13 +631,15 @@ module Capybara
           going.each do |id|
             evict_window_proxies(id)
             (V8Runtime.engine_call(@ctx, 'neuterDetachedWindow', id) if @ctx) rescue nil
+            # (…discarded whatever became of that: the mark the page's leave drops it by)
+            (V8Runtime.engine_call(@ctx, 'discardRealm', id.to_i) if @ctx) rescue nil
           end
         end
         # (…and the blob URLs each realm going with the page made — a frame's, a same-isolate popup's — revoked as its
         # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
         going.each {|id| @browser.revoke_realm_blobs(id) rescue nil }
         if @ctx && kept.empty?
-          discarded = Array(V8Runtime.engine_call(@ctx, 'discardedRealmList')).select {|id| id.positive? && !@frame_realms&.key?(id) }
+          discarded = (Array(V8Runtime.engine_call(@ctx, 'discardedRealmList')) rescue []).select {|id| id.positive? && !@frame_realms&.key?(id) }
           (going | discarded).each do |id|
             V8Runtime.engine_call(@ctx, 'dropRealm', id.to_i)
           rescue StandardError

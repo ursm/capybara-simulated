@@ -99,8 +99,8 @@ pub(crate) fn keeps_window(initial: bool, own: &str, domain_set: bool, origin: O
 // 'originAgentCluster', 'origin' (where its URL does not say it: 'null' a new opaque one), 'locationOrigin', 'aboutBase',
 // 'controller', and, for the
 // host's commit of its opener policy (session_history.rs `commit_opener_policy`), 'openerPolicy' and 'responseOrigin'.
-// `params` (symbol keys): `url`; `headers` its response's (nil none: a document of no response, or whose response's
-// policies it is made of none — `inline`); `content_type` the type its body said or it is made as, over its response's;
+// `params` (symbol keys): `url`; `headers` its response's (nil none: a document of no response); `inline` an inline
+// content document's (a PDF viewer's, an error document's), made of none of its response's policies; `content_type` the type its body said or it is made as, over its response's;
 // `loopback` the host's stand-in for a secure context; `origin` its origin where its URL does not say it, with the
 // origin its location reports (`location_origin`, an about:blank one's its initiator's) and its base URL (`about_base`);
 // `fields` in place of `headers`, `[Referrer-Policy, Refresh, origin-keyed]`, a frame's response as its build read it;
@@ -126,7 +126,9 @@ pub(crate) fn initialize_document(ruby: &Ruby, params: RHash) -> Result<RHash, E
         (fields.refresh, fields.origin_agent_cluster) = (refresh.clone(), *origin_agent_cluster);
     }
     let response = (!inline && (headers.is_some() || given.is_some())).then(|| PolicyContainer { csp: fields.csp.clone(), referrer_policy: fields.referrer_policy.unwrap_or_default().to_owned() });
-    let policies = policy_container(&url, container("initiator")?.as_ref(), container("parent")?.as_ref(), response);
+    // (…an inline content document's — a PDF viewer's, an error document's — a new one: HTML "create a document for
+    // inline content that doesn't have a DOM", whose navigation params' request is null, so no referrer either)
+    let policies = if inline { PolicyContainer::default() } else { policy_container(&url, container("initiator")?.as_ref(), container("parent")?.as_ref(), response) };
     let given_origin = text("origin")?;
     let coop = text("coop")?;
     // (…the origin its response's opener policy is judged by: its own, but an inline content document's of a `blob:` URL,
@@ -148,7 +150,7 @@ pub(crate) fn initialize_document(ruby: &Ruby, params: RHash) -> Result<RHash, E
     out.aset("contentType", content_type)?;
     out.aset("csp", policies.csp)?;
     out.aset("referrerPolicy", policies.referrer_policy)?;
-    out.aset("referrer", text("referrer")?.filter(|r| !r.is_empty()))?;
+    out.aset("referrer", text("referrer")?.filter(|r| !r.is_empty() && !inline))?;
     out.aset("refresh", if inline { None } else { fields.refresh.clone() })?;
     out.aset("originAgentCluster", !inline && fields.origin_agent_cluster)?;
     out.aset("origin", given_origin)?;
