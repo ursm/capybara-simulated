@@ -470,9 +470,11 @@ fn abort_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     rv.set_int32(step.map_or(-1, |(realm, what)| (realm << ABORT_BITS) | what as i32));
 }
 // __dom.teardown(realm, teardown) -> the walk tearing realm `realm`'s document and its descendants' down, for what
-// `teardown` names (`Teardown::of`) — or -1 for a number that names none.
+// `teardown` names (`Teardown::of`) — or -1 for no realm's number or a purpose number that names none.
 fn teardown(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let root = args.get(0).int32_value(scope).unwrap_or(0);
+    // (…a realm's number alone: no other value is read as the page's)
+    let root = args.get(0);
+    let Some(root) = root.is_int32().then(|| root.int32_value(scope)).flatten().filter(|&r| r >= 0) else { return rv.set_int32(-1) };
     let Some(teardown) = Teardown::of(args.get(1).uint32_value(scope).unwrap_or(u32::MAX)) else { return rv.set_int32(-1) };
     let cid = realm_id(scope, &args);
     rv.set_uint32(crate::dom::realm(scope, cid).begin_teardown(root, teardown));

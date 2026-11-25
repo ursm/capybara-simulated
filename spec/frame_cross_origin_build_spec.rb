@@ -19,7 +19,7 @@ RSpec.describe 'a cross-origin frame and its frames' do
                <<~HTML
                  <!doctype html><meta charset=utf-8><title>top</title>
                  <script>var msgs = []; addEventListener('message', (e) => msgs.push(e.data + '@' + e.origin));</script>
-                 <iframe src="http://cross.example.org/child"></iframe>
+                 <iframe src="http://cross.test/child"></iframe>
                HTML
              when '/child'
                <<~HTML
@@ -41,8 +41,8 @@ RSpec.describe 'a cross-origin frame and its frames' do
   before { session.visit 'http://www.example.com/' }
 
   it 'loads with the page, its scripts and its frames’ run' do
-    expect(requests).to eq(['www.example.com/', 'cross.example.org/child', 'www.example.com/grand'])
-    expect(session.evaluate_script('msgs')).to eq(['child-ran@http://cross.example.org', 'grand-ran@http://www.example.com'])
+    expect(requests).to eq(['www.example.com/', 'cross.test/child', 'www.example.com/grand'])
+    expect(session.evaluate_script('msgs')).to eq(['child-ran@http://cross.test', 'grand-ran@http://www.example.com'])
   end
 
   it 'reads a frame of the page’s origin inside it on the first access' do

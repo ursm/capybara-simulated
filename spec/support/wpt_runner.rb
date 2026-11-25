@@ -1017,9 +1017,9 @@ module WptRunner
   def session
     # The wptserve shim app serves EVERY host (www.example.com, the cross-origin
     # test hosts not-web-platform.test / www1.web-platform.test, the SUB_ORIGIN),
-    # so every host is genuinely local here. Mark it so a cross-origin iframe
-    # fixture eager-builds + is served by @app.call (real apps leave this off, so
-    # external embeds stay lazy). The Browser caches this at construction, so set
+    # so every host is genuinely local here. Mark it so a cross-origin fixture is
+    # served by @app.call, not looked up on the network (real apps leave this off).
+    # The Browser caches this at construction, so set
     # the env ONLY while constructing the session and restore it immediately — a
     # process-global flag would otherwise leak into a later non-WPT Browser built
     # in the same rspec process (e.g. under `--order random`).

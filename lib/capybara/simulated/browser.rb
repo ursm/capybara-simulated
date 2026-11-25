@@ -293,11 +293,9 @@ module Capybara
         # The WPT runner serves EVERY host through one in-process Rack app (the
         # wptserve catch-all), so cross-origin test fixtures are genuinely local
         # there. Setting this makes `url_is_local?` true for all hosts, so a
-        # cross-origin iframe eager-builds + is served by @app.call directly
-        # (no failing net_http_fetch). Apps leave it off: an external embed stays
-        # non-local → lazy → no @app.call side effect (extra visit / log row).
-        # Universal-server context (every host served in-process → cross-origin frames
-        # eager-build). The Driver captures this at session-construction time (when the
+        # cross-origin request is served by @app.call directly (no failing
+        # net_http_fetch). Apps leave it off: another host's request goes to the
+        # network first. The Driver captures this at session-construction time (when the
         # WPT runner has the env set) and passes it to EVERY window it builds, so an aux
         # window opened LATER — after the runner restored the env — still inherits it.
         # nil override (a stand-alone Browser) falls back to the live env check.
@@ -10120,7 +10118,7 @@ module Capybara
                   ct    = response_field(r, 'content-type')
                   body2 = r['body'].to_s
                 end
-                # Strict (unlike classic importScripts' allHostsLocal-gated check, the
+                # Strict (unlike classic importScripts' `url_is_local?`-gated check, the
                 # Mastodon-Tesseract concession): Chrome enforces JS MIME for module
                 # scripts unconditionally.
                 raise "module import has an unsupported MIME type: #{abs}" unless js_mime_type?(ct)

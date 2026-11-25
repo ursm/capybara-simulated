@@ -7,7 +7,7 @@ require_relative 'support/poll_until'
 # An image a controlling service worker answers loads from its response's bytes — a network response passed on, and one
 # whose body is a stream the worker made (its chunks drained, then decoded) — its request carrying an image's `Accept`.
 # (…every host served in-process, which a service worker's job is scheduled under alone: browser.rb `sw_schedule_job`'s
-# `all_hosts_local?`)
+# `@all_hosts_local`)
 RSpec.describe 'a service worker image' do
   include PollUntil
 

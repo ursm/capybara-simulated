@@ -120,16 +120,23 @@ struct LoadRun {
     // (`PROMPT_OWED`: HTML "navigate" asks in parallel with the task that began it) — and the one being asked.
     ask: Option<i32>,
     asking: i32,
-    // The load gate its build runs under (bridge.entry.js `subresourceGate`), the page's load waiting for it.
+    // The load gate its build runs under (bridge.entry.js `subresourceGate`), the page's load waiting for it — and whether
+    // its task has taken it.
     gate: Option<u32>,
+    gate_taken: bool,
     // Its response in later, as its server took its time (frame_response.rs `FRAME_LATER`): built again then, its `load`
     // waiting for that.
     building: bool,
     load_queued: bool,
 }
-// (…as many of a container's as may still have steps to run: an older one's are those of a superseded navigation, which
-// come to nothing — and to nothing all the same where its run has gone)
-const LOAD_RUNS_KEPT: usize = 8;
+impl LoadRun {
+    // Whether a superseded navigation's run has a step left that needs it: its document still to ask — HTML "navigate"
+    // asks, and only then looks whether it is still the ongoing one — or its build's load gate still to take, which the
+    // page's load waits for. Its other steps come to nothing — its build, its `load` — and come to the same without it.
+    fn pending(&self) -> bool {
+        self.ask.is_some() || (self.gate.is_some() && !self.gate_taken)
+    }
+}
 
 // Its element's `load` fired or queued (frame-nav.js `FN_LOAD_FIRED`).
 pub(crate) const LOAD_FIRED: u32 = 1 << 0;
@@ -1669,6 +1676,7 @@ const LOAD_PHASE_BUILT: u32 = 8;
 const LOAD_PHASE_BUILT_ONLY: u32 = 9;
 const LOAD_PHASE_QUEUE_LOAD: u32 = 10;
 const LOAD_PHASE_COMMITTED: u32 = 11;
+const LOAD_PHASE_END: u32 = 12;
 // What the bindings do next (`frameLoadNext`), then coming back with the phase it names: nothing more; ask realm `arg`'s
 // document whether it may be unloaded (answer 1: it may); abort realm `arg`'s document and its descendants; end the
 // navigation, declined ("finalize a cross-document navigation"); queue the run's task again; take load gate `arg`; build the
@@ -1694,10 +1702,8 @@ impl RealmArena {
         let id = self.frame_navigations.1.load_runs;
         let ask = self.frame_nav_has(container, PROMPT_OWED).then(|| self.frame_realm(container).unwrap_or(-1));
         let nav = self.frame_navigation(container);
-        if nav.runs.len() >= LOAD_RUNS_KEPT {
-            nav.runs.remove(0);
-        }
-        nav.runs.push(LoadRun { id, generation, commit, ask, asking: -1, gate: None, building: false, load_queued: false });
+        nav.runs.retain(|r| r.generation == generation || r.pending());
+        nav.runs.push(LoadRun { id, generation, commit, ask, asking: -1, gate: None, gate_taken: false, building: false, load_queued: false });
         id
     }
     fn load_run(&mut self, container: NodeId, id: u32) -> Option<&mut LoadRun> {
@@ -1725,8 +1731,9 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
     loop {
         let arena = crate::dom::realm(scope, cid);
         let Some(run) = arena.load_run(container, id).map(|r| *r) else {
-            // (…a run gone: a superseded navigation's, whose `load` is owed no more — but paid where its container is gone)
-            let fire = matches!(phase, LOAD_PHASE_FIRE | LOAD_PHASE_FIRE_NOW);
+            // (…a run gone — its `load` fired, or a superseded navigation's with nothing left to do: `LoadRun::pending` — whose
+            // `load` is owed no more, but paid where its container is gone, as its own steps would have)
+            let fire = matches!(phase, LOAD_PHASE_FIRE | LOAD_PHASE_FIRE_NOW | LOAD_PHASE_QUEUE_LOAD);
             return if fire && !arena.is_connected(container) { (LOAD_PAY, LOAD_PHASE_RUN, 0) } else { done };
         };
         let latest = arena.load_latest(container, run.generation);
@@ -1759,7 +1766,10 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
                     continue;
                 }
                 match run.gate {
-                    Some(gate) => return (LOAD_TAKE_GATE, LOAD_PHASE_GATE_TAKEN, gate as i32),
+                    Some(gate) => {
+                        update(arena, &|r| r.gate_taken = true);
+                        return (LOAD_TAKE_GATE, LOAD_PHASE_GATE_TAKEN, gate as i32);
+                    }
                     None => phase = LOAD_PHASE_QUEUE_LOAD,
                 }
             }
@@ -1809,7 +1819,7 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
                 let then = if phase == LOAD_PHASE_BUILT { LOAD_PHASE_QUEUE_LOAD } else { u32::MAX };
                 if building {
                     arena.set_frame_nav(container, BUILD_QUEUED, true);
-                    return (LOAD_LATER, if then == u32::MAX { LOAD_PHASE_RUN } else { then }, 0);
+                    return (LOAD_LATER, if then == u32::MAX { LOAD_PHASE_END } else { then }, 0);
                 }
                 if then == u32::MAX {
                     return done;
@@ -1833,9 +1843,13 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
                     arena.hold_load_step(container, id, LOAD_PHASE_FIRE);
                     return done;
                 }
-                return match load_due(scope, cid, container, run.generation, now) {
-                    DUE_PAID => (LOAD_PAY, LOAD_PHASE_RUN, 0),
-                    DUE_FIRE => (LOAD_FIRE, LOAD_PHASE_RUN, i32::from(phase == LOAD_PHASE_FIRE_NOW)),
+                let due = load_due(scope, cid, container, run.generation, now);
+                if let Some(nav) = crate::dom::realm(scope, cid).frame_navigations.0.get_mut(&container) {
+                    nav.runs.retain(|r| r.id != id);
+                }
+                return match due {
+                    DUE_PAID => (LOAD_PAY, LOAD_PHASE_END, 0),
+                    DUE_FIRE => (LOAD_FIRE, LOAD_PHASE_END, i32::from(phase == LOAD_PHASE_FIRE_NOW)),
                     _ => done,
                 };
             }
