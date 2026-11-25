@@ -4890,30 +4890,39 @@ module Capybara
         # connection in its `onopen` unless `webSocket.protocol` is one it knows
         # (`actioncable-v1-json`).
         queue << {id: id, type: '__open', protocol: protocol}
+        # The server's frames as they come, read by the engine (ws_frame.rs): its messages, a Ping answered with a Pong
+        # where it falls, its Close, or the connection failed for a frame the protocol forbids. A connection that ends
+        # with no Close frame closes abnormally (1006).
+        reader = Native::WsReader.new
         loop do
-          frame = ws_read_message(sock, queue, id)
-          if frame.nil?                             # TCP closed with no close frame → abnormal
+          bytes = begin
+            sock.readpartial(65_536)
+          rescue EOFError
             queue << {id: id, type: '__close', code: 1006, reason: ''}
             break
           end
-          if frame == :protocol_error               # reserved opcode / malformed frame → fail the connection
-            queue << {id: id, type: '__error', message: 'protocol error'}
-            break
+          ended = reader.feed(bytes).any? do |kind, payload, code|
+            case kind
+            when Native::WsReader::TEXT
+              queue << {id: id, type: 'message', data: payload}
+              false
+            # Binary frames cross to JS as raw bytes (a BINARY String marshals to a Uint8Array) tagged so the JS side
+            # decodes them per `binaryType`.
+            when Native::WsReader::BINARY
+              queue << {id: id, type: 'message', binary: true, data: payload}
+              false
+            when Native::WsReader::PING
+              ws_write_frame(sock, 0xA, payload)
+              false
+            when Native::WsReader::CLOSE
+              queue << {id: id, type: '__close', code: code || 1005, reason: payload}
+              true
+            else
+              queue << {id: id, type: '__error', message: 'protocol error'}
+              true
+            end
           end
-          opcode, payload = frame
-          if opcode == :close
-            code   = payload.bytesize >= 2 ? payload[0, 2].unpack1('n') : 1005
-            reason = payload.bytesize > 2 ? RuntimeShared.utf8_text(payload[2..]) : ''
-            queue << {id: id, type: '__close', code: code, reason: reason}
-            break
-          end
-          # Binary frames cross to JS as raw bytes (a BINARY String marshals to a
-          # Uint8Array) tagged so the JS side decodes them per `binaryType`; text is UTF-8.
-          if opcode == 0x2
-            queue << {id: id, type: 'message', binary: true, data: payload}
-          else
-            queue << {id: id, type: 'message', data: RuntimeShared.utf8_text(payload)}
-          end
+          break if ended
         end
       rescue StandardError => e
         queue << {id: id, type: '__close', code: 1006, reason: e.message.to_s[0, 120]}
@@ -4955,82 +4964,11 @@ module Capybara
         [accept_ok, protocol, cookies]
       end
 
-      # Read one complete message (reassembling continuation frames), handling
-      # interleaved control frames inline. Returns `[opcode, payload]` (opcode
-      # 0x1 text / 0x2 binary), `[:close, payload]`, `:protocol_error` (a reserved
-      # opcode — the connection must be failed), or nil on EOF.
-      private def ws_read_message(sock, queue, id)
-        data       = +''.b
-        msg_opcode = nil
-        loop do
-          hdr = ws_read_n(sock, 2) or return nil
-          b0, b1 = hdr.bytes
-          fin    = (b0 & 0x80) != 0
-          opcode = b0 & 0x0f
-          masked = (b1 & 0x80) != 0
-          len    = b1 & 0x7f
-          if len == 126
-            ext = ws_read_n(sock, 2) or return nil
-            len = ext.unpack1('n')
-          elsif len == 127
-            ext = ws_read_n(sock, 8) or return nil
-            len = ext.unpack1('Q>')
-          end
-          mask = nil
-          if masked
-            mask = ws_read_n(sock, 4) or return nil
-          end
-          if len.zero?
-            payload = ''.b
-          else
-            payload = ws_read_n(sock, len) or return nil
-          end
-          payload = ws_mask(payload, mask) if mask  # server frames shouldn't be masked, but be defensive
-          case opcode
-          when 0x8 then return [:close, payload]
-          when 0x9 then ws_write_frame(sock, 0xA, payload); next   # ping → pong
-          when 0xA then next                                       # pong → ignore
-          when 0x0 then data << payload                            # continuation
-          when 0x1, 0x2 then msg_opcode = opcode; data << payload  # text / binary
-          else return :protocol_error                              # reserved opcode (0x3-7, 0xB-F) → fail
-          end
-          return [msg_opcode || opcode, data] if fin
-        end
-      end
-
-      # Read exactly `n` bytes, or nil if the stream ends first (EOF, or a short
-      # read on a mid-frame close). `IO#read(n)` blocks for n bytes on a stream
-      # socket and only returns nil / fewer at EOF, so a nil-or-short result is
-      # a closed/broken connection — bail and let the caller surface a close.
-      private def ws_read_n(sock, n)
-        buf = sock.read(n)
-        buf if buf && buf.bytesize == n
-      end
-
-      # Write one frame. Client→server frames MUST be masked (RFC6455 §5.3);
-      # csim is always the client, so every frame it writes is masked. Holds the
-      # per-connection write lock so the reader thread's pong and the main
-      # thread's send/close can't interleave bytes on the shared socket.
+      # Write one frame (ws_frame.rs: masked, as every frame a client sends is). Holds the per-connection write lock so the
+      # reader thread's pong and the main thread's send/close can't interleave bytes on the shared socket.
       private def ws_write_frame(sock, opcode, payload)
-        payload = payload.to_s.b
-        len     = payload.bytesize
-        out     = [0x80 | opcode].pack('C')
-        if len < 126
-          out << [0x80 | len].pack('C')
-        elsif len < 65_536
-          out << [0x80 | 126, len].pack('Cn')
-        else
-          out << [0x80 | 127, len].pack('CQ>')
-        end
-        key = SecureRandom.random_bytes(4)
-        out << key
-        out << ws_mask(payload, key)
-        @websocket_write_lock.synchronize { sock.write(out) }
-      end
-
-      private def ws_mask(payload, key)
-        kb = key.bytes
-        payload.bytes.each_with_index.map {|byte, i| byte ^ kb[i & 3] }.pack('C*')
+        frame = Native.ws_frame(opcode, payload.to_s.b)
+        @websocket_write_lock.synchronize { sock.write(frame) }
       end
 
       # ── Hijack-aware async XHR ─────────────────────────────────────

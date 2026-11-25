@@ -121,6 +121,7 @@ mod fetch_plan;
 mod sw_router;
 mod system_clipboard;
 mod text_setters;
+mod ws_frame;
 mod ws_state;
 mod url_pattern;
 mod storage_areas;
@@ -311,6 +312,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("event_stream_close", magnus::function!(event_stream::close_for_ruby, 1))?;
     // …and whether a response is one that announces an event source's connection (event_source_state.rs).
     native.define_module_function("event_stream_response_ok", magnus::function!(event_source_state::response_ok_for_ruby, 2))?;
+    // A WebSocket connection's frames, written and read (ws_frame.rs).
+    ws_frame::define(native, ruby)?;
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
     worker_host::define(native, ruby)?;
