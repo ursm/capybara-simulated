@@ -1390,7 +1390,8 @@ module WptRunner
     qs = if js_test?(rel)
       head.scan(%r{^\s*//\s*META:\s*variant=(\S+)}).flatten
     else
-      head.scan(/<meta\s+name=["']?variant["']?\s+content=["']([^"']*)["']/i).flatten
+      # (…its content quoted or not: `<meta name=variant content=?test1>` is popover-focus-2's)
+      head.scan(/<meta\s+name=["']?variant["']?\s+content=(?:["']([^"']*)["']|([^\s"'>]+))/i).flatten.compact
     end
     qs.map(&:strip).reject(&:empty?)
   rescue StandardError

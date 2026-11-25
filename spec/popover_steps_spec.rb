@@ -121,6 +121,28 @@ RSpec.describe 'Popover and dialog steps' do
     expect(s.evaluate_script('[shown, toggles.join(",")]')).to eq(['open=true popover=false', 'closed->open,closed->closed'])
   end
 
+  # Sequential focus navigation: a showing popover's popover trigger is a focus navigation scope owner, the popover in its
+  # scope — after the trigger, out of its place in the tree — and a trigger that cannot take focus still owns it; past
+  # the popover's contents the order goes on after the trigger. Chrome (CDP Tab): ["inside1", "inside2", "after"],
+  # and Shift+Tab back from inside1 to the trigger.
+  it 'puts a showing popover after its trigger in the sequential focus order' do
+    s = session_with(<<~HTML)
+      <button id=before>before</button><button id=trigger popovertarget=p>trigger</button><button id=after>after</button>
+      <div popover id=p><button id=inside1>1</button><button id=inside2>2</button></div>
+    HTML
+    s.find(:css, '#trigger').click
+    s.find(:css, '#trigger').send_keys(:tab)
+    order = [s.evaluate_script('document.activeElement.id')]
+    2.times do
+      s.send_keys(:tab)
+      order << s.evaluate_script('document.activeElement.id')
+    end
+    expect(order).to eq(%w[inside1 inside2 after])
+    s.execute_script('inside1.focus()')
+    s.send_keys(%i[shift tab])
+    expect(s.evaluate_script('document.activeElement.id')).to eq('trigger')
+  end
+
   # The close watcher manager (HTML §6.10): close watchers made with no user activation between them share a group,
   # which one close request (the Escape key) closes together — the last first, its `cancel` not cancelable — and a
   # CloseWatcher's requestClose() fires a cancelable `cancel` its listener may prevent (WPT close-watcher/

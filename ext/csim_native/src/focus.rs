@@ -124,6 +124,11 @@ struct Navigator<'a> {
     now: f64,
     // Each radio button group's stop, by its tree, name and form owner, found once a navigation.
     radio_stops: HashMap<(NodeId, String, Option<NodeId>), Option<NodeId>>,
+    // The showing popovers with a popover trigger, by trigger, in tree order, and each one's trigger: HTML makes such a
+    // popover's "associated focus navigation owner" its trigger, so its contents follow the trigger in the order, out of
+    // their place in the tree.
+    triggered: HashMap<NodeId, Vec<NodeId>>,
+    owned: HashMap<NodeId, NodeId>,
 }
 
 impl Navigator<'_> {
@@ -137,15 +142,27 @@ impl Navigator<'_> {
         let negative = out_of_sequence(n);
         let group = if negative { 0 } else { tabindex.unwrap_or(0) };
         let owner = |kind, sub| Some(Item { el, kind, sub: Some(sub), included: !negative, group, tree_pos: 0 });
+        // (…a slot or a host that is a popover trigger too: its popovers in its scope, after the rest)
+        let popovers = self.triggered.get(&el).cloned().unwrap_or_default();
         if n.is_html_named("slot") {
-            let sub = self.slot_scope(el);
+            let mut nodes = if n.assigned.is_empty() { n.children.clone() } else { n.assigned.clone() };
+            nodes.extend(popovers);
+            let sub = self.scope(Some(el), &nodes);
             return owner(Kind::Owner, sub);
         }
         if let Some(root) = n.shadow_root {
             let delegates = self.arena.get(root).is_some_and(|r| r.shadow_is(crate::dom::SHADOW_DELEGATES_FOCUS));
-            let children = self.arena.get(root).map(|r| r.children.clone()).unwrap_or_default();
+            let mut children = self.arena.get(root).map(|r| r.children.clone()).unwrap_or_default();
+            children.extend(popovers);
             let sub = self.scope(Some(el), &children);
             let stop = !delegates && !negative && self.focusable(el);
+            return owner(if stop { Kind::Both } else { Kind::Owner }, sub);
+        }
+        // (…the popover trigger of a showing popover: an owner, its popovers its scope — a stop besides where it can take
+        // focus)
+        if !popovers.is_empty() {
+            let sub = self.scope(Some(el), &popovers);
+            let stop = !negative && self.focusable(el);
             return owner(if stop { Kind::Both } else { Kind::Owner }, sub);
         }
         if negative || !self.focusable(el) || self.unrepresentative_radio(el) {
@@ -197,9 +214,14 @@ impl Navigator<'_> {
             if self.arena.get(el).is_none_or(|n| n.kind != NodeKind::Element) {
                 continue;
             }
+            // (…a showing popover its trigger owns is in the trigger's scope, not where the tree has it)
+            if self.owned.get(&el).is_some_and(|&trigger| owner != Some(trigger)) {
+                continue;
+            }
             let editable = editing_host(self.arena, el);
             let item = self.classify(el);
-            let descend = !item.as_ref().is_some_and(Item::owner) && !editable;
+            // (…a slot's and a host's children are theirs; a popover trigger's are its own owner's, as the trigger's are)
+            let descend = !editable && !item.as_ref().is_some_and(|x| x.owner() && !self.triggered.contains_key(&x.el));
             if let Some(mut item) = item {
                 item.tree_pos = tree.len();
                 tree.push(item);
@@ -212,11 +234,6 @@ impl Navigator<'_> {
         order.sort_by_key(|&i| tree[i].group);
         order.extend((0..tree.len()).filter(|&i| tree[i].group <= 0));
         Scope { owner, tree, order }
-    }
-    fn slot_scope(&mut self, slot: NodeId) -> Scope {
-        let n = self.arena.get(slot).expect("a slot");
-        let nodes = if n.assigned.is_empty() { n.children.clone() } else { n.assigned.clone() };
-        self.scope(Some(slot), &nodes)
     }
 }
 
@@ -310,7 +327,12 @@ impl Scope {
 // (focus came back from them), its first (last) element; none where nothing is focusable.
 pub(crate) fn next(engine: &mut StyleEngine, arena: &RealmArena, doc: NodeId, current: Option<NodeId>, reverse: bool, now: f64) -> Option<NodeId> {
     let children = arena.get(doc)?.children.clone();
-    let root = Navigator { engine, arena, now, radio_stops: HashMap::new() }.scope(None, &children);
+    let mut triggered = arena.popovers.triggered();
+    for popovers in triggered.values_mut() {
+        popovers.sort_by(|&a, &b| tree_order(arena, a, b));
+    }
+    let owned = triggered.iter().flat_map(|(&trigger, popovers)| popovers.iter().map(move |&p| (p, trigger))).collect();
+    let root = Navigator { engine, arena, now, radio_stops: HashMap::new(), triggered, owned }.scope(None, &children);
     if let Some(cur) = current {
         let mut chain = Vec::new();
         return match root.locate(cur, &mut chain) {

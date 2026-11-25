@@ -54,11 +54,13 @@ impl PopoverDoc {
 }
 
 // The popovers' state the arena keeps (`RealmArena::popovers`): each document's, by its slot; the document each showing
-// popover is in; the popovers being hidden ("popover hiding").
+// popover is in, and its popover trigger — the invoker or source that showed it, where one did; the popovers being
+// hidden ("popover hiding").
 #[derive(Default)]
 pub(crate) struct Popovers {
     docs: HashMap<NodeId, PopoverDoc>,
     shown_in: HashMap<NodeId, NodeId>,
+    triggers: HashMap<NodeId, NodeId>,
     hiding: HashSet<NodeId>,
 }
 impl Popovers {
@@ -69,11 +71,12 @@ impl Popovers {
             live(doc)
         });
         self.shown_in.retain(|p, doc| live(p) && live(doc));
+        self.triggers.retain(|p, t| live(p) && live(t));
         self.hiding.retain(|p| live(p));
     }
     // …and what of it is node `id`'s, freed.
     pub(crate) fn forget(&mut self, id: NodeId) {
-        if self.docs.is_empty() && self.shown_in.is_empty() {
+        if self.docs.is_empty() && self.shown_in.is_empty() && self.triggers.is_empty() {
             return;
         }
         self.docs.remove(&id);
@@ -81,7 +84,17 @@ impl Popovers {
             d.top_layer.retain(|&(p, _)| p != id);
         }
         self.shown_in.remove(&id);
+        self.triggers.retain(|&p, &mut t| p != id && t != id);
         self.hiding.remove(&id);
+    }
+    // The showing popovers that have a popover trigger, by their trigger (HTML: each such trigger a focus navigation scope
+    // owner, the popovers in its scope — focus.rs).
+    pub(crate) fn triggered(&self) -> HashMap<NodeId, Vec<NodeId>> {
+        let mut by_trigger: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for (&popover, &trigger) in &self.triggers {
+            by_trigger.entry(trigger).or_default().push(popover);
+        }
+        by_trigger
     }
 }
 
@@ -157,17 +170,21 @@ impl RealmArena {
         if self.stack_position(doc, clicked) > self.stack_position(doc, target) { clicked } else { target }
     }
 
-    // A popover shown in document `doc`, opened in `mode`: into its top layer, `:popover-open`.
-    fn popover_in(&mut self, doc: NodeId, el: NodeId, mode: u32) {
+    // A popover shown in document `doc`, opened in `mode`, by `trigger`: into its top layer, `:popover-open`.
+    fn popover_in(&mut self, doc: NodeId, el: NodeId, mode: u32, trigger: Option<NodeId>) {
         let d = self.popover_doc(doc);
         d.top_layer.retain(|&(p, _)| p != el);
         d.top_layer.push((el, mode));
         self.popovers.shown_in.insert(el, doc);
+        if let Some(trigger) = trigger {
+            self.popovers.triggers.insert(el, trigger);
+        }
         self.set_popover_open(el, true);
     }
     // …and one hidden: out of its document's top layer — the hint stack parent no more where it was one, or no hint is
     // left — its close watcher destroyed, and the element its showing kept to give focus back to taken.
     fn popover_out(&mut self, el: NodeId) -> Option<NodeId> {
+        self.popovers.triggers.remove(&el);
         if let Some(doc) = self.popovers.shown_in.remove(&el) {
             let d = self.popover_doc(doc);
             d.top_layer.retain(|&(p, _)| p != el);
@@ -324,7 +341,7 @@ fn show_steps(scope: &mut v8::PinScope<'_, '_>, el: NodeId, doc: NodeId, throws:
     }
     arena.previously_focused.remove(&el);
     let originally_focused = crate::focus::document_focus(arena, el);
-    arena.popover_in(doc, el, mode);
+    arena.popover_in(doc, el, mode, source);
     if mode == HINT && ancestor.is_some_and(|a| arena.opened_mode(a) == AUTO) {
         arena.popover_doc(doc).hint_parent = ancestor;
     }
