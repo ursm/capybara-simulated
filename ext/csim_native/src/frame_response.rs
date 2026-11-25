@@ -31,11 +31,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // window is read before the navigation under way has its response, which this leaves to that navigation's build —
 // `[FRAME_DEFERRED]`, `[FRAME_KEPT]`, or `[FRAME_BUILD, url, locationHref,
 // body, contentType, javascriptSource, aboutBase, clientId, referrer, policy, refresh, documentOrigin, locationOrigin,
-// sandbox, originAgentCluster]`: the document's URL, the one its location reports (about:srcdoc, about:blank), its body
+// sandbox, originAgentCluster, csp]`: the document's URL, the one its location reports (about:srcdoc, about:blank), its body
 // (its bytes, a srcdoc's text), its type, the script a javascript: URL runs in it, the base URL an about: document
 // inherits from its creator, the client id its navigation reserved, the Referer its request sent and the Referrer-Policy
 // and Refresh its response set (null for none), its origins (`frame_origins`), its sandboxing flags and whether its
-// response asked for an origin-keyed agent cluster (structured_field.rs `is_true`).
+// response asked for an origin-keyed agent cluster (structured_field.rs `is_true`), and its response's
+// Content-Security-Policy, its policy container's (null for none) — read as document_init.rs reads the host's.
 fn frame_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     // (…a container of no node, or no host: no document made, as for a build parked)
     let deferred = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>| {
@@ -217,6 +218,7 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
         text_or_null(scope, created.location),
         v8::Integer::new_from_unsigned(scope, created.sandbox).into(),
         v8::Boolean::new(scope, r.origin_agent_cluster).into(),
+        text_or_null(scope, r.csp.as_deref()),
     ];
     Ok(v8::Array::new_with_elements(scope, &items).into())
 }
@@ -353,12 +355,11 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
         }
     }
     if let Some(headers) = member(scope, resp, "headers").and_then(|h| v8::Local::<v8::Object>::try_from(h).ok()) {
-        let header = |scope: &mut v8::PinScope<'_, '_>, name: &str| crate::fetch_rules::response_header(scope, headers, name);
-        r.csp = header(scope, "content-security-policy").filter(|s| !s.is_empty());
-        r.policy = header(scope, "referrer-policy");
-        r.refresh = header(scope, "refresh");
-        r.origin_agent_cluster = header(scope, "origin-agent-cluster").is_some_and(|v| crate::structured_field::is_true(&v));
-        if let Some(content_type) = header(scope, "content-type").filter(|s| !s.is_empty()) {
+        // (…read as the host's responses are: response_headers.rs `ResponseFields`, document_init.rs)
+        let fields = crate::response_headers::ResponseFields::of_document(|name| crate::fetch_rules::response_header(scope, headers, name));
+        (r.csp, r.refresh, r.origin_agent_cluster) = (fields.csp, fields.refresh, fields.origin_agent_cluster);
+        r.policy = fields.referrer_policy.map(str::to_owned);
+        if let Some(content_type) = fields.content_type {
             r.content_type = content_type;
         }
     }

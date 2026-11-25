@@ -83,4 +83,37 @@ RSpec.describe 'a document a navigation commits' do
       expect(poll_until { session.evaluate_script('w.document.getElementById("x") && w.origin') }).to eq('https://b.test')
     end
   end
+
+  # …and the policy container of an about:blank document its initiator's (HTML "determine navigation params policy
+  # container" step 3), its CSP list with it: a page sandboxed by its response's CSP, but for forms, that navigates
+  # itself to about:blank leaves a document whose form submits nothing (Chrome 157 and Firefox 159, measured 2026-11-25:
+  # the pop-up stays at about:blank; with `allow-forms` it goes to the form's action) — and so does the document a
+  # traversal back to its entry makes again, of the policy container the entry kept (step 1), no initiator's.
+  context 'of a local URL' do
+    let(:sandboxed_app) {
+      lambda {|env|
+        case env['PATH_INFO']
+        when '/sbx'
+          [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-scripts allow-same-origin'}, ["<!doctype html><script>location = 'about:blank'</script>"]]
+        else [200, {'content-type' => 'text/html'}, ["<!doctype html><title>#{env['PATH_INFO']}</title>"]]
+        end
+      }
+    }
+    def submit_a_form(session)
+      session.execute_script(%q(document.body.innerHTML = '<form action="http://www.example.com/submitted"><input name=q value=1></form>'; document.forms[0].submit()))
+      session.evaluate_script('1')
+      session.current_url
+    end
+
+    it "is its initiator's policy container, its CSP list's sandbox too, and its entry's on a traversal" do
+      session = simulated_session(sandboxed_app)
+      session.visit '/sbx'
+      expect(poll_until { session.current_url == 'about:blank' }).to be(true)
+      expect(submit_a_form(session)).to eq('about:blank')
+      session.visit '/other'
+      session.go_back
+      expect(poll_until { session.current_url == 'about:blank' }).to be(true)
+      expect(submit_a_form(session)).to eq('about:blank')
+    end
+  end
 end

@@ -32,11 +32,14 @@ fn is_srcdoc(url: &str) -> bool {
     ada_url::Url::parse(url, None).is_ok_and(|u| u.protocol() == "about:" && u.pathname() == "srcdoc")
 }
 
-// HTML "determine navigation params policy container" (§7.1.7): about:srcdoc its parent's, cloned; a local URL its
-// initiator's, cloned, where it has one; else its response's — a new one where none is given (an error document's, an
-// inline content document's: `response` None). (Not modelled: step 1's history policy container — a traversal back to a
-// local URL's entry takes its initiator's as the navigation gives it, none stored with the entry.)
-pub(crate) fn policy_container(url: &str, initiator: Option<&PolicyContainer>, parent: Option<&PolicyContainer>, response: Option<PolicyContainer>) -> PolicyContainer {
+// HTML "determine navigation params policy container" (§7.1.7): the one its session history entry kept (`history`, a
+// reload's or a traversal's: `stores_policy_container`); about:srcdoc its parent's, cloned; a local URL its initiator's,
+// cloned, where it has one; else its response's — a new one where none is given (an error document's, an inline content
+// document's: `response` None).
+pub(crate) fn policy_container(url: &str, history: Option<&PolicyContainer>, initiator: Option<&PolicyContainer>, parent: Option<&PolicyContainer>, response: Option<PolicyContainer>) -> PolicyContainer {
+    if let Some(history) = history {
+        return history.clone();
+    }
     if is_srcdoc(url) {
         if let Some(parent) = parent {
             return parent.clone();
@@ -48,6 +51,12 @@ pub(crate) fn policy_container(url: &str, initiator: Option<&PolicyContainer>, p
         }
     }
     response.unwrap_or_default()
+}
+
+// HTML: "A URL requires storing the policy container in history" — a local one but a `blob:` URL's, whose document a
+// traversal makes again of its blob, not of its initiator: the entry keeps its document's policy container.
+pub(crate) fn stores_policy_container(url: &str) -> bool {
+    is_local(url) && !url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("blob:"))
 }
 
 // The origin of `url` serialized — a `blob:` URL's its inner URL's — None where it is opaque.
@@ -97,13 +106,16 @@ pub(crate) fn keeps_window(initial: bool, own: &str, domain_set: bool, origin: O
 // Native.initialize_document(params) -> what the document a navigation commits is made of, keyed as the bindings read it
 // (bridge.entry.js `initializeDocument`): 'url', 'contentType', 'csp', 'referrer', 'referrerPolicy', 'refresh',
 // 'originAgentCluster', 'origin' (where its URL does not say it: 'null' a new opaque one), 'locationOrigin', 'aboutBase',
-// 'controller', and, for the
+// 'controller', 'historyPolicyContainer' (`[referrer policy, csp]` its entry keeps, none where its URL needs none), and,
+// for the
 // host's commit of its opener policy (session_history.rs `commit_opener_policy`), 'openerPolicy' and 'responseOrigin'.
 // `params` (symbol keys): `url`; `headers` its response's (nil none: a document of no response); `inline` an inline
 // content document's (a PDF viewer's, an error document's), made of none of its response's policies; `content_type` the type its body said or it is made as, over its response's;
 // `loopback` the host's stand-in for a secure context; `origin` its origin where its URL does not say it, with the
 // origin its location reports (`location_origin`, an about:blank one's its initiator's) and its base URL (`about_base`);
-// `fields` in place of `headers`, `[Referrer-Policy, Refresh, origin-keyed]`, a frame's response as its build read it;
+// `fields` in place of `headers`, `[Referrer-Policy, Refresh, origin-keyed, Content-Security-Policy]`, a frame's
+// response as its build read it (frame_response.rs, by the same `ResponseFields`); `history` the policy container its
+// session history entry kept;
 // `referrer` the Referer its request sent; `initiator` / `parent` the policy containers `[referrer policy, csp]` of the
 // document that initiated it and of its container's; `coop` the opener policy a local scheme's inherits;
 // `sw` `[partition, site]` where a fetch made it, `[partition, nil, creator client id, creator origin]` where none did,
@@ -120,15 +132,19 @@ pub(crate) fn initialize_document(ruby: &Ruby, params: RHash) -> Result<RHash, E
     let mut fields = ResponseFields::read(headers)?;
     // (…or, a frame's response as its build read it — frame_response.rs `frameResponse` — the fields it gave: its
     // Referrer-Policy, its Refresh, whether it asked for an origin-keyed agent cluster)
-    let given = Option::<(Option<String>, Option<String>, bool)>::try_convert(get("fields")?)?;
-    if let Some((policy, refresh, origin_agent_cluster)) = &given {
+    let given = Option::<(Option<String>, Option<String>, bool, Option<String>)>::try_convert(get("fields")?)?;
+    if let Some((policy, refresh, origin_agent_cluster, csp)) = &given {
         fields.referrer_policy = policy.as_deref().and_then(crate::url_ops::policy_of_header);
-        (fields.refresh, fields.origin_agent_cluster) = (refresh.clone(), *origin_agent_cluster);
+        (fields.refresh, fields.origin_agent_cluster, fields.csp) = (refresh.clone(), *origin_agent_cluster, csp.clone().filter(|c| !c.is_empty()));
     }
     let response = (!inline && (headers.is_some() || given.is_some())).then(|| PolicyContainer { csp: fields.csp.clone(), referrer_policy: fields.referrer_policy.unwrap_or_default().to_owned() });
     // (…an inline content document's — a PDF viewer's, an error document's — a new one: HTML "create a document for
     // inline content that doesn't have a DOM", whose navigation params' request is null, so no referrer either)
-    let policies = if inline { PolicyContainer::default() } else { policy_container(&url, container("initiator")?.as_ref(), container("parent")?.as_ref(), response) };
+    let policies = if inline {
+        PolicyContainer::default()
+    } else {
+        policy_container(&url, container("history")?.as_ref(), container("initiator")?.as_ref(), container("parent")?.as_ref(), response)
+    };
     let given_origin = text("origin")?;
     let coop = text("coop")?;
     // (…the origin its response's opener policy is judged by: its own, but an inline content document's of a `blob:` URL,
@@ -148,6 +164,9 @@ pub(crate) fn initialize_document(ruby: &Ruby, params: RHash) -> Result<RHash, E
     out.aset("url", url.as_str())?;
     let content_type = text("content_type")?.filter(|t| !t.is_empty()).or_else(|| if inline { Some("text/html".to_owned()) } else { fields.content_type.clone().filter(|t| !t.is_empty()) });
     out.aset("contentType", content_type)?;
+    // (…kept with its session history entry where its URL requires it)
+    let kept = stores_policy_container(&url).then(|| (policies.referrer_policy.clone(), policies.csp.clone()));
+    out.aset("historyPolicyContainer", kept)?;
     out.aset("csp", policies.csp)?;
     out.aset("referrerPolicy", policies.referrer_policy)?;
     out.aset("referrer", text("referrer")?.filter(|r| !r.is_empty() && !inline))?;
@@ -184,13 +203,18 @@ mod tests {
     #[test]
     fn a_local_url_takes_its_initiators_policy_container_and_srcdoc_its_parents() {
         let (initiator, parent, response) = (pc("no-referrer"), pc("origin"), pc("same-origin"));
-        assert_eq!(policy_container("about:blank", Some(&initiator), Some(&parent), None), initiator);
-        assert_eq!(policy_container("blob:https://a.test/x", Some(&initiator), None, Some(response.clone())), initiator);
-        assert_eq!(policy_container("data:text/html,x", Some(&initiator), None, Some(response.clone())), initiator);
-        assert_eq!(policy_container("about:srcdoc", Some(&initiator), Some(&parent), None), parent);
-        assert_eq!(policy_container("https://a.test/", Some(&initiator), Some(&parent), Some(response.clone())), response);
+        assert_eq!(policy_container("about:blank", None, Some(&initiator), Some(&parent), None), initiator);
+        assert_eq!(policy_container("blob:https://a.test/x", None, Some(&initiator), None, Some(response.clone())), initiator);
+        assert_eq!(policy_container("data:text/html,x", None, Some(&initiator), None, Some(response.clone())), initiator);
+        assert_eq!(policy_container("about:srcdoc", None, Some(&initiator), Some(&parent), None), parent);
+        assert_eq!(policy_container("https://a.test/", None, Some(&initiator), Some(&parent), Some(response.clone())), response);
+        // (…a replay's the one its entry kept, whoever initiated it)
+        let kept = pc("unsafe-url");
+        assert_eq!(policy_container("about:blank", Some(&kept), Some(&initiator), None, None), kept);
+        assert!(stores_policy_container("about:blank") && stores_policy_container("data:text/html,x"));
+        assert!(!stores_policy_container("blob:https://a.test/x") && !stores_policy_container("https://a.test/"));
         // (…a local URL no document initiated: its response's, else a new one)
-        assert_eq!(policy_container("about:blank", None, None, None), PolicyContainer::default());
+        assert_eq!(policy_container("about:blank", None, None, None, None), PolicyContainer::default());
     }
 
     #[test]

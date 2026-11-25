@@ -17,6 +17,9 @@ pub(crate) struct RealmLocation {
     target_hash: Option<String>,
     document_origin: Option<String>,
     origin_key: Option<String>,
+    // Its document's policy container's CSP list as script reads it (every Content-Security-Policy value, joined) — what a
+    // document of a local URL it initiates clones (document_init.rs `policy_container`) — none for none.
+    pub(crate) csp: Option<String>,
     // Its origin's domain (HTML §7.5.1: a tuple origin's, null until a `document.domain` write sets it) — and which
     // origin it is, by a number of its own (`ORIGINS`): an origin is a record a document that inherited it shares with
     // its creator (an about:blank frame's, its parent's), its domain one for them all — a frame made before its parent's
@@ -64,6 +67,7 @@ impl Default for RealmLocation {
             target_hash: None,
             document_origin: None,
             origin_key: None,
+            csp: None,
             domain: None,
             origin_record: new_origin_record(),
             sandbox: 0,
@@ -213,6 +217,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "takeOpenerOrigins", take_opener_origins, context_id);
     register(scope, ns, "seedTopLevelDocument", seed_top_level_document, context_id);
     register(scope, ns, "keepsWindowFor", keeps_window_for, context_id);
+    register(scope, ns, "setDocumentCsp", set_document_csp, context_id);
+    register(scope, ns, "documentCsp", document_csp, context_id);
     register(scope, ns, "pageSandbox", page_sandbox, context_id);
     register(scope, ns, "popupFlags", popup_flags_op, context_id);
     register(scope, ns, "sandboxed", sandboxed_op, context_id);
@@ -463,6 +469,20 @@ fn origin_domain_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(realm(scope, cid).location.domain.is_some());
 }
 
+// __dom.setDocumentCsp(csp) / __dom.documentCsp() — the calling realm's document's policy container's CSP list, as the
+// document is made (bridge.entry.js `initializeDocument`), null for none.
+fn set_document_csp(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let csp = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope)).filter(|c| !c.is_empty());
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).location.csp = csp;
+}
+fn document_csp(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    match realm(scope, cid).location.csp.clone() {
+        Some(csp) => rv.set(v8::String::new(scope, &csp).unwrap().into()),
+        None => rv.set_null(),
+    }
+}
 // __dom.keepsWindowFor(url, csp, origin) -> whether the document a navigation of the calling realm's navigable makes at
 // `url` keeps its Window (document_init.rs `keeps_window`): its response's Content-Security-Policy `csp` (null none),
 // `origin` the document's where its URL does not say it (an about:blank one's, its initiator's; undefined its URL's).

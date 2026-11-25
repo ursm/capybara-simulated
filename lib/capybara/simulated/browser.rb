@@ -2374,11 +2374,32 @@ module Capybara
         about_blank_made(about_blank_creator(origin, @runtime.realm_direct_call(realm, 'baseURL')))
       end
       # The policy container of the document that initiated navigation `navigation` as it began, `[referrer policy,
-      # Content-Security-Policy]` — the one a document of a local URL it makes clones (document_init.rs `policy_container`)
-      # — none for one no document initiated. (…its referrer policy alone: its source snapshot's CSP list not kept — a gap)
-      private def source_policy_container(navigation)
-        policy = navigation.source_policy
-        [policy, nil] if policy
+      # Content-Security-Policy]` (HTML's source snapshot params' source policy container: navigate.rs `source_policy`) —
+      # the one a document of a local URL it makes clones (document_init.rs `policy_container`) — none for one no document
+      # initiated.
+      private def source_policy_container(navigation) = navigation.source_policy
+      # …that of realm `realm`'s document (0 the page) now: what a navigation it begins snapshots — none of a realm gone.
+      def policy_container(realm)
+        realm = realm.to_i
+        return nil unless realm.zero? || @runtime.frame_realm_present?(realm)
+
+        @runtime.realm_direct_call(realm, 'policyContainer')
+      rescue StandardError
+        nil
+      end
+      # …and the one session history entry `id` of `history` kept for its document (HTML's document state's history policy
+      # container: document_init.rs `stores_policy_container`), which a reload or a traversal to it makes its document
+      # with again — none where it kept none.
+      def entry_policy_container(history, id)
+        policy = history&.text(id, :container_policy) or return nil
+        [policy, history.text(id, :container_csp)]
+      end
+      # …kept by that entry as the document `init` makes is made, where its URL requires it and the entry has none yet.
+      def keep_policy_container(history, id, init)
+        kept = init['historyPolicyContainer'] or return
+        return if history.nil? || id.nil? || history.text(id, :container_policy)
+
+        history.update(id, {container_policy: kept[0].to_s, container_csp: kept[1]})
       end
       # HTML "create and initialize a Document object": what the document a navigation commits at `url` is made of
       # (document_init.rs `initialize_document`, `params` as that reads them) — the host's to make it in a realm and load.
@@ -2387,10 +2408,15 @@ module Capybara
       # Referer its navigation sent (`@current_referer`) — `made` what its navigation makes of it besides; controlled where
       # a fetch made it (`controlled` false: a `javascript:` URL's, an initial about:blank) by the worker its URL matches in
       # its own top-level site.
+      # (…its policy container the one its entry kept, a reload's or a traversal's: `entry_policy_container` — kept by it
+      # where it is a new one's)
       private def page_document_init(controlled: true, **made)
         url = page_url.to_s
         sw  = [@sw_partition, Native.site(url).to_s] if controlled && http_url?(url) && sw_registered?
-        document_init(url, headers: @last_response_headers, referrer: @current_referer.to_s, sw: sw, **made)
+        entry = @session_history.active(0)
+        init = document_init(url, headers: @last_response_headers, referrer: @current_referer.to_s, sw: sw, history: entry_policy_container(@session_history, entry), **made)
+        keep_policy_container(@session_history, entry, init)
+        init
       end
       # HTML "create a new top-level traversable": a new window's initial about:blank, made with the window — a new opaque
       # origin, of no creator (a window this one opens without its opener) — and completely loaded as it is, no parse run
@@ -3687,6 +3713,7 @@ module Capybara
         origin_null: false,
         initiator_cross_site_ancestor: false,
         client_id: nil,
+        source_policy: nil,
         user_activated: false
       )
         navigate_top_level(
@@ -3702,6 +3729,7 @@ module Capybara
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
           client_id:                     client_id,
+          source_policy:                 source_policy,
           user_activated:                user_activated
         )
       end
@@ -11565,6 +11593,7 @@ module Capybara
           begun:          begun&.to_i,
           initiator:      (navigation_source(initiator) if initiator),
           referrer:       ([source, policy.to_s] if source),
+          source_policy:  (policy_container(initiator) if initiator && !by_user),
           activated:      activated == true,
           sw:             ([@sw_partition, true, nil] if sw),
           defers:         true,
@@ -11617,7 +11646,7 @@ module Capybara
         # its policy says (Chrome: its origin), its policy container the initiator's — a reload as the document it replaces
         # was, HTML's reload reusing its document state's referrer; the user's of a new opaque origin, no referrer)
         when 'about_blank'
-          body, made = '', {content_type: 'text/html', coop: payload, origin: 'null'}
+          body, made = '', {content_type: 'text/html', coop: payload, origin: 'null', initiator: initiator}
           unless host.by_user && kind != 'traverse'
             referrer, made = window_about_blank(realm_id, kind, source, host.source, host.plan[:policy], host.plan[:referred], url, made)
           end
@@ -11634,7 +11663,9 @@ module Capybara
         end
         response ||= [hop.status, hop.headers] if hop
         sw  = [@sw_partition, Native.site(url).to_s] if hop && http_url?(url) && sw_registered?
-        init = document_init(url, referrer: referrer.to_s, sw: sw, **made)
+        entry = history.active(0)
+        init = document_init(url, referrer: referrer.to_s, sw: sw, history: entry_policy_container(history, entry), **made)
+        keep_policy_container(history, entry, init)
         client_id = hop&.client_id if %w[document inline].include?(step)
         # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
         # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
@@ -11712,9 +11743,8 @@ module Capybara
       # isolate (`traversable_history`).
       private def window_history(realm) = traversable_history(@runtime.frame_realm_tree(realm)[4])
       # …what an about:blank document a navigation of window realm `realm_id` makes is of (`made`, merged): the initiator's
-      # origins and base URL, its policy container the initiator's — a reload's the document's it replaces — and its
-      # referrer, returned first: a reload's the document's it replaces, a traversal's its entry's (`referred`), else the
-      # initiator's under the policy it navigated under (`source`, `policy`).
+      # origins and base URL — and its referrer, returned first: a reload's the document's it replaces, a traversal's its
+      # entry's (`referred`), else the initiator's under the policy it navigated under (`source`, `policy`).
       private def window_about_blank(realm_id, kind, initiator, source, policy, referred, url, made)
         doc_origin, location_origin, = @runtime.realm_direct_call(0, 'navigationOrigins', initiator, realm_id)
         case kind
@@ -11731,8 +11761,7 @@ module Capybara
         made = made.merge(
           origin:          doc_origin,
           location_origin: location_origin,
-          about_base:      @runtime.realm_direct_call(initiator, 'baseURL'),
-          initiator:       [policy.to_s, nil]
+          about_base:      @runtime.realm_direct_call(initiator, 'baseURL')
         )
         [referrer, made]
       end
@@ -11868,21 +11897,28 @@ module Capybara
       # The referrer policy a document realm `realm` (0 the page) creates inherits — a srcdoc or initial about:blank frame
       # its container's document's, whose policy container it clones (HTML).
       def inherited_referrer_policy(realm) = realm_referrer_initiator(realm.to_i)[1]
-      # …what a frame's document at `url` is made of (`document_init`), its container's document realm `parent`'s: its
-      # response's fields as its build read them (`policy`, `refresh`, `origin_agent_cluster` — frame_response.rs) — a
-      # local URL's `policy` the one its navigation carried, its initiator's, else its container's document's — and,
-      # where a service worker may control it, a fetch's matched in its top-level site, else (about:blank, srcdoc, a blob)
-      # its creator's, its container's document's (Service Workers §2.5.1).
-      def frame_document_init(url, parent, policy: nil, refresh: nil, origin_agent_cluster: false, **made)
+      # …what a frame's document at `url` is made of (`document_init`) in frame realm `realm`, its container's document realm
+      # `parent`'s: its response's fields as its build read them (`policy`, `refresh`, `origin_agent_cluster`, `csp` —
+      # frame_response.rs, by the same reader) — a local URL's `policy` the one its navigation carried, its initiator's,
+      # else its container's document's policy container — and the policy container its navigable's entry kept, a reload's
+      # or a traversal's (`entry_policy_container`), kept by it where it is a new one's; where a service worker may control
+      # it, a fetch's matched in its top-level site, else (about:blank, srcdoc, a blob) its creator's, its container's
+      # document's (Service Workers §2.5.1).
+      def frame_document_init(url, parent, realm, policy: nil, csp: nil, refresh: nil, origin_agent_cluster: false, **made)
         url = url.to_s
         if (local = url.empty? || url.match?(/\A(?:about|blob|data):/i))
-          container = [inherited_referrer_policy(parent).to_s, nil]
+          container = policy_container(parent)
           initiator = policy ? [policy, nil] : container
         end
         if sw_registered?
           sw = http_url?(url) ? [@sw_partition, blob_partition_site(parent)] : [@sw_partition, nil, sw_client_id(parent), document_origin(parent)]
         end
-        document_init(url.empty? ? 'about:blank' : url, fields: [(policy unless local), refresh, origin_agent_cluster == true], parent: container, initiator: initiator, sw: sw, **made)
+        # (…an entry keeps one only for a local URL: none asked of another's)
+        history, entry = frame_entry(realm) if local
+        fields = [(policy unless local), refresh, origin_agent_cluster == true, (csp unless local)]
+        init = document_init(url.empty? ? 'about:blank' : url, fields: fields, parent: container, initiator: initiator, sw: sw, history: entry_policy_container(history, entry), **made)
+        keep_policy_container(history, entry, init)
+        init
       end
       # Frame realm `realm_id`'s document made, its referrer `referrer` (its navigation's request's Referer): kept in its
       # session history entry, where it has none yet — the document state's (HTML), which a reload or a traversal to the
@@ -12405,7 +12441,8 @@ module Capybara
           referrer:             referrer,
           referrer_policy:      referrer_policy,
           refresh:              refresh,
-          origin_agent_cluster: origin_agent_cluster
+          origin_agent_cluster: origin_agent_cluster,
+          csp:                  csp
         ).to_i
         return if new_id.zero?
         # (…the entry its navigation began made with it: `with_frame_entry`)
@@ -12692,7 +12729,7 @@ module Capybara
         return {} unless realm.zero? || @runtime.frame_realm_present?(realm)
 
         _url, _policy, opaque, _realm, _source, cross_site_ancestor = request_client(realm)
-        {origin_null: opaque == true, initiator_cross_site_ancestor: cross_site_ancestor == true, client_id: sw_client_id(realm)}
+        {origin_null: opaque == true, initiator_cross_site_ancestor: cross_site_ancestor == true, client_id: sw_client_id(realm), source_policy: policy_container(realm)}
       end
       # The document of realm `realm` (0 the page) as the initiator of a navigation (navigate.rs `Initiator`), read at once:
       # the URL its site and origin are of — an about:blank one's creator's — whether that origin is opaque, whether it has a
@@ -12752,6 +12789,7 @@ module Capybara
         origin_null: false,
         initiator_cross_site_ancestor: false,
         client_id: nil,
+        source_policy: nil,
         blob: nil,
         user_activated: false,
         ongoing: nil
@@ -12769,6 +12807,7 @@ module Capybara
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
           client_id:                     client_id,
+          source_policy:                 source_policy,
           blob:                          blob,
           user_activated:                user_activated,
           ongoing:                       ongoing
@@ -12804,6 +12843,7 @@ module Capybara
         initiator_cross_site_ancestor:,
         client_id:,
         user_activated:,
+        source_policy: nil,
         traversal: nil,
         replayed: nil,
         blob: nil,
@@ -12827,6 +12867,7 @@ module Capybara
           begun:          ongoing,
           initiator:      initiator && {url: initiator, opaque: origin_null, cross_site_ancestor: initiator_cross_site_ancestor, client_id: client_id},
           referrer:       referer && [referer, (referrer_policy || main_document_referrer_policy).to_s],
+          source_policy:  source_policy,
           activated:      user_activated,
           sw:             ([@sw_partition, true, nil] if sw),
           defers:         true,

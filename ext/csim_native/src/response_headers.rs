@@ -181,6 +181,21 @@ impl ResponseFields {
         Ok(out)
     }
 
+    // …the fields a document is made of — its type, its policy container's CSP list and referrer policy, its Refresh,
+    // whether it asks for an origin-keyed agent cluster — of a response whose headers `header` reads by name, each its
+    // combined value: the one parse of them `read` makes too, for a frame's build that holds its response as a script
+    // value (frame_response.rs) rather than the host's map.
+    pub(crate) fn of_document(mut header: impl FnMut(&str) -> Option<String>) -> Self {
+        ResponseFields {
+            csp: header("content-security-policy").filter(|s| !s.is_empty()),
+            referrer_policy: header("referrer-policy").as_deref().and_then(crate::url_ops::policy_of_header),
+            refresh: header("refresh"),
+            origin_agent_cluster: header("origin-agent-cluster").is_some_and(|v| crate::structured_field::is_true(&v)),
+            content_type: header("content-type").filter(|s| !s.is_empty()),
+            ..ResponseFields::default()
+        }
+    }
+
     // A navigation's redirect, where `status` is a redirect status: its Location fields — more than one a network error
     // as the redirect is followed (fetch_chain.rs `follow`: "extract header list values"; Chrome's
     // ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION) — none where it has none or one empty one, the response then made a

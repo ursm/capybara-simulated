@@ -119,6 +119,9 @@ struct Machine {
     begun: Option<u64>,
     initiator: Option<Initiator>,
     referrer: Option<(String, String)>,
+    // The policy container of the document that initiated it as it began, `(referrer policy, CSP list)` (HTML's source
+    // snapshot params' source policy container): the host's, of the initiator's realm (`source_policy`).
+    source_policy: Option<(String, Option<String>)>,
     activated: bool,
     reload: bool,
     // (…a service worker's: the partition its registrations are in, whether the navigable may be controlled at an HTTPS
@@ -256,6 +259,7 @@ impl Machine {
             begun: Option::<u64>::try_convert(get("begun")?)?.filter(|n| *n != 0),
             initiator,
             referrer: Option::<(Option<String>, Option<String>)>::try_convert(get("referrer")?)?.map(|(s, p)| (s.unwrap_or_default(), p.unwrap_or_default())),
+            source_policy: Option::<(Option<String>, Option<String>)>::try_convert(get("source_policy")?)?.map(|(p, csp)| (p.unwrap_or_default(), csp)),
             activated: get("activated")?.to_bool(),
             reload: get("reload")?.to_bool(),
             sw: Option::<(u64, bool, Option<String>)>::try_convert(get("sw")?)?,
@@ -873,12 +877,11 @@ impl Navigation {
     fn superseded(&self) -> bool {
         self.0.borrow().superseded
     }
-    // #source_policy -> the referrer policy of the document that initiated it as it began (HTML's source snapshot params'
-    // source policy container): the one a document of a local URL it makes clones (document_init.rs
-    // `policy_container`) — none for one no document initiated, the user's.
-    fn source_policy(&self) -> Option<String> {
-        let m = self.0.borrow();
-        m.referrer.as_ref().filter(|_| !m.by_user).map(|r| r.1.clone())
+    // #source_policy -> `[referrer policy, CSP list]` of the policy container of the document that initiated it as it began
+    // (`Machine::source_policy`): the one a document of a local URL it makes clones (document_init.rs `policy_container`)
+    // — none for one no document initiated, the user's.
+    fn source_policy(&self) -> Option<(String, Option<String>)> {
+        self.0.borrow().source_policy.clone()
     }
     // #resume: a parked navigation (`defer`) taken again — #next goes on with it, its wait asked anew.
     fn resume(&self) {

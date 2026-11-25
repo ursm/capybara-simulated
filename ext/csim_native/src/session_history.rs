@@ -33,7 +33,9 @@ struct Entry {
 
 // The text fields of an entry's `Data`: the origin, Referer and referrer policy its request was sent with, and its
 // document's referrer.
-const TEXT_FIELDS: [&str; 6] = ["origin", "referer", "referrer_policy", "referrer", "opener_policy", "document_origin"];
+// (…`container_policy` / `container_csp` the referrer policy and CSP list of its document's policy container, kept for an
+// entry whose URL requires storing it — HTML's document state's "history policy container": document_init.rs)
+const TEXT_FIELDS: [&str; 8] = ["origin", "referer", "referrer_policy", "referrer", "opener_policy", "document_origin", "container_policy", "container_csp"];
 
 // What a replay of an entry sends and restores: how it was reached — a POST's body and content type, the origin, Referer
 // and referrer policy its request was sent with (HTML's document state), whether its cookies were cross-site (which a
@@ -48,7 +50,7 @@ pub(crate) type Post = (Arc<[u8]>, Option<String>);
 pub(crate) struct Data {
     post: Option<Post>,
     // (…by `TEXT_FIELDS`)
-    texts: [Option<String>; 6],
+    texts: [Option<String>; 8],
     cross_site: Option<bool>,
     name: Option<Vec<u16>>,
     state: Option<Arc<[u8]>>,
