@@ -375,6 +375,23 @@ mod tests {
     }
 
     #[test]
+    fn a_self_wait_is_of_a_reserved_client_a_get_waits_on_until_its_event_is_answered() {
+        let mut g = ServiceWorkerGlobal::default();
+        g.reserve("a".into());
+        g.reserve("b".into());
+        assert_eq!(g.self_waits().count(), 0);
+        g.reserved_waited("b");
+        g.reserved_waited("c");
+        assert_eq!(g.self_waits().collect::<Vec<_>>(), ["b"]);
+        // (…a navigation reserving it again waits on no get yet)
+        g.reserve("b".into());
+        assert_eq!(g.self_waits().count(), 0);
+        g.reserved_waited("a");
+        g.reserved_over("a");
+        assert_eq!(g.self_waits().count(), 0);
+    }
+
+    #[test]
     fn a_response_not_filtered_is_filtered_by_its_request_s_tainting() {
         let o = "https://a.test";
         assert_eq!(response_filter("default", 200, "cors", "https://a.test/x", o), "basic");
@@ -569,6 +586,9 @@ pub(crate) struct ServiceWorkerGlobal {
     probed_imports: std::collections::HashMap<String, String>,
     installed: bool,
     soft_update_coming: bool,
+    // The reserved clients of the navigations whose fetch events it has not answered yet, in the order taken: each id, and
+    // whether a `clients.get` of it waits (`swBreakSelfWait`).
+    reserving: Vec<(String, bool)>,
 }
 
 impl ServiceWorkerGlobal {
@@ -598,6 +618,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "swGlobal", global_op, context_id);
     crate::dom::register(scope, ns, "swInstalled", installed_op, context_id);
     crate::dom::register(scope, ns, "swClaims", claims_op, context_id);
+    crate::dom::register(scope, ns, "swReserving", reserving_op, context_id);
+    crate::dom::register(scope, ns, "swReservingOver", reserving_over_op, context_id);
+    crate::dom::register(scope, ns, "swReservingWaited", reserving_waited_op, context_id);
+    crate::dom::register(scope, ns, "swSelfWaits", self_waits_op, context_id);
     crate::dom::register(scope, ns, "swSoftUpdateLater", soft_update_later_op, context_id);
     crate::dom::register(scope, ns, "swSoftUpdateDue", soft_update_due_op, context_id);
     crate::dom::register(scope, ns, "swResponseFilter", response_filter_op, context_id);
@@ -653,6 +677,56 @@ fn installed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         g.installed = true;
     }
 }
+// A navigation's reserved client, as a service worker's fetch event of it is dispatched, until it is answered: a `clients.get`
+// of it waits for its document to be execution ready — which the response the event withholds makes — so a handler that
+// awaits one while nothing else of the worker's is under way waits for good, the deadlock `swBreakSelfWait` breaks.
+impl ServiceWorkerGlobal {
+    fn reserve(&mut self, id: String) {
+        match self.reserving.iter_mut().find(|(r, _)| *r == id) {
+            Some(entry) => entry.1 = false,
+            None => self.reserving.push((id, false)),
+        }
+    }
+    fn reserved_over(&mut self, id: &str) {
+        self.reserving.retain(|(r, _)| r != id);
+    }
+    fn reserved_waited(&mut self, id: &str) {
+        if let Some(entry) = self.reserving.iter_mut().find(|(r, _)| r == id) {
+            entry.1 = true;
+        }
+    }
+    // The reserved clients a `clients.get` waits on, in the order their events were taken.
+    fn self_waits(&self) -> impl Iterator<Item = &str> {
+        self.reserving.iter().filter(|(_, waited)| *waited).map(|(id, _)| id.as_str())
+    }
+}
+fn with_global(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, f: impl FnOnce(&mut ServiceWorkerGlobal, String)) {
+    let cid = crate::dom::realm_id(scope, args);
+    let id = args.get(0).to_rust_string_lossy(scope);
+    if let Some(g) = crate::dom::realm(scope, cid).realm_state_mut(cid).and_then(|s| s.service_worker.as_mut()) {
+        f(g, id);
+    }
+}
+// __dom.swReserving(id) — the fetch event of the navigation that reserved client `id` dispatched.
+fn reserving_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    with_global(scope, &args, |g, id| g.reserve(id));
+}
+// __dom.swReservingOver(id) — …answered.
+fn reserving_over_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    with_global(scope, &args, |g, id| g.reserved_over(&id));
+}
+// __dom.swReservingWaited(id) — a `clients.get` of the reserved client `id` waits on it.
+fn reserving_waited_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    with_global(scope, &args, |g, id| g.reserved_waited(&id));
+}
+// __dom.swSelfWaits() -> the reserved clients a `clients.get` waits on whose navigations' events are unanswered.
+fn self_waits_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let ids: Vec<String> = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.service_worker.as_ref()).map_or_else(Vec::new, |g| g.self_waits().map(str::to_owned).collect());
+    let items: Vec<v8::Local<'_, v8::Value>> = ids.iter().filter_map(|id| v8::String::new(scope, id)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
 // A Soft Update's delay, in the calling service worker's time (Handle Fetch: "If shouldSoftUpdate is true, then in parallel run
 // the Soft Update algorithm"): each navigation's script request came about 1 s after its load in Firefox, 1.6 s in Chrome,
 // measured — the page that navigation made under way.
