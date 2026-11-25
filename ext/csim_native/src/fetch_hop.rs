@@ -164,11 +164,13 @@ impl FetchHops {
         // origin — a mode-less load, with none, keeps them.
         let hop_cross_origin = c.doc_origin.as_deref().is_some_and(|doc| tainted || target_origin.as_deref() != Some(doc));
         let send_cookies = c.credentials == "include" || (c.credentials != "omit" && !hop_cross_origin);
-        // Fetch "append a request `Origin` header": a CORS hop to another origin, and any request with an origin of a
-        // method that is no GET or HEAD.
+        // Fetch "append a request `Origin` header": a CORS hop to another origin, a WebSocket's opening handshake (its
+        // mode `websocket`) wherever it goes — the origin serialized as it is, as a CORS hop's — and any request with an
+        // origin of a method that is no GET or HEAD.
+        let websocket = c.of_mode("websocket");
         let bodied = !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD");
-        let origin_value = if cross_origin || (c.origin.is_some() && bodied) {
-            origin.as_deref().map(|o| origin_header(o, policy.as_deref().unwrap_or(""), &target, cors).to_owned())
+        let origin_value = if cross_origin || websocket || (c.origin.is_some() && bodied) {
+            origin.as_deref().map(|o| origin_header(o, policy.as_deref().unwrap_or(""), &target, cors || websocket).to_owned())
         } else {
             None
         };
@@ -273,6 +275,18 @@ mod tests {
             })
             .collect();
         assert_eq!(sites, [(Some(false), Some("same-origin")), (Some(true), Some("cross-site")), (Some(true), Some("cross-site"))]);
+    }
+
+    #[test]
+    fn a_websocket_handshake_carries_its_origin_wherever_it_goes() {
+        // (…its mode `websocket`, its credentials `include`: no CORS hop, its cookies sent to any origin)
+        let ws = hops(Client { credentials: "include".to_owned(), ..client(Some("websocket")) });
+        for target in ["http://a.test/ws", "http://b.test/ws"] {
+            let hop = ws.hop(target.into(), "GET".into(), Some("http://a.test".into()), Some("no-referrer".into()), RedirectTaint::SameOrigin);
+            assert!(!hop.0 && hop.3.is_some());
+            assert_eq!(hop.1.as_deref(), Some("http://a.test"));
+            assert_eq!(hop.2.map(|s| (s.1, s.2)), Some(("websocket".to_owned(), "empty".to_owned())));
+        }
     }
 
     #[test]

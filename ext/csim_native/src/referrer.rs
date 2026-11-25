@@ -382,7 +382,7 @@ fn chain_site_for_cookies(documents: &[Option<String>]) -> Option<String> {
 }
 // …of realm `r`'s document: each by its origin, an about:blank or srcdoc one's its creator's (an about:blank popup's its
 // opener's) — None where one is gone.
-pub(crate) fn site_for_cookies(arena: &mut RealmArena, r: i32) -> Option<String> {
+fn site_for_cookies(arena: &mut RealmArena, r: i32) -> Option<String> {
     chain_site_for_cookies(&document_chain(arena, r, true, known_document))
 }
 // What `read` says of the documents of realm `r`'s ancestors (`known_document`'s origin, `known_origin_key`'s key), up

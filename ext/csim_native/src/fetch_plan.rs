@@ -150,7 +150,7 @@ impl FetchPlan {
         // and the document origin a mode's response type is judged by; a mode-less internal load has none. A worker's
         // re-issued navigation (`initiator`) is of its initiator's whatever its mode, a document's own navigation request
         // of its document's.
-        let moded = matches!(mode.as_deref(), Some("cors" | "no-cors" | "same-origin"));
+        let moded = matches!(mode.as_deref(), Some("cors" | "no-cors" | "same-origin" | "websocket"));
         let initiator = text("initiator")?;
         let origin = initiator.clone().or_else(|| moded.then(|| client_origin.clone()).flatten());
         let doc_origin = moded.then(|| client_origin.clone()).flatten();

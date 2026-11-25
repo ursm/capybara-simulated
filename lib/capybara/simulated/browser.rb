@@ -4657,36 +4657,42 @@ module Capybara
       }
       private_constant :WorkerSink
 
-      # (`request` what its opening handshake asks, as the engine describes it — fetch_request.rs `webSocketRequest`: its
-      # URL, its header list, its client — `worker` the WorkerSink that opens it, none for a window's)
+      # (`request` what its opening handshake asks, as the engine describes it — fetch_request.rs `webSocketRequest` — and
+      # fetched as every request is: its FetchPlan's one hop, whose response is the socket — `worker` the WorkerSink that
+      # opens it, none for a window's)
       def ws_open(request, worker = nil)
-        request  = request.to_h
+        r        = request.to_h
         queue    = worker || @websocket_queue
         id       = @websocket_lock.synchronize { @websocket_seq += 1 }
-        target   = request['url'].to_s
-        client   = request['clientRealm'].to_i
+        client   = r['clientRealm'].to_i
         key      = SecureRandom.base64(16)
+        # The request's hop (fetch_plan.rs): its URL, its header list and what its cache mode adds to it (`no-store`'s
+        # Pragma / Cache-Control), its cookies as its client's site for cookies judges them — a frame's by its
+        # ancestors', a worker's by the site it was made with — its Origin (a `websocket` mode's wherever it goes, an
+        # opaque client's `null`), its Fetch Metadata, and no Referer: its referrer is `no-referrer`. None for a URL no
+        # request goes to.
+        plan = fetch_plan(
+          r['method'], r['url'].to_s, nil, r['headers'], r['redirect'], r['mode'],
+          credentials: r['credentials'], referrer: r['referrer'], cache_mode: r['cache'], client_url: r['clientUrl'],
+          client_origin: r['clientOrigin'], ancestors: r['ancestors'], dest: r['dest']
+        )
+        step, facts = plan&.begin_hop(nil, Process.clock_gettime(Process::CLOCK_MONOTONIC))
+        raise StandardError, 'websocket handshake refused' unless step == 'dispatch'
+
+        _method, target, hop_headers, _drop_length, referer, cookie_context, authorization, origin, sec = facts
         csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
         env = rack_env_for(target, method: 'GET')
-        # (…its cookies sent, and the handshake's Set-Cookie stored, as its client's site for cookies judges it — a
-        # worker's the site it was made with, a window's realm's the engine's: its top-level document's origin's site
-        # where every document down to its own is of it, else none ('null', cross-site to every target) — RFC 6265bis
-        # §5.2.1)
-        judge = worker ? worker_cookie_site(worker) : (request['siteForCookies'] || 'null')
-        cookie_context = Native.cookie_context(judge, target, false)
-        # (…and no Referer: its referrer is `no-referrer`)
-        apply_default_request_env(env, target, referer: nil, cookie_context: cookie_context)
-        apply_request_headers(env, request['headers'].to_h)
+        apply_request_headers(env, hop_headers.to_h)
+        # (…the `Accept` of a request of no destination: Fetch "fetch" step 12)
+        env['HTTP_ACCEPT'] ||= Native.default_accept(r['dest'].to_s)
+        apply_default_request_env(env, target, referer: referer, force: false, cookie_context: cookie_context)
+        env['HTTP_AUTHORIZATION'] = authorization if authorization && !env.key?('HTTP_AUTHORIZATION')
+        env['HTTP_ORIGIN'] = origin if origin
+        env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_SEC_FETCH_DEST'] = sec if sec
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
         env['HTTP_SEC_WEBSOCKET_VERSION'] = '13'
-        # The opening handshake always carries its client's origin — its realm's document's (an about:blank frame's its
-        # creator's), or the worker's (the UA owns this header) — server handlers echo it back (websockets/opening-
-        # handshake origin test): Fetch "append a request `Origin` header", a `websocket` mode's whatever it is, an
-        # opaque one's `null`.
-        origin = request['clientOrigin'].to_s
-        env['HTTP_ORIGIN'] = origin unless origin.empty?
         env['rack.hijack?']  = true
         env['rack.hijack']   = -> { app_io }
         env['rack.hijack_io'] = app_io
@@ -10833,40 +10839,22 @@ module Capybara
         )
       end
 
-      # URLs we won't even try to route through Rack: anything that
-      # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
-      # like V8's `<snapshot>` that sourcemap libraries pull out of
-      # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      # (…`dest` the request's destination where an element's load makes it — `image`, `script`, `style`, `font`, … —
-      # which its Fetch Metadata reports, its mode `cors_mode`, else `no-cors`: Fetch "main fetch", an element's load a
-      # no-cors request but where it asks for CORS)
-      # (…`transport` what sends each hop where it is not the app's or Net::HTTP's — `dispatch_rack_or_http` — and
-      # `stream` whether the response is answered with its body unread, `[status, headers, body, url]`, for a reader that
-      # takes it as it comes: an event stream's)
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, redirect_taint: nil, redirected: false, cors_preflight: false, origin_null: false, client_url: nil, cookie_cross_site: false, navigation_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, dest: nil,
-                     ancestors: nil, ua_headers: nil, transport: nil, stream: false)
-        # NB: a relative fetch/XHR URL is resolved against the document's API base URL
-        # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
-        # would wrongly pick up a `<base href>` inserted after open() (open-url-base
-        # -inserted-after-open). So this resolves only against the document URL — a relative one: an absolute URL is the
-        # request's as it is, which also keeps a worker thread's fetch (its URLs resolved in its own isolate) off the main
-        # realm, whose current document only its own thread may ask about. (An absolute URL is taken as already serialized:
-        # every caller resolves it first, JS-side or through parse_url / resolve_against.)
-        target = http_url?(url) ? url.to_s : resolve_against_current(url.to_s)
-        return nil unless target.is_a?(String) && http_url?(target)
-        # The fetch, step by step (fetch_plan.rs `FetchPlan`), of the request this describes: its client the realm that
-        # called fetch/XHR (`client_url`, `client_origin`: its document's, a service worker's script's — the page's where
-        # that is no HTTP(S) URL), its origin and referrer and the origin Sec-Fetch-Site measures from worked out there;
-        # its hops' headers and cookie site of that client (fetch_hop.rs: a frame document's by its ancestors' — the
-        # `ancestors` a realm's request names, else those of the `client_realm` a host caller names — a dedicated
-        # worker's by the site for cookies it was made with). None for a URL no fetch
-        # goes to (no HTTP(S) one; a blocked port, Fetch "port blocking" — request-bad-port). A SW re-fetch seeds
-        # Sec-Fetch-Site with the site the network hops accumulated BEFORE the SW intercepted the final hop, and starts
-        # tainted where they had (`origin_null`) — redirected where they followed one (`redirected`: a service worker's
-        # redirects before its fall-through). The method's case AS GIVEN: the engine normalized it already
-        # (open-method-case-sensitive).
+      # The fetch, step by step (fetch_plan.rs `FetchPlan`), of the request this describes: its client the realm that
+      # called fetch/XHR (`client_url`, `client_origin`: its document's, a service worker's script's — the page's where
+      # that is no HTTP(S) URL), its origin and referrer and the origin Sec-Fetch-Site measures from worked out there;
+      # its hops' headers and cookie site of that client (fetch_hop.rs: a frame document's by its ancestors' — the
+      # `ancestors` a realm's request names, else those of the `client_realm` a host caller names — a dedicated
+      # worker's by the site for cookies it was made with). None for a URL no fetch
+      # goes to (no HTTP(S) one; a blocked port, Fetch "port blocking" — request-bad-port). A SW re-fetch seeds
+      # Sec-Fetch-Site with the site the network hops accumulated BEFORE the SW intercepted the final hop, and starts
+      # tainted where they had (`origin_null`) — redirected where they followed one (`redirected`: a service worker's
+      # redirects before its fall-through). The method's case AS GIVEN: the engine normalized it already
+      # (open-method-case-sensitive).
+      # (…the same for a WebSocket's opening handshake, whose response is the socket it speaks the protocol on: ws_open)
+      private def fetch_plan(method, target, body, headers, redirect_mode, cors_mode, credentials: 'same-origin', referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, redirect_taint: nil, redirected: false, cors_preflight: false, origin_null: false, client_url: nil, client_origin: nil, ancestors: nil, client_realm: nil,
+                             cookie_cross_site: false, navigation_cross_site: false, nav_dest: nil, dest: nil, ua_headers: nil)
         worker = Thread.current[:csim_worker_record]
-        plan   = Native::FetchPlan.new(
+        Native::FetchPlan.new(
           {
             method:                (method || 'GET').to_s,
             url:                   target,
@@ -10898,6 +10886,35 @@ module Capybara
             ua_headers:            ua_headers
           },
           [@cors_preflight_cache, @auth_cache]
+        )
+      end
+
+      # URLs we won't even try to route through Rack: anything that
+      # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
+      # like V8's `<snapshot>` that sourcemap libraries pull out of
+      # error stacks and feed straight to `fetch()` / `xhr.open()`.
+      # (…`dest` the request's destination where an element's load makes it — `image`, `script`, `style`, `font`, … —
+      # which its Fetch Metadata reports, its mode `cors_mode`, else `no-cors`: Fetch "main fetch", an element's load a
+      # no-cors request but where it asks for CORS)
+      # (…`transport` what sends each hop where it is not the app's or Net::HTTP's — `dispatch_rack_or_http` — and
+      # `stream` whether the response is answered with its body unread, `[status, headers, body, url]`, for a reader that
+      # takes it as it comes: an event stream's)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, redirect_taint: nil, redirected: false, cors_preflight: false, origin_null: false, client_url: nil, cookie_cross_site: false, navigation_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, dest: nil,
+                     ancestors: nil, ua_headers: nil, transport: nil, stream: false)
+        # NB: a relative fetch/XHR URL is resolved against the document's API base URL
+        # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
+        # would wrongly pick up a `<base href>` inserted after open() (open-url-base
+        # -inserted-after-open). So this resolves only against the document URL — a relative one: an absolute URL is the
+        # request's as it is, which also keeps a worker thread's fetch (its URLs resolved in its own isolate) off the main
+        # realm, whose current document only its own thread may ask about. (An absolute URL is taken as already serialized:
+        # every caller resolves it first, JS-side or through parse_url / resolve_against.)
+        target = http_url?(url) ? url.to_s : resolve_against_current(url.to_s)
+        return nil unless target.is_a?(String) && http_url?(target)
+        plan = fetch_plan(
+          method, target, body, headers, redirect_mode, cors_mode,
+          credentials:, referrer_policy:, referrer:, cache_mode:, initiator:, site_seed:, redirect_taint:, redirected:,
+          cors_preflight:, origin_null:, client_url:, client_origin:, ancestors:, client_realm:, cookie_cross_site:,
+          navigation_cross_site:, nav_dest:, dest:, ua_headers:
         ) or return nil
         loop do
           t0          = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -13463,15 +13480,6 @@ module Capybara
           env['HTTP_COOKIE'] = cookies
         end
       end
-      # …and the site a worker's requests are judged by for cookies: the one it was made with (none — 'null' — for an
-      # opaque creator's), else its script's URL.
-      private def worker_cookie_site(worker)
-        record = Thread.current[:csim_worker_record]
-        return worker.url unless record&.key?(:site_for_cookies)
-
-        record[:site_for_cookies] || 'null'
-      end
-
       # The mode, credentials mode and referrer policy of the request a subresource's `plan` (subresource_plan.rs) is, as a
       # request the asset cache and `subresource_fetch` make takes them: a no-cors one none — the mode-less request an
       # element's load always was, of no response tainting of its own — but a CORS one's, a plugin's navigation.

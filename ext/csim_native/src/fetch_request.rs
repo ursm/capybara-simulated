@@ -309,15 +309,12 @@ fn event_source_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
 }
 
 // __dom.webSocketRequest(state) -> [route, request]: the request a WebSocket's opening handshake makes (WebSockets
-// "establish a WebSocket connection", Fetch §7) of the socket `state` wraps (ws_state.rs) — a GET of its URL, its scheme
-// `ws` made `http` and `wss` `https` — and its header list as it goes on the wire: the subprotocols it offers
-// (`Sec-WebSocket-Protocol`), the `Accept` of a request of no destination (Fetch "fetch" step 12), the `Pragma` and
-// `Cache-Control` of its cache mode `no-store` (Fetch "HTTP-network-or-cache fetch"), and its Fetch Metadata — its mode
-// `websocket`, its destination none, its client's relation to its URL (an opaque client's cross-site). Its credentials
-// mode is `include` (its cookies the host's: the client's site for cookies beside it, referrer.rs `site_for_cookies`,
-// undefined for none — an opaque one; a worker's is its own, which the host knows); its redirect mode `error` (the host
-// follows none); its referrer `no-referrer` — no `Referer` (Chrome and Firefox send none either, even under
-// `unsafe-url`). No service worker answers it (its service-workers mode is `none`): the network does.
+// "establish a WebSocket connection") of the socket `state` wraps (ws_state.rs) — a GET of its URL, its scheme `ws` made
+// `http` and `wss` `https`, the subprotocols it offers in `Sec-WebSocket-Protocol`, its mode `websocket`, its
+// credentials mode `include`, its cache mode `no-store`, its redirect mode `error`, and its referrer `no-referrer` (''):
+// no `Referer` (Chrome and Firefox send none either, even under `unsafe-url`). The host fetches it as every request is
+// (fetch_plan.rs `FetchPlan`: its cookies, its Origin, its cache mode's headers, its Fetch Metadata), over the socket it
+// then speaks the protocol on. No service worker answers it (its service-workers mode is `none`): the network does.
 fn web_socket_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some((url, protocols)) = crate::ws_state::request_facts(scope, args.get(0)) else { return };
@@ -326,26 +323,19 @@ fn web_socket_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
         Some(("wss", rest)) => format!("https:{rest}"),
         _ => url,
     };
-    let arena = &mut dom(scope).arena;
-    let client = Client::of(arena, cid);
-    let site = crate::referrer::site_for_cookies(arena, cid);
+    let client = Client::of(&mut dom(scope).arena, cid);
     let offered = protocols.join(", ");
-    let fetch_site = if client.origin == "null" { "cross-site" } else { crate::referrer::fetch_site(&client.origin, &url) };
-    let mut headers = vec![
-        ("Accept", crate::fetch_rules::default_accept("")),
-        ("Pragma", "no-cache"),
-        ("Cache-Control", "no-cache"),
-        ("Sec-Fetch-Dest", "empty"),
-        ("Sec-Fetch-Mode", "websocket"),
-        ("Sec-Fetch-Site", fetch_site),
-    ];
-    if !offered.is_empty() {
-        headers.push(("Sec-WebSocket-Protocol", &offered));
-    }
+    let headers = if offered.is_empty() { vec![] } else { vec![("Sec-WebSocket-Protocol", offered.as_str())] };
     let fields = vec![
+        ("method", text(scope, "GET")),
         ("url", text(scope, &url)),
         ("headers", text_header_record(scope, &headers)),
-        ("siteForCookies", or_undefined(scope, site.as_deref())),
+        ("mode", text(scope, "websocket")),
+        ("credentials", text(scope, "include")),
+        ("redirect", text(scope, "error")),
+        ("cache", text(scope, "no-store")),
+        ("referrer", text(scope, "")),
+        ("dest", text(scope, "")),
     ];
     let described = host_record(scope, fields, &client);
     answer(scope, rv, ROUTE_NETWORK, described, None, &[]);
