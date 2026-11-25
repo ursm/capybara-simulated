@@ -277,7 +277,6 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
       const f = document.createElement('iframe');
       f.src = 'http://cross.example.org/child';
       document.body.appendChild(f);
-      void f.contentWindow;   // a cross-origin frame read while it navigates is built (frameWindowRead)
     JS
     poll_until { session.evaluate_script("window.__r !== 'none'") }
     r = session.evaluate_script('window.__r')

@@ -13673,17 +13673,6 @@ module Capybara
         out
       end
 
-      # Whether this is a universal-server context (the WPT runner's wptserve shim
-      # serves every host in-process). Gates cross-origin eager frame building: in
-      # such a context a cross-origin iframe's content IS served locally, so it
-      # eager-builds; an ordinary app leaves cross-origin frames lazy (= baseline),
-      # so an external embed isn't eager-fetched — and so nothing it does at load happens until a test enters it (a
-      # `parent.postMessage` from its load-time script is never posted; a test waiting on one enters the frame, or
-      # serves the host locally). A simple flag, NOT per-URL —
-      # url_is_local? compares only host:port (ignoring scheme) and treats a missing
-      # ref origin as local, which would eager-build frames the baseline left lazy.
-      def all_hosts_local? = @all_hosts_local
-
       # Whether a browser's request of `url` would have reached the app's server, which a run with a server listens on one port
       # under any name that resolves to it: a subdomain's, an apex's — the page's own, or its port under a name of its site, or
       # under any name at a port no CDN is on (cuprite with `host-resolver-rules`, measured). A limit: another site's name at the

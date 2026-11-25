@@ -189,11 +189,6 @@ module Capybara
         # Zero-copy postMessage transfer-token bookkeeping (see Browser#drop_pending_transfers).
         'transferIssued'               => ->(b, *a) { b.transfer_token_issued(a[0]); nil },
         'moduleIssued'                 => ->(b, *a) { b.module_token_issued(a[0]); nil },
-        # Universal-server context (WPT runner)? Gates cross-origin eager frame
-        # building: only there is a cross-origin iframe's content served locally,
-        # so an ordinary app leaves cross-origin frames lazy (= baseline) and never
-        # eager-@app.calls a foreign URL (side effects: extra visit / log row).
-        'allHostsLocal'                => ->(b, *a) { b.send(:all_hosts_local?) },
         'videoBytes'                   => ->(b, *a) { b.video_bytes(a[0], a[2], realm: a[1]) }
       }.freeze
 

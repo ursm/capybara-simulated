@@ -126,7 +126,7 @@ module Capybara
         # Capture the universal-server flag ONCE, at session construction — the WPT
         # runner sets CSIM_LOCAL_ALL_HOSTS only while building the session, then
         # restores it. Every window (incl. aux windows opened later) inherits this so
-        # cross-origin iframes eager-build consistently across the whole session.
+        # another host's request is served by the app consistently across the whole session.
         @all_hosts_local = ENV['CSIM_LOCAL_ALL_HOSTS'] == '1'
         # …and the session's device, every window's: its viewport, its user agent and whether its pointer is a
         # touchscreen.
