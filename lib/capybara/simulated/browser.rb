@@ -393,7 +393,7 @@ module Capybara
         @websocket_seq        = 0
         @websocket_threads    = {}
         @websocket_sockets    = {}   # id → csim's socket end
-        @websocket_app_sockets = {}  # id → the app's hijack end (closed on teardown)
+        @websocket_app_sockets = {}  # id → the app's hijack end (closed on reset where the app left it open)
         @websocket_workers    = {}   # id → the handle of the worker that opened it (none: the window's)
         @websocket_realms     = {}   # id → the realm whose document opened it (a window's: 0 the page's)
         @websocket_lock       = Mutex.new
@@ -4839,9 +4839,12 @@ module Capybara
       # once each ended.
       private def forget_websockets(ids)
         @websocket_lock.synchronize do
+          # (…but the app's end, which is the app's to close: its server may not have read the last of csim's end yet — a
+          # Close's echo, a failure's Close — and reads EOF after it, as the reader closed csim's end. Kept until the app
+          # closes it, or until `reset_websockets` closes what the app left open.)
+          @websocket_app_sockets.reject! {|_, s| s.closed? }
           ids.each do |id|
             @websocket_sockets.delete(id)
-            @websocket_app_sockets.delete(id)&.close rescue nil
             @websocket_threads.delete(id)
             @websocket_workers.delete(id)
             @websocket_realms.delete(id)

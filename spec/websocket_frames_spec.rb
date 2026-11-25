@@ -44,16 +44,14 @@ RSpec.describe 'WebSocket frames' do
     'client_close'  => ''.b
   }.freeze
 
-  # A client's frame, unmasked: [opcode, payload] — nil where none comes in time.
+  # A client's frame, unmasked: [opcode, payload] — nil at the end of its stream (or where none comes in time).
   def self.client_frame(io)
-    return unless io.wait_readable(2) && (head = io.read(2))
+    return unless io.wait_readable(5) && (head = io.read(2)) && head.bytesize == 2
 
     len = head.getbyte(1) & 0x7f
     len = io.read(2).unpack1('n') if len == 126
     key = io.read(4)
     [head.getbyte(0) & 0x0f, (io.read(len) || ''.b).bytes.each_with_index.map {|b, i| b ^ key.getbyte(i & 3) }.pack('C*')]
-  rescue IOError, SystemCallError
-    nil
   end
 
   # The handshakes' request headers, as the app saw them; and the frames each case's client sent, by its name.
@@ -77,7 +75,10 @@ RSpec.describe 'WebSocket frames' do
             sent[name] << f
             io.write(group.frame(0x8, f[1])) if name == 'client_close' && f[0] == 0x8
           end
+        ensure
+          # (…the stream over, the app's end its own to close)
           sent[name].close
+          io.close
         end
         [101, {}, []]
       else
