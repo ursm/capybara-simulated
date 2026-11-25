@@ -443,7 +443,6 @@ module Capybara
         @worker_outbox_head = nil
         # What the service workers changed of their clients' control — their claims, their lifecycle phases — taken from
         # the outbox and held for the window's next event-loop step (`hold_controller_changes`).
-        @held_controller_changes = []
         # What the workers owe this window and what it streams, races, awaits and holds its clock for across their threads
         # — the engine's (worker_host.rs `WorkerHost`), counted with no lock: the plain messages posted to a worker that it
         # may answer (`POSTED`: `polling?` stays true while one is outstanding, so long-running compute isn't starved by the
@@ -621,16 +620,13 @@ module Capybara
       # Client-realm handler for each streaming respondWith frame kind (see deliver_worker_messages
       # + sw-client.js). `fr_start` builds a ReadableStream-backed Response; `fr_chunk` enqueues;
       # `fr_close` / `fr_error` close / error the body stream.
-      # A worker's MessagePort channel signals about an END — handled in the order the worker sent them, ahead of its
-      # port messages (deliver_worker_messages).
-      PORT_END_KINDS = %w[port_here port_gone port_closed port_redeliver].freeze
       STREAM_FRAME_FNS = {
         'fr_start' => 'swFetchStreamStart',
         'fr_chunk' => 'swFetchStreamChunk',
         'fr_close' => 'swFetchStreamClose',
         'fr_error' => 'swFetchStreamError'
       }.freeze
-      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_START_MS, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :WORKER_QUIESCE_MAX_ROUNDS, :PORT_END_KINDS, :STREAM_FRAME_FNS
+      private_constant :WORKER_POLL_INTERVAL, :WORKER_ROUND_TRIP_BUDGET, :WORKER_START_MS, :WORKER_TERMINATE_GRACE, :WORKER_GVL_YIELD, :WORKER_QUIESCE_MAX_ROUNDS, :STREAM_FRAME_FNS
 
       # ── Capybara DSL surface ────────────────────────────────────
 
@@ -6232,7 +6228,6 @@ module Capybara
       # (…and whether there is any: none, and no navigation has a registration to match — what it asks before working
       # out the storage key it would match by, rule 3)
       private def sw_registered? = Native.sw_any(@sw_partition)
-      private def sw_scope_of(handle) = sw_regs.find {|_, _, activating, serving| serving == handle || activating == handle }&.first
 
       # Whether a service worker's response `r` (its wire form) may answer a request in `mode` with `redirect` (Fetch
       # "HTTP fetch" step 5.5 — the engine's).
@@ -8032,25 +8027,19 @@ module Capybara
         return 0 if head.nil? && @workers.empty? && @worker_outbox.empty?
         events = drain_queue(@worker_outbox)
         events.unshift(head) if head
-        events.reject! {|e| e[:kind] == 'sw_job_event' }
-        return 0 if events.empty?
-        # A worker-originated BroadcastChannel post ('broadcast') is fanned out on the main thread and
-        # is NOT a reply. A 'bcack' acknowledges a broadcast the worker just delivered → release one
-        # broadcast-pending. Everything else ('message'/'__error') is a postMessage reply.
-        broadcasts,  rest0  = events.partition {|e| e[:kind] == 'broadcast' }
-        port_ends,   rest0b = rest0.partition  {|e| PORT_END_KINDS.include?(e[:kind]) }
-        port_msgs,   rest0c = rest0b.partition {|e| e[:kind] == 'port_msg' }
-        sw_navs,     rest0c3 = rest0c.partition {|e| e[:kind] == 'sw_client_navigate' }
-        skip_waits,  rest0d0 = rest0c3.partition {|e| e[:kind] == 'sw_skip_waiting' }
-        sw_phases,   rest0d2 = rest0d0.partition {|e| e[:kind] == 'sw_phase' }
-        sw_reaps,    rest0d2b = rest0d2.partition {|e| e[:kind] == 'sw_reaped' }
-        try_acts,    rest0d  = rest0d2b.partition {|e| e[:kind] == 'sw_try_activate' }
-        sw_msgs,     rest1  = rest0d.partition {|e| e[:kind] == 'sw_client_msg' }
-        swacks,      rest2  = rest1.partition  {|e| e[:kind] == 'swack' }
-        claims,      rest3  = rest2.partition  {|e| e[:kind] == 'sw_claim' }
-        fetch_resps,   rest4  = rest3.partition  {|e| e[:kind] == 'fetch_response' }
-        stream_frames, rest4b = rest4.partition  {|e| e[:kind].to_s.start_with?('fr_') }
-        acks,          msgs   = rest4b.partition {|e| e[:kind] == 'bcack' }
+        # The drain by kind, in the order a delivery takes them, each kind's in the order posted (worker_delivery.rs
+        # `delivery_plan`): a worker-originated BroadcastChannel post ('broadcast') is fanned out on the main thread and
+        # is NOT a reply; a 'bcack' acknowledges a broadcast the worker just delivered → release one broadcast-pending;
+        # what no group names ('message' / '__error' / '__scripterror') a postMessage reply. A port or client message
+        # carries whether a claim was posted before it.
+        plan = WorkerHost.delivery_plan(events.map {|e| e[:kind].to_s })
+        return 0 if plan.empty?
+
+        group = plan.to_h {|name, picks| [name, picks.map {|i, after_claim| [events[i], after_claim] }] }
+        group.default = [].freeze
+        of = ->(name) { group[name].map(&:first) }
+        broadcasts, port_ends, sw_navs, claims, sw_phases, sw_reaps, skip_waits, try_acts, fetch_resps, stream_frames, swacks, acks, msgs =
+          %w[broadcast port_end client_navigate claim phase reaped skip_waiting try_activate fetch_response stream_frame swack bcack message].map(&of)
         broadcasts.each {|e| broadcast_to_windows(e[:name], e[:data], nil, e[:origin], from_worker: e[:handle]) }
         # A worker taking a MessagePort channel's end, or giving one up — in the order it did — BEFORE
         # the message events below, so a port message carried in the same drain can already route.
@@ -8079,12 +8068,8 @@ module Capybara
         # (skip-waiting "both active and waiting" hang).
         run_sw_job_events
         # What changes a client's control — a claim, a lifecycle phase — held for the window's next step, in the order the
-        # workers made them (`hold_controller_changes`) — but for a message to a client posted after one, below. (…where
-        # each event stood in the outbox, which the partitions above lost)
+        # workers made them (`hold_controller_changes`) — but for a message to a client posted after one, below.
         held_before = controller_changes_held?
-        order       = {}.compare_by_identity
-        events.each_with_index {|e, i| order[e] = i }
-        first_claim = claims.map {|e| order[e] }.min
         hold_controller_changes(claims, sw_phases)
         # A reaped SERVICE worker (posted by reap_worker, possibly from a worker thread):
         # main-thread cleanup of the activation-parking state it can no longer satisfy, and of
@@ -8109,8 +8094,8 @@ module Capybara
         # a client decodes a transferred port in the sw_client_msg processed just below). (…one posted after a claim held is
         # causally after it, as a client message below is: the claim taken effect first — claim-shared-worker-fetch's
         # 'PASS', posted on a port once `clients.claim()` resolved)
-        port_msgs.each do |e|
-          apply_controller_changes if controller_changes_held? && (held_before || (first_claim && order[e] > first_claim))
+        group['port_message'].each do |e, after_claim|
+          apply_controller_changes if controller_changes_held? && (held_before || after_claim)
           port_post(e[:end], e[:data])
         end
         # A service worker → client message: deliver to the realm of the client it names, by the
@@ -8123,11 +8108,11 @@ module Capybara
         # to a main realm would MISROUTE it)
         # (…one to a reserved client — a navigation's, its document not committed, which a deadlocked worker's `get` resolved
         # to early: workers.js `swBreakSelfWait` — held until it is a client: `sw_client_settled`)
-        sw_msgs.each do |e|
+        group['client_message'].each do |e, after_claim|
           # (…one posted after a claim held — an earlier drain's, or this one's before it in the outbox — is causally after
           # it: `clients.claim()` sets each client's active worker before its promise resolves, so a message sent after
           # `await self.clients.claim()` finds its client controlled; the claim taken effect first)
-          apply_controller_changes if controller_changes_held? && (held_before || (first_claim && order[e] > first_claim))
+          apply_controller_changes if controller_changes_held? && (held_before || after_claim)
           @runtime.run_due_by(e[:at]) if e[:at]
           if Native.sw_client_reserved(@sw_partition, e[:client].to_s)
             (@reserved_client_messages ||= Hash.new {|h, k| h[k] = [] })[e[:client].to_s] << e
@@ -8186,7 +8171,7 @@ module Capybara
         # Each worker→parent message fires from its OWN task, its checkpoint before the next (HTML: the message event is
         # fired from a queued task) — the delivery's own, workers.js `deliverWorkerEvent`, the batch handed over at once.
         @runtime.call('deliverWorkerMessages', direct) unless direct.empty?
-        events.size
+        plan.sum {|_, picks| picks.size }
       end
 
       # Window-first: what a service worker changes of its clients' control — its `clients.claim()`, a lifecycle phase (the
@@ -8206,19 +8191,20 @@ module Capybara
       # The phases ride with the claims, in order, so a claim is in place before the 'activated' after it is observable
       # (the activation.https flake); a phase with no claim held before it is applied at once, as nothing of the window's
       # orders it.
+      # (…held by the engine, which says what is applied at once: worker_delivery.rs `changes_hold`)
       private def hold_controller_changes(claims, phases)
-        if claims.empty? && @held_controller_changes.empty?
-          apply_sw_phases(phases)
-        elsif !(claims.empty? && phases.empty?)
-          @held_controller_changes << [claims, phases]
-        end
+        now = @worker_host.changes_hold(
+          claims.map {|e| [e[:handle].to_i, e[:has_fetch] == true] },
+          phases.map {|e| [e[:handle].to_i, e[:phase].to_s, !e.key?(:ok) || e[:ok] == true] }
+        )
+        apply_sw_phases(now)
       end
       # …applied, in the order they were held. (…a held one is work pending (`worker_drive_pending?`), which a settle
       # steps for)
       def apply_controller_changes
-        return if @held_controller_changes.empty?
+        held = @worker_host.changes_take
+        return if held.empty?
 
-        held, @held_controller_changes = @held_controller_changes, []
         held.each do |claims, phases|
           apply_sw_claims(claims)
           apply_sw_phases(phases)
@@ -8229,7 +8215,7 @@ module Capybara
         try_clear_uninstalls
         sw_try_activate
       end
-      private def controller_changes_held? = !@held_controller_changes.empty?
+      private def controller_changes_held? = @worker_host.changes_held?
 
       # clients.claim(): the claiming worker takes control of EVERY in-scope client — including
       # ones that never register()'d (an iframe built before the SW existed). See broadcast_claim.
@@ -8251,12 +8237,9 @@ module Capybara
       # An ACTIVATING worker's claim applies immediately too (claim is valid from state
       # 'activating'; fetch-waits-for-activate claims mid-activate and expects the client
       # controlled — its fetches then park on the activation, not the claim).
+      # (…`claims` each `[worker, has_fetch]`, ordered and scoped by the engine: sw_registry.rs `claim_order`)
       private def apply_sw_claims(claims)
-        claims.map {|e| [e, sw_scope_of(e[:handle].to_i)] }
-              .sort_by {|_e, scope| -(scope ? scope.length : -1) }
-              .each do |e, scope|
-          broadcast_claim(e[:handle], e[:has_fetch], scope) if scope
-        end
+        Native.sw_claim_order(@sw_partition, claims).each {|handle, has_fetch, scope| broadcast_claim(handle, has_fetch, scope) }
       end
 
       # A worker finished a lifecycle phase — its lifecycle parks its observable states on
@@ -8268,17 +8251,16 @@ module Capybara
       # 'activating' (fetch-waits-for-activate): the record flag flips FIRST (new dispatches
       # stop deferring), then the resumed step makes it the worker serving its scope, then the
       # parked fetches/navigations replay against the now-complete state.
+      # (…`sw_phases` each `[worker, phase, ok]`)
       private def apply_sw_phases(sw_phases)
-        sw_phases.each do |e|
-          h     = e[:handle].to_i
-          phase = e[:phase].to_s
-          Native.sw_note_phase(@sw_partition, h, phase, !e.key?(:ok) || e[:ok])
+        sw_phases.each do |h, phase, ok|
+          Native.sw_note_phase(@sw_partition, h, phase, ok)
           sw_resume_step(h, phase == 'install' ? 'install' : 'activation')
         end
-        sw_phases.each do |e|
-          next unless e[:phase].to_s == 'activated'
+        sw_phases.each do |h, phase, _ok|
+          next unless phase == 'activated'
 
-          flush_sw_deferred_fetches(e[:handle].to_i)
+          flush_sw_deferred_fetches(h)
           retry_deferred_navigations
         end
       end
@@ -9489,7 +9471,7 @@ module Capybara
         @worker_outbox_head = nil
         @sw_job_events.clear
         @sw_realm_tells.clear
-        @held_controller_changes.clear
+        @worker_host.changes_take
         # Nothing owed, streamed, raced, awaited or held for any more, and no client id adopted: the adopted ids go with
         # the client registry (the reserved ids a navigation mints are the process's, never reset — `mint_resulting_client_id`).
         @worker_host.reset

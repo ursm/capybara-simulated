@@ -116,6 +116,7 @@ mod isomorphic;
 mod worker_script_fetch;
 mod worker_host;
 mod worker_records;
+mod worker_delivery;
 mod clock_holds;
 mod fetch_hop;
 mod fetch_plan;
@@ -437,6 +438,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_registered_at", magnus::function!(sw_registry::registered_at_for_ruby, 3))?;
     native.define_module_function("sw_note_phase", magnus::function!(sw_registry::note_phase_for_ruby, 4))?;
     native.define_module_function("sw_hold", magnus::function!(sw_registry::hold_for_ruby, 4))?;
+    native.define_module_function("sw_claim_order", magnus::function!(sw_registry::claim_order_for_ruby, 2))?;
     native.define_module_function("sw_own_evaluated", magnus::function!(sw_registry::own_evaluated_for_ruby, 2))?;
     native.define_module_function("sw_own_fire", magnus::function!(sw_registry::own_fire_for_ruby, 3))?;
     native.define_module_function("sw_own_settled", magnus::function!(sw_registry::own_settled_for_ruby, 3))?;

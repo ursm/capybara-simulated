@@ -1067,6 +1067,20 @@ pub(crate) fn note_phase_for_ruby(partition: u64, handle: u32, phase: String, ok
         }
     }
 }
+// The claims `clients.claim()` made (each `[worker, whether it handles fetches]`), in the order they are applied — each with
+// the scope of the registration its worker serves or activates for, one whose registration left the map since claiming
+// nothing — the LONGEST scope first: where nested-scope workers claim in the same drain, the deeper registration is in
+// place before the shallower one runs, or a client the shallow claim transiently seized would see a spurious extra
+// `controllerchange`.
+pub(crate) fn claim_order_for_ruby(partition: u64, claims: Vec<(u32, bool)>) -> Vec<(u32, bool, String)> {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return Vec::new() };
+    let scope_of = |h: u32| p.registrations.iter().find(|r| r.mapped && (r.serving == Some(h) || r.activating == Some(h))).map(|r| r.scope.clone());
+    let mut ordered: Vec<(u32, bool, String)> = claims.into_iter().filter_map(|(h, fetch)| scope_of(h).map(|scope| (h, fetch, scope))).collect();
+    ordered.sort_by_key(|(_, _, scope)| std::cmp::Reverse(scope.len()));
+    ordered
+}
+
 // ── A service worker's own lifecycle events, its thread's (`Own`) ──
 // Its script ran: the host's Install may reach it.
 pub(crate) fn own_evaluated_for_ruby(partition: u64, handle: u32) {
