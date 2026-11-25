@@ -210,24 +210,40 @@ const INVOKE_DIALOG_COMMAND: u32 = 2;
 const INVOKE_CUSTOM_COMMAND: u32 = 3;
 const INVOKE_POPOVER_TARGET: u32 = 4;
 
-// HTML's "popover target element" of `id` — its `popovertarget`'s popover, or a `<button commandfor>`'s popover where its
-// command is a popover's — for a button or a button-like input that is not disabled and no submit button with a form
-// owner: what a press on it is a press of, for the popovers' light dismiss.
+// HTML's "target popover" of `id` — what a press on it is a press of, for the popovers' light dismiss: a button-like
+// input's popover target element; a `<button>`'s `commandfor` element where its command is a popover's, else its popover
+// target element; none for a disabled one. HTML "get the target popover": "If node has a form owner: If element is a
+// submit button, then return null. If element's type attribute is in the Reset Button state, then return null. If
+// element's type attribute is in the Auto state, then return null." — a `<button commandfor>` in a form is a popover's
+// only where its `type` is `button`, though Chrome and Firefox take a reset or untyped one's too (an explicit rule
+// kept over both engines).
 pub(crate) fn invoked_popover(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
     let n = arena.get(id)?;
     let button = n.is_html_named("button");
     if !button && !(n.is_html_named("input") && n.input_has(crate::input_types::BUTTON)) {
         return None;
     }
-    if arena.is_actually_disabled(id) || (arena.is_submit_button(id) && arena.form_owner(id).is_some()) {
+    if arena.is_actually_disabled(id) {
         return None;
     }
     let popover = |p: NodeId| arena.get(p).is_some_and(crate::popovers::is_popover);
     if let Some(target) = button.then(|| arena.referenced_element(id, "commandfor")).flatten() {
+        let typed_button = n.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("button"));
+        if arena.form_owner(id).is_some() && !typed_button {
+            return None;
+        }
         let command = button_command(n);
         return command.filter(|c| POPOVER_COMMANDS.contains(&c.as_str())).map(|_| target).filter(|&t| popover(t));
     }
-    arena.referenced_element(id, "popovertarget").filter(|&p| popover(p))
+    popover_target_element(arena, id).filter(|&p| popover(p))
+}
+// …and HTML "popover target element" of a button or button-like input, not disabled: its `popovertarget` element — none
+// for a submit button with a form owner.
+fn popover_target_element(arena: &RealmArena, id: NodeId) -> Option<NodeId> {
+    if arena.is_submit_button(id) && arena.form_owner(id).is_some() {
+        return None;
+    }
+    arena.referenced_element(id, "popovertarget")
 }
 
 // __dom.invokerAction(invoker, eventTarget) -> undefined, or `[kind, target, command, action]`: HTML's button activation

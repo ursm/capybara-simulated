@@ -168,6 +168,25 @@ RSpec.describe 'Popover and dialog steps' do
     expect(got).to eq([['', ''], %w[b c], %w[b c]])
   end
 
+  # HTML "get the target popover": a `<button commandfor>` with a form owner is no popover's but where its `type` is
+  # `button` — "If element's type attribute is in the Reset Button state, then return null. If element's type attribute
+  # is in the Auto state, then return null." — so pressing a reset or untyped one light-dismisses the popover it names.
+  # Chrome and Firefox keep it open for all three (the reviewer's cap4); the explicit rule is kept: [false, false, true].
+  it 'light-dismisses past a reset or untyped command button in a form' do
+    s = session_with(<<~HTML)
+      <div id=p popover>pop</div>
+      <form><button type=reset id=r commandfor=p command=toggle-popover>reset</button>
+      <button id=a commandfor=p command=toggle-popover>auto</button>
+      <button type=button id=b commandfor=p command=show-popover>button</button></form>
+    HTML
+    open_after = %w[r a b].map {|id|
+      s.execute_script('p.showPopover()')
+      s.find("##{id}").click
+      s.evaluate_script("p.matches(':popover-open')").tap { s.execute_script("if (p.matches(':popover-open')) p.hidePopover()") }
+    }
+    expect(open_after).to eq([false, false, true])
+  end
+
   # The close watcher manager (HTML §6.10): close watchers made with no user activation between them share a group,
   # which one close request (the Escape key) closes together — the last first, its `cancel` not cancelable — and a
   # CloseWatcher's requestClose() fires a cancelable `cancel` its listener may prevent (WPT close-watcher/

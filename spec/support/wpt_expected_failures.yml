@@ -67873,10 +67873,8 @@ html/semantics/popovers/popover-top-layer-interactions.html:
 - A Popover should *not* close a Fullscreen Element.
 html/semantics/popovers/popover-top-layer-nesting-hints.html:
 - Nested auto/hint ancestors with fullscreen
-- Nested auto/hint ancestors, target is auto with dialog
 - Nested auto/hint ancestors, target is auto with fullscreen
 - Single popover=hint ancestor with fullscreen
-- Unrelated hint, target=auto with dialog
 - Unrelated hint, target=auto with fullscreen
 - Unrelated hint, target=hint with fullscreen
 html/semantics/popovers/popover-top-layer-nesting.html:

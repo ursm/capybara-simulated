@@ -1452,7 +1452,6 @@ mod tests {
         clear(partition);
     }
 
-
     #[test]
     fn an_rp_id_is_a_valid_domain_string() {
         for (requested, host, ok) in [
