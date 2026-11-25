@@ -54,6 +54,7 @@ pub(crate) struct WorkerHost {
     // …and what its workers post it, and the wake of a thread waiting for a post (worker_delivery.rs).
     pub(crate) outbox: Mutex<crate::worker_delivery::Outbox>,
     pub(crate) outbox_posted: Condvar,
+    pub(crate) counts: crate::worker_delivery::Counts,
 }
 
 #[derive(Default)]
@@ -136,7 +137,7 @@ static RESERVED_CLIENTS: AtomicU64 = AtomicU64::new(0);
 impl WorkerHost {
     pub(crate) fn new() -> Self {
         let (records, stirred) = crate::worker_records::new_records();
-        WorkerHost { owed: Default::default(), epoch: Mutex::new(0), state: Mutex::new(State { direct_seq: DIRECT_BASE, ..State::default() }), answered: Condvar::new(), records, stirred, held_changes: Mutex::default(), outbox: Mutex::default(), outbox_posted: Condvar::new() }
+        WorkerHost { owed: Default::default(), epoch: Mutex::new(0), state: Mutex::new(State { direct_seq: DIRECT_BASE, ..State::default() }), answered: Condvar::new(), records, stirred, held_changes: Mutex::default(), outbox: Mutex::default(), outbox_posted: Condvar::new(), counts: Default::default() }
     }
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)

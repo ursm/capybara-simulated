@@ -148,6 +148,14 @@ pub(crate) struct Outbox {
     posted: VecDeque<(String, Datum)>,
 }
 
+// How many posts there are, and whether any controller change is held — read with no lock by the window's checks every
+// step (`outbox_empty?`, `changes_held?`), written under their locks.
+#[derive(Default)]
+pub(crate) struct Counts {
+    posts: std::sync::atomic::AtomicUsize,
+    held: std::sync::atomic::AtomicBool,
+}
+
 impl WorkerHost {
     fn outbox(&self) -> MutexGuard<'_, Outbox> {
         self.outbox.lock().unwrap_or_else(PoisonError::into_inner)
@@ -156,17 +164,22 @@ impl WorkerHost {
     fn outbox_post(ruby: &magnus::Ruby, rb_self: &Self, hash: RHash) -> Result<(), magnus::Error> {
         let datum = Datum::read(ruby, hash.as_value())?;
         let kind = datum.kind();
-        rb_self.outbox().posted.push_back((kind, datum));
+        let mut outbox = rb_self.outbox();
+        outbox.posted.push_back((kind, datum));
+        rb_self.counts.posts.store(outbox.posted.len(), std::sync::atomic::Ordering::Release);
+        drop(outbox);
         rb_self.outbox_posted.notify_all();
         Ok(())
     }
     // #outbox_empty? -> whether nothing is posted.
     fn outbox_empty(&self) -> bool {
-        self.outbox().posted.is_empty()
+        self.counts.posts.load(std::sync::atomic::Ordering::Acquire) == 0
     }
     // #outbox_clear — every post let go of: the session's reset.
     fn outbox_clear(&self) {
-        self.outbox().posted.clear();
+        let mut outbox = self.outbox();
+        outbox.posted.clear();
+        self.counts.posts.store(0, std::sync::atomic::Ordering::Release);
     }
     // #outbox_wait(seconds) -> whether something is posted, waiting for it at most `seconds` with the GVL released (an
     // interrupt of the thread ending the wait at once).
@@ -193,7 +206,11 @@ impl WorkerHost {
     // #outbox_take -> a drain of what is posted, in the order a delivery takes it (`delivery_plan`): `[group, [[post,
     // after_claim], …]]` for each group it has — nothing posted, none.
     fn outbox_take(ruby: &magnus::Ruby, rb_self: &Self) -> RArray {
-        let drained: Vec<(String, Datum)> = rb_self.outbox().posted.drain(..).collect();
+        let drained: Vec<(String, Datum)> = {
+            let mut outbox = rb_self.outbox();
+            rb_self.counts.posts.store(0, std::sync::atomic::Ordering::Release);
+            outbox.posted.drain(..).collect()
+        };
         let plan = delivery_plan(drained.iter().map(|(kind, _)| kind.clone()).collect());
         let groups = ruby.ary_new_capa(plan.len());
         for (group, picks) in plan {
@@ -251,16 +268,19 @@ impl WorkerHost {
         }
         if !(claims.is_empty() && phases.is_empty()) {
             held.batches.push((claims, phases));
+            self.counts.held.store(true, std::sync::atomic::Ordering::Release);
         }
         Vec::new()
     }
     // #changes_held? -> whether any is held: work pending, which a settle steps for.
     fn changes_held(&self) -> bool {
-        !self.held().batches.is_empty()
+        self.counts.held.load(std::sync::atomic::Ordering::Acquire)
     }
     // #changes_take -> those held, in the order held — `[claims, phases]` each — none held after.
     fn changes_take(&self) -> Vec<(Claims, Phases)> {
-        std::mem::take(&mut self.held().batches)
+        let mut held = self.held();
+        self.counts.held.store(false, std::sync::atomic::Ordering::Release);
+        std::mem::take(&mut held.batches)
     }
 }
 
