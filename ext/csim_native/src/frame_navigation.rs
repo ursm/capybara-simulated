@@ -142,11 +142,13 @@ const DEFERRED_LISTED: u32 = 1 << 16;
 // Its realm being built now: a read of its window the build makes is answered with none, not
 // a build again — set and cleared by the build alone (unload_walks.rs `frameBuildBegin` / `frameBuildEnd`).
 pub(crate) const BUILDING: u32 = 1 << 4;
-// The navigation is a reload (frame-nav.js `FN_RELOAD_NAV`).
+// The navigation is a reload (`renavigateFrame`).
 const RELOAD_NAV: u32 = 1 << 5;
+// The session history entry it pushes as it commits replaces the current one (frame-nav.js `FN_HISTORY_REPLACE`).
+const HISTORY_REPLACE: u32 = 1 << 13;
 // Its post-insertion step ran: its navigable exists (frame-nav.js `FN_CONTEXT_READY`).
 const CONTEXT_READY: u32 = 1 << 6;
-// Its `src` refused as its attributes were last processed (frame-nav.js `FN_SRC_REFUSED`, `process_src`).
+// Its `src` refused as its attributes were last processed (`process_src`).
 const SRC_REFUSED: u32 = 1 << 7;
 // Its element's `load` for the navigation under way still to fire (frame-nav.js `FN_LOAD_OWED`).
 const LOAD_OWED: u32 = 1 << 8;
@@ -366,6 +368,7 @@ impl RealmArena {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "frameLoadBegin", frame_load_begin, context_id);
     crate::dom::register(scope, ns, "frameLoadNext", frame_load_next, context_id);
+    crate::dom::register(scope, ns, "renavigateFrame", renavigate_frame, context_id);
     crate::dom::register(scope, ns, "frameLoadGate", frame_load_gate, context_id);
     crate::dom::register(scope, ns, "frameNav", frame_nav, context_id);
     crate::dom::register(scope, ns, "frameAttributesNavigate", frame_attributes_navigate, context_id);
@@ -398,7 +401,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "navigationTurnRan", navigation_turn_ran, context_id);
     let turn_due = crate::dom::dom(scope).arena.frame_navigations.1.turn_due.store();
     crate::dom::view_word(scope, ns, "navigationTurnDue", turn_due);
-    crate::dom::register(scope, ns, "frameNavigationBegins", frame_navigation_begins, context_id);
     crate::dom::register(scope, ns, "frameNavAsks", frame_nav_asks, context_id);
     crate::dom::register(scope, ns, "frameNavigationFinalized", frame_navigation_finalized, context_id);
     crate::dom::register(scope, ns, "takeFrameNavigations", take_frame_navigations, context_id);
@@ -411,7 +413,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "takeFrameSandbox", take_frame_sandbox, context_id);
     crate::dom::register(scope, ns, "releaseFrameSandbox", release_frame_sandbox, context_id);
     crate::dom::register(scope, ns, "frameSandbox", frame_sandbox_op, context_id);
-    crate::dom::register(scope, ns, "beginFrameNavigation", begin_frame_navigation, context_id);
 }
 
 // HTML "shared attribute processing steps for iframe and frame elements" step 3, as the frame `container`'s attributes
@@ -476,25 +477,6 @@ impl crate::dom::RealmArena {
     pub(crate) fn take_frame_sandbox(&mut self, container: NodeId) -> Option<String> {
         let snapshot = self.frame_navigations.0.get_mut(&container).and_then(|nav| nav.sandbox.take());
         snapshot.unwrap_or_else(|| self.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned))
-    }
-}
-// __dom.beginFrameNavigation(containerNid[, begun]) — a navigation of the container begins (`begin`): a scripted one, or
-// the host's, which carries the attribute it began with (`begun`, `[attribute]`: `takeFrameNavigations`).
-fn begin_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = nid_arg(scope, &args, 0) else { return };
-    let begun = v8::Local::<v8::Array>::try_from(args.get(1)).ok().map(|a| {
-        let v = a.get_index(scope, 0).filter(|v| !v.is_null_or_undefined());
-        v.map(|v| v.to_rust_string_lossy(scope))
-    });
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    match begun {
-        Some(sandbox) => {
-            let nav = arena.frame_navigation(container);
-            nav.sandbox = Some(sandbox);
-            nav.activated = false;
-        }
-        None => begin(arena, container),
     }
 }
 // Whether the navigation of the container under way began with its document's window activated
@@ -927,19 +909,6 @@ fn frame_load_fired(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     arena.frame_navigation(container).loaded_at = Some(at);
 }
 
-// __dom.frameNavigationBegins(containerNid, commitsLater, prompted) -> whether the frame's old document stays its own until
-// the navigation's task, as HTML "navigate" has it: it has one, and is connected, where a task is coming (`commitsLater`,
-// none in a snapshot's build) — its document still to be asked unless `prompted`. A frame none is coming for unloads it now.
-fn frame_navigation_begins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let (coming, prompted) = (args.get(1).is_true(), args.get(2).is_true());
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let later = coming && arena.frame_realm(container).is_some() && arena.is_connected(container);
-    arena.set_frame_nav(container, COMMIT_PENDING, later);
-    arena.set_frame_nav(container, PROMPT_OWED, later && !prompted);
-    rv.set_bool(later);
-}
 // __dom.frameNavAsks(containerNid) -> the realm whose document the container's latest navigation asks now whether it may
 // be unloaded (`RealmArena::frame_nav_asks`), -1 for none: the one it owes, no document above it asking already.
 fn frame_nav_asks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -1009,6 +978,73 @@ fn frame_attributes_navigate(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     let loaded = arena.realm_document(realm).is_none_or(|d| arena.document_states.lifecycle(d).is_completely_loaded());
     let replace = !loaded || (here == url && origin.is_none_or(|o| o == served));
     answer(scope, rv, if replace { ATTR_NAV_REPLACE } else { ATTR_NAV_PUSH }, &url);
+}
+
+// __dom.renavigateFrame(containerNid, navFrom, isReload, historyUrl, byAttributes, src, begun, prompted, coming) -> whether
+// the navigation's steps go on as a task (`coming`: the container's document queues them), its old document the frame's
+// till then — false where none is coming for it, the caller unloading that document now. HTML "navigate" of the
+// container's navigable, the steps it runs at once (dom-nodes.js `renavigateFrame`): the response it goes to carried in
+// slot `navFrom` (-1: none, its URL fetched), the URL it starts with — `src` (null for none), whatever a beforeunload
+// handler writes into the attribute after — `byAttributes` where its attributes' processing makes it (`srcdoc` read again),
+// a reload (`isReload`), the session history entry it pushes as it commits (`historyUrl`, null for none), the sandboxing
+// its host navigation began with (`begun`), its document asked already (`prompted`); the navigation under way superseded.
+fn renavigate_frame(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(false);
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let nav_from = args.get(1).int32_value(scope).unwrap_or(-1);
+    let is_reload = args.get(2).is_true();
+    let history = args.get(3);
+    let history = if history.is_null_or_undefined() { None } else { Some(utf16_arg(scope, history)) };
+    let by_attributes = args.get(4).is_true();
+    let src = args.get(5);
+    let src = if src.is_null_or_undefined() { None } else { Some(utf16_arg(scope, src)) };
+    let begun = v8::Local::<v8::Array>::try_from(args.get(6)).ok().map(|a| {
+        let v = a.get_index(scope, 0).filter(|v| !v.is_null_or_undefined());
+        v.map(|v| v.to_rust_string_lossy(scope))
+    });
+    let (prompted, coming) = (args.get(7).is_true(), args.get(8).is_true());
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    if by_attributes {
+        arena.set_frame_nav(container, URL_NAV, false);
+    }
+    let nav = arena.frame_navigation(container);
+    // (…the response carried where it lies already — a javascript: URL's result — kept; a reload's the bytes of the document
+    // it loaded last — a blob: URL's, revoked since — where that is the one it reloads, its fragment aside, and none where it
+    // went on to another since: that one's URL loaded again)
+    let unfragmented = |url: &[u16]| url.iter().position(|&c| c == u16::from(b'#')).map_or(url, |at| &url[..at]).to_vec();
+    if is_reload && nav_from == CONTENT_LOADED as i32 {
+        let (kept, reload) = (nav.contents[CONTENT_LOADED].as_ref().map(|c| unfragmented(&c.url)), nav.reload.as_deref().map(unfragmented));
+        if kept.is_some() && reload.is_some() && kept != reload {
+            nav.contents[CONTENT_LOADED] = None;
+        }
+    }
+    match usize::try_from(nav_from).ok().filter(|&slot| slot < CONTENT_SLOTS) {
+        Some(CONTENT_NAV) => {}
+        Some(slot) => nav.contents[CONTENT_NAV] = nav.contents[slot].clone(),
+        None => nav.contents[CONTENT_NAV] = None,
+    }
+    nav.flags &= !(LOAD_FIRED | SRC_REFUSED);
+    nav.src = Some(src);
+    match begun {
+        Some(sandbox) => {
+            nav.sandbox = Some(sandbox);
+            nav.activated = false;
+        }
+        None => begin(arena, container),
+    }
+    let nav = arena.frame_navigation(container);
+    if is_reload { nav.flags |= RELOAD_NAV } else { nav.flags &= !RELOAD_NAV }
+    if history.is_none() {
+        nav.flags &= !HISTORY_REPLACE;
+    }
+    nav.history = history;
+    arena.supersede_frame_nav(container);
+    crate::session_history::begin_navigation_of(arena, cid, Some(container));
+    let later = coming && arena.frame_realm(container).is_some() && arena.is_connected(container);
+    arena.set_frame_nav(container, COMMIT_PENDING, later);
+    arena.set_frame_nav(container, PROMPT_OWED, later && !prompted);
+    rv.set_bool(later);
 }
 
 // __dom.frameNav(containerNid) -> the container's navigation flags.
