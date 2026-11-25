@@ -195,6 +195,13 @@ impl Commit {
     pub(crate) fn replayed_policy(&self) -> Option<String> {
         self.handling.replays().then(|| self.replayed().and_then(|id| self.history.text_of(id, "opener_policy")).unwrap_or_else(|| "unsafe-none".to_owned()))
     }
+    // …and the origin of the document a replay's about:blank makes: the one its entry's document state is of (HTML
+    // "determine the origin" — a session history entry's document state's initiator origin, which a traversal's or a
+    // reload's navigation params keep, no initiator's of the traversal itself), none an opaque one's.
+    pub(crate) fn replayed_origin(&self) -> Option<String> {
+        let id = self.handling.replays().then(|| self.replayed()).flatten()?;
+        self.history.text_of(id, "document_origin").filter(|o| !o.starts_with("null"))
+    }
     pub(crate) fn keep_policy(&mut self, policy: &str) {
         self.data.set_text("opener_policy", policy.to_owned());
     }

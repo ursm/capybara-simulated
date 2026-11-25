@@ -114,6 +114,10 @@ RSpec.describe 'a document a navigation commits' do
       session.go_back
       expect(poll_until { session.current_url == 'about:blank' }).to be(true)
       expect(submit_a_form(session)).to eq('about:blank')
+      # (…of the origin its entry's document state is of, the user's traversal no initiator of it: HTML "determine the
+      # origin"; Chrome 157 and Firefox 159 alike, 2026-11-26: a pop-up back at an about:blank its opener made reads its
+      # opener's origin)
+      expect(session.evaluate_script('self.origin')).to eq('http://www.example.com')
     end
 
     # …its initiator's being the document that began its navigation, not its container's: a frame sandboxed by its CSP

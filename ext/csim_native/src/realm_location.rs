@@ -219,6 +219,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "keepsWindowFor", keeps_window_for, context_id);
     register(scope, ns, "setDocumentCsp", set_document_csp, context_id);
     register(scope, ns, "documentCsp", document_csp, context_id);
+    register(scope, ns, "documentCommitOrder", document_commit_order, context_id);
     register(scope, ns, "pageSandbox", page_sandbox, context_id);
     register(scope, ns, "popupFlags", popup_flags_op, context_id);
     register(scope, ns, "sandboxed", sandboxed_op, context_id);
@@ -469,6 +470,13 @@ fn origin_domain_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(realm(scope, cid).location.domain.is_some());
 }
 
+// __dom.documentCommitOrder() -> the steps a commit replaces its navigable's document in (document_init.rs
+// `COMMIT_ORDER`), by name: the bindings' own commit of a frame's response (dom-nodes.js `commitSteps`) runs in it, as the
+// host's (browser.rb `commit_steps`).
+fn document_commit_order(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let names: Vec<v8::Local<v8::Value>> = crate::document_init::COMMIT_ORDER.iter().map(|n| v8::String::new(scope, n).unwrap().into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &names).into());
+}
 // __dom.setDocumentCsp(csp) / __dom.documentCsp() — the calling realm's document's policy container's CSP list, as the
 // document is made (bridge.entry.js `initializeDocument`), null for none.
 fn set_document_csp(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {

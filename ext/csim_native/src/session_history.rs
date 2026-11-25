@@ -35,7 +35,9 @@ struct Entry {
 // document's referrer.
 // (…`container_policy` / `container_csp` the referrer policy and CSP list of its document's policy container, kept for an
 // entry whose URL requires storing it — HTML's document state's "history policy container": document_init.rs)
-const TEXT_FIELDS: [&str; 8] = ["origin", "referer", "referrer_policy", "referrer", "opener_policy", "document_origin", "container_policy", "container_csp"];
+// (…`about_base` an about:blank document's about base URL, its document state's, which a traversal back to it makes it
+// with again as its origin: browser.rb `entry_about_base`)
+const TEXT_FIELDS: [&str; 9] = ["origin", "referer", "referrer_policy", "referrer", "opener_policy", "document_origin", "container_policy", "container_csp", "about_base"];
 
 // What a replay of an entry sends and restores: how it was reached — a POST's body and content type, the origin, Referer
 // and referrer policy its request was sent with (HTML's document state), whether its cookies were cross-site (which a
@@ -50,7 +52,7 @@ pub(crate) type Post = (Arc<[u8]>, Option<String>);
 pub(crate) struct Data {
     post: Option<Post>,
     // (…by `TEXT_FIELDS`)
-    texts: [Option<String>; 8],
+    texts: [Option<String>; 9],
     cross_site: Option<bool>,
     name: Option<Vec<u16>>,
     state: Option<Arc<[u8]>>,
@@ -2573,7 +2575,7 @@ mod tests {
     #[test]
     fn an_entry_of_the_same_document_shares_what_it_was_reached_by() {
         let h = history();
-        let reached = Data { texts: [None, Some("/r".into()), None, None, None, None, None, None], cross_site: Some(true), post: Some((Arc::from(&b"q=1"[..]), None)), ..Default::default() };
+        let reached = Data { texts: [None, Some("/r".into()), None, None, None, None, None, None, None], cross_site: Some(true), post: Some((Arc::from(&b"q=1"[..]), None)), ..Default::default() };
         h.push(TOP, TOP, "/a".into(), false, reached);
         let pushed = h.push(TOP, TOP, "/b".into(), true, Data::default()).unwrap();
         let other = h.push(TOP, TOP, "/c".into(), false, Data::default()).unwrap();

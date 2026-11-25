@@ -877,6 +877,11 @@ impl Navigation {
     fn superseded(&self) -> bool {
         self.0.borrow().superseded
     }
+    // #replays? -> whether it makes an entry's document again, a reload's or a traversal's: what that one's document state
+    // keeps is its document's (browser.rb `entry_about_base`, navigation_commit.rs `replayed_origin`).
+    fn replays_entry(&self) -> bool {
+        self.0.borrow().replays()
+    }
     // #source_policy -> `[referrer policy, CSP list]` of the policy container of the document that initiated it as it began
     // (`Machine::source_policy`): the one a document of a local URL it makes clones (document_init.rs `policy_container`)
     // — none for one no document initiated, the user's.
@@ -901,6 +906,7 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("coop_switch?", method!(Navigation::coop_switch, 0))?;
     class.define_method("deferred?", method!(Navigation::deferred, 0))?;
     class.define_method("superseded?", method!(Navigation::superseded, 0))?;
+    class.define_method("replays?", method!(Navigation::replays_entry, 0))?;
     class.define_method("source_policy", method!(Navigation::source_policy, 0))?;
     class.define_method("resume", method!(Navigation::resume, 0))?;
     Ok(())

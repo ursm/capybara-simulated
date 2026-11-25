@@ -2394,13 +2394,18 @@ module Capybara
         policy = history&.text(id, :container_policy) or return nil
         [policy, history.text(id, :container_csp)]
       end
-      # …kept by that entry as the document `init` makes is made, where its URL requires it and the entry has none yet.
+      # …kept by that entry as the document `init` makes is made, where its URL requires it and the entry has none yet — and
+      # an about:blank one's about base URL, its document state's too, which a traversal back to it makes it with again as
+      # its origin (`entry_about_base`; the origin the entry's `document_origin`: navigation_commit.rs `replayed_origin`).
       def keep_policy_container(history, id, init)
-        kept = init['historyPolicyContainer'] or return
-        return if history.nil? || id.nil? || history.text(id, :container_policy)
+        return if history.nil? || id.nil?
 
-        history.update(id, {container_policy: kept[0].to_s, container_csp: kept[1]})
+        kept = init['historyPolicyContainer']
+        history.update(id, {container_policy: kept[0].to_s, container_csp: kept[1]}) if kept && !history.text(id, :container_policy)
+        history.update(id, {about_base: init['aboutBase']}) if init['aboutBase'] && !history.text(id, :about_base)
       end
+      # …and the about base URL an about:blank entry's document state kept, nil for none.
+      def entry_about_base(history, id) = history&.text(id, :about_base)
       # HTML "create and initialize a Document object": what the document a navigation commits at `url` is made of
       # (document_init.rs `initialize_document`, `params` as that reads them) — the host's to make it in a realm and load.
       def document_init(url, **params) = Native.initialize_document(params.merge!(url: url.to_s, loopback: @loopback_stand_in))
@@ -11654,6 +11659,11 @@ module Capybara
           unless host.by_user && kind != 'traverse'
             referrer, made = window_about_blank(realm_id, kind, source, host.source, host.plan[:policy], host.plan[:referred], url, made)
           end
+          # (…a replay's origin and base URL its entry's document state's — navigation_commit.rs `replayed_origin`, the step's
+          # — whoever asked for it)
+          if type && fetch.replays?
+            made = made.merge(origin: type, location_origin: type, about_base: entry_about_base(history, history.active(0)) || made[:about_base])
+          end
         when 'blob_document'
           body, made = document_payload(blob[:bytes]), {content_type: type, coop: payload, initiator: initiator}
         # (…the document of its response, the Referer it sent its referrer, its reserved client its own — a `data:` URL's
@@ -12021,11 +12031,12 @@ module Capybara
         history, id = frame_entry(realm_id)
         history&.entry(id)
       end
-      # The frame realm `realm_id` leaving its current entry: the entry's URL and form state snapshotted now — keeping how
-      # it was reached (a POST entry's body and content type: leaving a document doesn't change the request that
-      # loaded it, so a later traversal back re-POSTs rather than GET-ing) — and its form state again as the document is
-      # unloaded (`frame_document_unloaded`): what its pagehide / unload handlers left is what a traversal back restores
-      # (Chrome). The snapshot taken now stands when the navigation never commits.
+      # The frame realm `realm_id` leaving its current entry: the entry's URL snapshotted now — keeping how it was reached
+      # (a POST entry's body and content type: leaving a document doesn't change the request that loaded it, so a later
+      # traversal back re-POSTs rather than GET-ing) — and its form state as the document is unloaded, as the next is
+      # activated (`frame_document_unloaded`, HTML "save persisted state" in "activate history entry", the commit's
+      # `save_state` step as the page's and a window's): what its pagehide / unload handlers left is what a traversal back
+      # restores (Chrome). None of a navigation that never commits, whose document stays the entry's.
       # (…`url` its document's URL as the navigation began, where a handler since may have moved its location: a
       # traversal's, which asked it first)
       def leave_frame_entry(realm_id, url = frame_realm_url(realm_id))
@@ -12034,7 +12045,6 @@ module Capybara
         return unless (history, id = frame_entry(realm_id))
 
         history.set_url(id, url)
-        history.update(id, {form_state: capture_frame_form_state(realm_id)})
         (@frame_leaving_entries ||= {})[realm_id] = [history, id]
       end
       # A frame's document unloaded (its pagehide and unload fired, its realm still alive): the history entry its
@@ -12434,8 +12444,8 @@ module Capybara
         # (…the document it shows gone in the order every commit takes, as the page's: `commit_steps` — unloaded, none
         # made where a handler of that removed the frame; then what it owned let go, its realm's with it as the next is
         # made: the bytes a reload of it loads again none but a blob document's, which the container kept as it took them —
-        # `takeFrameNavBlob`. Its document state is its traversable's, its controls' state saved as its navigation began:
-        # `begin_frame_entry`)
+        # `takeFrameNavBlob`. Its document state is its traversable's; its controls' state is saved as its unload walk
+        # ends, before its realm goes: `frame_document_unloaded`)
         committing = commit_steps(
           unload:  -> { :abort unless unload_frame_document(parent, realm_id) },
           discard: lambda {
@@ -12954,7 +12964,10 @@ module Capybara
         # here — a gap); its referrer the request's, under the initiator's policy — the initiator's, though the window be at
         # its initial about:blank still (that one made with the window, its creator's: `open_initial_document`).
         when 'about_blank'
-          creator = about_blank_creator(type, initiator == page_url ? @runtime.realm_direct_call(0, 'baseURL').to_s : initiator.to_s) if type
+          # (…a replay's origin and base URL its entry's document state's: `entry_about_base`)
+          base    = entry_about_base(@session_history, @session_history.active(0)) if fetch.replays?
+          base  ||= initiator == page_url ? @runtime.realm_direct_call(0, 'baseURL').to_s : initiator.to_s
+          creator = about_blank_creator(type, base) if type
           self.page_url = url
           record_response(*ABOUT_BLANK_RESPONSE)
           boot_response_into_ctx('', coop: payload, initiator: source_policy_container(fetch), **about_blank_made(creator))

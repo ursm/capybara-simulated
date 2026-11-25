@@ -105,7 +105,8 @@ fn controller(partition: u64, url: &str, origin: Option<&str>, control: Control<
 // "obtain a browsing context to use for a navigation response", decided before the unload — session_history.rs
 // `opener_policy_verdict` — taken now, its pagehide judged by its own policy); then what the leaving document owned
 // discarded — its workers, its service worker clients, its sockets, its realms — before the next is made of the realm
-// its navigable has. A step a kind has none of (a frame's document state is its traversable's) it skips.
+// its navigable has. A step a kind has none of (a frame's document state is its traversable's; a frame's controls' state
+// is saved as its unload walk ends, the realm going with the walk) it skips.
 pub(crate) const COMMIT_ORDER: [&str; 6] = ["unload", "save_state", "show", "clear_traversals", "commit_policy", "discard"];
 // Native.document_commit_order -> `COMMIT_ORDER`.
 pub(crate) fn commit_order_for_ruby() -> Vec<&'static str> {
