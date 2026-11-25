@@ -2950,7 +2950,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "navigableTraversing", navigable_traversing_op, context_id);
     crate::dom::register(scope, ns, "applyTraversal", apply_traversal_op, context_id);
     crate::dom::register(scope, ns, "windowsTraversing", windows_traversing_op, context_id);
-    crate::dom::register(scope, ns, "destroyNavigableHistory", destroy_navigable_history_op, context_id);
     crate::dom::register(scope, ns, "historyUpdate", history_update_op, context_id);
     crate::dom::register(scope, ns, "historyScrollRestoration", history_scroll_restoration_op, context_id);
     crate::dom::register(scope, ns, "frameNavigable", frame_navigable_op, context_id);
@@ -3120,13 +3119,10 @@ fn history_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 pub(crate) fn traversable_id_of(arena: &crate::dom::RealmArena, realm: i32) -> u64 {
     if of_page(arena, realm) { arena.navigables.history } else { arena.window_history(realm).map_or(0, |(h, _)| h.id) }
 }
-// __dom.destroyNavigableHistory(realm) — the navigable realm `realm`'s document is the active document of destroyed, its
-// container removed (HTML "destroy a child navigable"): its nested history taken out of its traversable's session
-// history (`Traversable::destroy`), its own frames' with it.
-fn destroy_navigable_history_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let realm = args.get(0).int32_value(scope).unwrap_or(0);
-    let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
+// The navigable realm `realm`'s document is the active document of destroyed, its container removed (HTML "destroy a
+// child navigable"): its nested history taken out of its traversable's session history (`Traversable::destroy`), its own
+// frames' with it — as its teardown begins (unload_walks.rs `Teardown::Destroyed`).
+pub(crate) fn destroy_navigable_history(arena: &crate::dom::RealmArena, realm: i32) {
     let nav = arena.realm_tree(realm).2;
     if nav == TOP {
         return;
