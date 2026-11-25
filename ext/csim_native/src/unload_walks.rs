@@ -11,6 +11,12 @@
 //   are destroyed (the host disposes their realms, `dispose_order`); one a handler took out of the tree since skipped —
 //   and, its unloading begun (its children taken), destroyed with the rest: its removal left it to the walk, its counter
 //   raised. Which of its child navigables goes first HTML leaves open ("in what order?"): tree order, the prompt's.
+// - "abort a document and its descendants": its descendants' requests cancelled at once and then its own — no network's
+//   time here to have kept them from being answered first (Chrome and Firefox abort a frame's XHR with its parent's
+//   `stop()`) — and then the rest of each frame's abort, before the document's own: at once for a frame whose document
+//   is being parsed (its parser on the stack, a script of it stopping its parent: there is no next chunk of its for a
+//   task to come between, and Chrome and Firefox parse none of its markup after that script), its frames' in turn, else
+//   as a task queued on its own event loop (HTML), which aborts its frames' in turn.
 //   What a teardown makes of each document it unloads and then of their realms is the walk's (`Teardown`): the bindings
 //   run each step it hands them (`teardownNext`) — fire a document's pagehide and unload, take its controls' state for
 //   the entry it leaves, drop its connections, dispose a realm — and decide none of it.
@@ -68,7 +74,17 @@ enum Kind {
     // (…what it makes of the documents, and — once every one is unloaded — the realms still to dispose, the next last,
     // each with whether its WindowProxies are kept: `teardown_next`)
     Unload { teardown: Teardown, disposing: Option<Vec<(i32, bool)>> },
+    // (…its requests' phase still under way — and, where `requests` is false, none: the rest of an abort a frame's task
+    // makes, its requests cancelled with its parent's already)
+    Abort { requests: bool },
 }
+
+// A step of an abort (`abort_next`), its realm above the low bits: cancel the requests of its document, abort the rest of
+// it now, or queue a task on its event loop that aborts the rest of it and its descendants (`abortDocumentRest`).
+pub(crate) const ABORT_REQUESTS: u32 = 0;
+pub(crate) const ABORT_NOW: u32 = 1;
+pub(crate) const ABORT_TASK: u32 = 2;
+const ABORT_BITS: u32 = 2;
 
 // What a teardown of realm `root`'s document and its descendants' is for, which says what each step does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -103,6 +119,7 @@ impl Teardown {
     }
 }
 
+#[cfg(test)]
 impl Kind {
     fn prompt(traversal: bool) -> Self {
         Kind::Prompt { asking: None, traversal, shown: false, verdict: PROMPT_NONE, container: None }
@@ -131,6 +148,8 @@ impl RealmArena {
         let pending = match kind {
             Kind::Prompt { .. } => self.inclusive_descendant_realms(root).into_iter().rev().map(|r| (r, false, 0)).collect(),
             Kind::Unload { .. } => vec![(root, false, 0)],
+            Kind::Abort { requests: true } => self.child_realms_in_tree_order(root).into_iter().rev().map(|r| (r, false, 1)).collect(),
+            Kind::Abort { requests: false } => vec![(root, false, 0)],
         };
         let id = next_mark();
         self.navigables.walks.open.insert(id, Walk { root, kind, pending, reached: Vec::new(), raised: Vec::new(), removed: Vec::new() });
@@ -152,6 +171,7 @@ impl RealmArena {
                 next
             }
             Kind::Unload { .. } => self.next_to_unload(&mut walk),
+            Kind::Abort { .. } => None,
         };
         walk.reached.extend(next);
         self.navigables.walks.open.insert(id, walk);
@@ -287,6 +307,55 @@ impl RealmArena {
         let (realm, kept) = list.pop()?;
         Some((realm, STEP_DISPOSE | if kept { STEP_KEEP_PROXIES } else { 0 }))
     }
+    // An abort of realm `root`'s document begun — with its descendants' (`with_requests`: HTML "abort a document and its
+    // descendants"), or the rest of it alone, its requests cancelled already (a frame's task, its parent's abort's).
+    pub(crate) fn begin_abort(&mut self, root: i32, with_requests: bool) -> u32 {
+        self.begin_walk(root, Kind::Abort { requests: with_requests })
+    }
+    // The next step of abort `id` — its realm and what to do (`ABORT_*`) — none where it is done: the requests of each
+    // document below the root's, a document before its frames', then the root's; then the rest, a frame's at once where
+    // its document is being parsed — its frames' first, in turn — else on a task of its own, and the root's last. Each
+    // frame's children read as the walk reaches it, a realm whose document is gone meanwhile passed over.
+    pub(crate) fn abort_next(&mut self, id: u32) -> Option<(i32, u32)> {
+        let mut walk = self.navigables.walks.open.remove(&id)?;
+        let step = self.next_to_abort(&mut walk);
+        self.navigables.walks.open.insert(id, walk);
+        step
+    }
+    fn next_to_abort(&mut self, walk: &mut Walk) -> Option<(i32, u32)> {
+        if let Kind::Abort { requests: requests @ true } = &mut walk.kind {
+            while let Some((realm, _, depth)) = walk.pending.pop() {
+                if self.realm_document(realm).is_none() {
+                    continue;
+                }
+                if depth < crate::navigables::MAX_NESTING {
+                    walk.pending.extend(self.child_realms_in_tree_order(realm).into_iter().rev().map(|r| (r, false, depth + 1)));
+                }
+                return Some((realm, ABORT_REQUESTS));
+            }
+            *requests = false;
+            walk.pending.push((walk.root, false, 0));
+            return Some((walk.root, ABORT_REQUESTS));
+        }
+        while let Some(&(realm, taken, depth)) = walk.pending.last() {
+            let doc = self.realm_document(realm);
+            if taken || doc.is_none() {
+                walk.pending.pop();
+                if doc.is_some() {
+                    return Some((realm, ABORT_NOW));
+                }
+            } else if realm != walk.root && !doc.is_some_and(|d| self.document_states.lifecycle(d).is_parsing()) {
+                walk.pending.pop();
+                return Some((realm, ABORT_TASK));
+            } else {
+                walk.pending.last_mut().expect("just read").1 = true;
+                if depth < crate::navigables::MAX_NESTING {
+                    walk.pending.extend(self.child_realms_in_tree_order(realm).into_iter().rev().map(|r| (r, false, depth + 1)));
+                }
+            }
+        }
+        None
+    }
     // Every walk and build begun after number `mark` still open ended — none should be: the host's entry into the isolate
     // made as `mark` was the last, which has returned, left them (a termination). Returns how many.
     pub(crate) fn end_left_open_since(&mut self, mark: u32) -> usize {
@@ -340,6 +409,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "promptAnswered", prompt_answered, context_id);
     crate::dom::register(scope, ns, "promptVerdict", prompt_verdict, context_id);
     crate::dom::register(scope, ns, "teardown", teardown, context_id);
+    crate::dom::register(scope, ns, "abortWalk", abort_walk, context_id);
+    crate::dom::register(scope, ns, "abortNext", abort_next, context_id);
     crate::dom::register(scope, ns, "teardownNext", teardown_next, context_id);
     crate::dom::register(scope, ns, "walkNext", walk_next, context_id);
     crate::dom::register(scope, ns, "walkEnd", walk_end, context_id);
@@ -375,6 +446,20 @@ fn prompt_verdict(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     rv.set_uint32(crate::dom::realm(scope, cid).prompt_verdict(id));
+}
+// __dom.abortWalk(withRequests) -> the walk aborting this realm's document (`begin_abort`).
+fn abort_walk(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let with_requests = args.get(0).is_true();
+    let cid = realm_id(scope, &args);
+    rv.set_uint32(crate::dom::realm(scope, cid).begin_abort(cid, with_requests));
+}
+// __dom.abortNext(walk) -> the next step of the abort (`abort_next`): its realm shifted above `ABORT_BITS`, the step in
+// them — -1 for none.
+fn abort_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let step = crate::dom::realm(scope, cid).abort_next(id);
+    rv.set_int32(step.map_or(-1, |(realm, what)| (realm << ABORT_BITS) | what as i32));
 }
 // __dom.teardown(realm, teardown) -> the walk tearing realm `realm`'s document and its descendants' down, for what
 // `teardown` names (`Teardown::of`) — or -1 for a number that names none.
@@ -640,6 +725,28 @@ mod tests {
         arena.detach(a);
         assert_eq!(arena.prompt_verdict(removed), PROMPT_REMOVED);
         arena.end_walk(removed);
+    }
+
+    #[test]
+    fn an_abort_cancels_requests_first_and_aborts_a_parsing_frame_at_once_another_on_a_task() {
+        let (mut arena, _) = page();
+        // (…`a`'s document (2) being parsed, `c`'s (3) and `b`'s (1) loaded)
+        let a_doc = arena.realm_document(2).expect("a's document");
+        arena.document_states.lifecycle_mut(a_doc).ready = crate::document_lifecycle::READY_LOADING;
+        let id = arena.begin_abort(0, true);
+        let steps: Vec<_> = std::iter::from_fn(|| arena.abort_next(id)).collect();
+        assert_eq!(
+            steps,
+            vec![
+                (2, ABORT_REQUESTS), (3, ABORT_REQUESTS), (1, ABORT_REQUESTS), (0, ABORT_REQUESTS),
+                (3, ABORT_TASK), (2, ABORT_NOW), (1, ABORT_TASK), (0, ABORT_NOW),
+            ]
+        );
+        arena.end_walk(id);
+        // (…a frame's task: the rest of its own, its loaded frame's on a task in turn)
+        let rest = arena.begin_abort(2, false);
+        assert_eq!(std::iter::from_fn(|| arena.abort_next(rest)).collect::<Vec<_>>(), vec![(3, ABORT_TASK), (2, ABORT_NOW)]);
+        arena.end_walk(rest);
     }
 
     #[test]

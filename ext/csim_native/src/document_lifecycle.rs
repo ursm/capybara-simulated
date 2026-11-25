@@ -108,6 +108,10 @@ impl Lifecycle {
     pub(crate) fn is_aborted(&self) -> bool {
         self.aborted
     }
+    // Whether it is being parsed: loading, its parser not aborted.
+    pub(crate) fn is_parsing(&self) -> bool {
+        self.ready == READY_LOADING && !self.aborted
+    }
     // HTML document open steps: a document of its own written into it from here, numbered `generation` — "the end" of its
     // parse owed nothing of what the last one had (a task of that one's still queued, for its number, fires nothing) —
     // its container's load muted where it was being fired as it was opened, and loading again: whether that changed its
@@ -539,8 +543,7 @@ fn completely_loaded(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // __dom.docParsing(docNid) -> whether its parser is at work still: its readiness `loading`, its parser not aborted.
 fn parsing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let lc = crate::dom::dom(scope).arena.document_states.lifecycle(doc);
-    rv.set_bool(lc.ready == READY_LOADING && !lc.aborted);
+    rv.set_bool(crate::dom::dom(scope).arena.document_states.lifecycle(doc).is_parsing());
 }
 // __dom.docLoadFired(docNid) -> whether its load has fired, or begun to: nothing more delays it.
 fn load_fired(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
