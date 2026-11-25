@@ -11639,7 +11639,8 @@ module Capybara
         # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
         # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
         # use for a navigation response")
-        switch, = history.commit_opener_policy(init['openerPolicy'], init['responseOrigin'], fetch.coop_switch?) { coop_leaving_facts(realm_id) }
+        # (…decided before the document it replaces unloads, its policy committed after: `replace_window_document`)
+        switch, = history.opener_policy_verdict(init['openerPolicy'], init['responseOrigin'], fetch.coop_switch?) { coop_leaving_facts(realm_id) }
         if switch && @driver.respond_to?(:move_window_to_new_group)
           moved = {init: made.except(:headers), referrer: referrer, client_id: client_id, blob: (blob.merge(type: init['contentType']) if step == 'blob_document')}
           return @driver.move_window_to_new_group(self, realm_id, url, response || [200, {'content-type' => init['contentType'] || 'text/html'}], body, moved)
@@ -11650,7 +11651,7 @@ module Capybara
         if (state = history.take_starting_state)
           init['historyState'] = state
         end
-        new_id = replace_window_document(realm_id, body, init, client_id: client_id, reuses: kind == 'location')
+        new_id = replace_window_document(realm_id, body, init, client_id: client_id, reuses: kind == 'location', opener_policy: init['openerPolicy'])
         return unless new_id
 
         @runtime.window_realm_meta[new_id][:response] = response || [200, {'content-type' => init['contentType'] || 'text/html'}]
@@ -11662,7 +11663,9 @@ module Capybara
       # about:blank's realm is the one a document of its origin is loaded into, its Window kept — and its Document object,
       # renewed: a location's, a `javascript:` URL's) (…`keep_traversals` the traversals the document it replaces queued
       # going on after it: a `javascript:` URL's, as the page's: `boot_response_into_ctx`)
-      private def replace_window_document(realm_id, body, init, client_id: nil, reuses:, keep_traversals: false)
+      # (…`opener_policy` the one its navigation's response committed, the window's traversable's once the document it
+      # replaces unloaded, as the page's: `commit_coop`)
+      private def replace_window_document(realm_id, body, init, client_id: nil, reuses:, keep_traversals: false, opener_policy: nil)
         keeps = reuses && @runtime.realm_call(realm_id, 'keepsWindowFor', init['url'], init['csp'], *init['origin'])
         # (…the document it replaces unloaded first, its frames' with it — HTML "unload a document and its descendants", as
         # the page's is: `boot_response_into_ctx` — while its realms still live, an initial about:blank's too, its renewed
@@ -11676,6 +11679,7 @@ module Capybara
           if (id = history.take_leaving) && (state = @runtime.realm_call(realm_id, 'captureFormState'))
             history.update(id, {form_state: state})
           end
+          history.commit_opener_policy(opener_policy) if opener_policy
           history.show
           history.clear_queued unless keep_traversals
           history.rebuilt
@@ -12987,7 +12991,9 @@ module Capybara
       # `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service worker's own COEP
       # (it is never isolated here).
       private def commit_coop(coop, origin, carried)
-        @session_history.commit_opener_policy(coop, origin.to_s, carried == true) { coop_leaving_facts(0) }
+        verdict = @session_history.opener_policy_verdict(coop, origin.to_s, carried == true) { coop_leaving_facts(0) }
+        @session_history.commit_opener_policy(coop)
+        verdict
       end
       # The page's browsing context group left for a new one (HTML "obtain a browsing context to use for a navigation
       # response"): the next document a new browsing context's, of a group of its own — named anew, which its realms are

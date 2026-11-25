@@ -1964,16 +1964,21 @@ impl SessionHistory {
     fn opener_policy(&self) -> &'static str {
         self.lock().opener_policy.name()
     }
-    // #commit_opener_policy(name, response origin, carried) { [origin, initial about:blank] } -> [switch, isolated]: the
-    // document a navigation of it makes, of that policy, is its document's from here on, and what that does to its browsing
-    // context group (coop.rs `commit_verdict`), the block giving the facts of the document it leaves.
-    fn commit_opener_policy(ruby: &magnus::Ruby, rb_self: &Self, name: String, response_origin: String, carried: bool) -> Result<(bool, bool), magnus::Error> {
+    // #opener_policy_verdict(name, response origin, carried) { [origin, initial about:blank] } -> [switch, isolated]: what
+    // the document a navigation of it makes, of that policy, does to its browsing context group (coop.rs `commit_verdict`),
+    // the block giving the facts of the document it leaves — nothing committed: HTML "obtain a browsing context to use for a
+    // navigation response" decides it as the document is created, its policy the leaving document's still while that one
+    // unloads (`commit_opener_policy`, after).
+    fn opener_policy_verdict(ruby: &magnus::Ruby, rb_self: &Self, name: String, response_origin: String, carried: bool) -> Result<(bool, bool), magnus::Error> {
         let (document, response) = (rb_self.lock().opener_policy, crate::coop::Value::named(&name));
-        let verdict = crate::coop::commit_verdict(document, response, &response_origin, carried, || ruby.yield_value(ruby.qnil()))?;
-        let mut t = rb_self.lock();
-        t.opener_policy = response;
+        crate::coop::commit_verdict(document, response, &response_origin, carried, || ruby.yield_value(ruby.qnil()))
+    }
+    // #commit_opener_policy(name): that document its document from here on — the one a navigation of it after is judged
+    // by, and its creation URL let go of.
+    fn commit_opener_policy(&self, name: String) {
+        let mut t = self.lock();
+        t.opener_policy = crate::coop::Value::named(&name);
         t.creation_url = None;
-        Ok(verdict)
     }
     // #inherited_opener_policy { [origin, top-level origin] } -> the name of the policy a document of no headers that a document
     // of it makes takes (coop.rs `inherited`), the block giving that document's facts.
@@ -2137,7 +2142,8 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("opener_policy=", method!(SessionHistory::set_opener_policy, 1))?;
     class.define_method("opener_policy", method!(SessionHistory::opener_policy, 0))?;
     class.define_method("loopback_stand_in=", method!(SessionHistory::set_loopback_stand_in, 1))?;
-    class.define_method("commit_opener_policy", method!(SessionHistory::commit_opener_policy, 3))?;
+    class.define_method("opener_policy_verdict", method!(SessionHistory::opener_policy_verdict, 3))?;
+    class.define_method("commit_opener_policy", method!(SessionHistory::commit_opener_policy, 1))?;
     class.define_method("inherited_opener_policy", method!(SessionHistory::inherited_opener_policy, 0))?;
     class.define_method("entry_at_step", method!(SessionHistory::entry_at_step, 1))?;
     class.define_method("opener_policy_isolates?", method!(SessionHistory::opener_policy_isolates, 0))?;
