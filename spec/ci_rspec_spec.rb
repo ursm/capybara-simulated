@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'tmpdir'
+require 'fileutils'
 
 # `bin/ci-rspec` is the gate CI actually runs: the suite, then ONE retry of the examples that run
 # reported as failures. Its own header says the exit status is the thing it must not get wrong, and
@@ -33,7 +34,10 @@ RSpec.describe 'bin/ci-rspec' do
 
   def run_ci_rspec(source)
     Dir.mktmpdir do |dir|
-      path = File.join(root, "spec/tmp_ci_rspec_fixture_#{Process.pid}_spec.rb")
+      # (…under `tmp/`, which the suite's pattern does not cover: a fixture in `spec/` is picked up by another suite run
+      # in the same tree that starts while it exists — it listed this one's red example as its own)
+      path = File.join(root, "tmp/ci_rspec_fixture_#{Process.pid}_spec.rb")
+      FileUtils.mkdir_p(File.dirname(path))
       File.write(path, source.call(File.join(dir, 'marker')))
       out = IO.popen(['bin/ci-rspec', path.delete_prefix("#{root}/")],
                      chdir: root, err: [:child, :out], &:read)
