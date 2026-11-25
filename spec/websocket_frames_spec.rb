@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'digest'
+require 'io/wait'
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
@@ -33,21 +34,48 @@ RSpec.describe 'WebSocket frames' do
     'interleaved'   => frame(0x1, 'a', fin: false) + frame(0x1, 'b'),
     'not_utf8'      => frame(0x1, "a\xFFb".b),
     'one_byte'      => frame(0x8, 'x'),
-    'reserved_code' => frame(0x8, [1005].pack('n'))
+    'reserved_code' => frame(0x8, [1005].pack('n')),
+    'server_close'  => frame(0x8, [4001].pack('n') + 'x'),
+    'bare_close'    => frame(0x8),
+    # (…none of its own: it answers the client's Close with its own)
+    'client_close'  => ''.b
   }.freeze
 
-  # The handshakes' request headers, as the app saw them.
+  # A client's frame, unmasked: [opcode, payload] — nil where none comes in time.
+  def self.client_frame(io)
+    return unless io.wait_readable(2) && (head = io.read(2))
+
+    len = head.getbyte(1) & 0x7f
+    len = io.read(2).unpack1('n') if len == 126
+    key = io.read(4)
+    [head.getbyte(0) & 0x0f, (io.read(len) || ''.b).bytes.each_with_index.map {|b, i| b ^ key.getbyte(i & 3) }.pack('C*')]
+  rescue IOError, SystemCallError
+    nil
+  end
+
+  # The handshakes' request headers, as the app saw them; and the frames each case's client sent, by its name.
   let(:handshakes) { [] }
+  let(:sent) { Hash.new {|h, k| h[k] = Thread::Queue.new } }
   let(:app) {
     cases = self.class.cases
     handshakes = self.handshakes
+    sent = self.sent
+    group = self.class
     lambda {|env|
       if env['HTTP_UPGRADE'].to_s.casecmp?('websocket')
         handshakes << env.select {|k, _| k.start_with?('HTTP_') }
         accept = Digest::SHA1.base64digest(env['HTTP_SEC_WEBSOCKET_KEY'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
         io = env['rack.hijack'].call
         io.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n")
-        io.write(cases.fetch(env['QUERY_STRING']))
+        name = env['QUERY_STRING']
+        io.write(cases.fetch(name))
+        Thread.new do
+          while (f = group.client_frame(io))
+            sent[name] << f
+            io.write(group.frame(0x8, f[1])) if name == 'client_close' && f[0] == 0x8
+          end
+          sent[name].close
+        end
         [101, {}, []]
       else
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
@@ -57,7 +85,7 @@ RSpec.describe 'WebSocket frames' do
             window.run = (name) => {
               const events = seen[name] = [];
               const ws = new WebSocket('ws://' + location.host + '/ws?' + name);
-              ws.onopen = () => events.push('open');
+              ws.onopen = () => { events.push('open'); if (name === 'client_close') ws.close(4000, 'me'); };
               ws.onmessage = (e) => events.push('message:' + e.data);
               ws.onerror = () => events.push('error');
               ws.onclose = (e) => events.push(['close', e.code, e.wasClean, e.reason].join(':'));
@@ -97,7 +125,30 @@ RSpec.describe 'WebSocket frames' do
     expect(handshakes.last).not_to have_key('HTTP_REFERER')
   end
 
-  (cases.keys - ['joined']).each do |name|
+  # RFC 6455 §5.5.1: a Close frame received where none was sent is answered with one — echoing its code and reason, as
+  # Chrome and Firefox do (measured 2026-11-26), a bare one with a bare one — and one sent first is the only one sent.
+  def frames_sent(name)
+    queue = sent[name]
+    frames = []
+    while (f = queue.pop(timeout: 3))
+      frames << f
+    end
+    frames
+  end
+
+  it "answers a server's Close with its own, echoing its code and reason" do
+    expect(events_of('server_close')).to eq(['open', 'close:4001:true:x'])
+    expect(frames_sent('server_close')).to eq([[0x8, [4001].pack('n') + 'x']])
+    expect(events_of('bare_close')).to eq(['open', 'close:1005:true:'])
+    expect(frames_sent('bare_close')).to eq([[0x8, ''.b]])
+  end
+
+  it 'sends no second Close where its own came first' do
+    expect(events_of('client_close')).to eq(['open', 'close:4000:true:me'])
+    expect(frames_sent('client_close')).to eq([[0x8, [4000].pack('n') + 'me']])
+  end
+
+  (cases.keys - ['joined', 'server_close', 'bare_close', 'client_close']).each do |name|
     it "fails the connection on a frame the protocol forbids: #{name.tr('_', ' ')}" do
       expect(events_of(name)).to eq(['open', 'error', 'close:1006:false:'])
     end

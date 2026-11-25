@@ -410,6 +410,8 @@ module Capybara
         # send/close) go through one socket; serialise them so two threads can't
         # interleave bytes into a corrupt frame.
         @websocket_write_lock = Mutex.new
+        # …and the sockets a Close frame went out on, which send no other (RFC 6455 §5.5.1), under that lock.
+        @websocket_close_sent = Set.new.compare_by_identity
         # Hijacked-XHR delivery — per-Browser handle counter,
         # background threads, and a Queue of completed responses for
         # Rack calls where the middleware used `rack.hijack` to hold
@@ -4744,7 +4746,7 @@ module Capybara
         # closes with no status, which the peer echoes and the reader reports as
         # code 1005 (NO_STATUS), not 1000.
         payload = code.nil? ? ''.b : [code.to_i].pack('n') + reason.to_s.b
-        ws_write_frame(sock, 0x8, payload) rescue nil
+        ws_write_close(sock, payload) rescue nil
         # A close handshake is now in flight — hold the clock until the reader's `__close` lands
         # (bounded by the deadline in hold_for_ws_close if the peer never replies → EOF 1006).
         @ws_closing << id.to_i if hold
@@ -4817,6 +4819,7 @@ module Capybara
           @websocket_workers.clear
           @websocket_realms.clear
         end
+        @websocket_write_lock.synchronize { @websocket_close_sent.clear }
         forget_window_websocket_events
       end
 
@@ -4865,7 +4868,7 @@ module Capybara
           @websocket_sockets.keys.select {|id| @websocket_workers[id] == worker && !kept.include?(@websocket_realms[id]) }.each do |id|
             @websocket_workers.delete(id)
             @websocket_realms.delete(id)
-            ws_write_frame(@websocket_sockets.delete(id), 0x8, [1001].pack('n')) rescue nil
+            ws_write_close(@websocket_sockets.delete(id), [1001].pack('n')) rescue nil
           end
         end
       end
@@ -4916,7 +4919,10 @@ module Capybara
             when Native::WsReader::PING
               ws_write_frame(sock, 0xA, payload)
               false
+            # The server's Close answered with one echoing its code — none for none — where the client sent none first
+            # (RFC 6455 §5.5.1; Chrome and Firefox echo the code and reason, measured 2026-11-26).
             when Native::WsReader::CLOSE
+              ws_write_close(sock, code ? [code].pack('n') + payload.b : ''.b) rescue nil
               queue << {id: id, type: '__close', code: code || 1005, reason: payload}
               true
             else
@@ -4933,6 +4939,7 @@ module Capybara
         # its opener's and its teardown's, under `@websocket_lock`; a closed entry
         # just no-ops on the next access.
         sock.close rescue nil
+        @websocket_write_lock.synchronize { @websocket_close_sent.delete(sock) }
       end
 
       # Read + validate the 101 Switching Protocols response (status line +
@@ -4967,10 +4974,18 @@ module Capybara
       end
 
       # Write one frame (ws_frame.rs: masked, as every frame a client sends is). Holds the per-connection write lock so the
-      # reader thread's pong and the main thread's send/close can't interleave bytes on the shared socket.
+      # reader thread's pong and the main thread's send/close can't interleave bytes on the shared socket — and nothing
+      # after a Close frame (RFC 6455 §5.5.1: "the application MUST NOT send any more data frames after sending a Close
+      # frame").
       private def ws_write_frame(sock, opcode, payload)
         frame = Native.ws_frame(opcode, payload.to_s.b)
-        @websocket_write_lock.synchronize { sock.write(frame) }
+        @websocket_write_lock.synchronize { sock.write(frame) unless @websocket_close_sent.include?(sock) }
+      end
+      # …a Close frame, the first alone: whichever of the page's close(), its document's going and the server's Close
+      # comes first sends it.
+      private def ws_write_close(sock, payload)
+        frame = Native.ws_frame(0x8, payload.to_s.b)
+        @websocket_write_lock.synchronize { sock.write(frame) if @websocket_close_sent.add?(sock) }
       end
 
       # ── Hijack-aware async XHR ─────────────────────────────────────
