@@ -23,6 +23,7 @@
 // stop, and what it writes after lands nowhere.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -407,15 +408,56 @@ impl WorkerHost {
     // waited for: each one that does not answer in time (`Record::deadline`) left lagging — but one blocked meanwhile on
     // another worker's answer, which waits on the window, counted as answered — then every worker an answer let go on
     // (`resuming`) waited for, until it waits again. With the GVL released: the workers' threads run meanwhile.
+    // An interrupt of the waiting thread (Thread#raise, Timeout, a signal) ends the wait at once: Ruby's unblocking function
+    // flags it and wakes the condition variable (`without_gvl_interruptibly`), the ticks not answered by then left as they
+    // are.
     fn lockstep_await(&self, handles: Vec<i64>, ago: f64) {
         let start = Instant::now().checked_sub(Duration::from_secs_f64(ago.max(0.0))).unwrap_or_else(Instant::now);
-        crate::image_decode::without_gvl(|| self.lockstep_wait(handles, start));
+        let cancel = AtomicBool::new(false);
+        self.without_gvl_interruptibly(&cancel, || self.lockstep_wait(handles, start, &cancel));
     }
-    fn lockstep_wait(&self, handles: Vec<i64>, start: Instant) {
+    // `f` run with the GVL released, `cancel` set and every wait on the records woken where Ruby interrupts the thread.
+    fn without_gvl_interruptibly<F: FnOnce() -> R, R>(&self, cancel: &AtomicBool, f: F) -> R {
+        struct Job<'a, F, R> {
+            f: Option<F>,
+            r: Option<R>,
+            host: &'a WorkerHost,
+            cancel: &'a AtomicBool,
+        }
+        unsafe extern "C" fn run<F: FnOnce() -> R, R>(data: *mut std::ffi::c_void) -> *mut std::ffi::c_void {
+            // SAFETY: `data` is the `Job` below, alive for the call.
+            let job = unsafe { &mut *data.cast::<Job<'_, F, R>>() };
+            job.r = Some((job.f.take().expect("run once"))());
+            std::ptr::null_mut()
+        }
+        unsafe extern "C" fn unblock<F, R>(data: *mut std::ffi::c_void) {
+            // SAFETY: the same `Job`, alive while the call it unblocks runs; only its shared parts are touched.
+            let job = unsafe { &*data.cast::<Job<'_, F, R>>() };
+            job.cancel.store(true, Ordering::Release);
+            // (…under the lock, so a waiter between its check and its wait cannot miss the wakeup)
+            drop(job.host.records());
+            job.host.stirred.notify_all();
+        }
+        let mut job = Job { f: Some(f), r: None, host: self, cancel };
+        let data = (&raw mut job).cast();
+        // SAFETY: `run` and `unblock` are handed their own `Job`, and touch no Ruby object.
+        unsafe {
+            rb_sys::rb_thread_call_without_gvl(Some(run::<F, R>), data, Some(unblock::<F, R>), data);
+        }
+        job.r.expect("the job ran")
+    }
+    fn lockstep_wait(&self, handles: Vec<i64>, start: Instant, cancel: &AtomicBool) {
+        let cancelled = || cancel.load(Ordering::Acquire);
         {
             let mut records = self.records();
             for handle in handles {
+                if cancelled() {
+                    return;
+                }
                 let answered = loop {
+                    if cancelled() {
+                        return;
+                    }
                     let Some(r) = records.map.get_mut(&handle) else { break false };
                     if !r.alive() {
                         break false;
@@ -438,6 +480,9 @@ impl WorkerHost {
                 }
             }
             loop {
+                if cancelled() {
+                    return;
+                }
                 let now = Instant::now();
                 let waiting = records.map.values().filter(|r| r.resuming && !r.lagging && r.alive()).map(|r| r.deadline(start)).filter(|d| *d > now).min();
                 let Some(deadline) = waiting else { break };
@@ -827,7 +872,7 @@ mod tests {
         // (…its thread ended: no tick of it answered, the wait over at once)
         host.worker_ended(1);
         let began = Instant::now();
-        host.lockstep_wait(vec![1], began);
+        host.lockstep_wait(vec![1], began, &AtomicBool::new(false));
         assert!(began.elapsed() < Duration::from_secs(1));
         assert!(host.with(1, false, |r| r.lagging));
     }
@@ -843,10 +888,28 @@ mod tests {
             worker.worker_timers_left(1, -1.0, true);
         });
         let began = Instant::now();
-        host.lockstep_wait(vec![1], began);
+        host.lockstep_wait(vec![1], began, &AtomicBool::new(false));
         answering.join().unwrap();
         assert!(began.elapsed() < Duration::from_millis(ROUND_TRIP_BUDGET as u64 * 1000));
         assert!(!host.with(1, true, |r| r.lagging));
+    }
+
+    #[test]
+    fn a_lockstep_wait_ends_as_it_is_cancelled() {
+        let host = std::sync::Arc::new(host_with("dedicated"));
+        host.worker_script_began(1);
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let (h, c) = (std::sync::Arc::clone(&host), std::sync::Arc::clone(&cancel));
+        let interrupting = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            c.store(true, Ordering::Release);
+            drop(h.records());
+            h.stirred.notify_all();
+        });
+        let began = Instant::now();
+        host.lockstep_wait(vec![1], began, &cancel);
+        interrupting.join().unwrap();
+        assert!(began.elapsed() < Duration::from_millis(500));
     }
 
     #[test]

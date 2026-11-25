@@ -165,4 +165,22 @@ RSpec.describe 'a worker beside a page timer, on one virtual time', engine_globa
     session.click_button 'b'
     expect(poll_until { l = session.evaluate_script('log'); l.size == 6 && l }).to eq(%w[t50@50 m100@112 t200@200 w:sw@304 t500@500 t900@900])
   end
+  # A window's wait for its workers' ticks (worker_records.rs `lockstep_await`) runs with the GVL released; an interrupt of
+  # its thread — Thread#raise, Timeout, a signal — ends it at once rather than after a booting worker's 10 s guard.
+  it 'lets an interrupt end a wait for a tick' do
+    host = Capybara::Simulated::Native::WorkerHost.new
+    host.worker_new(1, 'dedicated', nil, 0, 'https://a.test/w.js', 0.0, 0.0, nil, 0.0, 0.0)
+    expect(host.lockstep_due(0.0)).to eq([1])
+    began  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    waiter = Thread.new do
+      host.lockstep_await([1], 0.0)
+      :answered
+    rescue Interrupt
+      :interrupted
+    end
+    sleep 0.05
+    waiter.raise(Interrupt)
+    expect(waiter.value).to eq(:interrupted)
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 1
+  end
 end
