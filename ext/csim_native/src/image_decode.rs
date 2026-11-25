@@ -475,7 +475,9 @@ pub(crate) fn decode_for_ruby(ruby: &magnus::Ruby, bytes: magnus::RString, max_w
     }
     Ok(hash.into_value_with(ruby))
 }
-// `f` run with the GVL released, so other Ruby threads go on meanwhile.
+// `f` run with the GVL released, so other Ruby threads go on meanwhile. (…`rb_thread_call_without_gvl2`, which never
+// raises: an interrupt pending as it begins leaves `f` not run — run here then, the GVL held — and one that comes during
+// it is Ruby's to raise once back in Ruby code, never by a longjmp across these frames.)
 pub(crate) fn without_gvl<F: FnOnce() -> R, R>(f: F) -> R {
     struct Job<F, R> {
         f: Option<F>,
@@ -490,9 +492,12 @@ pub(crate) fn without_gvl<F: FnOnce() -> R, R>(f: F) -> R {
     let mut job = Job { f: Some(f), r: None };
     // SAFETY: `run` is handed its own `Job`, and touches no Ruby object.
     unsafe {
-        rb_sys::rb_thread_call_without_gvl(Some(run::<F, R>), (&raw mut job).cast(), None, std::ptr::null_mut());
+        rb_sys::rb_thread_call_without_gvl2(Some(run::<F, R>), (&raw mut job).cast(), None, std::ptr::null_mut());
     }
-    job.r.expect("the job ran")
+    match job.r {
+        Some(r) => r,
+        None => (job.f.take().expect("not run"))(),
+    }
 }
 
 #[cfg(test)]

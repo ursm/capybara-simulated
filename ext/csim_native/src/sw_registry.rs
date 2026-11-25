@@ -87,7 +87,7 @@ struct Worker {
     // and whether its thread is gone — reaped, or ended on its own (a raise).
     fetch: Option<bool>,
     router: bool,
-    dead: bool,
+    life: crate::worker_records::Liveness,
     // …and what holds it, set as it runs: `skipWaiting()` called, the extendable message events whose `waitUntil`
     // promises are not all settled, the messages queued to it it has not finished dispatching, and the fetch events it
     // took and has not answered.
@@ -129,13 +129,13 @@ impl Worker {
     // Whether it has events pending that extend its lifetime — a message it has not finished, an unsettled `waitUntil` of
     // one, a fetch event unanswered — none for one whose thread is gone.
     fn extended(&self) -> bool {
-        !self.dead && (self.extensions > 0 || self.messages > 0 || !self.fetches.is_empty())
+        !self.life.ended() && (self.extensions > 0 || self.messages > 0 || !self.fetches.is_empty())
     }
     // …or a lifecycle event of its own: its install event's, from its job's end until the step its outcome makes is
     // taken, or its activate event's, from its activating step until its activated one — none for one waiting at Try
     // Activate.
     fn lifecycle_pending(&self) -> bool {
-        !self.dead && matches!(self.lifecycle.step, Step::UpdateFound | Step::Installed | Step::Activated)
+        !self.life.ended() && matches!(self.lifecycle.step, Step::UpdateFound | Step::Installed | Step::Activated)
     }
 }
 
@@ -380,10 +380,17 @@ pub(crate) fn versions_for_ruby(partition: u64, id: u32) -> (Option<u32>, Option
     (installing, waiting, active)
 }
 // A service worker of the session, spawned: its script's URL, type and bytes, 'parsed' until its registration holds it.
-pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, site: String, script_url: String, script_type: String, script: magnus::RString, registration: u32) {
-    worker_new(partition, handle, site, script_url, script_type, crate::fetch_rules::ruby_bytes(script), registration);
+// (…its liveness the host's record's of it, `host` the window's that runs it: worker_records.rs `Liveness`)
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, site: String, script_url: String, script_type: String, script: magnus::RString, registration: u32, host: &crate::worker_host::WorkerHost) {
+    worker_new_living(partition, handle, site, script_url, script_type, crate::fetch_rules::ruby_bytes(script), registration, host.liveness(i64::from(handle)));
 }
+#[cfg(test)]
 fn worker_new(partition: u64, handle: u32, site: String, script_url: String, script_type: String, script: Vec<u8>, registration: u32) {
+    worker_new_living(partition, handle, site, script_url, script_type, script, registration, Default::default());
+}
+#[allow(clippy::too_many_arguments)]
+fn worker_new_living(partition: u64, handle: u32, site: String, script_url: String, script_type: String, script: Vec<u8>, registration: u32, life: crate::worker_records::Liveness) {
     let worker = Worker {
         site,
         script_url,
@@ -394,7 +401,7 @@ fn worker_new(partition: u64, handle: u32, site: String, script_url: String, scr
         resources: crate::service_worker::ScriptResources { script, imports: Vec::new() },
         fetch: None,
         router: false,
-        dead: false,
+        life,
         skip_waiting: false,
         extensions: 0,
         messages: 0,
@@ -429,13 +436,13 @@ pub(crate) fn set_worker_flag_for_ruby(partition: u64, handle: u32, flag: String
     match flag.as_str() {
         "fetch" => w.fetch = Some(on),
         "router" => w.router = on,
-        "dead" => w.dead = on,
+        "dead" if on => w.life.end(),
         _ => {}
     }
 }
 // …whether its thread is there to answer: none reaped it, nor did it end on its own.
 pub(crate) fn worker_live_for_ruby(partition: u64, handle: u32) -> bool {
-    lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| !w.dead)
+    lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| !w.life.ended())
 }
 // …a hold of it set or let go, from whichever thread (`what` "skip_waiting": it called `skipWaiting()`; "extended": one
 // more extendable message event's `waitUntil` promises pending, `on`, or one fewer; "message": a message queued to it,
@@ -503,7 +510,7 @@ pub(crate) fn note_client_for_ruby(
     let mut reg = lock();
     let p = reg.partition(partition);
     let kept = p.clients.iter().find(|c| c.id == id && c.ready && c.url == url).and_then(|c| c.controller);
-    let controller = controller.or(kept.filter(|h| p.workers.get(h).is_some_and(|w| !w.dead)));
+    let controller = controller.or(kept.filter(|h| p.workers.get(h).is_some_and(|w| !w.life.ended())));
     let clients = &mut p.clients;
     let client = Client { id, ready: true, owner, site, url, kind, frame_type, origin, controller };
     match clients.iter_mut().find(|c| c.id == client.id) {
@@ -763,7 +770,7 @@ impl Partition {
         }
         // (…no worker to compare where its thread is gone: nothing here runs one again on demand as SW's "Run Service Worker"
         // does, so a dead newest worker is an update, which is what brings the registration back)
-        let dead = newest.and_then(|h| self.workers.get(&h)).is_some_and(|w| w.dead);
+        let dead = newest.and_then(|h| self.workers.get(&h)).is_some_and(|w| w.life.ended());
         let same_script = !dead && script.as_ref().is_some_and(|(url, ty)| *url == script_url && *ty == script_type);
         if kind == "register" && same_script {
             let current = self.mapped(&site, &scope).and_then(|r| r.update_via_cache.clone());
@@ -1281,7 +1288,7 @@ fn scope_match<'p>(p: &'p Partition, site: &str, url: &str, activating: bool) ->
     }
     for r in p.registrations.iter().filter(|r| r.mapped && r.site == site) {
         let Some(h) = r.activating.filter(|_| url.starts_with(&r.scope) && longer(&best, &r.scope, true)) else { continue };
-        if p.workers.get(&h).is_some_and(|w| !w.dead && (activating || w.lifecycle.activated)) {
+        if p.workers.get(&h).is_some_and(|w| !w.life.ended() && (activating || w.lifecycle.activated)) {
             best = Some((h, &r.scope));
         }
     }
@@ -1299,8 +1306,8 @@ pub(crate) fn match_worker_for_ruby(partition: u64, site: String, url: String, m
     let p = reg.existing(partition)?;
     let (handle, scope) = match mode.as_str() {
         "served" => scope_match(p, &site, &url, false)?,
-        "navigation" => scope_match(p, &site, &url, false).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.dead && w.intercepts()))?,
-        "client" => scope_match(p, &site, &url, true).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.dead))?,
+        "navigation" => scope_match(p, &site, &url, false).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.life.ended() && w.intercepts()))?,
+        "client" => scope_match(p, &site, &url, true).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.life.ended()))?,
         "activating" => {
             let covering = |r: &&Registration| r.mapped && r.site == site && r.activating.is_some() && url.starts_with(&r.scope);
             let r = p.registrations.iter().filter(covering).max_by_key(|r| r.scope.len())?;
@@ -1308,7 +1315,7 @@ pub(crate) fn match_worker_for_ruby(partition: u64, site: String, url: String, m
                 return None;
             }
             let h = r.activating?;
-            p.workers.get(&h).filter(|w| !w.dead && !w.lifecycle.activated && w.intercepts())?;
+            p.workers.get(&h).filter(|w| !w.life.ended() && !w.lifecycle.activated && w.intercepts())?;
             (h, r.scope.as_str())
         }
         _ => return None,
@@ -1321,7 +1328,7 @@ pub(crate) fn match_worker_for_ruby(partition: u64, site: String, url: String, m
 pub(crate) fn controller_for_ruby(partition: u64, handle: u32, live: bool) -> Option<(u32, bool, String, String)> {
     let mut reg = lock();
     let p = reg.existing(partition)?;
-    let w = p.workers.get(&handle).filter(|w| !(live && w.dead))?;
+    let w = p.workers.get(&handle).filter(|w| !(live && w.life.ended()))?;
     let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map_or_else(String::new, |r| r.scope.clone());
     Some((handle, w.intercepts(), w.script_url.clone(), scope))
 }

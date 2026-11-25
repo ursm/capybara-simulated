@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
+require 'timeout'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
@@ -182,5 +183,28 @@ RSpec.describe 'a worker beside a page timer, on one virtual time', engine_globa
     waiter.raise(Interrupt)
     expect(waiter.value).to eq(:interrupted)
     expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - began).to be < 1
+  end
+  # A worker is made at once or not at all: a spawn an interrupt ends half way (Timeout, Thread#raise) leaves no record a
+  # window's step then waits a booting worker's guard for, nor a boot owed (it took 10 s, a record with no thread).
+  it 'leaves nothing of a spawn an interrupt ended' do
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/javascript'}, ['onmessage = () => {};']] if env['PATH_INFO'] == '/w.js'
+
+      [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>p']]
+    })
+    session.visit '/'
+    rng   = Random.new(1)
+    worst = 0
+    40.times do
+      begin
+        Timeout.timeout(rng.rand(0.0005..0.02)) { session.execute_script("for (let i = 0; i < 5; i++) new Worker('/w.js');") }
+      rescue Timeout::Error, StandardError
+        nil
+      end
+      t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      session.evaluate_script('1')
+      worst = [worst, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t].max
+    end
+    expect(worst).to be < 3
   end
 end

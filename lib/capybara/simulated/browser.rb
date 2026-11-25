@@ -564,8 +564,8 @@ module Capybara
       # What the workers owe a window, the engine's (`@worker_host`) — asked of it by kind, a bit each — and the clock holds
       # (`@clock_holds`), each kind's budget CLOCK_HOLD_BUDGET of real time.
       WorkerHost               = Native::WorkerHost
-      # Worker thread polling and termination intervals — split so a
-      # tuning change to one doesn't accidentally rebind the other. (…the poll the engine's: worker_records.rs)
+      # How long a worker's thread waits on its inbox before it catches its clock up to the window's, and a window waits for
+      # a worker's post at a time — the engine's (worker_records.rs POLL_INTERVAL).
       WORKER_POLL_INTERVAL     = WorkerHost::POLL_INTERVAL
       ClockHolds               = Native::ClockHolds
       OWED_FETCH               = 1 << WorkerHost::FETCH
@@ -5309,8 +5309,6 @@ module Capybara
         # A blob: worker script that didn't resolve (revoked / unavailable) fails the
         # same way — fire onerror rather than spawn a worker that runs nothing.
         return worker_fail(handle, 'Worker script could not be loaded', parent_worker) if target.start_with?('blob:') && body.to_s.empty?
-        # Pending until the worker's initial script has run (see `WorkerHost::BOOTING`).
-        @worker_host.owe(WorkerHost::BOOTING, 1)
         # Register the worker's record BEFORE its thread exists: the sw_hooks fire from the
         # worker thread as early as the script EVAL (a top-level skipWaiting(), the extended
         # counter) and write through its record — created after Thread.new, a fast worker could
@@ -5333,7 +5331,6 @@ module Capybara
                  end
         travel = travel ? travel.to_f : @runtime.call('timeTravel').to_f
         kind   = if service then 'service' elsif shared then 'shared' else 'dedicated' end
-        @worker_host.worker_new(handle, kind, parent_worker, parent_worker ? 0 : realm_id.to_i, target, origin, @runtime.clock, epoch, shift, travel)
         # The host's own record of it, its host I/O: its thread, its inbox, and its own runtime, published by its thread
         # once built, so the session boundary can stop the JS half without waiting for it (see `stop_worker_js`). The
         # lock is per worker rather than the shared counter mutex: the only two things that ever contend for it are that
@@ -5351,46 +5348,67 @@ module Capybara
           elsif parent_worker then @worker_host.worker_site_for_cookies(parent_worker)&.first
           else site_for_cookies(realm_id)
           end
-        @worker_host.worker_identity(handle, site.to_s, !service, cookie_site, creator_key&.to_s, cluster_key&.to_s, !service && isolated == true, service || secure == true)
-        # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
-        # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
-        # (…its bytes the first of its script resource map, which an update is byte-checked against: sw_registry.rs)
-        Native.sw_worker_new(@sw_partition, handle, site.to_s, target, worker_type(script_type), body.to_s, sw_registration.to_i) if service
-        workers_store(handle, record)
-        thread = Thread.new do
-          Thread.current.report_on_exception = false
-          run_worker(
-            handle, target, body, inbox, outbox,
-            # The record, not `@workers[handle]` looked up later: `terminate_realm_workers` and
-            # `reset_workers` remove entries WITHOUT waiting for the thread, and building the
-            # isolate takes long enough (a fresh context plus ~20 host-fn attaches) for a frame
-            # discarded in that window to leave the lookup empty. A worker whose record it never
-            # found could publish no runtime and would never see the stop flag.
-            record:          record,
-            name:            name,
-            shared:          shared,
-            service:         service,
-            creator_key:     creator_key,
-            sw_scope:        sw_scope,
-            sw_registration: sw_registration.to_i,
-            controller:      ctrl,
-            sw_script:       sw_script,
-            # `new Worker(url, {type: 'module'})` — the observable module/classic split
-            # (importScripts is classic-only) rides into the isolate as a flag.
-            module_worker: script_type.to_s == 'module',
-            # The creating context's client id — the worker MAIN-SCRIPT fetch's clientId
-            # (the PARENT WORKER's own client id for a nested spawn).
-            creator_client: parent_worker ? sw_worker_client_id(parent_worker) : sw_client_id(realm_id.to_i),
-            # The registration's updateViaCache mode — its job's, which commits only once this
-            # evaluation ran — a SERVICE worker's importScripts reads ('none' bypasses the HTTP cache).
-            sw_uvc: service ? update_via_cache || sw_scope_update_via_cache(sw_scope, site) : nil,
-            sw_imports_map: sw_imports
-          )
+        creator_client = parent_worker ? sw_worker_client_id(parent_worker) : sw_client_id(realm_id.to_i)
+        uvc            = service ? update_via_cache || sw_scope_update_via_cache(sw_scope, site) : nil
+        window_clock   = @runtime.clock
+        # Made at once or not at all: its records, its registry entry and its thread with no interrupt between them
+        # (Timeout, Thread#raise), and on a raise among them none of it left — a record with no thread is a worker a window's
+        # step waits a boot guard for, and one a SharedWorker connects to — nor the boot it was owed.
+        made = owed = false
+        begin
+          Thread.handle_interrupt(Object => :never) do
+            # Pending until the worker's initial script has run (see `WorkerHost::BOOTING`).
+            @worker_host.owe(WorkerHost::BOOTING, 1)
+            owed = true
+            @worker_host.worker_new(handle, kind, parent_worker, parent_worker ? 0 : realm_id.to_i, target, origin, window_clock, epoch, shift, travel)
+            @worker_host.worker_identity(handle, site.to_s, !service, cookie_site, creator_key&.to_s, cluster_key&.to_s, !service && isolated == true, service || secure == true)
+            # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
+            # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
+            # (…its bytes the first of its script resource map, which an update is byte-checked against: sw_registry.rs)
+            Native.sw_worker_new(@sw_partition, handle, site.to_s, target, worker_type(script_type), body.to_s, sw_registration.to_i, @worker_host) if service
+            workers_store(handle, record)
+            record[:thread] = Thread.new do
+              Thread.current.report_on_exception = false
+              # (…its own thread the interruptible one it would have been made outside the mask above: the session boundary's
+              # kill its last resort, `stop_worker_wait`)
+              Thread.handle_interrupt(Object => :immediate) do
+                run_worker(
+                  handle, target, body, inbox, outbox,
+                  # The record, not `@workers[handle]` looked up later: `terminate_realm_workers` and
+                  # `reset_workers` remove entries WITHOUT waiting for the thread, and building the
+                  # isolate takes long enough (a fresh context plus ~20 host-fn attaches) for a frame
+                  # discarded in that window to leave the lookup empty. A worker whose record it never
+                  # found could publish no runtime.
+                  record:          record,
+                  name:            name,
+                  shared:          shared,
+                  service:         service,
+                  creator_key:     creator_key,
+                  sw_scope:        sw_scope,
+                  sw_registration: sw_registration.to_i,
+                  controller:      ctrl,
+                  sw_script:       sw_script,
+                  # `new Worker(url, {type: 'module'})` — the observable module/classic split
+                  # (importScripts is classic-only) rides into the isolate as a flag.
+                  module_worker:   script_type.to_s == 'module',
+                  # The creating context's client id — the worker MAIN-SCRIPT fetch's clientId
+                  # (the PARENT WORKER's own client id for a nested spawn).
+                  creator_client:  creator_client,
+                  # The registration's updateViaCache mode — its job's, which commits only once this
+                  # evaluation ran — a SERVICE worker's importScripts reads ('none' bypasses the HTTP cache).
+                  sw_uvc:          uvc,
+                  sw_imports_map:  sw_imports
+                )
+              end
+            end
+            made = true
+          end
+        ensure
+          unless made
+            workers_drop(handle) || @worker_host.worker_drop(handle)
+            @worker_host.release(WorkerHost::BOOTING, 1) if owed
+          end
         end
-        # A nested spawn runs THIS method on a worker thread, so other threads can observe
-        # the record's one-statement `thread: nil` window — every `[:thread]` reader
-        # nil-guards and treats nil as "still spawning".
-        record[:thread] = thread
         # A dedicated / shared worker is a client of its ORIGIN — type 'worker' / 'sharedworker',
         # frameType 'none' — whether or not a service worker's scope covers its script; only the
         # `controlled` flag turns on that scope match, exactly as it does for a browsing context.
@@ -5834,8 +5852,8 @@ module Capybara
         # A wait that ran out on a hang, a handler spinning: its isolate ended, so no later request waits it out too — a dead
         # worker routes nothing (a user agent's own "the service worker is unresponsive": Chrome after 62 s, Firefox after
         # 60 s, measured). A wait a worker's thread makes leaves it to the window.
-        hung = in_place && worker && (w = @workers[worker]) && @worker_host.worker_kind(worker) == 'service' &&
-               Native.sw_hung(left <= 0, @worker_host.worker_idle?(worker), @worker_host.on_network?(worker))
+        hung = in_place && worker && @workers.key?(worker) && @worker_host.worker_kind(worker) == 'service' &&
+               Native.sw_hung(left <= 0, @worker_host.worker_at_inbox?(worker), @worker_host.on_network?(worker))
         nil
       ensure
         if in_place
@@ -7965,8 +7983,8 @@ module Capybara
         # realms at all. Same outbox pattern as sw_try_activate.
         flush_sw_deferred_fetches(handle, record: w, fallthrough: true)
         if w[:kind] == 'service'
-          # (…no request goes to it any more: the registry's matching skips it)
-          Native.sw_set_worker_flag(@sw_partition, handle.to_i, 'dead', true)
+          # (…no request goes to it any more: the registry's matching skips it, its liveness ended as it left the
+          # registry — worker_records.rs `Liveness`, the registry's worker's too)
           @worker_host << {handle: handle.to_i, kind: 'sw_reaped'}
         end
         # Its agents gone: the locks it held let go, its IndexedDB connections closed (agents.rs `drop_owner`).
@@ -10419,11 +10437,11 @@ module Capybara
           outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
         end
       ensure
-        # (…its thread ending: no step of the window's waits on it, nor are its timers due)
+        # (…its thread ending, on its own too — a raise: no step of the window's waits on it, nor are its timers due; and,
+        # a service worker, no request goes to it any more — the registry's matching skips it, the liveness cell the
+        # registry's worker shares — and its holds let go: a release a successor parked at Try Activate waits for, its
+        # wakeup posted below)
         @worker_host.worker_ended(handle)
-        # (…its thread ending, on its own too — a raise — no request goes to it any more: the registry's matching skips
-        # it, and its holds let go: a release a successor parked at Try Activate waits for, its wakeup posted below)
-        Native.sw_set_worker_flag(@sw_partition, handle, 'dead', true) if service
         # A service worker exiting with a lifecycle event still to come or OPEN — a raise on this
         # thread, `self.close()` during a parked install waitUntil, a terminate — can
         # never settle it itself, and the client timeline parked on its marker

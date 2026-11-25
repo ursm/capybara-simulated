@@ -52,14 +52,14 @@ fn group_of(kind: &str) -> &'static str {
 // What the workers post their window's host — from their own threads, any time — kept as plain data until the window's
 // thread takes a drain of it (`outbox_take`): each its kind and its fields as the poster gave them, a hash of symbols to
 // strings, numbers, booleans, lists and hashes, nothing of Ruby's kept (no object a GC could move or free).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) enum Datum {
     Nil,
     Bool(bool),
     Int(i64),
     Float(f64),
-    // a string, and whether it is UTF-8 (else binary)
-    Str(Vec<u8>, bool),
+    // a string, and its encoding (an index, the process's)
+    Str(Vec<u8>, magnus::encoding::Index),
     Sym(String),
     List(Vec<Datum>),
     Map(Vec<(Datum, Datum)>),
@@ -77,8 +77,7 @@ impl Datum {
             return Ok(Datum::Bool(false));
         }
         if let Some(s) = RString::from_value(v) {
-            let utf8 = s.enc_get() == ruby.utf8_encindex() || s.enc_get() == ruby.usascii_encindex();
-            return Ok(Datum::Str(crate::fetch_rules::ruby_bytes(s), utf8));
+            return Ok(Datum::Str(crate::fetch_rules::ruby_bytes(s), s.enc_get()));
         }
         if let Some(sym) = Symbol::from_value(v) {
             return Ok(Datum::Sym(sym.name()?.into_owned()));
@@ -100,7 +99,9 @@ impl Datum {
             })?;
             return Ok(Datum::Map(pairs));
         }
-        Err(magnus::Error::new(ruby.exception_type_error(), format!("a worker's post can't hold {}", unsafe { v.classname() })))
+        // (…what a post may carry is plain data; anything else is the posting code's bug, raised where it posts — the post
+        // made none of)
+        Err(magnus::Error::new(ruby.exception_arg_error(), format!("a worker's post can't carry a {}", unsafe { v.classname() })))
     }
     fn write(&self, ruby: &magnus::Ruby) -> Value {
         match self {
@@ -108,13 +109,7 @@ impl Datum {
             Datum::Bool(b) => if *b { ruby.qtrue().as_value() } else { ruby.qfalse().as_value() },
             Datum::Int(i) => ruby.integer_from_i64(*i).as_value(),
             Datum::Float(f) => ruby.float_from_f64(*f).as_value(),
-            Datum::Str(bytes, utf8) => {
-                let s = ruby.str_from_slice(bytes);
-                if *utf8 {
-                    let _ = s.enc_associate(ruby.utf8_encindex());
-                }
-                s.as_value()
-            }
+            Datum::Str(bytes, encoding) => ruby.enc_str_new(bytes, *encoding).as_value(),
             Datum::Sym(name) => ruby.to_symbol(name).as_value(),
             Datum::List(items) => {
                 let a = ruby.ary_new_capa(items.len());
@@ -189,7 +184,7 @@ impl WorkerHost {
         }
         let deadline = Instant::now() + Duration::from_secs_f64(seconds.max(0.0));
         let cancel = std::sync::atomic::AtomicBool::new(false);
-        self.without_gvl_interruptibly(&cancel, || {
+        let posted = self.without_gvl_interruptibly(&cancel, || {
             let mut outbox = self.outbox();
             loop {
                 if !outbox.posted.is_empty() {
@@ -201,7 +196,8 @@ impl WorkerHost {
                 }
                 outbox = self.outbox_posted.wait_timeout(outbox, left).unwrap_or_else(PoisonError::into_inner).0;
             }
-        })
+        });
+        posted.unwrap_or_else(|| !self.outbox_empty())
     }
     // #outbox_take -> a drain of what is posted, in the order a delivery takes it (`delivery_plan`): `[group, [[post,
     // after_claim], …]]` for each group it has — nothing posted, none.

@@ -72,12 +72,19 @@ impl Kind {
 }
 
 // Its thread: running from the moment it is made (its thread's first statement may come later, but a window's step waits
-// for a booting worker, and a SharedWorker constructor finds one made in the same task), or ended (on its own, or
-// terminated).
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Life {
-    Running,
-    Ended,
+// for a booting worker, and a SharedWorker constructor finds one made in the same task), until it ends — on its own, or
+// terminated, or the worker leaves the registry. One cell, shared with the service worker registry's worker of it
+// (sw_registry.rs: a worker whose thread is gone routes nothing), so the two never disagree.
+#[derive(Clone, Default, Debug)]
+pub(crate) struct Liveness(std::sync::Arc<AtomicBool>);
+
+impl Liveness {
+    pub(crate) fn ended(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+    pub(crate) fn end(&self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 #[derive(Debug)]
@@ -86,7 +93,7 @@ pub(crate) struct Record {
     parent: Option<i64>,
     realm: i64,
     url: String,
-    life: Life,
+    life: Liveness,
     stopping: bool,
     // ── Its clock, on the window's ──
     // where it stands, and the window's clock as it last looked — the window's going back (a refused context reset's new
@@ -131,7 +138,7 @@ pub(crate) struct Record {
 
 impl Record {
     fn alive(&self) -> bool {
-        self.life == Life::Running
+        !self.life.ended()
     }
     // In the lockstep: alive, not blocked on another worker's answer, and not left lagging — but one whose answer came in
     // since, back in it.
@@ -243,7 +250,7 @@ impl WorkerHost {
             parent,
             realm,
             url,
-            life: Life::Running,
+            life: Liveness::default(),
             stopping: false,
             now: at,
             window_was: window,
@@ -280,6 +287,9 @@ impl WorkerHost {
     #[allow(clippy::type_complexity)]
     fn worker_drop(&self, handle: i64) -> Option<(&'static str, usize, Vec<(String, i64, i64)>)> {
         let gone = self.records().map.remove(&handle);
+        if let Some(r) = &gone {
+            r.life.end();
+        }
         self.stirred.notify_all();
         gone.map(|r| (r.kind.name(), r.in_flight, r.parked))
     }
@@ -325,6 +335,14 @@ impl WorkerHost {
     fn worker_secure(&self, handle: i64) -> bool {
         self.identity(handle, true, |i| i.secure)
     }
+    // The liveness cell of worker `handle` — a new one, ended, where it has no record.
+    pub(crate) fn liveness(&self, handle: i64) -> Liveness {
+        self.with(handle, None, |r| Some(r.life.clone())).unwrap_or_else(|| {
+            let gone = Liveness::default();
+            gone.end();
+            gone
+        })
+    }
     // #worker_kind(handle) -> "dedicated", "shared" or "service"; nil for none.
     fn worker_kind(&self, handle: i64) -> Option<&'static str> {
         self.with(handle, None, |r| Some(r.kind.name()))
@@ -357,7 +375,7 @@ impl WorkerHost {
     // #worker_ended(handle) — its thread ended, on its own or terminated; its timers none.
     fn worker_ended(&self, handle: i64) {
         self.stir(handle, (), |r| {
-            r.life = Life::Ended;
+            r.life.end();
             r.next_timer = Some(-1.0);
             r.next_timer_at = None;
         });
@@ -376,7 +394,7 @@ impl WorkerHost {
     }
     // #worker_gone?(handle) -> whether its thread ended, or it left the window's registry: it answers nothing more.
     fn worker_gone(&self, handle: i64) -> bool {
-        self.with(handle, true, |r| r.life == Life::Ended)
+        self.with(handle, true, |r| r.life.ended())
     }
     // #worker_stop(handle) — the session boundary asked it to stop; #worker_stopping?(handle) — whether it was, or it is
     // gone from the window's registry.
@@ -440,9 +458,9 @@ impl WorkerHost {
     fn inbox_queued(&self, handle: i64) {
         self.with(handle, (), |r| r.queued += 1);
     }
-    // #worker_idle?(handle) -> whether it waits on its inbox, which holds nothing.
-    fn worker_idle(&self, handle: i64) -> bool {
-        self.with(handle, false, |r| r.idle())
+    // #worker_at_inbox?(handle) -> whether its thread waits on its inbox now, whatever is in it.
+    fn is_at_inbox(&self, handle: i64) -> bool {
+        self.with(handle, false, |r| r.at_inbox)
     }
     // #inbox_pending? -> whether a live worker has a message in its inbox it has not taken.
     fn inbox_pending(&self) -> bool {
@@ -504,10 +522,13 @@ impl WorkerHost {
     fn lockstep_await(&self, handles: Vec<i64>, ago: f64) {
         let start = Instant::now().checked_sub(Duration::from_secs_f64(ago.max(0.0))).unwrap_or_else(Instant::now);
         let cancel = AtomicBool::new(false);
-        self.without_gvl_interruptibly(&cancel, || self.lockstep_wait(handles, start, &cancel));
+        // (…none run where an interrupt was pending: the window's thread is Ruby's to raise in)
+        let _ = self.without_gvl_interruptibly(&cancel, || self.lockstep_wait(handles, start, &cancel));
     }
-    // `f` run with the GVL released, `cancel` set and every wait on the records woken where Ruby interrupts the thread.
-    pub(crate) fn without_gvl_interruptibly<F: FnOnce() -> R, R>(&self, cancel: &AtomicBool, f: F) -> R {
+    // `f` run with the GVL released, `cancel` set and every wait on the records woken where Ruby interrupts the thread —
+    // none where an interrupt was pending already, `f` not run (`rb_thread_call_without_gvl2`: it never raises across
+    // these frames; the interrupt is Ruby's to raise once back in Ruby code).
+    pub(crate) fn without_gvl_interruptibly<F: FnOnce() -> R, R>(&self, cancel: &AtomicBool, f: F) -> Option<R> {
         struct Job<'a, F, R> {
             f: Option<F>,
             r: Option<R>,
@@ -534,9 +555,9 @@ impl WorkerHost {
         let data = (&raw mut job).cast();
         // SAFETY: `run` and `unblock` are handed their own `Job`, and touch no Ruby object.
         unsafe {
-            rb_sys::rb_thread_call_without_gvl(Some(run::<F, R>), data, Some(unblock::<F, R>), data);
+            rb_sys::rb_thread_call_without_gvl2(Some(run::<F, R>), data, Some(unblock::<F, R>), data);
         }
-        job.r.expect("the job ran")
+        job.r
     }
     fn lockstep_wait(&self, handles: Vec<i64>, start: Instant, cancel: &AtomicBool) {
         let cancelled = || cancel.load(Ordering::Acquire);
@@ -810,7 +831,7 @@ pub(crate) fn define(class: magnus::RClass) -> Result<(), magnus::Error> {
     class.define_method("worker_idle_to", method!(WorkerHost::worker_idle_to, 2))?;
     class.define_method("worker_off_inbox", method!(WorkerHost::worker_off_inbox, 2))?;
     class.define_method("inbox_queued", method!(WorkerHost::inbox_queued, 1))?;
-    class.define_method("worker_idle?", method!(WorkerHost::worker_idle, 1))?;
+    class.define_method("worker_at_inbox?", method!(WorkerHost::is_at_inbox, 1))?;
     class.define_method("inbox_pending?", method!(WorkerHost::inbox_pending, 0))?;
     class.define_method("sw_parked?", method!(WorkerHost::sw_parked, 1))?;
     class.define_method("worker_timers_pending?", method!(WorkerHost::worker_timers_pending, 0))?;
