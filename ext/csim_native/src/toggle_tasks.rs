@@ -41,7 +41,11 @@ impl RealmArena {
 
 // HTML "queue a … toggle event task" for `el` on its `tracker`, from `old_open` to `new_open`, by `source` (an invoker's,
 // or none): a task already queued on it removed, its old state kept, and one queued that fires a `toggle` ToggleEvent of
-// the two states (None: a script was terminated).
+// the two states (None: a script was terminated). "If element's popover toggle task tracker is not null: Set oldState
+// to element's popover toggle task tracker's old state. Remove element's popover toggle task tracker's task from its
+// task queue" — so a popover hidden during its own show's focusing steps (its `popover` removed by a focus listener)
+// fires ONE `toggle`, open → open, where Chrome fires two (WPT popover-events, popover-remove-attribute-during-focusing-
+// steps); no whatwg issue revisits the coalescing.
 pub(crate) fn queue_toggle_task(scope: &mut v8::PinScope<'_, '_>, el: NodeId, tracker: Tracker, old_open: bool, new_open: bool, source: Option<NodeId>) -> Option<()> {
     let old_open = match dom(scope).arena.toggle_tasks.0.remove(&(el, tracker)) {
         Some((key, old)) => {

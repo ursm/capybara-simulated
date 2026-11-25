@@ -473,6 +473,11 @@ fn popover_focusing_steps(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> Optio
 
 // HTML "light dismiss open popovers" for a user's `pointerdown` (`down`) or `pointerup` on `target` in document `doc`:
 // the topmost clicked popover recorded at the press, and at the release — on the same one — the popovers above it hidden.
+// A press whose target its own `pointerdown` listener removed records none (`target` in no popover) and a release
+// outside them all matches it: the popovers close, as Firefox closes them. Chrome keeps them, and so does WPT
+// light-dismiss-remove-target, following w3c/pointerevents#460 (open), which runs light dismiss at the `click` with
+// both targets — a click that never comes once the press's target is gone; HTML's merged steps are the
+// pointerdown / pointerup ones.
 fn light_dismiss_open_popovers(scope: &mut v8::PinScope<'_, '_>, doc: NodeId, target: NodeId, down: bool) -> Option<()> {
     let arena = &mut dom(scope).arena;
     if arena.topmost_auto_or_hint(doc).is_none() {

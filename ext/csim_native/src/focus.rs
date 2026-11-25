@@ -596,7 +596,10 @@ pub(crate) fn dialog_opening(arena: &mut RealmArena, dialog: NodeId) {
     };
 }
 // …and, closing it, that element — taken — where focus goes back to it: still in a document, and the dialog was modal
-// or holds the focus (a shadow-including inclusive descendant of it is focused).
+// or holds the focus — HTML "close the dialog": "If subject's node document's focused area of the document's DOM anchor
+// is a shadow-including inclusive descendant of subject, or wasModal is true, then run the focusing steps for element".
+// An element SLOTTED into a dialog in a shadow tree is no shadow-including descendant of it, so a non-modal one keeps
+// the focus there: WPT dialog-focus-previous-outside asks for the flat tree (Chrome), against that explicit test.
 pub(crate) fn dialog_focus_restore(arena: &mut RealmArena, dialog: NodeId, was_modal: bool) -> Option<NodeId> {
     let previous = arena.previously_focused.remove(&dialog)?;
     let in_document = arena.get(arena.shadow_including_root(previous)).is_some_and(|r| r.kind == NodeKind::Document);
