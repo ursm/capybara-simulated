@@ -46,6 +46,9 @@ pub(crate) struct WorkerHost {
     epoch: Mutex<u64>,
     state: Mutex<State>,
     answered: Condvar,
+    // The agent record of each of its workers (worker_records.rs), and the change any of their waits is told of.
+    pub(crate) records: Mutex<crate::worker_records::Records>,
+    pub(crate) stirred: Condvar,
 }
 
 #[derive(Default)]
@@ -126,8 +129,9 @@ struct Leg {
 static RESERVED_CLIENTS: AtomicU64 = AtomicU64::new(0);
 
 impl WorkerHost {
-    fn new() -> Self {
-        WorkerHost { owed: Default::default(), epoch: Mutex::new(0), state: Mutex::new(State { direct_seq: DIRECT_BASE, ..State::default() }), answered: Condvar::new() }
+    pub(crate) fn new() -> Self {
+        let (records, stirred) = crate::worker_records::new_records();
+        WorkerHost { owed: Default::default(), epoch: Mutex::new(0), state: Mutex::new(State { direct_seq: DIRECT_BASE, ..State::default() }), answered: Condvar::new(), records, stirred }
     }
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
@@ -428,7 +432,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("client_of", method!(WorkerHost::client_of, 1))?;
     class.define_method("realm_of", method!(WorkerHost::realm_of, 1))?;
     class.define_method("forget_client", method!(WorkerHost::forget_client, 1))?;
-    Ok(())
+    crate::worker_records::define(class)
 }
 
 #[cfg(test)]

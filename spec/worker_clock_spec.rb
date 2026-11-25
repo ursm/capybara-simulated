@@ -255,8 +255,9 @@ RSpec.describe 'Worker clock', engine_global: true do
       a.close();
       postMessage('ready');
     JS
-    workers = session.driver.browser.instance_variable_get(:@workers).values
-    expect(workers.map {|w| w[:bc_names]&.fetch('p', 0) }).to eq([1])
+    browser = session.driver.browser
+    host    = browser.instance_variable_get(:@worker_host)
+    expect(browser.instance_variable_get(:@workers).keys.map {|h| host.bc_listening?(h, 'p') }).to eq([true])
   end
 
   # A worker's clock is its window's: one whose script set a timer reads the window's `Date` (it read 50 ms ahead for good:

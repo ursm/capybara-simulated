@@ -662,7 +662,7 @@ RSpec.describe 'Service Worker client enumeration' do
     end
 
     # Only the service worker may be left — the frame's workers are gone from @workers.
-    expect(browser.instance_variable_get(:@workers).values.map {|w| w[:service] }).to all(be(true))
+    expect(browser.instance_variable_get(:@workers).keys.map {|h| worker_host.worker_kind(h) }).to all(eq('service'))
     expect(worker_host.owed(posted)).to eq(0)
     expect(browser.worker_pending?).to be(false)
   end

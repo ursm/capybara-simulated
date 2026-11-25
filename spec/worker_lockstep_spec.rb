@@ -141,7 +141,7 @@ RSpec.describe 'a worker beside a page timer, on one virtual time', engine_globa
 
   # (…and its sync XHR, which the service worker answers off a 300 ms timer of its own: a request one worker waits on in
   # place is taken by the other at the time it was made, the window going no further meanwhile — so the timer starts
-  # then, however late the service worker's thread gets to it on a loaded machine (Browser#worker_due_at, `:asked`))
+  # then, however late the service worker's thread gets to it on a loaded machine (worker_records.rs `due_at`, `asked`))
   it "hears a worker whose sync XHR a service worker answers late at its time" do
     sw = "self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));" \
          "self.addEventListener('fetch', e => { const path = new URL(e.request.url).pathname;" \

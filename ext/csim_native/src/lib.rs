@@ -115,6 +115,7 @@ mod response_headers;
 mod isomorphic;
 mod worker_script_fetch;
 mod worker_host;
+mod worker_records;
 mod clock_holds;
 mod fetch_hop;
 mod fetch_plan;
