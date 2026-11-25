@@ -403,6 +403,7 @@ const INTERFACES = [
     omitMembers: { onclose: 'withdrawn from the HTML Standard — no close event is fired at a port; Chrome and Firefox have none' }
   }],
   ['html', 'BroadcastChannel', { shell: true, slots: ['name'] }],
+  ['html', 'CloseWatcher', { shell: true }],
   ['html', 'EventSource', { install: true }],
   ['websockets', 'WebSocket', { install: true }],
   ['html', 'DragEvent', { event: {} }],

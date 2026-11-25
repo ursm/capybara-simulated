@@ -120,4 +120,27 @@ RSpec.describe 'Popover and dialog steps' do
     JS
     expect(s.evaluate_script('[shown, toggles.join(",")]')).to eq(['open=true popover=false', 'closed->open,closed->closed'])
   end
+
+  # The close watcher manager (HTML §6.10): close watchers made with no user activation between them share a group,
+  # which one close request (the Escape key) closes together — the last first, its `cancel` not cancelable — and a
+  # CloseWatcher's requestClose() fires a cancelable `cancel` its listener may prevent (WPT close-watcher/
+  # user-activation/nn-CloseWatcher, basic).
+  it 'closes the close watchers of one group with one close request' do
+    s = session_with('<input id=i><dialog id=d>d</dialog>')
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const w1 = new CloseWatcher();
+      w1.oncancel = (e) => log.push(`w1 cancel ${e.cancelable}`);
+      w1.onclose = () => log.push('w1 close');
+      d.addEventListener('cancel', (e) => log.push(`d cancel ${e.cancelable}`));
+      d.addEventListener('close', () => log.push('d close'));
+      d.showModal();
+      window.w2 = new CloseWatcher();
+      w2.oncancel = (e) => { log.push(`w2 cancel ${e.cancelable}`); e.preventDefault(); };
+      w2.onclose = () => log.push('w2 close');
+      w2.requestClose();
+    JS
+    s.find(:css, '#d').send_keys(:escape)
+    expect(s.evaluate_script('log')).to eq(['w2 cancel true', 'w2 cancel false', 'w2 close', 'd cancel false', 'w1 cancel false', 'w1 close', 'd close'])
+  end
 end
