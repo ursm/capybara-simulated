@@ -35,6 +35,7 @@ mod cloning;
 mod range_contents;
 mod element_references;
 mod clone;
+mod close_watchers;
 mod connection_steps;
 mod collections;
 mod combobox;

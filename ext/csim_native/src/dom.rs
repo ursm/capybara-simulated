@@ -1011,8 +1011,9 @@ pub(crate) struct RealmArena {
     // The event types a node has ever had a listener of, and how often a node has gained a store or a type one
     // (node_handle.rs).
     pub(crate) listener_types: crate::node_handle::ListenerTypes,
-    // Each open dialog's "previously focused element": what its document had focused as it opened, which closing it
-    // gives focus back to — whichever realm's script opens and closes it (focus.rs).
+    // Each element's "previously focused element": what its document had focused as an open dialog opened, or as the
+    // first popover of a stack showed, which closing or hiding it gives focus back to — whichever realm's script opens and
+    // closes it (focus.rs, popovers.rs).
     pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
     // Each focused text control's value as it was focused, and whether the user edited it since (change_on_blur.rs).
     pub(crate) change_baselines: crate::change_on_blur::ChangeBaselines,
@@ -1025,17 +1026,15 @@ pub(crate) struct RealmArena {
     // radio a row, and a walk of the document for each was quadratic. An entry may since have been unchecked, renamed or
     // moved, which a lookup sees and drops; a freed one goes as it is freed.
     pub(crate) checked_radios: std::collections::HashMap<(Vec<u16>, Option<NodeId>), Vec<NodeId>>,
-    // Each document's open dialogs list (HTML §4.11.4), by the document's slot, in the order they opened, with the close
-    // watcher groups their dialogs' close watchers are in (dialogs.rs).
-    pub(crate) open_dialogs: std::collections::HashMap<NodeId, crate::dialogs::OpenDialogs>,
-    // …and its showing auto and hint popover lists, in the order they were shown, each entry with its list (popovers.rs).
-    pub(crate) showing_popovers: std::collections::HashMap<NodeId, Vec<(NodeId, u32)>>,
-    // …and when each open dialog and showing popover was opened, in one count: whose close watcher is the newer, which a
-    // close request goes to first (popovers.rs `closeRequestTarget`).
-    pub(crate) close_watcher_order: std::collections::HashMap<NodeId, u64>,
-    pub(crate) close_watcher_count: u64,
-    // …and its popover and dialog pointerdown targets (popovers.rs `lightDismissPress`).
-    pub(crate) pointerdown_targets: std::collections::HashMap<NodeId, [Option<NodeId>; 2]>,
+    // Each document's open dialogs list (HTML §4.11.4), by the document's slot, in the order they opened (dialogs.rs).
+    pub(crate) open_dialogs: std::collections::HashMap<NodeId, Vec<NodeId>>,
+    // …and its popovers' state — its showing popovers, its flags, its pointerdown targets — and each popover's
+    // (popovers.rs).
+    pub(crate) popovers: crate::popovers::Popovers,
+    // …and each open dialog's and showing auto or hint popover's close watcher, with the Window it is of, and the count
+    // that numbers the isolate's close watchers (close_watchers.rs).
+    pub(crate) element_watchers: std::collections::HashMap<NodeId, (i32, u64)>,
+    pub(crate) close_watcher_ids: u64,
     // …and its policy container's referrer policy, as its `<meta name="referrer">` elements set it (url_ops.rs
     // `meta_referrer_steps`), by the document's slot; none for one no meta has set.
     pub(crate) referrer_policies: std::collections::HashMap<NodeId, &'static str>,
@@ -1048,10 +1047,6 @@ pub(crate) struct RealmArena {
     pub(crate) sheet_policies: std::collections::HashMap<String, &'static str>,
     // …and the URL each `<link>` filed its last Resource Timing entry for (resource_timing.rs `filed_once`).
     pub(crate) link_timings: std::collections::HashMap<NodeId, Box<str>>,
-    // The popovers in the middle of being shown or hidden (HTML's "popover showing or hiding" flag).
-    pub(crate) popovers_changing: std::collections::HashSet<NodeId>,
-    // The close watchers running their cancel action (dialogs.rs `dialogRequestClose`).
-    pub(crate) running_cancel: std::collections::HashSet<u64>,
     // The keys of the tasks the platform queues on the realms' timer lists, the isolate's (timers.rs).
     pub(crate) task_keys: crate::timers::TaskKeys,
     // …and the agent's event loop, which runs them — its clock, the order its tasks were queued in (timers.rs).
@@ -1248,10 +1243,11 @@ pub(crate) struct RealmState {
     // …and its crossing queue: what other agents sent it, run at the times they were sent at (timers.rs `Crossings`).
     pub(crate) crossings: crate::timers::Crossings,
     // Its Window's user activation (user_activation.rs): its last activation timestamp — None for positive infinity, a
-    // window never activated — and how many activation notifications reached it, which its close watcher manager
-    // groups by.
+    // window never activated — and whether it has history-action activation…
     pub(crate) last_activation: Option<f64>,
-    pub(crate) activations: u32,
+    pub(crate) history_action: bool,
+    // …and its close watcher manager (close_watchers.rs).
+    pub(crate) close_watchers: crate::close_watchers::Manager,
     // Its ResizeObservers that observe anything, and their observations (resize_observers.rs).
     pub(crate) resize_observers: crate::resize_observers::ResizeObservers,
     // The selects whose `<selectedcontent>` waits for an update at the end of the task (selected_content.rs).
@@ -1446,7 +1442,7 @@ impl RealmArena {
         self.ce_reactions.forget(|id| live_node_realm(slots, id).is_none_or(|realm| realm == cid));
         // (…and its documents' open dialogs lists: a page of it begins with none)
         self.open_dialogs.retain(|&doc, _| live_node_realm(slots, doc).is_some_and(|realm| realm != cid));
-        self.showing_popovers.retain(|&doc, _| live_node_realm(slots, doc).is_some_and(|realm| realm != cid));
+        self.popovers.retain(|&id| live_node_realm(slots, id).is_some_and(|realm| realm != cid));
         self.ce_reactions.forget_definitions_of(cid);
     }
     // The elements of the backup element queue realm `cid` made, taken (ce_reactions.rs `take_backup`).
@@ -1536,19 +1532,14 @@ impl RealmArena {
         self.sheet_requests.retain(|id, _| live(slots, id));
         self.video_frames.retain(|id, _| live(slots, id));
         self.images.retain(|id, _| live(slots, id));
-        self.close_watcher_order.retain(|id, _| live(slots, id));
-        self.pointerdown_targets.retain(|doc, _| live(slots, doc));
+        self.element_watchers.retain(|id, _| live(slots, id));
         self.referrer_policies.retain(|doc, _| live(slots, doc));
         self.request_policies.retain(|id, _| live(slots, id));
         self.link_timings.retain(|id, _| live(slots, id));
-        self.popovers_changing.retain(|id| live(slots, id));
-        self.showing_popovers.retain(|doc, list| {
-            list.retain(|(p, _)| live(slots, p));
-            live(slots, doc) && !list.is_empty()
-        });
+        self.popovers.retain(|id| live(slots, id));
         self.open_dialogs.retain(|doc, list| {
-            list.dialogs.retain(|(d, _)| live(slots, d));
-            live(slots, doc) && !list.dialogs.is_empty()
+            list.retain(|d| live(slots, d));
+            live(slots, doc) && !list.is_empty()
         });
         self.checked_radios.retain(|_, ids| {
             ids.retain(|id| live(slots, id));
@@ -1749,9 +1740,9 @@ impl RealmArena {
         if !self.explicit_elements.is_empty() {
             self.forget_all_explicit_elements(id);
         }
-        // (…and an open dialogs list or a showing popover list: a document's freed, or a dialog or popover of one)
-        if !self.close_watcher_order.is_empty() {
-            self.close_watcher_order.remove(&id);
+        // (…and an open dialog's or a showing popover's close watcher)
+        if !self.element_watchers.is_empty() {
+            self.destroy_element_close_watcher(id);
         }
         if !self.nonces.is_empty() {
             self.nonces.remove(&id);
@@ -1787,16 +1778,11 @@ impl RealmArena {
         if !self.images.is_empty() {
             self.images.remove(&id);
         }
-        if !self.showing_popovers.is_empty() {
-            self.showing_popovers.remove(&id);
-            for list in self.showing_popovers.values_mut() {
-                list.retain(|&(p, _)| p != id);
-            }
-        }
+        self.popovers.forget(id);
         if !self.open_dialogs.is_empty() {
             self.open_dialogs.remove(&id);
             for list in self.open_dialogs.values_mut() {
-                list.dialogs.retain(|&(d, _)| d != id);
+                list.retain(|&d| d != id);
             }
         }
         // (…and a checked radio's entry, under its name)
@@ -3141,6 +3127,13 @@ pub(crate) fn realm_of_global(scope: &mut v8::PinScope<'_, '_>, global: v8::Loca
     let key = realm_key(scope);
     global.get_private(scope, key).filter(|v| v.is_int32()).and_then(|v| v.int32_value(scope))
 }
+// A node's node document: the document its object holds, else — a node of its realm's own document, whose objects
+// default to it — the root of its tree, where that is a document.
+pub(crate) fn node_document(scope: &mut v8::PinScope<'_, '_>, id: NodeId) -> Option<NodeId> {
+    let doc = crate::editing::document_of(scope, id)?;
+    crate::node_handle::nid_of(scope, doc.into())
+}
+
 // The step `name` of the current realm's bindings that the engine calls (engine.js `hostSteps`, on the realm's host
 // object, which no script of a page's can reach): none where the realm has none of that name — no bindings, or none yet.
 pub(crate) fn host_step<'s>(scope: &mut v8::PinScope<'s, '_>, name: &str) -> Option<v8::Local<'s, v8::Function>> {
@@ -3149,6 +3142,14 @@ pub(crate) fn host_step<'s>(scope: &mut v8::PinScope<'s, '_>, name: &str) -> Opt
     let steps = v8::Local::<v8::Object>::try_from(host.get(scope, key.into())?).ok()?;
     let key = v8::String::new(scope, name)?;
     v8::Local::<v8::Function>::try_from(steps.get(scope, key.into())?).ok()
+}
+
+// …called with `args`: its answer — None where it threw, which the bindings' steps do only as a script is terminated
+// (a listener's exception they report), or the realm has none.
+pub(crate) fn call_host_step<'s>(scope: &mut v8::PinScope<'s, '_>, name: &str, args: &[v8::Local<'_, v8::Value>]) -> Option<v8::Local<'s, v8::Value>> {
+    let step = host_step(scope, name)?;
+    let recv = v8::undefined(scope).into();
+    step.call(scope, recv, args)
 }
 
 // Install the realm's engine ops (`__dom`: the arena build / query / match surface + attrsView) into |ctx|, building
@@ -3484,6 +3485,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::selected_content::install(scope, ns, context_id);
     crate::nonce::install(scope, ns, context_id);
     crate::popovers::install(scope, ns, context_id);
+    crate::close_watchers::install(scope, ns, context_id);
     crate::activation::install(scope, ns, context_id);
     crate::input_value::install(scope, ns, context_id);
     crate::image_source::install(scope, ns, context_id);

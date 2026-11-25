@@ -1055,7 +1055,11 @@ fn transparent_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // where the realm has no engine or the engine failed a verification (thrown here).
 pub(crate) fn with_engine<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);
-    let now = crate::dom::realm_clock(scope, args);
+    with_engine_in(scope, cid, ask)
+}
+// …of realm `cid`, whichever realm's op asks.
+pub(crate) fn with_engine_in<R>(scope: &mut v8::PinScope<'_, '_>, cid: i32, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<R> {
+    let now = crate::dom::dom(scope).arena.timeline_time(cid);
     let mut answer = None;
     crate::dom::style_op(scope, cid, |scope| {
         let d = crate::dom::dom(scope);

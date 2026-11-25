@@ -299,7 +299,6 @@ const STEP_SHEET: u32 = 1 << 2; // a `<link>`'s or `<style>`'s that selects or o
 const STEP_DISABLED: u32 = 1 << 3; // `disabled` set: the focused element unfocused where it no longer can be
 const STEP_NAMED: u32 = 1 << 4; // an `id` or a `name` set: a named property
 const STEP_CANVAS: u32 = 1 << 5; // a canvas's `width` / `height`: its bitmap reset
-const STEP_DIALOG: u32 = 1 << 6; // a dialog's `open` came or went
 const STEP_DETAILS: u32 = 1 << 7; // a details element's `open` came or went: its toggle, its group closed
 const STEP_DETAILS_NAME: u32 = 1 << 8; // …its `name`
 const STEP_SELECTED: u32 = 1 << 9; // an option's `selected`
@@ -514,6 +513,15 @@ fn change(
     }
     // (…a script's `async` added makes it no longer "force async": HTML §4.12.1)
     let arena = realm(scope, cid);
+    // (…a dialog's `open` come or gone — HTML's dialog attribute change steps: its setup steps, where they run, or its
+    // cleanup steps, dialogs.rs)
+    if plain && local == "open" && old.is_some() != value.is_some() && arena.get(id).is_some_and(|n| n.is_html_named("dialog")) {
+        if value.is_some() {
+            arena.dialog_setup_steps(id);
+        } else {
+            arena.dialog_cleanup_steps(id);
+        }
+    }
     // (…a `nonce` set or removed sets the element's nonce: HTML §2.6.4)
     if plain && local == "nonce" {
         arena.set_nonce(id, value.map(<[u16]>::to_vec).unwrap_or_default());
@@ -610,7 +618,6 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     steps |= flag(local == "disabled" && set, STEP_DISABLED);
     steps |= flag(matches!(local, "id" | "name") && value.is_some_and(|v| !v.is_empty()), STEP_NAMED);
     steps |= flag(html && tag == "canvas" && matches!(local, "width" | "height"), STEP_CANVAS);
-    steps |= flag(html && tag == "dialog" && local == "open" && came_or_went, STEP_DIALOG);
     steps |= flag(html && tag == "details" && local == "open" && came_or_went, STEP_DETAILS);
     steps |= flag(html && tag == "details" && local == "name", STEP_DETAILS_NAME);
     steps |= flag(tag == "option" && local == "selected", STEP_SELECTED);

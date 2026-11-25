@@ -761,7 +761,7 @@ RSpec.describe 'IDL bindings' do
       ['[object HTMLElement]', '[object SVGElement]', '[object MathMLElement]'],
       '[false,true]',
       '[]',
-      "NotSupportedError: Failed to execute 'showPopover' on 'HTMLElement': Not supported on elements that do not have a valid value for the 'popover' attribute.",
+      "NotSupportedError: Failed to execute 'showPopover' on 'HTMLElement': Not supported on elements that are not popovers.",
       "InvalidStateError: Failed to execute 'showPopover' on 'HTMLElement': Invalid on disconnected popover elements.",
       'false',
       '[object DOMStringMap]'

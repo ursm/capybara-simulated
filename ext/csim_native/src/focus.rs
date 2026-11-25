@@ -427,21 +427,26 @@ pub(crate) fn focus_delegate(engine: &mut StyleEngine, arena: &RealmArena, targe
         Some(_) => delegating_root(arena, target)?,
         None => target,
     };
+    if let Some(found) = autofocus_delegate(engine, arena, root, now) {
+        return Some(found);
+    }
     let area = |engine: &mut StyleEngine, id: NodeId| {
         if focusable(engine, arena, id, now) { Some(id) } else { focusable_area(engine, arena, id, now) }
     };
-    let autofocus = descendants(arena, root).into_iter().filter(|&d| arena.get(d).is_some_and(|n| n.plain_attr("autofocus").is_some()));
-    for d in autofocus {
-        if let Some(found) = area(engine, d) {
-            return Some(found);
-        }
-    }
     // (…a dialog's only among those in the sequential order: a `tabindex=-1` button is passed over for the next)
     let dialog = arena.get(target)?.is_html_named("dialog");
     descendants(arena, root).into_iter().find_map(|d| match area(engine, d) {
         Some(found) if dialog && found == d && arena.get(d).is_some_and(out_of_sequence) => None,
         other => other,
     })
+}
+// HTML's "autofocus delegate" of `root`'s descendants (a focus trigger of "other"): the first carrying `autofocus` that is
+// a focusable area or stands for one — that area.
+fn autofocus_delegate(engine: &mut StyleEngine, arena: &RealmArena, root: NodeId, now: f64) -> Option<NodeId> {
+    descendants(arena, root)
+        .into_iter()
+        .filter(|&d| arena.get(d).is_some_and(|n| n.plain_attr("autofocus").is_some()))
+        .find_map(|d| if focusable(engine, arena, d, now) { Some(d) } else { focusable_area(engine, arena, d, now) })
 }
 fn delegating_root(arena: &RealmArena, host: NodeId) -> Option<NodeId> {
     arena.get(host)?.shadow_root.filter(|&r| arena.get(r).is_some_and(|r| r.shadow_is(crate::dom::SHADOW_DELEGATES_FOCUS)))
@@ -465,8 +470,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "focusableArea", focusable_area_op, context_id);
     crate::dom::register(scope, ns, "focusTarget", focus_target_op, context_id);
     crate::dom::register(scope, ns, "pressFocusTarget", press_target_op, context_id);
-    crate::dom::register(scope, ns, "dialogFocusingSteps", dialog_focusing_steps_op, context_id);
-    crate::dom::register(scope, ns, "dialogFocusRestore", dialog_focus_restore_op, context_id);
     crate::dom::register(scope, ns, "documentFocus", document_focus_op, context_id);
     crate::dom::register(scope, ns, "activeElement", active_element_op, context_id);
     crate::dom::register(scope, ns, "setPointerModality", set_pointer_modality_op, context_id);
@@ -513,14 +516,41 @@ fn active_element_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(crate::dom::node_value(scope, found));
 }
 
-// HTML's "dialog focusing steps" for a dialog opening, up to running the focusing steps: the element focused now kept as
-// its previously focused element, and the control to focus — the dialog where it carries `autofocus`, else its focus
+// What HTML's "dialog focusing steps" focus for a dialog opening: the dialog where it carries `autofocus`, else its focus
 // delegate, else the dialog itself.
 pub(crate) fn dialog_focus_control(engine: &mut StyleEngine, arena: &RealmArena, dialog: NodeId, now: f64) -> NodeId {
     if arena.get(dialog).is_some_and(|n| n.plain_attr("autofocus").is_some()) {
         return dialog;
     }
     focus_delegate(engine, arena, dialog, now).unwrap_or(dialog)
+}
+// …and the "popover focusing steps" for a popover shown (no dialog): the popover where it carries `autofocus`, else its
+// autofocus delegate, else none.
+fn popover_control(engine: &mut StyleEngine, arena: &RealmArena, popover: NodeId, now: f64) -> Option<NodeId> {
+    if arena.get(popover).is_some_and(|n| n.plain_attr("autofocus").is_some()) {
+        return Some(popover);
+    }
+    autofocus_delegate(engine, arena, popover, now)
+}
+// …each asked of the style engine of the element's realm, the sheets its bindings hold fed to it first (None: a script
+// was terminated).
+fn ask_engine<R>(scope: &mut v8::PinScope<'_, '_>, el: NodeId, ask: impl FnOnce(&mut StyleEngine, &RealmArena, f64) -> R) -> Option<Option<R>> {
+    let target = crate::dom::node_value(scope, Some(el));
+    crate::dom::call_host_step(scope, "feedStyleEngineSheetsOf", &[target])?;
+    let cid = crate::dom::dom(scope).arena.get(el).map(|n| n.realm)?;
+    Some(crate::rendered::with_engine_in(scope, cid, ask))
+}
+pub(crate) fn dialog_focus_control_of(scope: &mut v8::PinScope<'_, '_>, dialog: NodeId) -> Option<NodeId> {
+    Some(ask_engine(scope, dialog, |engine, arena, now| dialog_focus_control(engine, arena, dialog, now))?.unwrap_or(dialog))
+}
+pub(crate) fn popover_focus_control(scope: &mut v8::PinScope<'_, '_>, popover: NodeId) -> Option<Option<NodeId>> {
+    Some(ask_engine(scope, popover, |engine, arena, now| popover_control(engine, arena, popover, now))?.flatten())
+}
+// HTML's "focusing steps" for `el`, the bindings' to run (dom-nodes.js `focusElement`) — the viewport not scrolled, as
+// the dialogs' and popovers' steps ask (None: a script was terminated).
+pub(crate) fn run_focusing_steps(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> Option<()> {
+    let target = crate::dom::node_value(scope, Some(el));
+    crate::dom::call_host_step(scope, "focusingSteps", &[target]).map(drop)
 }
 // The element the document `node` is in has focused — its realm's, whichever realm asks; none for a document the
 // realm made that is not the one it shows (a DOMParser's), which has no focus of its own.
@@ -529,7 +559,7 @@ pub(crate) fn document_focus(arena: &RealmArena, node: NodeId) -> Option<NodeId>
     let doc = arena.get(root).filter(|d| d.kind == NodeKind::Document)?;
     arena.realm_state(doc.realm)?.focus.filter(|&f| arena.shadow_including_root(f) == root)
 }
-// …its "previously focused element", kept as it opens: what its document has focused…
+// A dialog's "previously focused element", kept as it opens: what its document has focused…
 pub(crate) fn dialog_opening(arena: &mut RealmArena, dialog: NodeId) {
     match document_focus(arena, dialog) {
         Some(focused) => arena.previously_focused.insert(dialog, focused),
@@ -543,26 +573,6 @@ pub(crate) fn dialog_focus_restore(arena: &mut RealmArena, dialog: NodeId, was_m
     let in_document = arena.get(arena.shadow_including_root(previous)).is_some_and(|r| r.kind == NodeKind::Document);
     let holds = document_focus(arena, dialog).is_some_and(|f| arena.shadow_including_ancestor(dialog, f));
     (in_document && (was_modal || holds)).then_some(previous)
-}
-
-// __dom.dialogFocusingSteps(dialogNid) -> [the control to focus] (`dialog_focus_control`), as `nodes_value`
-// answers, the focused element kept for the dialog's closing.
-fn dialog_focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(dialog) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let cid = crate::dom::realm_id(scope, &args);
-    dialog_opening(crate::dom::realm(scope, cid), dialog);
-    let control = crate::rendered::with_engine(scope, &args, |engine, arena, now| dialog_focus_control(engine, arena, dialog, now)).unwrap_or(dialog);
-    rv.set(crate::dom::nodes_value(scope, cid, &[control]));
-}
-
-// __dom.dialogFocusRestore(dialogNid, wasModal) -> [the element focus goes back to] or [] (`dialog_focus_restore`), as
-// `nodes_value` answers.
-fn dialog_focus_restore_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(dialog) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let was_modal = args.get(1).is_true();
-    let cid = crate::dom::realm_id(scope, &args);
-    let previous = dialog_focus_restore(crate::dom::realm(scope, cid), dialog, was_modal);
-    rv.set(crate::dom::nodes_value(scope, cid, previous.as_slice()));
 }
 
 // __dom.focusableArea(hostNid) -> [what focusing the delegating host focuses] or [] (`focusable_area`), as

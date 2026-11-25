@@ -252,7 +252,7 @@ pub(crate) const INTERACTIVE: u32 = 1 << 3;
 // The legacy `keypress` after the keydown: a key that produces a character — a printable one, Enter (a carriage
 // return) — none with Control / Alt / Meta held.
 pub(crate) const KEYPRESS: u32 = 1 << 4;
-// Escape's: a close request (HTML §6.4.4).
+// Escape's: a close request (HTML §6.10.1).
 pub(crate) const CLOSE_REQUEST: u32 = 1 << 5;
 // An arrow on a `<select>` or a radio: the adjacent option, the next or previous radio of its group — ArrowDown /
 // ArrowUp on an `<input list>`: its datalist shown (open-ui's customizable combobox).
@@ -1280,8 +1280,8 @@ impl KeyGesture {
                     p.at = PressAt::KeyUp;
                     return;
                 }
-                // Escape's: a close request (HTML §6.4.4) — the topmost showing auto popover hidden, else the dialog
-                // opened last that takes one closed.
+                // Escape's: a close request (HTML §6.10.1) — its document's Window's close watchers processed, the
+                // newest group's, the last first (close_watchers.rs).
                 if p.plan & CLOSE_REQUEST != 0 {
                     self.tell(Step::CloseRequest(self.to));
                 }

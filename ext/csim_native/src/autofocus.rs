@@ -142,6 +142,18 @@ fn insert_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set_bool(crate::dom::realm(scope, cid).autofocus_insert(top, node));
 }
 
+// The end of the dialog focusing steps and the popover focusing steps, `control` focused: its top-level document's
+// autofocus processed — no candidate takes focus from it after — where that document is of its document's origin.
+pub(crate) fn processed_for(scope: &mut v8::PinScope<'_, '_>, control: NodeId) {
+    let arena = &crate::dom::dom(scope).arena;
+    let Some(realm) = arena.get(control).map(|n| n.realm) else { return };
+    let top = arena.top_level_realm(realm);
+    let Some(top_doc) = arena.realm_document(top) else { return };
+    if crate::realm_location::realms_same_origin(scope, realm, top) {
+        crate::dom::dom(scope).arena.autofocus_processed(top_doc);
+    }
+}
+
 // __dom.autofocusProcessed(topNid): the top-level document's autofocus is processed (`autofocus_processed`).
 fn processed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(top) = nid_arg(scope, &args, 0) else { return };

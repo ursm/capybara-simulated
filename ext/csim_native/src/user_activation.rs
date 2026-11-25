@@ -22,8 +22,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 impl RealmArena {
     // HTML "activation notification steps" for realm `realm`'s document: its window, its ancestor navigables' windows
-    // and those of its descendant navigables whose documents are of its origin, each activated now on its clock, and
-    // each window's close watcher manager notified (`activations`) — the initial about:blank window of a frame no script
+    // and those of its descendant navigables whose documents are of its origin, each activated now on its clock, given
+    // history-action activation, and its close watcher manager notified — the initial about:blank window of a frame no script
     // has looked into, whose realm is not made yet, among them (frame_navigation.rs `note_unbuilt_activation`): it is of
     // its container's document's origin, unless a sandbox makes it opaque.
     pub(crate) fn activation_notify(&mut self, realm: i32) {
@@ -47,7 +47,8 @@ impl RealmArena {
         for window in windows {
             if let Some(state) = self.realm_state_mut(window) {
                 state.last_activation = Some(now);
-                state.activations += 1;
+                state.history_action = true;
+                state.close_watchers.notify_user_activation();
             }
         }
     }
@@ -57,7 +58,10 @@ impl RealmArena {
         let initial = self.realm_state(realm).is_some_and(|s| s.location.href() == "about:blank");
         if let Some(state) = self.realm_state_mut(realm).filter(|_| initial) {
             state.last_activation = Some(at);
-            state.activations = count;
+            if count > 0 {
+                state.history_action = true;
+                state.close_watchers.notify_user_activation();
+            }
         }
     }
     // …and its time origin, the time its document was made at `created` — the realm made only as a script first used the

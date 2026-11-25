@@ -119,12 +119,6 @@ close-watcher/frame-removal.html:
 - detaching the iframe then calling destroy()
 - detaching the iframe then calling requestClose()
 - detaching the iframe then constructing a CloseWatcher
-close-watcher/iframes/dialog-same-origin-nn.html:
-- dialog-same-origin-nn
-close-watcher/iframes/dialog-same-origin-ynn.html:
-- dialog-same-origin-ynn
-close-watcher/iframes/dialog-same-origin-ynyn.html:
-- dialog-same-origin-ynyn
 close-watcher/inside-event-listeners.html:
 - close() inside oncancel
 - close() inside oncancel with preventDefault()
@@ -141,51 +135,31 @@ close-watcher/inside-event-listeners.html:
 close-watcher/user-activation/n-activate-preventDefault.html:
 - Create a close watcher without user activation that preventDefault()s cancel; send
   user activation
-- Create a close watcher without user activation that preventDefault()s cancel; send
-  user activation
 close-watcher/user-activation/n-activate.html:
 - Create a close watcher without user activation; send user activation
 close-watcher/user-activation/n-closerequest-n.html:
 - Create a close watcher without user activation; send a close request; create a close
   watcher without user activation
-- Create a close watcher without user activation; send a close request; create a close
-  watcher without user activation
 close-watcher/user-activation/n-destroy-n.html:
 - Create a close watcher without user activation; destroy the close watcher; create
   a close watcher without user activation
-- Create a close watcher without user activation; destroy the close watcher; create
-  a close watcher without user activation
 close-watcher/user-activation/n.html:
-- Create a close watcher without user activation
 - Create a close watcher without user activation
 close-watcher/user-activation/nn-CloseWatcher.html:
 - Create two close watchers without user activation
 close-watcher/user-activation/nn-activate-CloseWatcher.html:
 - Create two CloseWatchers without user activation; send user activation
-close-watcher/user-activation/nn-dialog.html:
-- Create two close watchers without user activation
 close-watcher/user-activation/nnn-CloseWatcher-dialog-popover.html:
 - Create a CloseWatcher without user activation; create a dialog without user activation;
   create a popover without user activation
 close-watcher/user-activation/nnn-CloseWatcher.html:
 - Create three close watchers without user activation
-close-watcher/user-activation/nnn-dialog.html:
-- Create three close watchers without user activation
-close-watcher/user-activation/nnn-popovers.html:
-- Create three popovers without user activation
 close-watcher/user-activation/ny-activate-preventDefault.html:
-- Create a close watcher without user activation; create a close watcher with user
-  activation that preventDefault()s cancel; send user activation
 - Create a close watcher without user activation; create a close watcher with user
   activation that preventDefault()s cancel; send user activation
 close-watcher/user-activation/ny.html:
 - Create a close watcher without user activation; create a close watcher with user
   activation
-- Create a close watcher without user activation; create a close watcher with user
-  activation
-close-watcher/user-activation/nyn-popovers.html:
-- Create a popover without user activation; create a popover with user activation;
-  create a popover without user activation
 close-watcher/user-activation/nyn.html:
 - Create a close watcher without user activation; create a close watcher with user
   activation; create a close watcher without user activation
@@ -206,13 +180,7 @@ close-watcher/user-activation/nynn.html:
 close-watcher/user-activation/nyyn-CloseWatcher.html:
 - Create a close watcher without user activation; create two close watchers with user
   activation; create a close watcher without user activation
-close-watcher/user-activation/nyyn-dialog.html:
-- Create a close watcher without user activation; create two close watchers with user
-  activation; create a close watcher without user activation
 close-watcher/user-activation/nyyyn-CloseWatcher.html:
-- Create a close watcher without user activation; create three close watchers with
-  user activation; create a close watcher without user activation
-close-watcher/user-activation/nyyyn-dialog.html:
 - Create a close watcher without user activation; create three close watchers with
   user activation; create a close watcher without user activation
 close-watcher/user-activation/y.html:
@@ -220,24 +188,15 @@ close-watcher/user-activation/y.html:
 close-watcher/user-activation/yn-activate.html:
 - Create a close watcher with user activation; create a close watcher without user
   activation; send user activation
-- Create a close watcher with user activation; create a close watcher without user
-  activation; send user activation
 close-watcher/user-activation/yn.html:
-- Create a close watcher with user activation; create a close watcher without user
-  activation
 - Create a close watcher with user activation; create a close watcher without user
   activation
 close-watcher/user-activation/ynn-CloseWatcher.html:
 - Create a close watcher with user activation; create two close watchers without user
   activation
-close-watcher/user-activation/ynn-dialog.html:
-- Create a close watcher with user activation; create two close watchers without user
-  activation
 close-watcher/user-activation/yy.html:
 - Create two close watchers with user activation
 close-watcher/user-activation/yyn.html:
-- Create two close watchers with user activation; create a close watcher without user
-  activation
 - Create two close watchers with user activation; create a close watcher without user
   activation
 close-watcher/user-activation/yyy-CloseWatcher-dialog-popover.html:
@@ -67878,8 +67837,6 @@ html/semantics/interactive-elements/the-dialog-element/backdrop-inherits.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-inherits-ref.html"
 html/semantics/interactive-elements/the-dialog-element/backdrop-stacking-order.html:
 - "== html/semantics/interactive-elements/the-dialog-element/backdrop-stacking-order-ref.html"
-html/semantics/interactive-elements/the-dialog-element/dialog-active-document.html:
-- showModal should throw when the document isn't active
 html/semantics/interactive-elements/the-dialog-element/dialog-canceling.html:
 - Modal dialogs should close when the escape key is pressed.
 html/semantics/interactive-elements/the-dialog-element/dialog-focus-previous-outside.html:
@@ -67906,10 +67863,7 @@ html/semantics/interactive-elements/the-dialog-element/dialog-overlay.html:
 - dialog computed overlay initially 'none'
 html/semantics/interactive-elements/the-dialog-element/dialog-popover-overlay.html:
 - "== html/semantics/interactive-elements/the-dialog-element/dialog-popover-overlay-ref.html"
-html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-3.html:
-- requestClose() should not close the dialog when is in inactive document
 html/semantics/interactive-elements/the-dialog-element/dialog-showModal.html:
-- When the document is not attached to any pages, showModal() should throw.
 - when opening multiple dialogs, the most recently opened is rendered on top
 html/semantics/interactive-elements/the-dialog-element/dont-share-style-to-top-layer.html:
 - "== html/semantics/interactive-elements/the-dialog-element/dont-share-style-to-top-layer-ref.html"
@@ -67957,13 +67911,6 @@ html/semantics/interactive-elements/the-dialog-element/modal-dialog-selection.ht
 - By default, text inside a modal dialog can be selected
 html/semantics/interactive-elements/the-dialog-element/removed-element-is-removed-from-top-layer.html:
 - "== html/semantics/interactive-elements/the-dialog-element/removed-element-is-removed-from-top-layer-ref.html"
-html/semantics/interactive-elements/the-dialog-element/toggle-events.html:
-- "[harness] ERROR"
-- dialog.show() should not open if beforetoggle calls showPopover
-- dialog.showModal() should coalesce asynchronous toggle events.
-- dialog.showModal() should fire beforetoggle and toggle events.
-- dialog.showModal() should fire cancelable beforetoggle which does not open dialog
-  if canceled
 html/semantics/interactive-elements/the-dialog-element/top-layer-containing-block.html:
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-containing-block-ref.html"
 html/semantics/interactive-elements/the-dialog-element/top-layer-nesting.html:
@@ -67995,17 +67942,10 @@ html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correc
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-correct-order-remove-readd-ref.html"
 html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic.html:
 - "== html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynamic-ref.html"
-html/semantics/popovers/imperative-invokers.html:
-- showPopover(contained)
-- showPopover(popover)
-- togglePopover(popover)
-- togglePopover({force, popover})
 html/semantics/popovers/light-dismiss-event-ordering.html:
 - Tests the order of pointer/mouse events during popover light dismiss.
 html/semantics/popovers/light-dismiss-remove-target.html:
 - Light dismiss should still happen if the clicked element is removed during pointerdown.
-html/semantics/popovers/popover-active-document.html:
-- showPopover should throw when the document isn't active
 html/semantics/popovers/popover-alignment-001.html:
 - "== html/semantics/popovers/popover-alignment-001-ref.html"
 html/semantics/popovers/popover-alignment-002.html:
@@ -68015,115 +67955,6 @@ html/semantics/popovers/popover-anchor-multicol-display.html:
 html/semantics/popovers/popover-attribute-all-elements.html:
 - A <col> element without popover attr should *not* behave as a popover.
 - A <colgroup> element without popover attr should *not* behave as a popover.
-html/semantics/popovers/popover-attribute-basic.html:
-- Changing a popover from auto to null (via idl), and then auto during 'beforetoggle'
-  works
-- Changing a popover from auto to null (via idl), and then hint during 'beforetoggle'
-  works
-- Changing a popover from auto to null (via idl), and then invalid during 'beforetoggle'
-  works
-- Changing a popover from auto to null (via idl), and then manual during 'beforetoggle'
-  works
-- Changing a popover from auto to null (via idl), and then null during 'beforetoggle'
-  works
-- Changing a popover from auto to null (via idl), and then undefined during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via attr), and then auto during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via attr), and then hint during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via attr), and then invalid during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via attr), and then manual during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via attr), and then null during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via attr), and then undefined during
-  'beforetoggle' works
-- Changing a popover from auto to undefined (via idl), and then auto during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via idl), and then hint during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via idl), and then invalid during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via idl), and then manual during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via idl), and then null during 'beforetoggle'
-  works
-- Changing a popover from auto to undefined (via idl), and then undefined during 'beforetoggle'
-  works
-- Changing a popover from hint to null (via idl), and then auto during 'beforetoggle'
-  works
-- Changing a popover from hint to null (via idl), and then hint during 'beforetoggle'
-  works
-- Changing a popover from hint to null (via idl), and then invalid during 'beforetoggle'
-  works
-- Changing a popover from hint to null (via idl), and then manual during 'beforetoggle'
-  works
-- Changing a popover from hint to null (via idl), and then null during 'beforetoggle'
-  works
-- Changing a popover from hint to null (via idl), and then undefined during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via attr), and then auto during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via attr), and then hint during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via attr), and then invalid during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via attr), and then manual during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via attr), and then null during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via attr), and then undefined during
-  'beforetoggle' works
-- Changing a popover from hint to undefined (via idl), and then auto during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via idl), and then hint during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via idl), and then invalid during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via idl), and then manual during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via idl), and then null during 'beforetoggle'
-  works
-- Changing a popover from hint to undefined (via idl), and then undefined during 'beforetoggle'
-  works
-- Changing a popover from manual to null (via idl), and then auto during 'beforetoggle'
-  works
-- Changing a popover from manual to null (via idl), and then hint during 'beforetoggle'
-  works
-- Changing a popover from manual to null (via idl), and then invalid during 'beforetoggle'
-  works
-- Changing a popover from manual to null (via idl), and then manual during 'beforetoggle'
-  works
-- Changing a popover from manual to null (via idl), and then null during 'beforetoggle'
-  works
-- Changing a popover from manual to null (via idl), and then undefined during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via attr), and then auto during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via attr), and then hint during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via attr), and then invalid during
-  'beforetoggle' works
-- Changing a popover from manual to undefined (via attr), and then manual during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via attr), and then null during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via attr), and then undefined during
-  'beforetoggle' works
-- Changing a popover from manual to undefined (via idl), and then auto during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via idl), and then hint during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via idl), and then invalid during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via idl), and then manual during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via idl), and then null during 'beforetoggle'
-  works
-- Changing a popover from manual to undefined (via idl), and then undefined during
-  'beforetoggle' works
 html/semantics/popovers/popover-backdrop-appearance.html:
 - "== html/semantics/popovers/popover-backdrop-appearance-ref.html"
 html/semantics/popovers/popover-checkbox-backdrop.html:
@@ -68133,27 +67964,7 @@ html/semantics/popovers/popover-events.html:
 html/semantics/popovers/popover-focus-2.html:
 - "[harness] ERROR"
 - "[harness] no subtests"
-html/semantics/popovers/popover-focus-3.html:
-- Popover focus returns when popover is hidden by invoker with commandfor invocation
-- Popover focus returns when popover is hidden by invoker with imperative invocation
-- Popover focus returns when popover is hidden by invoker with popovertarget invocation
 html/semantics/popovers/popover-focus-5.html:
-- Focusing elements inside a popover with a custom-element with a slotted button inside,
-  using commandfor
-- Focusing elements inside a popover with a custom-element with a slotted button inside,
-  using commandforelement
-- Focusing elements inside a popover with a custom-element with a slotted button inside,
-  using imperative
-- Focusing elements inside a popover with a custom-element with a slotted button inside,
-  using popovertargetelement
-- Focusing elements inside a popover with a custom-element with delegatesfocus inside,
-  using commandfor
-- Focusing elements inside a popover with a custom-element with delegatesfocus inside,
-  using commandforelement
-- Focusing elements inside a popover with a custom-element with delegatesfocus inside,
-  using imperative
-- Focusing elements inside a popover with a custom-element with delegatesfocus inside,
-  using popovertargetelement
 - Focusing elements inside a popover with a details element inside, and the after
   button adjacent to invoker, using commandfor
 - Focusing elements inside a popover with a details element inside, and the after
@@ -68162,10 +67973,6 @@ html/semantics/popovers/popover-focus-5.html:
   button adjacent to invoker, using imperative
 - Focusing elements inside a popover with a details element inside, and the after
   button adjacent to invoker, using popovertargetelement
-- Focusing elements inside a popover with a details element inside, using commandfor
-- Focusing elements inside a popover with a details element inside, using commandforelement
-- Focusing elements inside a popover with a details element inside, using imperative
-- Focusing elements inside a popover with a details element inside, using popovertargetelement
 - Focusing elements inside a popover with custom-element with a slotted button, followed
   by a details element, where the after button is adjacent to the invoker, using commandfor
 - Focusing elements inside a popover with custom-element with a slotted button, followed
@@ -68174,10 +67981,6 @@ html/semantics/popovers/popover-focus-5.html:
   by a details element, where the after button is adjacent to the invoker, using imperative
 - Focusing elements inside a popover with custom-element with a slotted button, followed
   by a details element, where the after button is adjacent to the invoker, using popovertargetelement
-- Focusing elements inside a popover with form controls inside, using commandfor
-- Focusing elements inside a popover with form controls inside, using commandforelement
-- Focusing elements inside a popover with form controls inside, using imperative
-- Focusing elements inside a popover with form controls inside, using popovertargetelement
 html/semantics/popovers/popover-focus-across-slot.html:
 - Popover focus behaviors in form control elements
 html/semantics/popovers/popover-focus-inert-invoker.html:
@@ -68188,85 +67991,24 @@ html/semantics/popovers/popover-focus-slotted.html:
 - Tabbing forward out of a <slot popover> should not hang.
 html/semantics/popovers/popover-focus-tabindex.html:
 - Cases where the popover invoker has different tabindex
-html/semantics/popovers/popover-focus.html:
-- 'Popover button click focus test: Opening dialogs as popovers should use dialog
-  initial focus algorithm.'
-- 'Popover button click focus test: Opening dialogs as popovers which have autofocus
-  should focus the dialog.'
-- 'Popover button click focus test: autofocus child'
-- 'Popover button click focus test: autofocus empty popover'
-- 'Popover button click focus test: autofocus multiple children'
-- 'Popover button click focus test: autofocus on tabindex=0 element'
-- 'Popover button click focus test: autofocus popover'
-- 'Popover button click focus test: autofocus popover and multiple autofocus children'
-- 'Popover button click focus test: autofocus popover with button'
-- 'Popover button click focus test: default behavior - popover is not focused'
-- 'Popover corner cases test: Opening dialogs as popovers should use dialog initial
-  focus algorithm.'
-- 'Popover corner cases test: Opening dialogs as popovers which have autofocus should
-  focus the dialog.'
-- 'Popover corner cases test: autofocus child'
-- 'Popover corner cases test: autofocus empty popover'
-- 'Popover corner cases test: autofocus multiple children'
-- 'Popover corner cases test: autofocus on tabindex=0 element'
-- 'Popover corner cases test: autofocus popover'
-- 'Popover corner cases test: autofocus popover and multiple autofocus children'
-- 'Popover corner cases test: autofocus popover with button'
-- 'Popover focus test: Opening dialogs as popovers should use dialog initial focus
-  algorithm.'
-- 'Popover focus test: Opening dialogs as popovers which have autofocus should focus
-  the dialog.'
-- 'Popover focus test: autofocus child'
-- 'Popover focus test: autofocus empty popover'
-- 'Popover focus test: autofocus multiple children'
-- 'Popover focus test: autofocus on tabindex=0 element'
-- 'Popover focus test: autofocus popover'
-- 'Popover focus test: autofocus popover and multiple autofocus children'
-- 'Popover focus test: autofocus popover with button'
-- 'Popover focus test: default behavior - popover is not focused'
 html/semantics/popovers/popover-hidden-appearance.html:
 - "== compat/green-ref.html (reference not vendored)"
-html/semantics/popovers/popover-hint-hierarchy.html:
-- Clicking outside consistently closes both auto and hint popovers.
-- Hiding an auto popover closes only its child popovers.
-- Opening a hint popover closes only other non-ancestor hint popovers.
-- Opening a hint popover will not hide unrelated auto popovers.
-- Opening an auto popover inside a hint popover is allowed and it downgrades to hint.
 html/semantics/popovers/popover-iframe-backdrop.html:
 - "== html/semantics/popovers/popover-img-backdrop-ref.html"
 html/semantics/popovers/popover-img-backdrop.html:
 - "== html/semantics/popovers/popover-img-backdrop-ref.html"
 html/semantics/popovers/popover-light-dismiss-contextmenu.html:
 - Popovers should not be light dismissed during contextmenu event.
-html/semantics/popovers/popover-light-dismiss-hint.html:
-- Auto can be nested inside hint (nothing should throw, auto demoted to hint)
 html/semantics/popovers/popover-light-dismiss-scroll-within.html:
 - Scrolling within a popover should not close the popover
 html/semantics/popovers/popover-light-dismiss-touch-scroll.html:
 - Popovers should not be light dismissed when scrolling via touch.
-html/semantics/popovers/popover-light-dismiss.html:
-- Hide the target popover during "hide all popovers until"
-- Nested showPopover
-- Opening a new auto popover should hide all hint popovers, even in the nested case
-- Show a sibling popover during "hide all popovers until"
-- Show an unrelated popover during "hide popover"
-- Show other auto popover during "hide all popover until"
-- Test "hint stack parent" behavior
-- "[harness] ERROR"
 html/semantics/popovers/popover-minimum-role.html:
 - Dynamic changes to popover attribute should change the role.
 - The popover attribute, on an element with no implicit role, then the element's role
   instead maps to group.
-html/semantics/popovers/popover-move-documents.html:
-- Moving popovers between documents during light dismiss should throw an exception.
-- Moving popovers between documents while showing should throw an exception.
 html/semantics/popovers/popover-open-display.html:
 - "== html/semantics/popovers/popover-open-display-ref.html"
-html/semantics/popovers/popover-open-in-beforetoggle.html:
-- Open double-nested popovers from closing beforetoggle event
-- Open popover from closing beforetoggle event
-- Showing a hint during a showPopover that hides an auto should throw InvalidStateError
-- "[harness] ERROR"
 html/semantics/popovers/popover-overlay.html:
 - dialog.show() should not put popover dialog in top layer
 - dialog.showModal() should put popover dialog in top layer
@@ -68278,17 +68020,8 @@ html/semantics/popovers/popover-remove-attribute-during-focusing-steps.html:
 - Remove popover attribute during the popover focusing steps
 html/semantics/popovers/popover-self-invoke.html:
 - touch on a popover button that is its own target should open it.
-html/semantics/popovers/popover-shadowhost-focus.html:
-- autofocus=true, delegatesfocus=false
-- autofocus=true, delegatesfocus=true
 html/semantics/popovers/popover-textarea-backdrop.html:
 - "== html/semantics/popovers/popover-img-backdrop-ref.html"
-html/semantics/popovers/popover-toggle-source.html:
-- 'ToggleEvent.source on popover elements: Calling click() on a popovertarget button.'
-- 'ToggleEvent.source on popover elements: popovertarget button then hidePopover().'
-- 'ToggleEvent.source on popover elements: showPopover() with source.'
-- 'ToggleEvent.source on popover elements: showPopover(invoker) then popovertarget
-  button.'
 html/semantics/popovers/popover-top-layer-combinations.html:
 - 'Popover combination: Fullscreen Open Non-modal Popover Dialog'
 - 'Popover combination: Fullscreen Popover'
@@ -68313,17 +68046,6 @@ html/semantics/popovers/popover-top-layer-nesting.html:
 - Single popover=auto ancestor with fullscreen
 - Single popover=manual ancestor with fullscreen
 - Top layer inside of nested element with fullscreen
-html/semantics/popovers/popover-types-with-hints.html:
-- 'If you: a) show a popover=auto (call it D), then b) show a descendent popover=hint
-  of D (call it T), then c) hide D, then T should be hidden. (A popover=hint gets
-  hidden when its ancestral popover=auto is hidden)'
-- 'If you: a) show a popover=auto (call it D), then b) show a non-descendent popover=hint
-  of D (call it T), then c) hide D, then T should stay open. (Non-nested popover=hint
-  does not get hidden when unrelated popover=autos are hidden)'
-- Opening an auto popover inside a hint popover is allowed and it downgrades to hint.
-- When showing an auto popover, hint popovers should be closed before auto popovers.
-- autos close hints but not manuals
-- manuals do not close popovers
 html/webappapis/dynamic-markup-insertion/document-write/iframe_005.html:
 - document.write external script into iframe write back into parent
 html/webappapis/dynamic-markup-insertion/document-write/module-dynamic-import.html:

@@ -799,6 +799,19 @@ fn clock_followed(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
     rv.set_bool(dom(scope).arena.event_loop.followed.is_some());
 }
 
+// A task of the engine's own — an element task: a toggle event's, a dialog's `close` — queued on the event loop now, by
+// the bindings' step (timers.js `queueTask`, which keeps the loop told it has work): its key, which `cancel_task` takes
+// back (None: no bindings to queue it, or a script was terminated).
+pub(crate) fn queue_task(scope: &mut v8::PinScope<'_, '_>, task: v8::Local<'_, v8::Function>) -> Option<i64> {
+    let delay = v8::Integer::new(scope, 0).into();
+    let key = crate::dom::call_host_step(scope, "setTimeout", &[task.into(), delay])?;
+    key.integer_value(scope)
+}
+pub(crate) fn cancel_task(scope: &mut v8::PinScope<'_, '_>, key: i64) -> Option<()> {
+    let key = v8::Number::new(scope, key as f64).into();
+    crate::dom::call_host_step(scope, "clearTimeout", &[key]).map(drop)
+}
+
 // __dom.timerAdd(handler, args, timeout, repeats, task, ahead, source) -> its key: a timer of the calling realm's,
 // falling due `timeout` ms after now on the event loop's clock — never, for one that is no finite time — and, `repeats`,
 // again that long after each run: a page's (`task` false: a positive id), nested in the timer task running and clamped
