@@ -11,7 +11,7 @@
 //   one), and the origin its response's opener policy is judged by (`response_origin`);
 // - the service worker that controls it (Service Workers §2.5.1 "Window client").
 
-use magnus::{prelude::*, Error, RHash, Ruby, TryConvert, Value};
+use magnus::{prelude::*, Error, IntoValue, RHash, Ruby, TryConvert, Value};
 
 use crate::response_headers::ResponseFields;
 
@@ -127,19 +127,21 @@ pub(crate) fn keeps_window(initial: bool, own: &str, domain_set: bool, origin: O
 // (bridge.entry.js `initializeDocument`): 'url', 'contentType', 'csp', 'referrer', 'referrerPolicy', 'refresh',
 // 'originAgentCluster', 'origin' (where its URL does not say it: 'null' a new opaque one), 'locationOrigin', 'aboutBase',
 // 'controller', 'historyPolicyContainer' (`[referrer policy, csp]` its entry keeps, none where its URL needs none), and,
-// for the
-// host's commit of its opener policy (session_history.rs `commit_opener_policy`), 'openerPolicy' and 'responseOrigin'.
-// `params` (symbol keys): `url`; `headers` its response's (nil none: a document of no response); `inline` an inline
-// content document's (a PDF viewer's, an error document's), made of none of its response's policies; `content_type` the type its body said or it is made as, over its response's;
-// `loopback` the host's stand-in for a secure context; `origin` its origin where its URL does not say it, with the
-// origin its location reports (`location_origin`, an about:blank one's its initiator's) and its base URL (`about_base`);
-// `fields` in place of `headers`, `[Referrer-Policy, Refresh, origin-keyed, Content-Security-Policy]`, a frame's
-// response as its build read it (frame_response.rs, by the same `ResponseFields`); `history` the policy container its
-// session history entry kept;
-// `referrer` the Referer its request sent; `initiator` / `parent` the policy containers `[referrer policy, csp]` of the
-// document that initiated it and of its container's; `coop` the opener policy a local scheme's inherits;
-// `sw` `[partition, site]` where a fetch made it, `[partition, nil, creator client id, creator origin]` where none did,
-// nil where no worker may control it (a `javascript:` URL's document).
+// for the host's commit of its opener policy (session_history.rs `opener_policy_verdict`), 'openerPolicy' and
+// 'responseOrigin'.
+// `params` (symbol keys):
+// - `url`; `headers` its response's (nil none: a document of no response), or `fields` in their place,
+//   `[Referrer-Policy, Refresh, origin-keyed, Content-Security-Policy]`, a frame's response as its build read it
+//   (frame_response.rs, by the same `ResponseFields`); `inline` an inline content document's (a PDF viewer's, an error
+//   document's), made of none of its response's policies; `content_type` the type its body said or it is made as, over
+//   its response's; `loopback` the host's stand-in for a secure context;
+// - `origin` its origin where its URL does not say it, with the origin its location reports (`location_origin`, an
+//   about:blank one's its initiator's) and its base URL (`about_base`); `referrer` the Referer its request sent;
+// - the policy containers `[referrer policy, csp]` it may be made of: `container` the one it is made with outright (a
+//   `javascript:` URL's result's), `history` the one its session history entry kept, `initiator` / `parent` those of the
+//   document that initiated it and of its container's; `coop` the opener policy a local scheme's inherits;
+// - `sw` `[partition, site]` where a fetch made it, `[partition, nil, creator client id, creator origin]` where none did,
+//   nil where no worker may control it (a `javascript:` URL's document).
 pub(crate) fn initialize_document(ruby: &Ruby, params: RHash) -> Result<RHash, Error> {
     let get = |key: &str| params.aref::<_, Value>(ruby.to_symbol(key));
     let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -160,7 +162,11 @@ pub(crate) fn initialize_document(ruby: &Ruby, params: RHash) -> Result<RHash, E
     let response = (!inline && (headers.is_some() || given.is_some())).then(|| PolicyContainer { csp: fields.csp.clone(), referrer_policy: fields.referrer_policy.unwrap_or_default().to_owned() });
     // (…an inline content document's — a PDF viewer's, an error document's — a new one: HTML "create a document for
     // inline content that doesn't have a DOM", whose navigation params' request is null, so no referrer either)
-    let policies = if inline {
+    // (…or the one it is made with outright: a `javascript:` URL's result's, the active document's it replaces — HTML
+    // "evaluate a javascript: URL", whatever its URL or its entry say)
+    let policies = if let Some(given) = container("container")? {
+        given
+    } else if inline {
         PolicyContainer::default()
     } else {
         policy_container(&url, container("history")?.as_ref(), container("initiator")?.as_ref(), container("parent")?.as_ref(), response)
@@ -181,20 +187,23 @@ pub(crate) fn initialize_document(ruby: &Ruby, params: RHash) -> Result<RHash, E
     let opener_policy = coop.unwrap_or_else(|| if inline { "unsafe-none".to_owned() } else { fields.opener_policy(&url, loopback).name().to_owned() });
 
     let out = ruby.hash_new();
+    // (…each key only where it has a value: the bindings read a missing one as none, and the fewer the cheaper the
+    // hand-over, on every visit)
+    let put = |key: &str, value: Option<Value>| -> Result<(), Error> { value.map_or(Ok(()), |v| out.aset(key, v)) };
     out.aset("url", url.as_str())?;
     let content_type = text("content_type")?.filter(|t| !t.is_empty()).or_else(|| if inline { Some("text/html".to_owned()) } else { fields.content_type.clone().filter(|t| !t.is_empty()) });
-    out.aset("contentType", content_type)?;
+    put("contentType", content_type.map(|t| t.into_value_with(ruby)))?;
     // (…kept with its session history entry where its URL requires it)
     let kept = stores_policy_container(&url).then(|| (policies.referrer_policy.clone(), policies.csp.clone()));
-    out.aset("historyPolicyContainer", kept)?;
-    out.aset("csp", policies.csp)?;
-    out.aset("referrerPolicy", policies.referrer_policy)?;
-    out.aset("referrer", text("referrer")?.filter(|r| !r.is_empty() && !inline))?;
-    out.aset("refresh", if inline { None } else { fields.refresh.clone() })?;
-    out.aset("originAgentCluster", !inline && fields.origin_agent_cluster)?;
-    out.aset("origin", given_origin)?;
-    out.aset("locationOrigin", text("location_origin")?)?;
-    out.aset("aboutBase", text("about_base")?.filter(|b| !b.is_empty()))?;
+    put("historyPolicyContainer", kept.map(|k| k.into_value_with(ruby)))?;
+    put("csp", policies.csp.map(|c| c.into_value_with(ruby)))?;
+    put("referrerPolicy", Some(policies.referrer_policy).filter(|p| !p.is_empty()).map(|p| p.into_value_with(ruby)))?;
+    put("referrer", text("referrer")?.filter(|r| !r.is_empty() && !inline).map(|r| r.into_value_with(ruby)))?;
+    put("refresh", if inline { None } else { fields.refresh.clone() }.map(|r| r.into_value_with(ruby)))?;
+    put("originAgentCluster", (!inline && fields.origin_agent_cluster).then(|| true.into_value_with(ruby)))?;
+    put("origin", given_origin.map(|o| o.into_value_with(ruby)))?;
+    put("locationOrigin", text("location_origin")?.map(|o| o.into_value_with(ruby)))?;
+    put("aboutBase", text("about_base")?.filter(|b| !b.is_empty()).map(|b| b.into_value_with(ruby)))?;
     let sw = match Option::<magnus::RArray>::try_convert(get("sw")?)? {
         Some(a) => Some((a.entry::<u64>(0)?, a.entry::<Option<String>>(1)?, a.entry::<Option<String>>(2)?, a.entry::<Option<String>>(3)?)),
         None => None,
@@ -206,7 +215,7 @@ pub(crate) fn initialize_document(ruby: &Ruby, params: RHash) -> Result<RHash, E
         };
         controller(*partition, &url, origin.as_deref(), control)
     });
-    out.aset("controller", found)?;
+    put("controller", found.map(|f| f.into_value_with(ruby)))?;
     out.aset("openerPolicy", opener_policy)?;
     out.aset("responseOrigin", response_origin.unwrap_or_else(|| "null".to_owned()))?;
     Ok(out)

@@ -183,19 +183,11 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
     // navigation its own: HTML "create a new child navigable")
     let sandbox = if initial { arena.frame_sandbox(container) } else { arena.take_frame_sandbox(container) };
     // (…and the policy container of the document that began its navigation, where another than this one did: a sibling
-    // frame's script, a link targeting it — `take_frame_source` — which a document of a local URL clones, its CSP list's
-    // `sandbox` sandboxing it as its response's would; this document's own otherwise: document_init.rs
-    // `policy_container`, which the host asks again with it)
+    // frame's script, a link targeting it — `take_frame_source` — which a document of a local URL clones; the CSP-derived
+    // sandboxing of the policy container document_init.rs settles on is the document's own to take as it is made:
+    // v8_runtime.rb `load_frame_document`, `sandboxByPolicy`)
     let source = if initial { None } else { arena.take_frame_source(container) };
-    let local = r.url.is_empty() || srcdoc || ["about:", "blob:", "data:"].iter().any(|p| r.url.get(..p.len()).is_some_and(|u| u.eq_ignore_ascii_case(p)));
-    let inherited = if !local {
-        None
-    } else if srcdoc {
-        arena.location.csp.clone()
-    } else {
-        source.as_ref().map_or_else(|| arena.location.csp.clone(), |s| s.1.clone())
-    };
-    let mut created = crate::realm_location::frame_origins(arena, cid, &r.url, sandbox.as_deref(), r.csp.as_deref().or(inherited.as_deref()));
+    let mut created = crate::realm_location::frame_origins(arena, cid, &r.url, sandbox.as_deref(), r.csp.as_deref());
     if r.error {
         created.document = Some("null".to_owned());
     }

@@ -2361,17 +2361,19 @@ module Capybara
       private def about_blank_made(creator)
         creator ? {origin: creator[:origin], location_origin: creator[:origin], about_base: creator[:base]} : {origin: 'null'}
       end
-      # …and what the document a `javascript:` URL's string result makes in realm `realm`'s navigable is of: the origin of
-      # the document it replaces — a new opaque one of an opaque one's — an about:blank one's origins and base URL that
-      # document's.
+      # …and what the document a `javascript:` URL's string result makes in realm `realm`'s navigable is of: the policy
+      # container of the document it replaces, live (HTML "evaluate a javascript: URL": its policy container a clone of
+      # the active document's — whatever its entry kept), and that document's origin — a new opaque one of an opaque
+      # one's — an about:blank one's origins and base URL that document's.
       # (…its own origin, `navigationOrigins` of its realm by itself — not `document_origin`, whose request client a
       # window's realm reads the page's creator URL for)
       private def javascript_document_made(realm, url)
+        container = policy_container(realm)
         origin, = @runtime.realm_direct_call(0, 'navigationOrigins', realm, realm)
-        return {origin: 'null'} if origin.to_s.start_with?('null')
-        return {} unless about_blank_url?(url)
+        return {container: container, origin: 'null'} if origin.to_s.start_with?('null')
+        return {container: container} unless about_blank_url?(url)
 
-        about_blank_made(about_blank_creator(origin, @runtime.realm_direct_call(realm, 'baseURL')))
+        {container: container, **about_blank_made(about_blank_creator(origin, @runtime.realm_direct_call(realm, 'baseURL')))}
       end
       # The policy container of the document that initiated navigation `navigation` as it began, `[referrer policy,
       # Content-Security-Policy]` (HTML's source snapshot params' source policy container: navigate.rs `source_policy`) —
@@ -2397,11 +2399,12 @@ module Capybara
       # …kept by that entry as the document `init` makes is made, where its URL requires it and the entry has none yet — and
       # an about:blank one's about base URL, its document state's too, which a traversal back to it makes it with again as
       # its origin (`entry_about_base`; the origin the entry's `document_origin`: navigation_commit.rs `replayed_origin`).
-      def keep_policy_container(history, id, init)
+      # (…`replace` where the document was made with one outright, a `javascript:` URL's: `javascript_document_made`)
+      def keep_policy_container(history, id, init, replace: false)
         return if history.nil? || id.nil?
 
         kept = init['historyPolicyContainer']
-        history.update(id, {container_policy: kept[0].to_s, container_csp: kept[1]}) if kept && !history.text(id, :container_policy)
+        history.update(id, {container_policy: kept[0].to_s, container_csp: kept[1]}) if kept && (replace || !history.text(id, :container_policy))
         history.update(id, {about_base: init['aboutBase']}) if init['aboutBase'] && !history.text(id, :about_base)
       end
       # …and the about base URL an about:blank entry's document state kept, nil for none.
@@ -2423,7 +2426,7 @@ module Capybara
         sw  = [@sw_partition, Native.site(url).to_s] if controlled && http_url?(url) && sw_registered?
         entry = @session_history.active(0)
         init = document_init(url, headers: @last_response_headers, referrer: @current_referer.to_s, sw: sw, history: entry_policy_container(@session_history, entry), **made)
-        keep_policy_container(@session_history, entry, init)
+        keep_policy_container(@session_history, entry, init, replace: made.key?(:container))
         init
       end
       # HTML "create a new top-level traversable": a new window's initial about:blank, made with the window — a new opaque
@@ -7036,16 +7039,6 @@ module Capybara
         nil
       end
 
-      # The controller an OPAQUE child browsing context (about:blank / srcdoc)
-      # inherits from its creator. An about:blank document has no URL to scope-match,
-      # so it's controlled by its parent's active service worker (HTML "create and
-      # initialize a Document" inherits the creator's controller) — the one the parent
-      # has NOW, in the client registry, which a claim since its load updated too.
-      def sw_inherited_controller_for(parent_realm_id)
-        parent = sw_client_id(parent_realm_id)
-        _id, _url, handle = Native.sw_clients(@sw_partition).find {|id, *| id == parent }
-        handle && sw_controller(handle)
-      end
 
       # A browsing context as a service-worker client, in the registry every service worker's
       # Clients read. `controller_handle` is the worker that CONTROLS it, or nil for an
@@ -11460,7 +11453,7 @@ module Capybara
 
         @session_history.commit_javascript_document(url.to_s)
         made    = javascript_document_made(0, url)
-        headers = javascript_document_headers(0, url, @last_response_headers)
+        headers = javascript_document_headers(made[:container])
         self.page_url = url
         record_response(200, headers)
         @current_referer = ''
@@ -11469,14 +11462,14 @@ module Capybara
         @runtime.call('applyOwnTraversals', true)
         consume_planned_traversal
       end
-      # …the response it is made of, HTML's: `text/html;charset=utf-8` and, given here as its headers, the policy container of
-      # realm `realm`'s document: the Content-Security-Policy its own response had (`headers`), the referrer policy it has now.
-      private def javascript_document_headers(realm, url, headers)
-        _, csp,  = Native.document_params(headers, url, @loopback_stand_in)
-        policy   = @runtime.realm_direct_call(realm, 'documentReferrerPolicy').to_s
+      # …the response it is recorded as having, HTML's: `text/html;charset=utf-8`, the policy container it is made with
+      # (`container`, `javascript_document_made`) given as its headers — what a later `javascript:` URL's document of it
+      # reads none of, taking its own live one.
+      private def javascript_document_headers(container)
+        policy, csp = container
         response = {'content-type' => 'text/html;charset=utf-8'}
         response['content-security-policy'] = csp if csp
-        response['referrer-policy'] = policy unless policy.empty?
+        response['referrer-policy'] = policy unless policy.to_s.empty?
         response
       end
       # The navigations of frames planned for the host — a frame's own `location`'s, a link's targeting one — taken at the
@@ -11742,10 +11735,11 @@ module Capybara
         history = window_history(realm_id)
         return unless history
 
-        given   = @runtime.window_realm_meta[realm_id]&.fetch(:response, nil) || ABOUT_BLANK_RESPONSE
-        headers = javascript_document_headers(realm_id, url, given[1])
-        init    = document_init(url, headers: headers, **javascript_document_made(realm_id, url))
+        made    = javascript_document_made(realm_id, url)
+        headers = javascript_document_headers(made[:container])
+        init    = document_init(url, headers: headers, **made)
         history.commit_javascript_document(url.to_s)
+        keep_policy_container(history, history.active(0), init, replace: true)
         new_id = replace_window_document(realm_id, markup, init, reuses: true, keep_traversals: true)
         return unless new_id
 
@@ -11922,7 +11916,8 @@ module Capybara
       # document's (Service Workers §2.5.1).
       # (…`source_policy` the policy container of the document that began its navigation where another than its
       # container's did — a sibling frame's script, a link targeting it: frame_navigation.rs `take_frame_source`)
-      def frame_document_init(url, parent, realm, policy: nil, csp: nil, source_policy: nil, refresh: nil, origin_agent_cluster: false, **made)
+      # (…`headers` the response's own where the host has them, read by the engine: its fields given otherwise)
+      def frame_document_init(url, parent, realm, headers: nil, policy: nil, csp: nil, source_policy: nil, refresh: nil, origin_agent_cluster: false, **made)
         url = url.to_s
         if (local = url.empty? || url.match?(/\A(?:about|blob|data):/i))
           container = policy_container(parent)
@@ -11933,8 +11928,8 @@ module Capybara
         end
         # (…an entry keeps one only for a local URL: none asked of another's)
         history, entry = frame_entry(realm) if local
-        fields = [(policy unless local), refresh, origin_agent_cluster == true, (csp unless local)]
-        init = document_init(url.empty? ? 'about:blank' : url, fields: fields, parent: container, initiator: initiator, sw: sw, history: entry_policy_container(history, entry), **made)
+        response = headers ? {headers: headers} : {fields: [(policy unless local), refresh, origin_agent_cluster == true, (csp unless local)]}
+        init = document_init(url.empty? ? 'about:blank' : url, parent: container, initiator: initiator, sw: sw, history: entry_policy_container(history, entry), **response, **made)
         keep_policy_container(history, entry, init)
         init
       end
@@ -12109,9 +12104,6 @@ module Capybara
       # The document of realm `realm` (0 the page) as a request's initiator: the URL whose site Sec-Fetch-Site compares and
       # whose origin an Origin header carries.
       def realm_creator_url(realm) = request_client(realm)[0]
-      # …whether its own origin is opaque: a sandboxed document's, the page's a `Content-Security-Policy: sandbox`
-      # response's.
-      def document_origin_opaque?(realm) = request_client(realm)[2]
       # …all a navigation of another window it begins carries of it, as its plan takes it (Driver#navigate_window,
       # session_history.rs `Initiator`): its URL and whether its origin is opaque, read at once — the page's for a realm
       # gone since (`initiating_realm`).
@@ -12393,28 +12385,20 @@ module Capybara
         when 'download'
           return save_downloaded_response(target, hop.headers, hop.rack_body || [hop.document.to_s], realm: realm_id)
         when 'inline'
-          return commit_frame_document(realm_id, target, '', 'text/html', doc_origin: 'null', client_id: hop.client_id)
+          return commit_frame_document(realm_id, target, '', 'text/html', doc_origin: 'null', inline: true, client_id: hop.client_id)
         end
 
         # (…and what the caller's document state gives it — `restored`, a traversal's form state — none where a redirect
         # made the request anew; a replay's its entry's classic history API state, as the step left it: none where a
         # redirect or another origin made it anew — HTML "create navigation params by fetching", navigation_commit.rs
         # `made_again`)
-        ctype, csp, document_policy, refresh, _, origin_agent_cluster = Native.document_params(hop.headers, '', false)
-        ctype = hop.document_type || ctype
-        response = {
-          client_id:            hop.client_id,
-          csp:                  csp,
-          referrer:             fetch.referrer,
-          referrer_policy:      document_policy,
-          refresh:              refresh,
-          origin_agent_cluster: origin_agent_cluster
-        }
+        # (…what its response makes of it read off its headers once, by the engine: document_init.rs)
+        response = {client_id: hop.client_id, referrer: fetch.referrer, headers: hop.headers}
         response.update(restored) unless fetch.redirected?
         if replay && (history, id = frame_entry(realm_id))
           response[:history_state] = [history.entry(id)[:state]]
         end
-        commit_frame_document(realm_id, target, document, ctype || 'text/html', **response)
+        commit_frame_document(realm_id, target, document, hop.document_type, **response)
       end
       # A frame's document the host makes — of its navigation's response, of a traversal's blob, an error document — in
       # place of the one it shows: its container found in its parent realm's document, a fresh realm built from the
@@ -12428,19 +12412,17 @@ module Capybara
         restore_state: nil,
         history_state: nil,
         client_id: nil,
-        csp: nil,
+        headers: nil,
+        inline: false,
         referrer: nil,
-        referrer_policy: nil,
-        refresh: nil,
         doc_origin: nil,
-        origin_agent_cluster: false,
         began: nil
       )
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
         # (…none where its container is gone: no document of it made unsandboxed, as an empty seed would)
-        seed = frame_seed(parent, handle, url, csp, doc_origin) or return
+        seed = frame_seed(parent, handle, url, doc_origin) or return
         # (…the document it shows gone in the order every commit takes, as the page's: `commit_steps` — unloaded, none
         # made where a handler of that removed the frame; then what it owned let go, its realm's with it as the next is
         # made: the bytes a reload of it loads again none but a blob document's, which the container kept as it took them —
@@ -12465,10 +12447,8 @@ module Capybara
           seed,
           history_state:        history_state,
           referrer:             referrer,
-          referrer_policy:      referrer_policy,
-          refresh:              refresh,
-          origin_agent_cluster: origin_agent_cluster,
-          csp:                  csp
+          headers:              headers,
+          inline:               inline
         ).to_i
         return if new_id.zero?
         # (…the entry its navigation began made with it: `with_frame_entry`)
@@ -12782,9 +12762,10 @@ module Capybara
       end
 
       # What the container `handle` in realm `parent` gives the document it is to hold at `url` (`frameSeed`) — its
-      # origin `doc_origin` where the caller decides it (an error document's, a new opaque one: 'null').
-      private def frame_seed(parent, handle, url, csp, doc_origin)
-        seed = frame_realm_host_call(parent, 'frameSeed', handle, url.to_s, csp) or return
+      # origin `doc_origin` where the caller decides it (an error document's, a new opaque one: 'null'). (…the sandboxing
+      # its policy container's CSP list adds the document's to take as it is made: v8_runtime.rb `load_frame_document`)
+      private def frame_seed(parent, handle, url, doc_origin)
+        seed = frame_realm_host_call(parent, 'frameSeed', handle, url.to_s) or return
         seed['docOrigin'] = doc_origin if doc_origin
         seed
       end
@@ -13050,7 +13031,7 @@ module Capybara
       end
       # The facts of the document of realm `realm` a navigation of its top-level traversable leaves that its responses'
       # opener policies are enforced against, asked only where a policy but "unsafe-none" is in play: its origin and whether it
-      # is its initial about:blank (session_history.rs `commit_opener_policy`) — and for each response as it comes
+      # is its initial about:blank (session_history.rs `opener_policy_verdict`) — and for each response as it comes
       # (navigation_fetch.rs `response`, HTML "enforce a response's opener policy") its navigable's popup sandboxing flag set
       # (realm_location.rs `pageSandbox` of no Content-Security-Policy).
       private def coop_leaving_facts(realm) = [document_origin(realm).to_s, @runtime.realm_call(realm, 'initialAboutBlank') == true]
@@ -13065,12 +13046,12 @@ module Capybara
       def self.document_commit_order = (@document_commit_order ||= Native.document_commit_order.map(&:to_sym).freeze)
       # The page's document committed, of opener policy `coop` and origin `origin` — the one place every commit goes through
       # (a response's, an about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context
-      # group is to be left for a new one where needed (session_history.rs `commit_opener_policy`), `carried` what its
-      # navigation's enforcement result needed (navigation_fetch.rs `CoopEnforcement`) — and whether the next document is
-      # cross-origin isolated as that makes it: `[switch, isolated]`, which `leave_browsing_context_group` carries out. (…a
-      # response in a context not secure of no policy: coop.rs `obtain`) Not modelled: a cross-origin frame's own
-      # `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service worker's own COEP
-      # (it is never isolated here).
+      # group is to be left for a new one where needed (session_history.rs `opener_policy_verdict`, then
+      # `commit_opener_policy`), `carried` what its navigation's enforcement result needed (navigation_fetch.rs
+      # `CoopEnforcement`) — and whether the next document is cross-origin isolated as that makes it: `[switch, isolated]`,
+      # which `leave_browsing_context_group` carries out. (…a response in a context not secure of no policy: coop.rs
+      # `obtain`) Not modelled: a cross-origin frame's own `allow="cross-origin-isolated"` permission (it shares the
+      # top-level document's here), nor a service worker's own COEP (it is never isolated here).
       private def commit_coop(coop, origin, carried)
         verdict = @session_history.opener_policy_verdict(coop, origin.to_s, carried == true) { coop_leaving_facts(0) }
         @session_history.commit_opener_policy(coop)
@@ -13626,7 +13607,7 @@ module Capybara
       # client (HTML "create a document for inline content"), so no service worker's client nor one it controls, and of a
       # new opaque origin, as a top-level one's is (`commit_error_document`).
       def commit_frame_error_document(realm_id, url, began: nil)
-        commit_frame_document(realm_id, url.to_s, '', 'text/html', doc_origin: 'null', began: began)
+        commit_frame_document(realm_id, url.to_s, '', 'text/html', doc_origin: 'null', inline: true, began: began)
       end
       # The document a frame's navigation makes, committed into it — an entered one's scope following it
       # (`reload_frame_realm_by_id`).

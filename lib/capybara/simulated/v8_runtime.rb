@@ -634,12 +634,15 @@ module Capybara
             # (…discarded whatever became of that: the mark the page's leave drops it by)
             (V8Runtime.engine_call(@ctx, 'discardRealm', id.to_i) if @ctx) rescue nil
           end
+          @realms_discarded = true unless going.empty?
         end
         # (…and the blob URLs each realm going with the page made — a frame's, a same-isolate popup's — revoked as its
         # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
         going.each {|id| @browser.revoke_realm_blobs(id) rescue nil }
         if @ctx && kept.empty?
-          discarded = (Array(V8Runtime.engine_call(@ctx, 'discardedRealmList')) rescue []).select {|id| id.positive? && !@frame_realms&.key?(id) }
+          # (…asked of the engine only where a realm was discarded since the last such drop: none, the common visit's)
+          discarded = @realms_discarded ? (Array(V8Runtime.engine_call(@ctx, 'discardedRealmList')) rescue []).select {|id| id.positive? && !@frame_realms&.key?(id) } : []
+          @realms_discarded = false
           (going | discarded).each do |id|
             V8Runtime.engine_call(@ctx, 'dropRealm', id.to_i)
           rescue StandardError
@@ -686,10 +689,8 @@ module Capybara
         seed,
         history_state: nil,
         referrer: nil,
-        referrer_policy: nil,
-        refresh: nil,
-        origin_agent_cluster: false,
-        csp: nil
+        headers: nil,
+        inline: false
       )
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
         # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
@@ -714,12 +715,10 @@ module Capybara
           client_id,
           seed['margins'],
           seed['sandbox'],
-          history_state:        history_state,
-          referrer:             referrer,
-          referrer_policy:      referrer_policy,
-          refresh:              refresh,
-          origin_agent_cluster: origin_agent_cluster,
-          csp:                  csp
+          history_state: history_state,
+          referrer:      referrer,
+          headers:       headers,
+          inline:        inline
         )
       end
 
@@ -743,7 +742,7 @@ module Capybara
         create_window_realm(
           init['url'], body, nil,
           opener_id: meta[:opener_id], window_key: meta[:window_key], retarget_from: old_id, group: meta[:group],
-          about_base: meta[:about_base], init: init, client_id: client_id, viewport: viewport
+          init: init, client_id: client_id, viewport: viewport
         )
       end
       # The navigation's reserved client id — the realm ADOPTS it as its service-worker Client identity
@@ -820,6 +819,8 @@ module Capybara
         evict_lost_window_proxies
         fr = frame_realms.delete(id)
         retire_realm(fr) if fr
+        # (…its arena the engine keeps as discarded, for the page's leave to drop: `dispose_frame_realms`)
+        @realms_discarded = true
         nil
       end
 
@@ -1331,14 +1332,6 @@ module Capybara
         nil
       end
 
-      # A frame whose document URL is opaque — about:blank (empty src), about:srcdoc,
-      # or empty — has no scope of its own; its controller is inherited from the
-      # creator. (create_frame_realm receives 'about:blank'/'about:srcdoc' as the url
-      # for these, seeded by realmHooks.frameWindow.)
-      def opaque_frame_url?(url)
-        u = url.to_s
-        u.empty? || u.start_with?('about:')
-      end
 
       # Bring a freshly-created realm context — made from the snapshot, its bindings in it already — up to a runnable
       # bridge, shared by the frame and window realm constructors. The
@@ -1394,7 +1387,9 @@ module Capybara
         refresh: nil,
         origin_agent_cluster: false,
         csp: nil,
-        source_policy: nil
+        source_policy: nil,
+        headers: nil,
+        inline: false
       )
         realm = parent_ctx.create_context
         # (…its depth and its parent the engine's once its container's navigable is given it, before its document loads:
@@ -1428,7 +1423,9 @@ module Capybara
           refresh:              refresh,
           origin_agent_cluster: origin_agent_cluster,
           csp:                  csp,
-          source_policy:        source_policy
+          source_policy:        source_policy,
+          headers:              headers,
+          inline:               inline
         )
         realm.id
       rescue StandardError => e
@@ -1495,7 +1492,9 @@ module Capybara
         refresh: nil,
         origin_agent_cluster: false,
         csp: nil,
-        source_policy: nil
+        source_policy: nil,
+        headers: nil,
+        inline: false
       )
         # Pass the URL + document body as call ARGUMENTS, not interpolated into
         # an eval string: the marshaller carries them losslessly, so arbitrary
@@ -1524,7 +1523,9 @@ module Capybara
           csp:                  csp,
           source_policy:        source_policy,
           refresh:              refresh,
-          origin_agent_cluster: origin_agent_cluster
+          origin_agent_cluster: origin_agent_cluster,
+          headers:              headers,
+          inline:               inline
         )
         init['historyState'] = history_state[0] if history_state
         load_document(realm, body, init) do
@@ -1551,6 +1552,9 @@ module Capybara
           # base BEFORE the document loads so its load-time scripts resolve relative URLs
           # against the parent, even though location.href reports about:blank/srcdoc.
           V8Runtime.engine_call(realm, 'setAboutBaseURL', about_base.to_s) unless about_base.to_s.empty? && !reused
+          # (…and sandboxed by its policy container's CSP list as well — its response's, its initiator's, its entry's: the
+          # one document_init.rs settled on, as a top-level document's `seedTopLevelDocument` is)
+          V8Runtime.engine_call(realm, 'sandboxByPolicy', init['csp']) if init['csp']
           # The navigable's WindowProxy, held in any realm, its new document's window's from its first script on — as a
           # window's (`create_window_realm`).
           retarget_window_proxies(retarget_from, realm.id) if retarget_from >= 0
@@ -1718,7 +1722,7 @@ module Capybara
         V8Runtime.engine_call(realm, 'setWindowName', window_name.to_s) unless window_name.nil?
         # Remember the window's opener so a self-navigation (reload_window_realm builds a FRESH realm) can carry it across
         # — a real popup keeps window.opener through its own navigation.
-        window_realm_meta[realm.id] = {opener_id: opener_id, about_base: about_base, window_key: window_key, group: group}
+        window_realm_meta[realm.id] = {opener_id: opener_id, window_key: window_key, group: group}
         window_realms_changed
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
         if initial

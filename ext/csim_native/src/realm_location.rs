@@ -221,6 +221,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "documentCsp", document_csp, context_id);
     register(scope, ns, "documentCommitOrder", document_commit_order, context_id);
     register(scope, ns, "pageSandbox", page_sandbox, context_id);
+    register(scope, ns, "sandboxByPolicy", sandbox_by_policy, context_id);
     register(scope, ns, "popupFlags", popup_flags_op, context_id);
     register(scope, ns, "sandboxed", sandboxed_op, context_id);
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
@@ -375,15 +376,36 @@ fn take_opener_origins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     location.origin_override = created.location.map(str::to_owned);
     arena.inherit_origin(cid, opener);
 }
-// __dom.pageSandbox(csp) -> the sandboxing flags the page's document, as it loads, has: its window's popup sandboxing flag
-// set (`popup_sandbox_of`: a pop-up's a Browser hosts, made by a sandboxed document — `SessionHistory#popup_sandbox=`)
-// and its response's Content-Security-Policy `csp`'s `sandbox` (null for none) — HTML "determine the creation sandboxing
-// flags" for a top-level navigable.
+// The sandboxing flags a top-level document of realm `cid` — the page's, a window's — is made with, its policy container's
+// CSP list `csp` (None: none): HTML "determine the creation sandboxing flags" for a top-level navigable, its popup
+// sandboxing flag set (`popup_sandbox_of`: a pop-up's a Browser hosts, made by a sandboxed document —
+// `SessionHistory#popup_sandbox=`), with that list's `sandbox` (`sandboxing`).
+fn top_level_flags(scope: &mut v8::PinScope<'_, '_>, cid: i32, csp: Option<&str>) -> u32 {
+    crate::session_history::popup_sandbox_of(crate::dom::realm(scope, cid), cid) | crate::sandbox::sandboxing(csp, None)
+}
+// __dom.pageSandbox(csp) -> `top_level_flags` of the calling realm's document — what a navigation of its navigable to a
+// response of Content-Security-Policy `csp` (null for none) is judged by (navigation_fetch.rs `response`).
 fn page_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let csp = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
-    let popup = crate::session_history::popup_sandbox_of(crate::dom::realm(scope, cid), cid);
-    rv.set_uint32(popup | crate::sandbox::sandboxing(csp.as_deref(), None));
+    let flags = top_level_flags(scope, cid, csp.as_deref());
+    rv.set_uint32(flags);
+}
+// __dom.sandboxByPolicy(csp) — the calling realm's frame document, its origins and its container's sandboxing seeded,
+// sandboxed by its policy container's CSP list `csp` too (null for none) — the one document_init.rs settled: its
+// response's, its initiator's, the one its session history entry kept — as a top-level document is by
+// `seedTopLevelDocument`: HTML "create and initialize a Document object", the final sandboxing flag set the navigable's
+// with the policy container's CSP-derived ones; a new opaque origin where they say so (`set_sandbox`).
+fn sandbox_by_policy(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let csp = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
+    let added = crate::sandbox::sandboxing(csp.as_deref(), None);
+    if added == 0 {
+        return;
+    }
+    let cid = realm_id(scope, &args);
+    let location = &mut realm(scope, cid).location;
+    let flags = location.sandbox | added;
+    location.set_sandbox(flags);
 }
 // __dom.popupFlags() -> the popup sandboxing flag set of a window the calling realm's document opens
 // (`sandbox::popup_flags`): what the host gives a window it opens as a Browser of its own (`SessionHistory#popup_sandbox=`).
@@ -404,8 +426,7 @@ fn seed_top_level_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let csp = text(scope, 1);
     let (origin, location_origin) = (text(scope, 2), text(scope, 3));
     let cid = realm_id(scope, &args);
-    let popup = crate::session_history::popup_sandbox_of(crate::dom::realm(scope, cid), cid);
-    let flags = popup | crate::sandbox::sandboxing(csp.as_deref(), None);
+    let flags = top_level_flags(scope, cid, csp.as_deref());
     let arena = realm(scope, cid);
     let (document, location_origin) = match origin.filter(|_| flags & crate::sandbox::ORIGIN == 0) {
         Some(origin) => (Some(origin), location_origin),

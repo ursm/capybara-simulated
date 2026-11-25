@@ -140,6 +140,43 @@ RSpec.describe 'a document a navigation commits' do
       expect(session.evaluate_script('frames.a.location.href')).to eq('about:blank')
     end
 
+    # …and a frame's about:blank document made again — a traversal back to it, a reload of it — of the policy container
+    # its entry kept (step 1), the sandbox of its CSP list its flags too, as at first (Chrome 157 and Firefox 159 keep it).
+    it "is a frame's entry's again on a traversal and a reload, its CSP sandbox with it" do
+      framed = lambda {|env|
+        case env['PATH_INFO']
+        when '/a' then [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-same-origin'}, ['<!doctype html><a href="about:blank">go</a>']]
+        when '/' then [200, {'content-type' => 'text/html'}, ['<!doctype html><iframe name=a src=/a></iframe>']]
+        else [200, {'content-type' => 'text/html'}, ["<!doctype html><title>#{env['PATH_INFO']}</title>"]]
+        end
+      }
+      runs = lambda {|s|
+        s.evaluate_script(<<~JS)
+          (() => {
+            window.ran = 0;
+            const d = frames.a.document, sc = d.createElement('script');
+            sc.textContent = 'parent.ran = 1';
+            (d.body || d.documentElement).append(sc);
+            return window.ran ? 'scripts run' : 'sandboxed';
+          })()
+        JS
+      }
+      session = simulated_session(framed)
+      session.visit '/'
+      session.within_frame('a') { session.click_link 'go' }
+      expect(poll_until { session.evaluate_script('frames.a.location.href') == 'about:blank' }).to be(true)
+      seen = [runs.(session)]
+      session.execute_script("frames.a.location = '/y'")
+      poll_until { (session.evaluate_script('frames.a.document.title') rescue nil) == '/y' }
+      session.go_back
+      expect(poll_until { (session.evaluate_script('frames.a.location.href') rescue nil) == 'about:blank' }).to be(true)
+      seen << runs.(session)
+      session.execute_script('frames.a.location.reload()')
+      session.evaluate_script('1')
+      seen << runs.(session)
+      expect(seen).to eq(%w[sandboxed sandboxed sandboxed])
+    end
+
     # …and one a script's traversal makes again of the origin its entry's document state is of — none, the user's
     # about:blank: a new opaque origin, not the origin of the document whose script asked for it (HTML "determine the
     # origin").
