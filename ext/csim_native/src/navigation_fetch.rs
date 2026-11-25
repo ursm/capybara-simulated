@@ -636,7 +636,7 @@ impl NavigationFetch {
                 // (…a replay's its entry's document state's: `Commit::replayed_origin`)
                 let replayed = self.commit.borrow().as_ref().and_then(Commit::replayed_origin);
                 let st = self.st.borrow();
-                let creator = replayed.or_else(|| st.initiator.as_deref().filter(|_| !st.initiator_opaque).and_then(http_origin));
+                let creator = replayed.unwrap_or_else(|| st.initiator.as_deref().filter(|_| !st.initiator_opaque).and_then(http_origin));
                 drop(st);
                 Step::AboutBlank(creator, self.local_policy(policy))
             }

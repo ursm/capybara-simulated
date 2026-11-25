@@ -139,5 +139,17 @@ RSpec.describe 'a document a navigation commits' do
       session.evaluate_script('1')
       expect(session.evaluate_script('frames.a.location.href')).to eq('about:blank')
     end
+
+    # …and one a script's traversal makes again of the origin its entry's document state is of — none, the user's
+    # about:blank: a new opaque origin, not the origin of the document whose script asked for it (HTML "determine the
+    # origin").
+    it "is of its entry's opaque origin on a script's traversal back" do
+      session = simulated_session(sandboxed_app)
+      session.visit 'about:blank'
+      session.visit '/x'
+      session.execute_script('history.back()')
+      expect(poll_until { session.current_url == 'about:blank' }).to be(true)
+      expect(session.evaluate_script('self.origin')).to eq('null')
+    end
   end
 end
