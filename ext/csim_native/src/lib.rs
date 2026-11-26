@@ -134,6 +134,7 @@ mod cache_storage;
 mod sandbox;
 mod service_worker;
 mod sw_registry;
+mod sw_request;
 mod integrity;
 mod pointer;
 mod webcrypto;
@@ -381,6 +382,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
     native.define_module_function("service_worker_response_allowed", magnus::function!(fetch_rules::service_worker_response_allowed_for_ruby, 4))?;
     native.define_module_function("default_accept", magnus::function!(fetch_rules::default_accept_for_ruby, 1))?;
+    // The request a service worker's fetch event is made of, the host's (sw_request.rs).
+    native.define_module_function("sw_request", magnus::function!(sw_request::sw_request_for_ruby, 1))?;
     native.define_module_function("sw_subresource_usable", magnus::function!(fetch_rules::sw_subresource_usable_for_ruby, 5))?;
     native.define_module_function("subresource_plan_fields", magnus::function!(subresource_plan::fields_for_ruby, 1))?;
     native.define_module_function("service_worker_start_register", magnus::function!(service_worker::start_register_for_ruby, 4))?;

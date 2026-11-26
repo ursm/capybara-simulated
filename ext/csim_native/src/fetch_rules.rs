@@ -472,7 +472,7 @@ pub(crate) fn default_accept(destination: &str) -> &'static str {
         _ => "*/*",
     }
 }
-// …for the host: a request the host hands a service worker (browser.rb `sw_fetch_request`).
+// …for the host: a hop's request with no `Accept` of its own (browser.rb `hop_env`).
 pub(crate) fn default_accept_for_ruby(destination: String) -> String {
     default_accept(&destination).to_owned()
 }

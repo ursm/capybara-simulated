@@ -5512,20 +5512,14 @@ module Capybara
       # validation and the redirect chain live in worker_main_script_fetch.
       private def sw_script_fetch_event(sw_handle, url, client_handle, shared:, creator_client:)
         sw_host.sw_soft_update_later(sw_handle)
-        req = JSON.generate(
-          method:      'GET',
-          url:         url.to_s,
-          headers:     {},
-          body_b64:    '',
-          mode:        'same-origin',
-          destination: shared ? 'sharedworker' : 'worker',
-          credentials: 'same-origin',
-          # The main-script request's CLIENT is the CREATING document (the page that called
-          # `new Worker` — worker-interception "correct client Ids"); the worker's own id is
-          # what the request will CREATE (the wire's resultingClientId, consumed for non-nav
-          # dispatches too).
-          clientId:    creator_client || sw_worker_client_id(client_handle),
-          resultingClientId: sw_worker_client_id(client_handle)
+        # The main-script request's CLIENT is the CREATING document (the page that called `new Worker` —
+        # worker-interception "correct client Ids"); the worker's own id is what the request will CREATE (the wire's
+        # resultingClientId, consumed for non-nav dispatches too).
+        req = Native.sw_request(
+          kind:                shared ? 'sharedworker' : 'worker',
+          url:                 url.to_s,
+          client_id:           creator_client || sw_worker_client_id(client_handle),
+          resulting_client_id: sw_worker_client_id(client_handle)
         )
         sw_worker_client_fetch(sw_handle, req, client_handle)
       end
@@ -5656,28 +5650,21 @@ module Capybara
         # from the network instead, exactly what an uncontrolled load did before
         # interception existed; the async-parking treatment is the follow-up.
         return nil unless Native.sw_worker_activated(@sw_partition, handle.to_i)
-        req = JSON.generate(
-          method:         'GET',
-          url:            url.to_s,
-          # Fetch "fetch" step 12: its destination's `Accept`, the request having none of its own.
-          headers:        {'Accept' => Native.default_accept(destination.to_s)},
-          body_b64:       '',
-          # As the engine planned the request (subresource_plan.rs `plan`): by the
-          # element's `crossorigin` for a potential-CORS one (absent → no-cors+include,
-          # anonymous → cors+same-origin, use-credentials → cors+include), a font's
-          # and a CSS module's cors+same-origin, a worker's module preload same-origin.
-          mode:           mode.to_s,
-          # The element's raw `integrity` attribute, verbatim: event.request.integrity
-          # reflects it even when unparseable (parsing happens at verification time).
-          integrity:      integrity.to_s,
-          destination:    destination.to_s,
-          credentials:    credentials.to_s,
-          clientId:       client_id.to_s,
-          # Policy-resolved like every other controlled fetch, under the policy the request
-          # is made under (its element's `referrerpolicy`, else its policy container's) —
-          # the raw document URL must not leak into event.request.referrer beyond it.
-          referrerPolicy: referrer_policy.to_s,
-          referrer:       Native.request_referrer(referrer_policy, referrer.to_s, url.to_s).to_s
+        # As the engine planned the request (subresource_plan.rs `plan`): by the element's `crossorigin` for a potential-CORS
+        # one (absent → no-cors+include, anonymous → cors+same-origin, use-credentials → cors+include), a font's and a CSS
+        # module's cors+same-origin, a worker's module preload same-origin — its `integrity` the element's raw attribute,
+        # verbatim (event.request.integrity reflects it even when unparseable), its referrer that the policy it is made
+        # under sends (its element's `referrerpolicy`, else its policy container's).
+        req = Native.sw_request(
+          kind:            'script',
+          url:             url.to_s,
+          mode:            mode.to_s,
+          integrity:       integrity.to_s,
+          destination:     destination.to_s,
+          credentials:     credentials.to_s,
+          client_id:       client_id.to_s,
+          referrer_policy: referrer_policy.to_s,
+          referrer_source: referrer.to_s
         )
         r = sw_direct_fetch(handle.to_i, req, -handle.to_i, follower:) or return nil
         return nil if r['fallthrough']
@@ -5728,19 +5715,10 @@ module Capybara
       end
 
       def sw_import_script_fetch(sw_handle, url, client_handle)
-        req = JSON.generate(
-          method:      'GET',
-          url:         url.to_s,
-          headers:     {},
-          body_b64:    '',
-          # (…a no-cors request, as HTML "fetch a classic worker-imported script" leaves it: an opaque answer runs, its
-          # errors muted — its type handed on for that, its real bytes riding the private render channel)
-          mode:        'no-cors',
-          destination: 'script',
-          credentials: 'same-origin',
-          # A SUBRESOURCE from the worker: the worker itself is the client.
-          clientId:    sw_worker_client_id(client_handle)
-        )
+        # (…a no-cors request, as HTML "fetch a classic worker-imported script" leaves it: an opaque answer runs, its errors
+        # muted — its type handed on for that, its real bytes riding the private render channel — a SUBRESOURCE of the
+        # worker, the worker itself its client)
+        req = Native.sw_request(kind: 'import', url: url.to_s, client_id: sw_worker_client_id(client_handle))
         r = sw_worker_client_fetch(sw_handle, req, client_handle) or return nil
         return nil if r['fallthrough']
         return {'blocked' => true} if r['networkError'] || !sw_response_allowed?(r, 'no-cors')
@@ -7757,73 +7735,55 @@ module Capybara
             cookie_context: cookie_context
           )
         end
-        # A form submission navigates with the form's method + encoded body (a POST nav the SW reads
-        # via `event.request.text()`); the Content-Type the form's enctype implies rides its headers.
-        headers = {'Accept' => Native.default_accept(dest.to_s)}
-        headers['Content-Type'] = content_type.to_s unless content_type.to_s.empty?
-        req = JSON.generate(
-          method:              method.to_s.empty? ? 'GET' : method.to_s.upcase,
-          url:                 url.to_s,
-          # The Accept header Fetch inserts for a navigation request: its destination's, a document's or a frame's alike.
-          headers:             headers,
-          # The request wire is JSON text, so the body's bytes travel as base64 in it.
-          body_b64:            Base64.strict_encode64(body.to_s),
-          mode:                'navigate',
-          # The navigation's real destination — 'document' for a top-level navigation,
-          # 'iframe' for a frame's (event.request.destination distinguishes them, and a
-          # passthrough re-fetch reports it as Sec-Fetch-Dest + gates the Lax cookie
-          # exception, which is top-level-only).
-          destination:         dest.to_s,
-          isReloadNavigation:  is_reload,
-          isHistoryNavigation: is_history,
-          # A navigation request's redirect mode is 'manual' (Fetch "create navigation request"):
-          # `event.request.redirect === 'manual'`, and a passthrough `fetch(event.request)` of a
-          # redirecting URL yields an opaqueredirect — which the navigation normalization below
-          # FOLLOWS (the private redirect_loc channel), so the SW observes every hop.
-          redirect:            'manual',
-          # A reload navigation revalidates (cache mode 'no-cache'); a fresh/history load is 'default'.
-          cache:               is_reload ? 'no-cache' : 'default',
-          # The navigation's referrer is the initiating document, resolved under ITS Referrer-Policy
-          # (the document default absent a meta/header — strict-origin-when-cross-origin — so a
-          # same-origin nav keeps the full URL). A SW that re-issues the request
+        # A form submission navigates with the form's method + encoded body (a POST nav the SW reads via
+        # `event.request.text()`); the Content-Type the form's enctype implies rides its headers.
+        req = Native.sw_request(
+          kind:                  'navigate',
+          url:                   url.to_s,
+          method:                method.to_s,
+          headers:               content_type.to_s.empty? ? {} : {'Content-Type' => content_type.to_s},
+          body:                  body.to_s,
+          # The navigation's real destination — 'document' for a top-level navigation, 'iframe' for a frame's
+          # (event.request.destination distinguishes them, and a passthrough re-fetch reports it as Sec-Fetch-Dest + gates
+          # the Lax cookie exception, which is top-level-only).
+          destination:           dest.to_s,
+          reload:                is_reload,
+          history:               is_history,
+          # The navigation's referrer is the initiating document, resolved under ITS Referrer-Policy (the document default
+          # absent a meta/header — strict-origin-when-cross-origin — so a same-origin nav keeps the full URL), and
+          # `event.request.referrerPolicy` the resolved policy, never the empty string a bare Request would carry
+          # (fetch-event-referrer-policy "default referrer policy"). A SW that re-issues the request
           # (`fetch(event.request)`) computes Sec-Fetch-Site / Origin against this referrer's origin.
-          referrer:            Native.request_referrer(referrer_policy, referrer_source, url.to_s).to_s,
-          # `event.request.referrerPolicy` reflects the RESOLVED policy: a navigation with no explicit
-          # meta/header policy uses the document default (strict-origin-when-cross-origin), never the
-          # empty string a bare Request would carry (fetch-event-referrer-policy "default referrer policy").
-          referrerPolicy:      referrer_policy.to_s.empty? ? DEFAULT_REFERRER_POLICY : referrer_policy.to_s,
-          # A passthrough `fetch(event.request)` re-fetch reports the navigation's OWN request
-          # metadata to the server, independent of the referrer (which Referrer-Policy may reduce):
-          # the initiator origin (the navigating frame's — the request's origin for the Origin
-          # header) and the redirect chain's latched Sec-Fetch-Site seed / Origin taint accumulated
-          # by the network hops before the SW intercepted the final URL.
-          initiator:           url_origin(origin_url),
-          siteSeed:            site_seed,
-          originNull:          origin_null,
-          # The ancestor-chain cookie verdict of the frame this navigation commits into
-          # (RFC 6265bis site-for-cookies). A property of the TARGET FRAME, not the
-          # request: it survives a SW's `new Request(event.request, init)` rewrite —
+          referrer_source:       referrer_source,
+          referrer_policy:       referrer_policy.to_s,
+          # A passthrough `fetch(event.request)` re-fetch reports the navigation's OWN request metadata to the server,
+          # independent of the referrer (which Referrer-Policy may reduce): the initiator origin (the navigating frame's —
+          # the request's origin for the Origin header) and the redirect chain's latched Sec-Fetch-Site seed / Origin
+          # taint accumulated by the network hops before the SW intercepted the final URL.
+          initiator:             url_origin(origin_url),
+          site_seed:             site_seed,
+          origin_null:           origin_null,
+          # The ancestor-chain cookie verdict of the frame this navigation commits into (RFC 6265bis site-for-cookies). A
+          # property of the TARGET FRAME, not the request: it survives a SW's `new Request(event.request, init)` rewrite —
           # unlike the initiator, which the copy resets to the SW's own origin.
-          cookieCrossSite:     cookie_cross_site,
-          # Whether the hop intercepted is cross-site for cookies (navigation_fetch.rs
-          # `Nav::cookies`: by its initiator's site, an opaque initiator's, a user's reload's
-          # verdict, the frame's): a passthrough `fetch(event.request)` re-issues the
-          # navigation's request and is judged as it was; a rewrite resets it, the request
-          # then the worker's own.
-          navigationCrossSite: navigation_cross_site,
+          cookie_cross_site:     cookie_cross_site,
+          # Whether the hop intercepted is cross-site for cookies (navigation_fetch.rs `Nav::cookies`: by its initiator's
+          # site, an opaque initiator's, a user's reload's verdict, the frame's): a passthrough `fetch(event.request)`
+          # re-issues the navigation's request and is judged as it was; a rewrite resets it, the request then the
+          # worker's own.
+          navigation_cross_site: navigation_cross_site,
           # The request's client's id (`event.clientId`): the document that began the navigation, HTML's source snapshot
-          # params' fetch client — none of a user's, by the address bar.
-          clientId:            client_id,
-          # …the document it replaces (`event.replacesClientId`), HTML's request "replaces client id": its navigable's active
-          # document's, none of a frame's first.
-          replacesClientId:    replaces_client_id,
-          # The navigation's RESERVED client id (`event.resultingClientId`): one per navigation
-          # chain, re-minted across a cross-origin redirect hop, adopted by the committed
-          # document (mint_resulting_client_id / sw_adopt_client_id).
-          resultingClientId:   resulting_client_id,
-          # The Navigation Preload response (nil unless preload is enabled), surfaced to the handler
-          # as `event.preloadResponse`.
-          preloadResponse:     preload
+          # params' fetch client — none of a user's, by the address bar; the document it replaces
+          # (`event.replacesClientId`), HTML's request "replaces client id": its navigable's active document's, none of a
+          # frame's first; and its RESERVED client id (`event.resultingClientId`): one per navigation chain, re-minted
+          # across a cross-origin redirect hop, adopted by the committed document (mint_resulting_client_id /
+          # sw_adopt_client_id).
+          client_id:             client_id,
+          replaces_client_id:    replaces_client_id,
+          resulting_client_id:   resulting_client_id,
+          # The Navigation Preload response (nil unless preload is enabled), surfaced to the handler as
+          # `event.preloadResponse`.
+          preload:               (JSON.generate(preload) if preload)
         )
         fetch_id = @worker_host.await_navigation
         reply    = begin
@@ -10546,10 +10506,10 @@ module Capybara
 
             next [bytes, abs]
           end
-          r = controller.positive? && http_url?(abs) ? sw_worker_client_fetch(controller, JSON.generate(
-            method: 'GET', url: abs, headers: {}, body_b64: '', mode: 'cors', destination: dest,
-            credentials: 'same-origin', clientId: sw_worker_client_id(handle)
-          ), handle) : nil
+          if controller.positive? && http_url?(abs)
+            req = Native.sw_request(kind: 'module', url: abs, destination: dest, client_id: sw_worker_client_id(handle))
+            r   = sw_worker_client_fetch(controller, req, handle)
+          end
           if r && !r['fallthrough']
             raise ModuleScriptUnavailable, abs if r['networkError'] || !sw_response_allowed?(r, 'cors')
 
