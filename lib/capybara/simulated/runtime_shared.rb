@@ -162,6 +162,7 @@ module Capybara
         'fontFile'                     => ->(b, *a) { b.font_file(a[0], a[1]) },
         'webFontFetch'                 => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i, a[2], a[3]) },
         'fontFetchStart'               => ->(b, *a) { b.font_fetch_start(a[0], a[1].to_i, a[2], a[3], a[4]) },
+        'fontFileKnown'                => ->(b, *a) { b.font_file_known(a[0], a[1].to_i, a[2], a[3])&.first },
         'localFontFile'                => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
         'resourceTimingFetch'          => ->(b, *a) { b.resource_timing_fetch(a[0], a[1].to_i, a[2], a[3]) },
         'takeModuleRt'                 => ->(b, *a) { b.take_module_rt },

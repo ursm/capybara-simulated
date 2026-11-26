@@ -92,6 +92,11 @@ impl RealmArena {
         }
     }
     // …and every entry of `doc`'s, as it loads anew (an in-place reload keeps its node): a new document's map is empty.
+    // Whether a preload of `url` is in the map, of whichever document and destination: what a look at a font's cached file
+    // leaves to the request (subresource_obtain.rs `font_known`).
+    pub(crate) fn preload_of(&self, url: &str) -> bool {
+        self.preloads.keys().any(|key| key.url == url)
+    }
     pub(crate) fn forget_preloads(&mut self, doc: NodeId) {
         self.preloads.retain(|key, _| key.doc != doc);
     }

@@ -1306,6 +1306,10 @@ pub(crate) struct RealmState {
     // …and the generation of that list, which moves as it is made again: what a face's place in it is good for
     // (font.rs `StackMember::wanted`).
     pub(crate) face_list_gen: u32,
+    // …and the faces of it a stack took as its own before any character asked for them, their files there already
+    // (font_resolve.rs `family_face`), and those it is to take no more, none having asked.
+    pub(crate) own_tentative: Vec<usize>,
+    pub(crate) own_refused: Vec<usize>,
     // What a face of that list came to, once asked (font_resolve.rs `indexed_file`) — its download under way, or the file
     // it is read from — and the face each family stack takes at a bucket (`family_face`): both forgotten when the list
     // moves, or a download lands.

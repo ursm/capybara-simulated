@@ -190,40 +190,66 @@ fn unreadable_format(u: &style::font_face::UrlSource) -> bool {
 }
 
 // The faces of a family stack (a computed `font-family`, as its value serializes) at a weight / style bucket
-// (`bold`, `italic`, `bold:italic`, ``), as indices into `faces`: with `all`, every face of every family of the stack
-// in the order a character picks from them — family by family, each family's best match first (a tie to the later
-// rule) — else the stack's first available font where it is one of them (CSS Fonts 4 §5.2: "the first font for which
-// the character U+0020 (space) is not excluded by a unicode-range, given the font families in the font-family list"):
-// the best match, of the first family that has faces, whose range does not exclude the space — a family all of whose
-// faces exclude it passed over (WPT fontface-descriptor-updates: a face scoped to U+0000 is no line's metrics; Chrome
-// and Firefox lay a split scoped to letters alone out by the next family, csim-bench font7 `sp1`) — none where no family
-// has one, the stack's system face then its first available font. CSS Fonts 4 §5.2: the same style first, then the
-// nearest weight.
-pub(crate) fn pick(faces: &[FaceRecord], stack: &str, bucket: &str, all: bool) -> Vec<usize> {
+// (`bold`, `italic`, `bold:italic`, ``), as indices into `faces`: every face of every family of the stack in the order
+// a character picks from them — family by family, each family's best match first (a tie to the later rule). CSS Fonts
+// 4 §5.2: the same style first, then the nearest weight.
+pub(crate) fn pick(faces: &[FaceRecord], stack: &str, bucket: &str) -> Vec<usize> {
+    families(stack).iter().flat_map(|family| family_pick(faces, family, bucket)).collect()
+}
+// …one family's (lowercased) faces, best first.
+fn family_pick(faces: &[FaceRecord], family: &str, bucket: &str) -> Vec<usize> {
     let want = if bucket.contains("bold") { 700.0 } else { 400.0 };
     let italic = bucket.contains("italic");
-    let mut out = Vec::new();
-    for family in families(stack) {
-        let mut scored: Vec<(Distance, usize)> = faces
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| f.family == family)
-            .map(|(i, f)| (f.distance(100.0, want, italic), i))
-            .collect();
-        if scored.is_empty() {
+    let mut scored: Vec<(Distance, usize)> = faces
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.family == family)
+        .map(|(i, f)| (f.distance(100.0, want, italic), i))
+        .collect();
+    // (…best first, and of equal ones the LATER rule)
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    scored.into_iter().map(|(_, i)| i).collect()
+}
+// The stack's first available font where it is one of `faces` (CSS Fonts 4 §5.2: "the first font for which the
+// character U+0020 (space) is not excluded by a unicode-range, given the font families in the font-family list"): family
+// by family, the best match whose range does not exclude the space — a family all of whose faces exclude it passed over
+// (WPT fontface-descriptor-updates: a face scoped to U+0000 is no line's metrics; Chrome and Firefox lay a split scoped
+// to letters alone out by the next family, csim-bench font7 `sp1`) — and none where a family of no faces comes first that
+// is a generic family or one `installed` (§5.2: an installed font covers all of Unicode; Chrome and Firefox `fa1`:
+// `U, serif, B` lays its lines out by `serif`, `U, NoSuchFont, B` by B). `installed` is asked of a family's name as
+// written, for a family of no faces that is no generic one.
+pub(crate) fn first_available(faces: &[FaceRecord], stack: &str, bucket: &str, mut installed: impl FnMut(&str) -> bool) -> Option<usize> {
+    for (family, quoted) in family_list(stack) {
+        let picked = family_pick(faces, &family.to_ascii_lowercase(), bucket);
+        if picked.is_empty() {
+            if (!quoted && is_generic(&family)) || installed(&family) {
+                return None;
+            }
             continue;
         }
-        // (…best first, and of equal ones the LATER rule)
-        scored.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
-        if !all {
-            match scored.iter().find(|&&(_, i)| faces[i].covers(0x20)) {
-                Some(&(_, i)) => return vec![i],
-                None => continue,
-            }
+        if let Some(&i) = picked.iter().find(|&&i| faces[i].covers(0x20)) {
+            return Some(i);
         }
-        out.extend(scored.into_iter().map(|(_, i)| i));
     }
-    out
+    None
+}
+// …the families it would ask `installed` about: of no faces and no generic ones, before the first family that has a face
+// not excluding the space.
+pub(crate) fn unknown_families(faces: &[FaceRecord], stack: &str, bucket: &str) -> Vec<String> {
+    let mut asked = Vec::new();
+    first_available(faces, stack, bucket, |f| {
+        asked.push(f.to_owned());
+        false
+    });
+    asked
+}
+// The generic font families (CSS Fonts 4 §4.1.1), as an identifier names them.
+const GENERIC_FAMILIES: [&str; 13] = [
+    "serif", "sans-serif", "cursive", "fantasy", "monospace", "system-ui", "emoji", "math", "fangsong", "ui-serif",
+    "ui-sans-serif", "ui-monospace", "ui-rounded",
+];
+fn is_generic(family: &str) -> bool {
+    GENERIC_FAMILIES.iter().any(|g| family.eq_ignore_ascii_case(g))
 }
 // CSS Font Loading's "find the matching font faces" (§2.4) among `faces`: for each family the `font` shorthand names,
 // the faces font matching picks (CSS Fonts 4 §5.2) — its style and weight decide among ALL the family's faces first
@@ -347,11 +373,7 @@ pub(crate) fn family_descriptor(value: &str) -> Option<(String, String)> {
             words.push(w);
         }
         const RESERVED: [&str; 6] = ["initial", "inherit", "unset", "revert", "revert-layer", "default"];
-        const GENERIC: [&str; 13] = [
-            "serif", "sans-serif", "cursive", "fantasy", "monospace", "system-ui", "emoji", "math", "fangsong", "ui-serif",
-            "ui-sans-serif", "ui-monospace", "ui-rounded",
-        ];
-        let keyword = |w: &String| RESERVED.iter().chain(GENERIC.iter()).any(|k| w.eq_ignore_ascii_case(k));
+        let keyword = |w: &String| RESERVED.iter().any(|k| w.eq_ignore_ascii_case(k)) || is_generic(w);
         if words.iter().any(|w| RESERVED.iter().any(|k| w.eq_ignore_ascii_case(k))) || (words.len() == 1 && keyword(&words[0])) {
             return Err(p.new_custom_error(()));
         }
@@ -516,6 +538,8 @@ fn font_faces_hand(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     arena.font_faces = faces;
     arena.family_faces.clear();
     arena.face_list_gen = arena.face_list_gen.wrapping_add(1);
+    arena.own_tentative.clear();
+    arena.own_refused.clear();
     arena.faces_handed = Some(key);
 }
 
@@ -622,20 +646,26 @@ mod tests {
     #[test]
     fn picks_by_style_then_weight() {
         let faces = [face("a", (400.0, 400.0), false), face("a", (700.0, 700.0), false), face("a", (400.0, 400.0), true), face("b", (300.0, 300.0), false)];
-        assert_eq!(pick(&faces, "A, b", "", false), vec![0]);
-        assert_eq!(pick(&faces, "\"A\"", "bold", false), vec![1]);
-        assert_eq!(pick(&faces, "a", "italic", false), vec![2]);
-        assert_eq!(pick(&faces, "x, B", "bold", false), vec![3]);
-        assert_eq!(pick(&faces, "a, b", "", true), vec![0, 1, 2, 3]);
+        let first = |faces: &[FaceRecord], stack: &str, bucket: &str| first_available(faces, stack, bucket, |f| f == "Installed");
+        assert_eq!(first(&faces, "A, b", ""), Some(0));
+        assert_eq!(first(&faces, "\"A\"", "bold"), Some(1));
+        assert_eq!(first(&faces, "a", "italic"), Some(2));
+        assert_eq!(first(&faces, "x, B", "bold"), Some(3));
+        assert_eq!(pick(&faces, "a, b", ""), vec![0, 1, 2, 3]);
         // (…the first available font is one whose range does not exclude the space: the later rule scoped away from it
-        // is no primary, the earlier one is — and a family every face of which excludes it is passed over, to the next
-        // family's)
+        // is no primary, the earlier one is — a family every face of which excludes it is passed over, to the next
+        // family's — and a generic family or an installed one before any is the first available font itself, a missing
+        // one passed over)
         let scoped = |range: Option<Vec<(u32, u32)>>| FaceRecord { ranges: range, ..face("u", (400.0, 400.0), false) };
         let split = [scoped(Some(vec![(0, 0xff)])), scoped(Some(vec![(0, 0)])), face("b", (400.0, 400.0), false)];
-        assert_eq!(pick(&split, "u", "", false), vec![0]);
-        assert_eq!(pick(&split[1..], "u, b", "", false), vec![1]);
-        assert_eq!(pick(&split[1..2], "u", "", false), Vec::<usize>::new());
-        assert!(pick(&faces, "serif", "", false).is_empty());
+        assert_eq!(first(&split, "u", ""), Some(0));
+        assert_eq!(first(&split[1..], "u, b", ""), Some(1));
+        assert_eq!(first(&split[1..2], "u", ""), None);
+        assert_eq!(first(&split[1..], "u, serif, b", ""), None);
+        assert_eq!(first(&split[1..], "u, Installed, b", ""), None);
+        assert_eq!(first(&split[1..], "u, NoSuchFont, b", ""), Some(1));
+        assert_eq!(first(&split[1..], "u, \"serif\", b", ""), Some(1));
+        assert!(first(&faces, "serif", "").is_none());
     }
 
     #[test]

@@ -45,6 +45,7 @@ pub(crate) const H_SCRIPT_TAKE: u32 = 29;
 pub(crate) const H_SCRIPT_FORGET: u32 = 30;
 const H_FONT_START: u32 = 31;
 pub(crate) const H_FONT_LAND: u32 = 32;
+const H_FONT_KNOWN: u32 = 33;
 
 // What a link's fetch came to (`linkObtain`, `linkPreloadRun`): its resource loads or not — or it has no preload planned
 // (`linkPreloadRun`), or it is a controlling service worker's to answer, the engine's then to fire its event
@@ -538,6 +539,26 @@ pub(crate) fn font_fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: 
             Ok(FontFetch::Done(None))
         }
     }
+}
+// The file a font's `url()` source has already where nothing need be fetched for it — the host's font cache's (another
+// document of the process fetched it) — none where it would be fetched, or answered by a preload or a controlling service
+// worker: a look that makes no request and files no entry (font_resolve.rs: a `unicode-range` face measured as a
+// character first asks for it, its load then begun, which answers at once with this file).
+pub(crate) fn font_known(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, referrer: Option<&str>, host: v8::Local<'_, v8::Function>) -> Result<Option<String>, Terminated> {
+    if crate::fetch_rules::fetch_route(url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
+        return Ok(None);
+    }
+    if call(scope, host, H_CONTROLLER, &[])?.is_some_and(|c| v8::Local::new(scope, c).uint32_value(scope).unwrap_or(0) != 0) {
+        return Ok(None);
+    }
+    let plan = plan_in(realm(scope, cid), crate::subresource_judge::J_FONT, None, None, referrer);
+    let r = Request { cid, kind: crate::subresource_judge::J_FONT, url: url.to_owned(), el: None, doc: None, plan, client: None, referrer: referrer.map(str::to_owned), integrity: String::new(), preload: None, load: 0, holds: None, initiator: "css", started: 0.0 };
+    if realm(scope, cid).preload_of(url) {
+        return Ok(None);
+    }
+    let args = request_args(scope, &r);
+    let known = call(scope, host, H_FONT_KNOWN, &args)?;
+    Ok(text_of(scope, known))
 }
 // …its file as it lands, none where it gave none: a slot's response taken (its cookies stored) and its entry filed, timed
 // from as it began to now — one cancelled filed as a network error.

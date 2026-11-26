@@ -18,7 +18,9 @@ RSpec.describe 'web fonts loading in parallel' do
       if (m = env['PATH_INFO'].match(%r{\A/slow/(\d+)/(\w+)\.ttf\z}))
         requested << m[2]
         sleep(m[1].to_i / 1000.0)
-        next m[2] == 'ahem' ? [200, {'content-type' => 'font/ttf'}, [ahem]] : [404, {}, ['no']]
+        next [200, {'content-type' => 'font/ttf'}, [ahem]] if m[2] == 'ahem'
+        next [200, {'content-type' => 'font/ttf'}, [lato]] if m[2] == 'lato'
+        next [404, {}, ['no']]
       end
       [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'])]]
     }
@@ -26,6 +28,15 @@ RSpec.describe 'web fonts loading in parallel' do
 
   def ahem
     @ahem ||= File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
+  end
+
+  def lato
+    @lato ||= File.binread(File.expand_path('wpt/fonts/Lato-Medium.ttf', __dir__))
+  end
+
+  # (…one URL for every page of an example: the host's font cache has it from the first page on)
+  def cached_font
+    @cached_font ||= font(0, 'lato')
   end
 
   # (…the fonts the server was asked for, by name)
@@ -48,6 +59,20 @@ RSpec.describe 'web fonts loading in parallel' do
   # (…each page's its own URL: the host keeps a font it fetched for the process, which another visit's then has at once)
   def font(ms, name = 'ahem')
     "/slow/#{ms}/#{name}.ttf?#{SecureRandom.hex(4)}"
+  end
+
+  def canvas_split(latin)
+    <<~HTML
+      <style>
+        @font-face { font-family: L; src: url(#{latin}); unicode-range: U+0-FF }
+        @font-face { font-family: L; src: url(#{font(0)}); unicode-range: U+400-4FF }
+      </style><span id="s"></span>
+      <script>
+        var c = document.createElement('canvas').getContext('2d');
+        c.font = '20px L';
+        L.push('ascent:' + c.measureText('\u0434\u0434').fontBoundingBoxAscent);
+      </script>
+    HTML
   end
 
   def face(ms, name: 'ahem', display: nil)
@@ -99,6 +124,31 @@ RSpec.describe 'web fonts loading in parallel' do
           @font-face { font-family: C; src: url(#{font(300, 'caps')}); unicode-range: U+41-5A }
         </style><span id="s" style="font: 20px A, monospace">一一</span><span style="font: 20px C, monospace">abcd</span>
       HTML
+      # A face scoped to letters before a generic family, and before a missing one: the generic family is the first available
+      # font, the missing one passed over to the next face (CSS Fonts 4 §5.2; Chrome and Firefox csim-bench font7 `fa1`).
+      '/families.html' => head + <<~HTML,
+        <style>
+          @font-face { font-family: U; src: url(#{font(0, 'lato')}); unicode-range: U+61-7A }
+          @font-face { font-family: B; src: url(#{font(0)}) }
+          div { font-size: 20px }
+        </style>
+        <span id="s"></span>
+        <div style="font-family: U, serif, B">ab cd</div><div style="font-family: U, serif">ab cd</div>
+        <div style="font-family: U, NoSuchFont, B">ab cd</div><div style="font-family: U, B">ab cd</div>
+      HTML
+      # A split's first available font whose file the host has from an earlier page, no character of this one selecting it:
+      # still no line's font, nor loaded — its file there makes it no use (§4.5).
+      '/cached-first.html' => head + %(<style>@font-face { font-family: L; src: url(#{cached_font}); unicode-range: U+0-FF }</style><span id="s" style="font: 20px L, monospace">abcd</span>),
+      '/cached-unused.html' => head + <<~HTML,
+        <style>
+          @font-face { font-family: L; src: url(#{cached_font}); unicode-range: U+0-FF }
+          @font-face { font-family: L; src: url(#{font(0)}); unicode-range: U+4E00-4FFF }
+        </style><span id="s" style="font: 20px L, monospace">\u4e00</span><div id="m" style="font: 20px monospace">\u4e00</div>
+      HTML
+      # A canvas measuring, before any layout, a stack whose first available font the host has a file of from an earlier
+      # page, no character asking for it: measured as a page whose host has none would (csim-bench rv `cache.rb`).
+      '/canvas-cached.html' => head + canvas_split(cached_font),
+      '/canvas-cold.html' => head + canvas_split(font(0, 'lato')),
       # `stop()` while the face downloads: its download cancelled, the face failed a task later, the set loaded.
       '/stop.html' => head + face(1000) + <<~HTML,
         <script>
@@ -237,6 +287,28 @@ RSpec.describe 'web fonts loading in parallel' do
     s = visit('/first-available.html')
     expect(s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.status; })")).to eq(%w[unloaded error unloaded])
     expect(requested).to eq(['han'])
+  end
+
+  it 'takes a generic or installed family before a face that excludes the space as the first available font' do
+    s = visit('/families.html')
+    heights = s.evaluate_script("Array.from(document.querySelectorAll('div')).map(function (d) { return d.getBoundingClientRect().height; })")
+    expect(heights[0]).to eq(heights[1])
+    expect(heights[2]).to eq(heights[3])
+    expect(heights[0]).not_to eq(heights[2])
+  end
+
+  it 'takes no face the host has a file of as a page\'s first available font where no character selects it' do
+    visit('/cached-first.html')
+    s = visit('/cached-unused.html')
+    expect(s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.status; })")).to eq(%w[unloaded loaded])
+    expect(s.evaluate_script("document.getElementById('s').getBoundingClientRect().height")).to eq(s.evaluate_script("document.getElementById('m').getBoundingClientRect().height"))
+  end
+
+  it 'measures a canvas\'s text by no face the host has a file of that no character asked for' do
+    visit('/cached-first.html')
+    warm = log(visit('/canvas-cached.html')).first
+    expect(warm).to start_with('ascent:')
+    expect(warm).to eq(log(visit('/canvas-cold.html')).first)
   end
 
   it 'fails a face whose download the document\'s stop() cancelled, a task later' do

@@ -45,8 +45,9 @@ pub(crate) struct FontMetrics {
 // One face of a `unicode-range` split: its registered handle, the ranges it covers (None: every code point), and its
 // vertical metrics in ems — None where its table carries none. Or a face no character has asked for yet (`wanted`: its
 // realm, the generation of that realm's face list and its place in it), whose file is not loaded until one does (CSS Fonts 4 §4.5: a face
-// whose range covers none of the text is not downloaded): a character it covers is measured past it, by the next member
-// that covers it, and asks for it (`take_wanted`).
+// whose range covers none of the text is not downloaded): a character it covers asks for it (`take_wanted`), and is
+// measured by it where its file is there already (`handle` one — the host's font cache's: font_resolve.rs), else past it,
+// by the next member that covers it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StackMember {
     pub(crate) ranges: Option<Vec<(u32, u32)>>,
@@ -87,15 +88,16 @@ impl FontMetrics {
             if !m.covers(cp) {
                 continue;
             }
-            match m.wanted {
-                Some(face) if !PROBING.get() => WANTED.with(|w| {
+            if let Some(face) = m.wanted.filter(|_| !PROBING.get()) {
+                WANTED.with(|w| {
                     let mut w = w.borrow_mut();
-                    if !w.contains(&face) {
-                        w.push(face);
+                    if !w.iter().any(|&(f, _)| f == face) {
+                        w.push((face, m.handle >= 0));
                     }
-                }),
-                Some(_) => {}
-                None => return Some(m),
+                });
+            }
+            if m.handle >= 0 {
+                return Some(m);
             }
         }
         None
@@ -379,7 +381,7 @@ thread_local! {
     static FONTS: RefCell<Vec<Option<FontMetrics>>> = const { RefCell::new(Vec::new()) };
     static FONT_IDX: RefCell<HashMap<String, i32>> = RefCell::new(HashMap::new());
     // The faces of a split a character asked for that no one has asked to load yet (`StackMember::wanted`).
-    static WANTED: RefCell<Vec<Wanted>> = const { RefCell::new(Vec::new()) };
+    static WANTED: RefCell<Vec<(Wanted, bool)>> = const { RefCell::new(Vec::new()) };
     // Whether what is measured is a probe of the layout's own (`probing`), which asks for no face.
     static PROBING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -394,18 +396,19 @@ pub(crate) fn probing<R>(f: impl FnOnce() -> R) -> R {
 }
 
 // The faces of realm `cid`'s list — the list of generation `list` — a character measured has asked for, by their places,
-// asked no more; and those of the realm's earlier lists let go of (a stack kept from one measured since).
-pub(crate) fn take_wanted(cid: i32, list: u32) -> Vec<usize> {
+// each with whether it was measured by it already, asked no more; and those of the realm's earlier lists let go of (a
+// stack kept from one measured since).
+pub(crate) fn take_wanted(cid: i32, list: u32) -> Vec<(usize, bool)> {
     WANTED.with(|w| {
         let mut w = w.borrow_mut();
-        let (mine, others): (Vec<_>, Vec<_>) = w.drain(..).partition(|&(realm, _, _)| realm == cid);
+        let (mine, others): (Vec<_>, Vec<_>) = w.drain(..).partition(|&((realm, _, _), _)| realm == cid);
         *w = others;
-        mine.into_iter().filter(|&(_, at, _)| at == list).map(|(_, _, k)| k).collect()
+        mine.into_iter().filter(|&((_, at, _), _)| at == list).map(|((_, _, k), measured)| (k, measured)).collect()
     })
 }
 // …or all of them let go of: a new document begins in the realm.
 pub(crate) fn forget_wanted(cid: i32) {
-    WANTED.with(|w| w.borrow_mut().retain(|&(realm, _, _)| realm != cid));
+    WANTED.with(|w| w.borrow_mut().retain(|&((realm, _, _), _)| realm != cid));
 }
 
 // The SFNT a font file holds: a WOFF 1.0 container's tables inflated, a WOFF 2.0 one's Brotli stream decompressed

@@ -22,8 +22,11 @@ struct Host<'s> {
     subresources: v8::Local<'s, v8::Function>,
     settle: v8::Local<'s, v8::Function>,
     system: v8::Local<'s, v8::Function>,
-    // (…and whether this is a download's landing task, which settles what it asks about in it)
+    // (…and whether this is a download's landing task, which settles what it asks about in it; and whether a stack's own
+    // face may be taken tentatively — by a layout pass, whose wants are settled as it ends (`fontFacesWanted`): no
+    // canvas's text op, which measures before any pass may have asked, csim-bench rv `cache.rb`)
     landing: bool,
+    tentative: bool,
 }
 // What a face came to, as `settle` is told (font-metrics.js `settleFace`): its file failed, or loaded — there as it was
 // first asked for, which its load settles a task later (CSS Font Loading "load()": "when the load operation completes …
@@ -97,12 +100,31 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
     // CSS Fonts 4 §4.5, "if the unicode-range of a font face does not cover any of the characters … it is not
     // downloaded", Chrome and Firefox csim-bench font7 `f10`, `u2` — a member of the split that asks as it is measured)
     let unasked = |arena: &crate::dom::RealmArena, k: usize| faces[k].ranges.is_some() && arena.face_files.get(k).is_none_or(Option::is_none);
+    // (…a face no character has asked for yet whose file is there already — the host's font cache's — which is measured
+    // with as soon as a character asks for it, its ask settling it after the pass: `known`)
+    let known = |scope: &mut v8::PinScope<'_, '_>, k: usize| {
+        let f = &faces[k];
+        crate::font_files::known_file(scope, cid, f.file.as_deref(), &f.sources, f.local_style(), f.referrer.as_deref(), f.usable_for, host.subresources)
+    };
     // (…the stack's own face, its first available font where that is one of its faces and has a file — one scoped by a
     // range loaded only as a character asks for it, as the split's other faces are: §4.5, "must not download or use the
     // font for codepoints outside this set", Chrome `g1`, `g3`; Firefox loads it as the line's font. Until then the
-    // stack's lines are laid out by its system face.)
-    let own = match crate::font_faces::pick(&faces, family, bucket, false).first() {
-        Some(&k) if !unasked(realm(scope, cid), k) => indexed_file(scope, cid, k, host)?.file().map(|path| (k, path)),
+    // stack's lines are laid out by its system face — or, its file there already, by it, tentatively: kept where a
+    // character of the pass asks for it, refused and the pass laid out again where none does (`fontFacesWanted`).)
+    // (…a family of no faces before its own face answered by whether it is installed: `installed_before`)
+    let installed = installed_before(scope, cid, &faces, family, bucket, host)?;
+    // (…one declined, where none may be taken tentatively, kept for no layout pass, which takes it: not memoised)
+    let mut declined = false;
+    let own = match crate::font_faces::first_available(&faces, family, bucket, |f| installed.iter().any(|i| i == f)) {
+        Some(k) if !unasked(realm(scope, cid), k) => indexed_file(scope, cid, k, host)?.file().map(|path| (k, path)),
+        Some(k) if !realm(scope, cid).own_refused.contains(&k) => {
+            let path = known(scope, k)?;
+            if path.is_some() && host.tentative {
+                realm(scope, cid).own_tentative.push(k);
+            }
+            declined = path.is_some() && !host.tentative;
+            path.filter(|_| host.tentative).map(|path| (k, path))
+        }
         _ => None,
     };
     let overrides = own.as_ref().map_or([None; 3], |&(k, _)| faces[k].overrides);
@@ -111,21 +133,21 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
         // The candidates a run's characters pick from — each character the FIRST whose range covers it, so a
         // `size-adjust` face scoped to A–Z reshapes only those glyphs — in pick order, the family's SYSTEM face the last
         // resort: Chrome never renders a code point through a face that excludes it.
-        let mut candidates: Vec<(Option<usize>, Option<String>)> = Vec::new();
+        let mut candidates: Vec<Candidate> = Vec::new();
         let mut restricted = false;
-        for k in crate::font_faces::pick(&faces, family, bucket, true) {
+        for k in crate::font_faces::pick(&faces, family, bucket) {
             if unasked(realm(scope, cid), k) {
                 restricted = true;
-                candidates.push((Some(k), None));
+                candidates.push((Some(k), known(scope, k)?, true));
                 continue;
             }
             let Some(path) = indexed_file(scope, cid, k, host)?.file() else { continue };
             restricted |= faces[k].ranges.is_some();
-            candidates.push((Some(k), Some(path)));
+            candidates.push((Some(k), Some(path), false));
         }
         if restricted {
             if let Some(path) = system_file(scope, host, family, bucket)?.filter(|p| crate::font::register_path(p) >= 0) {
-                candidates.push((None, Some(path)));
+                candidates.push((None, Some(path), false));
             }
             let wanted = (cid, realm(scope, cid).face_list_gen);
             handle = Some(stack_handle(wanted, &faces, own.as_ref().map(|&(k, _)| k), &candidates));
@@ -143,8 +165,25 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
         }
     };
     let resolved = (handle, overrides);
-    realm(scope, cid).family_faces.entry(family.to_owned()).or_default().insert(bucket.to_owned(), resolved);
+    if !declined {
+        realm(scope, cid).family_faces.entry(family.to_owned()).or_default().insert(bucket.to_owned(), resolved);
+    }
     Ok(resolved)
+}
+
+// The families of the stack `family` that `font_faces::first_available` asks about (`unknown_families`) that are installed
+// — none asked where the realm has no faces.
+fn installed_before(scope: &mut v8::PinScope<'_, '_>, cid: i32, faces: &[crate::font_faces::FaceRecord], family: &str, bucket: &str, host: &Host<'_>) -> Result<Vec<String>, Terminated> {
+    let mut installed = Vec::new();
+    if faces.is_empty() {
+        return Ok(installed);
+    }
+    for name in crate::font_faces::unknown_families(faces, family, bucket) {
+        if crate::font_files::installed(scope, cid, &name, bucket, host.subresources)? {
+            installed.push(name);
+        }
+    }
+    Ok(installed)
 }
 
 // A `unicode-range` split registered as one face: each candidate its own registered face — a downloaded one under its
@@ -152,16 +191,18 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
 // characters select it on, font.rs `run_vmax`) and its ranges. The stack's own face is the stack's primary — what a
 // character no candidate covers is measured by, and what a `ch` is (style_fonts.rs) — or the system face, the candidate
 // of no face, where it has none. -1 where any candidate has no file native reads, or none is the stack's own. A candidate
-// of no file (`None`) is one no character has asked for: a member that asks as one does (`StackMember::wanted`, of the
-// realm and the generation of its face list `list`).
-fn stack_handle(list: (i32, u32), faces: &[crate::font_faces::FaceRecord], own: Option<usize>, candidates: &[(Option<usize>, Option<String>)]) -> i32 {
+// one no character has asked for (`asks`) is a member that asks as one does (`StackMember::wanted`, of the realm and the
+// generation of its face list `list`), measured past where it has no file yet (`None`).
+type Candidate = (Option<usize>, Option<String>, bool);
+fn stack_handle(list: (i32, u32), faces: &[crate::font_faces::FaceRecord], own: Option<usize>, candidates: &[Candidate]) -> i32 {
     let mut primary = -1;
     let mut members = Vec::new();
-    for (k, path) in candidates {
+    for (k, path, asks) in candidates {
         let face = k.map(|k| &faces[k]);
         let ranges = face.and_then(|f| f.ranges.clone());
+        let wanted = k.filter(|_| *asks).map(|k| (list.0, list.1, k));
         let Some(path) = path else {
-            members.push(crate::font::StackMember { ranges, handle: -1, vertical: None, wanted: k.map(|k| (list.0, list.1, k)) });
+            members.push(crate::font::StackMember { ranges, handle: -1, vertical: None, wanted });
             continue;
         };
         let h = crate::font::register_scaled(crate::font::register_path(path), face.map_or(1.0, |f| f.size_adjust));
@@ -173,7 +214,7 @@ fn stack_handle(list: (i32, u32), faces: &[crate::font_faces::FaceRecord], own: 
         }
         let overrides = face.map_or([None; 3], |f| f.overrides);
         let vertical = crate::font::with_font(h, |fm| fm.face(overrides).map(|(v, _, _)| v)).flatten();
-        members.push(crate::font::StackMember { ranges, handle: h, vertical, wanted: None });
+        members.push(crate::font::StackMember { ranges, handle: h, vertical, wanted });
     }
     crate::font::register_stack(primary, members)
 }
@@ -181,13 +222,15 @@ fn stack_handle(list: (i32, u32), faces: &[crate::font_faces::FaceRecord], own: 
 // The functions of the page side's `Host`, from `args` at `at`, …
 fn host<'s>(args: &v8::FunctionCallbackArguments<'s>, at: i32) -> Option<Host<'s>> {
     let f = |k: i32| v8::Local::<v8::Function>::try_from(args.get(at + k)).ok();
-    Some(Host { subresources: f(0)?, settle: f(1)?, system: f(2)?, landing: false })
+    Some(Host { subresources: f(0)?, settle: f(1)?, system: f(2)?, landing: false, tentative: false })
 }
 
 // __dom.fontFamilyFace(family, bucket, subresources, settle, system) -> `[handle, ascentOverride, descentOverride,
-// lineGapOverride]` of the face `family` takes at `bucket` (`family_face`), NaN for an override it has none of.
+// lineGapOverride]` of the face `family` takes at `bucket` (`family_face`), NaN for an override it has none of: a layout
+// pass's (or the style engine's), which may take a stack's own face tentatively.
 fn font_family_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = host(&args, 2) else { return };
+    let host = Host { tentative: true, ..host };
     let (family, bucket) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
     let Ok((handle, overrides)) = family_face(scope, cid, &family, &bucket, &host) else { return };
@@ -197,7 +240,7 @@ fn font_family_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 }
 
 // __dom.fontFamilyHandle(family, bucket, subresources, settle, system) -> the handle alone (what a canvas's text op shapes
-// with, asked on every one).
+// with, asked on every one), no own face taken tentatively.
 fn font_family_handle(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = host(&args, 2) else { return };
     let (family, bucket) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
@@ -262,26 +305,35 @@ fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(v8::Array::new_with_elements(scope, &settled).into());
 }
 
-// __dom.fontFacesWanted(subresources, settle, system) -> whether a face's file was there at once: the faces of the realm's
-// list a character measured has asked for since (font.rs `take_wanted`: a `unicode-range` face, loaded only once text
-// uses it) asked for now — its load begun (`indexed_file`) — and the faces each family stack takes made again of them;
-// one whose file was there at once moves what the realm's faces read from (the layout due again, as a landing does).
+// __dom.fontFacesWanted(subresources, settle, system) -> whether what was laid out is to be laid out again: the faces of the
+// realm's list a character measured has asked for since (font.rs `take_wanted`: a `unicode-range` face, loaded only once
+// text uses it) asked for now — its load begun (`indexed_file`) — and the faces each family stack takes made again of
+// them. Laid out again where one's file was there at once that was not measured with already, or a stack's own face taken
+// tentatively (`family_face`) no character asked for — refused from now: what the realm's faces read from moved (the
+// layout due again, as a landing does).
 fn font_faces_wanted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(false);
     let Some(host) = host(&args, 0) else { return };
     let cid = realm_id(scope, &args);
     let wanted = crate::font::take_wanted(cid, realm(scope, cid).face_list_gen);
-    if wanted.is_empty() {
+    let tentative = std::mem::take(&mut realm(scope, cid).own_tentative);
+    if wanted.is_empty() && tentative.is_empty() {
         return;
     }
     let mut there = false;
-    for k in wanted {
+    for &(k, measured) in &wanted {
         match indexed_file(scope, cid, k, &host) {
-            Ok(got) => there |= got.file().is_some(),
+            Ok(got) => there |= got.file().is_some() && !measured,
             Err(Terminated) => return,
         }
     }
     let arena = realm(scope, cid);
+    for k in tentative {
+        if !wanted.iter().any(|&(w, _)| w == k) {
+            arena.own_refused.push(k);
+            there = true;
+        }
+    }
     arena.family_faces.clear();
     if there {
         arena.font_files.generation = arena.font_files.generation.wrapping_add(1);

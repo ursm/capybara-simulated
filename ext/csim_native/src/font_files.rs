@@ -113,6 +113,11 @@ fn source_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: &FaceSource, 
     let took = if kind == URL { realm(scope, cid).font_files.took.get(value).copied().unwrap_or(0.0) } else { 0.0 };
     Ok(path.filter(|p| crate::font::register_path(p) >= 0).map_or(Got::None(took), |p| Got::File(p, took)))
 }
+// Whether a font is installed under the family name `name` at the weight / style `bucket`: what a `local()` source of it
+// would give (`H_LOCAL_FONT`), looked up once per realm as one is.
+pub(crate) fn installed(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, bucket: &str, host: v8::Local<'_, v8::Function>) -> Result<bool, Terminated> {
+    Ok(matches!(source_file(scope, cid, &FaceSource::Local(name.to_owned()), bucket, None, host)?, Got::File(..)))
+}
 // …and what a face's sources come to: a buffer face's own `file`, else the first of its `sources` that gives one — a
 // browser tries each in turn: a `src` listing woff2, then woff, then ttf takes the first that comes; a `local()` name
 // looked up at the weight / style `bucket` its descriptors name — the face read from it where it came within `usable_for`
@@ -155,6 +160,52 @@ pub(crate) fn face_file(
         }
     }
     Ok(FaceFile::Settled { file: None, loaded: false })
+}
+// …or the file a face would be read from were it asked for now, where that needs nothing downloaded: its sources tried as
+// `face_file` tries them, a `url()` one known to this realm or to the host's font cache (subresource_obtain.rs
+// `font_known`), a `local()` one looked up — none where one would be downloaded, or is under way. Nothing is asked, so
+// nothing is settled: a look for a `unicode-range` face no character has asked for yet (font_resolve.rs).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn known_file(
+    scope: &mut v8::PinScope<'_, '_>,
+    cid: i32,
+    file: Option<&str>,
+    sources: &[FaceSource],
+    bucket: &str,
+    referrer: Option<&str>,
+    usable_for: f64,
+    host: v8::Local<'_, v8::Function>,
+) -> Result<Option<String>, Terminated> {
+    if let Some(file) = file {
+        return Ok(Some(file.to_owned()).filter(|p| crate::font::register_path(p) >= 0));
+    }
+    let mut tried = 0.0;
+    for source in sources {
+        let url = match source {
+            FaceSource::Url(url) => url,
+            FaceSource::Local(_) => match source_file(scope, cid, source, bucket, referrer, host)? {
+                Got::File(path, _) => return Ok(Some(path)),
+                _ => continue,
+            },
+        };
+        let files = &realm(scope, cid).font_files;
+        if files.flights.contains_key(url) || files.cancelled.as_deref() == Some(url.as_str()) {
+            return Ok(None);
+        }
+        let took = files.took.get(url).copied().unwrap_or(0.0);
+        let path = match files.files.get(&(URL, url.clone())).cloned() {
+            Some(path) => path,
+            None => match crate::subresource_obtain::font_known(scope, cid, url, referrer, host)? {
+                Some(path) => Some(path),
+                None => return Ok(None),
+            },
+        };
+        match path.filter(|p| crate::font::register_path(p) >= 0) {
+            Some(path) => return Ok((tried + took <= usable_for).then_some(path)),
+            None => tried += took,
+        }
+    }
+    Ok(None)
 }
 // A download landed (`fontFetchLand`): the flight of the host's slot `slot` taken — the file it gave kept, how long it took,
 // the generation moved — its URL, and the FontFaces whose `load()` waited for it, `[face, state]`, handed back; none
