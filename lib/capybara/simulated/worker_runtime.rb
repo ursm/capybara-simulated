@@ -45,6 +45,9 @@ module Capybara
       def eval_module_graph(src, url, fetch_import, service: true)
         module_steps(fetch_import, url.to_s => [src, url.to_s, 'text/javascript'])
         result = call('moduleWorkerGraph', url.to_s)
+        # (…its `import()`s' fetches the script's again, its graph's of the worker's destination in: HTML's
+        # HostLoadImportedModule with no load state, `script`)
+        module_steps(@dynamic_fetch) if @dynamic_fetch
         raise ModuleGraphFailed, "module script failed: #{url}" unless result.is_a?(Array)
         raise ModuleGraphFailed, result[0].first(2).join(': ') if result[0].is_a?(Array)
 
@@ -57,9 +60,6 @@ module Capybara
           root.evaluate(report: '@steps.reportError')
         end
         nil
-      ensure
-        # (…its `import()`s' fetches the script's again, its graph's of the worker's destination over)
-        module_steps(@dynamic_fetch) if @dynamic_fetch
       end
       # …what a module graph of the worker's could not come to: a module none could fetch, or its error to rethrow.
       class ModuleGraphFailed < StandardError; end

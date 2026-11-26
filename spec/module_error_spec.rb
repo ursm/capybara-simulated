@@ -94,7 +94,7 @@ RSpec.describe 'a module script’s error' do
     expect(poll_until { (e = s.evaluate_script('seen')).size == 3 && e }).to eq(
       [
         [true, 'SyntaxError', '/bad.js', 2, "SyntaxError: Unexpected token ';'"],
-        [true, 'TypeError', '/', 0, %(TypeError: #{Capybara::Simulated::RuntimeShared.unresolved_specifier('foo')})],
+        [true, 'TypeError', '/', 0, %(TypeError: Failed to resolve module specifier "foo". Relative references must start with either "/", "./", or "../".)],
         'inline error'
       ]
     )
