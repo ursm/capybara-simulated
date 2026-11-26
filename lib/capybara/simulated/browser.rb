@@ -4193,13 +4193,15 @@ module Capybara
       # (…`since`, a parser-blocking script's a controlling service worker let through: how long ago, in virtual ms, its
       # fetch is dated to have begun — its server's sleeps counted as the request is made, none of their real time the page's
       # script time, and only what is left of them past that date run on the event loop, as its network slot's would be)
-      def planned_external_asset(url, document, realm, plan, referrer = nil, module_map: false, since: nil)
+      # (…`waits` false, a style sheet's the cascade reads: one under way joined for its answer, none of what is left of its
+      # server's time waited on the event loop — its load's to wait for, the cascade's never)
+      def planned_external_asset(url, document, realm, plan, referrer = nil, module_map: false, since: nil, waits: true)
         mode, credentials, policy, dest = request_of_plan(plan)
         referrer = nil if referrer.to_s.empty?
-        return external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map) unless since
+        return external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map, waits: waits) unless since
 
         answer, slept = server_timed_sleeps {
-          external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
+          external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map, waits: waits)
         }
         @runtime.call('agentExcuse', slept) if slept.positive?
         left = slept - since.to_f
@@ -4209,8 +4211,8 @@ module Capybara
       # …answered as [its text, nil where the load failed; the facts of the response it came from (`resource_timing_meta`,
       # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of
       # one URL two responses — or nil where the URL resolves to none.
-      def external_asset_response(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin', module_map: false)
-        request = asset_request(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
+      def external_asset_response(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin', module_map: false, waits: true)
+        request = asset_request(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map, waits: waits)
         return request unless request.is_a?(AssetRequest)
 
         asset_answer(request, asset_fetch(request))
@@ -4222,7 +4224,7 @@ module Capybara
       # (…`joins` false: none of a fetch under way taken, its asker one to take it itself: `script_fetch_start`)
       # (…`module_map`: a module script's — its graph's, a modulepreload's — which its document's module map answers, filled
       # by the first fetch of it that loaded, whatever its response's freshness: HTML "fetch a single module script")
-      private def asset_request(url, document, realm, policy, referrer:, dest:, mode:, credentials:, joins: true, module_map: false)
+      private def asset_request(url, document, realm, policy, referrer:, dest:, mode:, credentials:, joins: true, module_map: false, waits: true)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4262,7 +4264,7 @@ module Capybara
         # be; none of it where it has passed)
         if joins && memo && (slot = @asset_flights[document.to_i]&.[](memo_key))
           left = slot[:began] + slot[:slept] - @runtime.realm_direct_call(0, 'virtualNow').to_f
-          server_slept_ms(left) if left.positive?
+          server_slept_ms(left) if waits && left.positive?
           return asset_answer(slot[:request], slot[:result]) if slot[:result]
         end
         client     = client_for(realm.to_i, policy, referrer: referrer)

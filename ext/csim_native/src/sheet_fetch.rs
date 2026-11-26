@@ -56,10 +56,18 @@ pub(crate) struct SheetRequest {
 pub(crate) struct RealmSheets {
     // A `<link>`'s fetch of its sheet under way, begun as it was connected (`sheetFetchBegin`): the host's slot, by owner —
     // and the owners whose fetch its document's abort cancelled (`sheetFetchesAbort`).
-    flights: HashMap<NodeId, u32>,
+    // (…each its slot, its request — `"{plan & PLAN_REQUEST} {url}"` — and when its response comes in on the clock)
+    flights: HashMap<NodeId, (u32, String, f64)>,
     cancelled: std::collections::HashSet<NodeId>,
-    // …and the `@import`s of an owner's sheet under way, begun as it came to have them (`sheetImportsBegin`).
-    imports: HashMap<NodeId, Vec<u32>>,
+    // …and the `@import`s of an owner's sheet under way, begun as it came to have them (`sheetImportsBegin`): each its slot
+    // and its URL, the level of the tree being waited for.
+    imports: HashMap<NodeId, Vec<(u32, String)>>,
+    // …and the flights the cascade began for an `@import`'s sheet it read before its owner's load came to that level of
+    // its tree, by request — each its slot and when its response comes in — which that level then waits for
+    // (`begin_imports`).
+    cascade_flights: HashMap<String, (u32, f64)>,
+    // …and how deep in its `@import` tree an owner's load has gone.
+    import_depths: HashMap<NodeId, usize>,
     encodings: HashMap<String, &'static str>,
     answers: HashMap<String, Option<v8::Global<v8::Value>>>,
     blob_texts: HashMap<String, Option<String>>,
@@ -98,12 +106,21 @@ fn fetch_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId, url: &str, plan: u32, scanned: bool) -> Result<f64, Terminated> {
+    let key = format!("{} {url}", plan & PLAN_REQUEST);
+    // (…the flight already under way where the cascade read its sheet first as the parser connected it: that fetch is its
+    // fetch, landing as it does)
+    let arena = realm(scope, cid);
+    let clock = arena.event_loop.clock;
+    if let Some((_, k, due_at)) = arena.realm_state(cid).and_then(|s| s.sheet_fetches.flights.get(&el)) {
+        if *k == key {
+            return Ok((due_at - clock).max(0.0));
+        }
+    }
     forget_flight(scope, cid, host, el)?;
     if crate::fetch_rules::fetch_route(url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
         return Ok(0.0);
     }
-    // (…none where the cascade fetched its sheet first, as the parser connected the link: that fetch is its fetch)
-    let key = format!("{} {url}", plan & PLAN_REQUEST);
+    // (…none where its sheet's answer is in already: the one the cascade's read took at once)
     if realm(scope, cid).sheet_requests.get(&el).and_then(|r| r.answered.as_ref()).is_some_and(|(k, _)| *k == key) {
         return Ok(0.0);
     }
@@ -116,8 +133,10 @@ fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
     }
     match begin_flight(scope, cid, host, Some(el), url, plan, scanned)? {
         Flight::Slot(id, due) => {
-            if let Some(s) = realm(scope, cid).realm_state_mut(cid) {
-                s.sheet_fetches.flights.insert(el, id);
+            let arena = realm(scope, cid);
+            let clock = arena.event_loop.clock;
+            if let Some(s) = arena.realm_state_mut(cid) {
+                s.sheet_fetches.flights.insert(el, (id, key, clock + due));
             }
             Ok(due)
         }
@@ -187,18 +206,34 @@ fn imports_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 }
 fn imports_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId, urls: &[String], referrer: Option<&str>) -> Result<f64, Terminated> {
     imports_land(scope, cid, host, el)?;
+    if let Some(s) = realm(scope, cid).realm_state_mut(cid) {
+        s.sheet_fetches.import_depths.remove(&el);
+    }
     if urls.is_empty() || call(scope, host, H_CONTROLLER, &[])?.is_some_and(|c| v8::Local::new(scope, c).uint32_value(scope).unwrap_or(0) != 0) {
         return Ok(0.0);
     }
     let plan = sheet_plan(scope, cid, None, referrer);
     let scanned = crate::script_fetch::parser_input_scanned(scope, cid);
+    begin_imports(scope, cid, host, el, urls, plan, scanned)
+}
+// …the level of the tree its load waits for: each `@import` of `urls` a flight of its own — one the cascade began, or
+// another owner's, joined: what is left of its time — the longest the owner's load waits.
+fn begin_imports(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId, urls: &[String], plan: u32, scanned: bool) -> Result<f64, Terminated> {
     let (mut slots, mut due) = (Vec::new(), 0.0f64);
     for url in urls {
         if crate::fetch_rules::fetch_route(url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
             continue;
         }
+        let arena = realm(scope, cid);
+        let clock = arena.event_loop.clock;
+        let key = format!("{} {url}", plan & PLAN_REQUEST);
+        if let Some((id, due_at)) = arena.realm_state_mut(cid).and_then(|s| s.sheet_fetches.cascade_flights.remove(&key)) {
+            slots.push((id, url.clone()));
+            due = due.max(due_at - clock);
+            continue;
+        }
         if let Flight::Slot(id, d) = begin_flight(scope, cid, host, None, url, plan, scanned)? {
-            slots.push(id);
+            slots.push((id, url.clone()));
             due = due.max(d);
         }
     }
@@ -229,21 +264,49 @@ fn imports_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let items = [urls, text_value(scope, &location)];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.sheetImportsLand(owner, host) — the `@import`s the owner's sheet began fetching landed as its load task runs: their
-// slots taken (the document's asset memo, their cookies).
-fn imports_land_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.sheetImportsLand(owner, host) -> how many ms after now the next level of the owner's `@import` tree comes in, -1 for
+// none: the level it waited for landed as its load task runs — their slots taken (the document's asset memo, their
+// cookies) — and their own `@import`s, resolved against where each came from, begun as the next (`begin_imports`), which
+// its load waits for in turn: the whole tree its critical subresources.
+fn imports_land_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_double(-1.0);
     let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
     let cid = realm_id(scope, &args);
-    let _ = imports_land(scope, cid, host, el);
-}
-fn imports_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId) -> Result<(), Terminated> {
-    let Some(slots) = realm(scope, cid).realm_state_mut(cid).and_then(|s| s.sheet_fetches.imports.remove(&el)) else { return Ok(()) };
-    for id in slots {
-        let id = v8::Integer::new_from_unsigned(scope, id).into();
-        call(scope, host, crate::subresource_obtain::H_SCRIPT_TAKE, &[id])?;
+    let Ok(next) = imports_land(scope, cid, host, el) else { return };
+    if next.is_empty() {
+        return;
     }
-    Ok(())
+    let plan = sheet_plan(scope, cid, None, None);
+    let Ok(due) = begin_imports(scope, cid, host, el, &next, plan, false) else { return };
+    // (…a level of none begun — each answered at once — none to wait for)
+    if realm(scope, cid).realm_state(cid).is_some_and(|s| s.sheet_fetches.imports.contains_key(&el)) {
+        rv.set_double(due);
+    }
+}
+// …the level landed, the `@import`s of its sheets — none past the depth an import cycle would go on to (`IMPORT_DEPTH_LIMIT`).
+fn imports_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId) -> Result<Vec<String>, Terminated> {
+    let Some(slots) = realm(scope, cid).realm_state_mut(cid).and_then(|s| s.sheet_fetches.imports.remove(&el)) else { return Ok(Vec::new()) };
+    let doc = crate::node_handle::node_document_of(scope, el);
+    let quirks = realm(scope, cid).document_mode(doc).0;
+    let Some(state) = realm(scope, cid).realm_state_mut(cid) else { return Ok(Vec::new()) };
+    let depths = &mut state.sheet_fetches.import_depths;
+    let depth = depths.get(&el).copied().unwrap_or(0) + 1;
+    depths.insert(el, depth);
+    let mut next = Vec::new();
+    for (id, url) in slots {
+        let slot = v8::Integer::new_from_unsigned(scope, id).into();
+        let Some(answer) = call(scope, host, crate::subresource_obtain::H_SCRIPT_TAKE, &[slot])? else { continue };
+        let answer = v8::Local::new(scope, answer);
+        let Ok(array) = v8::Local::<v8::Array>::try_from(answer) else { continue };
+        let Some(text) = array.get_index(scope, 0).filter(|t| t.is_string()).map(|t| t.to_rust_string_lossy(scope)) else { continue };
+        let meta = array.get_index(scope, 1).and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
+        let location = string_member(scope, meta, "url").filter(|u| !u.is_empty()).unwrap_or(url);
+        if depth < IMPORT_DEPTH_LIMIT {
+            next.extend(crate::sheets::import_urls(&text, &location, quirks));
+        }
+    }
+    Ok(next)
 }
 // What became of a `<link>`'s fetch as its load task runs (`sheetFetchLand`): none was begun (its load obtains its sheet as
 // it is); it landed; its document's abort cancelled it — a network error.
@@ -261,7 +324,7 @@ fn fetch_land_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     if state.sheet_fetches.cancelled.remove(&el) {
         return rv.set_uint32(FLIGHT_CANCELLED);
     }
-    let Some(id) = state.sheet_fetches.flights.remove(&el) else { return };
+    let Some((id, _, _)) = state.sheet_fetches.flights.remove(&el) else { return };
     let url = args.get(2).to_rust_string_lossy(scope);
     let plan = args.get(3).uint32_value(scope).unwrap_or(0);
     let id = v8::Integer::new_from_unsigned(scope, id).into();
@@ -287,9 +350,10 @@ fn fetches_abort_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
     let cid = realm_id(scope, &args);
     let Some(state) = realm(scope, cid).realm_state_mut(cid) else { return };
-    let flights: Vec<(NodeId, u32)> = state.sheet_fetches.flights.drain().collect();
+    let flights: Vec<(NodeId, u32)> = state.sheet_fetches.flights.drain().map(|(el, (id, _, _))| (el, id)).collect();
     state.sheet_fetches.cancelled.extend(flights.iter().map(|&(el, _)| el));
-    for &(_, id) in &flights {
+    let imports: Vec<u32> = state.sheet_fetches.cascade_flights.drain().map(|(_, (id, _))| id).collect();
+    for id in flights.iter().map(|&(_, id)| id).chain(imports) {
         let id = v8::Integer::new_from_unsigned(scope, id).into();
         if call(scope, host, crate::subresource_obtain::H_SCRIPT_FORGET, &[id]).is_err() {
             return;
@@ -302,7 +366,7 @@ fn fetches_abort_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 fn forget_flight(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId) -> Result<(), Terminated> {
     let Some(state) = realm(scope, cid).realm_state_mut(cid) else { return Ok(()) };
     state.sheet_fetches.cancelled.remove(&el);
-    let Some(id) = state.sheet_fetches.flights.remove(&el) else { return Ok(()) };
+    let Some((id, _, _)) = state.sheet_fetches.flights.remove(&el) else { return Ok(()) };
     let id = v8::Integer::new_from_unsigned(scope, id).into();
     call(scope, host, crate::subresource_obtain::H_SCRIPT_FORGET, &[id]).map(drop)
 }
@@ -651,6 +715,11 @@ pub(crate) fn asset(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<
             }
         }
     }
+    // (…its fetch begun in parallel where none is under way — a flight the cascade's reading joins rather than waits on: a
+    // server's time is its owner's load's to wait out, not the cascade's, which a sleep run on the event loop would let
+    // any task in under — Chrome and Firefox `inl dcl a.js-ran t50 st load`, rv-r13-probe `s5_stylemedia`, and
+    // `inl dcl a.js-ran css load`, `s4_media`)
+    let begun = cascade_flight(scope, cid, host, url, plan, owner, &key)?;
     let client = match owner.and_then(|o| realm(scope, cid).get(o.id).map(|n| n.realm)) {
         Some(c) => v8::Integer::new(scope, c).into(),
         None => v8::undefined(scope).into(),
@@ -659,8 +728,12 @@ pub(crate) fn asset(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<
         Some(r) => text_value(scope, r),
         None => v8::null(scope).into(),
     };
-    let args = [text_value(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), r, client];
-    let response = call(scope, host, H_ASSET, &args)?;
+    let (module, since, joins) = (v8::Boolean::new(scope, false).into(), v8::undefined(scope).into(), v8::Boolean::new(scope, false).into());
+    let args = [text_value(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), r, client, module, since, joins];
+    let response = match begun {
+        Some(answer) => Some(answer),
+        None => call(scope, host, H_ASSET, &args)?,
+    };
     if let Some(o) = owner {
         let failed = response.as_ref().map(|r| v8::Local::new(scope, r)).and_then(|r| v8::Local::<v8::Array>::try_from(r).ok()).is_none_or(|a| a.get_index(scope, 0).is_none_or(|b| b.is_null_or_undefined()));
         let request = request_of(realm(scope, cid), o.id);
@@ -672,6 +745,46 @@ pub(crate) fn asset(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<
         }
     }
     Ok(response)
+}
+
+// …the flight of a sheet the cascade reads before anything fetched it, begun as the request is: an owner's (a link's,
+// which its fetch as the parser connects it then finds: `fetch_begin`), or the realm's one per request of an `@import`'s,
+// which the level of its owner's tree it is on then waits for (`begin_imports`) — none where one is under way — the answer,
+// where it came at once.
+fn cascade_flight(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, url: &str, plan: u32, owner: Option<Owner>, key: &str) -> Result<Option<v8::Global<v8::Value>>, Terminated> {
+    if crate::fetch_rules::fetch_route(url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
+        return Ok(None);
+    }
+    let Some(state) = realm(scope, cid).realm_state(cid) else { return Ok(None) };
+    let under_way = match owner {
+        Some(o) => state.sheet_fetches.flights.get(&o.id).is_some_and(|(_, k, _)| k == key),
+        None => state.sheet_fetches.cascade_flights.contains_key(key),
+    };
+    if under_way {
+        return Ok(None);
+    }
+    let scanned = crate::script_fetch::parser_input_scanned(scope, cid);
+    match begin_flight(scope, cid, host, owner.map(|o| o.id), url, plan, scanned)? {
+        // (…one its server answered at once taken as it is: no time of it left to join)
+        Flight::Slot(id, due) if due <= 0.0 => {
+            let slot = v8::Integer::new_from_unsigned(scope, id).into();
+            call(scope, host, crate::subresource_obtain::H_SCRIPT_TAKE, &[slot])
+        }
+        Flight::Slot(id, due) => {
+            let arena = realm(scope, cid);
+            let due_at = arena.event_loop.clock + due;
+            if let Some(s) = arena.realm_state_mut(cid) {
+                if let Some(o) = owner {
+                    s.sheet_fetches.flights.insert(o.id, (id, key.to_owned(), due_at));
+                } else {
+                    s.sheet_fetches.cascade_flights.insert(key.to_owned(), (id, due_at));
+                }
+            }
+            Ok(None)
+        }
+        Flight::Answered(answer) => Ok(Some(answer)),
+        Flight::None => Ok(None),
+    }
 }
 
 // The integrity metadata of the owner `id`'s request of the sheet it obtains now (a `<link>`'s load takes it too).

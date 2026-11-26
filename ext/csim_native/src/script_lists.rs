@@ -148,8 +148,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sheetBlockEnd", sheet_end_op, context_id);
     register(scope, ns, "sheetBlockSettle", sheet_settle_op, context_id);
     register(scope, ns, "sheetWaitersParsed", waiters_parsed_op, context_id);
+    register(scope, ns, "sheetWaitersParserDone", waiters_parser_done_op, context_id);
     register(scope, ns, "parserSheetWait", parser_sheet_wait_op, context_id);
-    register(scope, ns, "sheetsQueuedBlock", sheets_queued_block_op, context_id);
+    register(scope, ns, "sheetsBlockingLate", sheets_blocking_late_op, context_id);
     register(scope, ns, "scriptPrepare", prepare_op, context_id);
     register(scope, ns, "scriptWaitNext", wait_next_op, context_id);
     register(scope, ns, "scriptRun", run_op, context_id);
@@ -186,10 +187,16 @@ fn begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let aborts = arena.document_states.lifecycle(doc).aborts();
     let in_order = matches!(kind, Kind::Inserted { .. })
         && arena.get(el).is_some_and(|n| n.script_flags & crate::script::SCRIPT_NOT_FORCE_ASYNC != 0 && n.plain_attr("async").is_none());
+    // (…the style sheets blocking scripts as it is prepared, which it waits for — while its document's parser is at work:
+    // HTML's async branch states no wait, and where it is silent the browsers decide — both wait while the page parses
+    // (`rv_css_asy`), and one inserted once it has (a DOMContentLoaded listener's) Firefox runs at once, Chrome's having
+    // fired DOMContentLoaded after the sheet, no evidence either way: rv-r13-probe `s4_dclins`, Firefox
+    // `dcl ins i.js-ran css load`)
+    let parsing = arena.document_states.lifecycle(doc).is_parsing();
     let Some(lists) = lists_of(arena, cid) else { return };
     lists.next += 1;
     let id = lists.next;
-    let sheets_up_to = lists.sheets_now();
+    let sheets_up_to = if parsing { lists.sheets_now() } else { 0 };
     lists.landings.push(Landing { id, el, doc, aborts, fetch, kind, speculative, sheets_up_to, in_order, state: State::Queued, prepared, exec: Exec::Nothing, landed_aborts: None });
     if in_order {
         lists.in_order.push_back(id);
@@ -247,7 +254,7 @@ fn next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, phase: u32, host: v
     match phase {
         PHASE_BEGUN if kind == Kind::Unfetched => return Ok((STEP_QUEUE | QUEUE_GATED | QUEUE_TIMER, 0.0)),
         PHASE_BEGUN => return Ok((STEP_QUEUE | if gated { QUEUE_GATED } else { 0 } | turn, 0.0)),
-        PHASE_RELEASED if state == State::Sheets => return then(scope, cid, id, host),
+        PHASE_RELEASED if state == State::Sheets => return then(scope, cid, id, host, true),
         PHASE_TASK if matches!(state, State::Queued | State::Waiting) => {}
         _ => return Ok(DONE),
     }
@@ -274,7 +281,8 @@ fn next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, phase: u32, host: v
     let arena = realm(scope, cid);
     let parsing = arena.document_states.lifecycle(doc).is_parsing();
     let Some(lists) = lists_of(arena, cid) else { return Ok(DONE) };
-    let held = if up_to == 0 {
+    // (…none once its document's parser is done: `sheetWaitersParserDone`)
+    let held = if up_to == 0 || !parsing {
         false
     } else if lists.sheet_blocks_up_to(up_to) {
         lists.sheet_waiters.push(id);
@@ -291,7 +299,7 @@ fn next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, phase: u32, host: v
         }
         return Ok(DONE);
     }
-    then(scope, cid, id, host)
+    then(scope, cid, id, host, false)
 }
 
 // Whether the landing `id`'s script still waits on its fetch: a deferred one's while its parser is not aborted, an `async`
@@ -309,8 +317,9 @@ fn waits(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) -> bool {
     }
 }
 
-// The landing `id` landed, held by no style sheet: what its script comes to.
-fn then(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>) -> Result<(u32, f64), Terminated> {
+// The landing `id` landed, held by no style sheet: what its script comes to — `released` one a style sheet held as it
+// landed, let go of now.
+fn then(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>, released: bool) -> Result<(u32, f64), Terminated> {
     const DONE: (u32, f64) = (STEP_DONE, 0.0);
     let arena = realm(scope, cid);
     let Some(l) = lists_of(arena, cid).and_then(|lists| lists.find(id)) else { return Ok(DONE) };
@@ -333,8 +342,10 @@ fn then(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_,
                 return Ok((STEP_RUN, 0.0));
             }
             crate::script_fetch::drop_fetch(scope, cid, fetch, host)?;
-            // (…one whose parser was aborted its `error`, its fetch cancelled — what its end tag listed it as, taken)
-            let failed = !moved && !run && realm(scope, cid).take_listed(cid, el).is_some();
+            // (…one whose parser was aborted its `error`, its fetch cancelled — what its end tag listed it as, taken — but
+            // none of one whose fetch had come in as a style sheet held it: no fetch is left to cancel, its run discarded
+            // with its document's tasks, HTML "abort a document")
+            let failed = !moved && !run && realm(scope, cid).take_listed(cid, el).is_some() && !released;
             Ok(if failed { (STEP_FAILED, 0.0) } else { DONE })
         }
         // (…an inserted one's response taken now, its entry filed as its load completes — unless it moved to another
@@ -577,6 +588,21 @@ fn released_value<'s>(scope: &mut v8::PinScope<'s, '_>, released: &[(NodeId, u32
     v8::Array::new_with_elements(scope, &items).into()
 }
 
+// __dom.sheetWaitersParserDone() -> `[el, id, gated, …]` as `sheetBlockEnd`: the `async` and inserted scripts held behind
+// the style sheets that blocked scripts as they were prepared, let go of as their document's parser is done ("the end") —
+// each its own task. HTML's branch for them states no wait at all; where it is silent the browsers decide, and Firefox
+// runs one held so as DOMContentLoaded comes (`dcl a.js-ran stopped csserr`, rv-r13-probe `s4_stopasync`; Chrome holds
+// DOMContentLoaded itself back until the sheet is in, which shows nothing of the script's wait).
+fn waiters_parser_done_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let Some(lists) = lists_of(arena, cid) else { return };
+    let mut waiting = std::mem::take(&mut lists.sheet_waiters);
+    waiting.append(&mut lists.waiters_parsed);
+    let facts: Vec<(NodeId, u32, NodeId)> = waiting.iter().filter_map(|&id| lists.landings.iter().find(|l| l.id == id).map(|l| (l.el, id, l.doc))).collect();
+    let released: Vec<(NodeId, u32, bool)> = facts.into_iter().map(|(el, id, doc)| (el, id, !arena.document_states.lifecycle(doc).is_load_fired())).collect();
+    rv.set(released_value(scope, &released));
+}
 // __dom.sheetWaitersParsed() -> `[el, id, …]`: the landings let go of as the parser waited, run now that it has gone on —
 // the script it waited to run first, as the parser resumes from that wait before the event loop runs the next task; or
 // "the end", where it waited for none. A sheet that ended as it waited holds those that land after it no more.
@@ -589,11 +615,15 @@ fn waiters_parsed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(pairs_value(scope, &pairs));
 }
 
-// __dom.sheetsQueuedBlock() -> whether a style sheet whose load task is queued blocks the calling realm's scripts still: what
-// the parser's wait on its script spins the event loop for (`WAIT_SHEETS`).
-fn sheets_queued_block_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.sheetsBlockingLate() -> how many ms after now the last style sheet whose load task is queued and that blocks the
+// calling realm's scripts still lands — 0 for one due now — -1 for none: what the parser's wait on its script spins the
+// event loop for (`WAIT_SHEETS`), a sheet's `@import`s told as its load task learns of them (`sheetBlockQueued`).
+fn sheets_blocking_late_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    rv.set_bool(lists_of(realm(scope, cid), cid).is_some_and(|lists| lists.sheets.iter().any(|s| s.queued)));
+    let arena = realm(scope, cid);
+    let clock = arena.event_loop.clock;
+    let late = lists_of(arena, cid).and_then(|lists| lists.sheets.iter().filter(|s| s.queued).map(|s| (s.due - clock).max(0.0)).reduce(f64::max));
+    rv.set_double(late.unwrap_or(-1.0));
 }
 // __dom.parserSheetWait() -> the mark the parser's next script waits by (script.rs `parser_waits`, one its `async` scripts
 // land with) where a style sheet came to block scripts since it last asked, -1 where none did.
@@ -625,6 +655,9 @@ struct Prepared {
     // where a preload scanner saw it; a deferred one's what "the end" waits on (`awaited`).
     fetch: u32,
     blocking: bool,
+    // …prepared by the parser at its end tag, which waits on the style sheets blocking scripts (`WAIT_SHEETS`) — none of
+    // one out of "the end"'s lists, an `async` one landed: HTML's branch for it states no wait (`sheetWaitersParserDone`)
+    at_end_tag: bool,
     awaited: bool,
     // …a parser-blocking one's response, landed as the parser's wait ends — at script nesting level zero, where a
     // controlling service worker is asked for it — run once the wait is over.
@@ -691,7 +724,7 @@ fn prepare(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (by, awaited,
     let module = listed.as_ref().map_or_else(|| n.is_some_and(|n| crate::script::script_type(n) == crate::script::MODULE), |l| l.module);
     let src = n.and_then(|n| n.plain_attr("src")).filter(|s| !s.is_empty()).map(str::to_owned);
     let lc = arena.document_states.lifecycle(doc);
-    let mut p = Prepared { id: 0, el, doc, aborts: lc.aborts(), generation: lc.generation(), module, url: None, text: None, fetch: 0, blocking: false, awaited, landed: None, mark: 0.0, wait: Wait::Begin };
+    let mut p = Prepared { id: 0, el, doc, aborts: lc.aborts(), generation: lc.generation(), module, url: None, text: None, fetch: 0, blocking: false, at_end_tag: by == crate::script::BY_PARSER, awaited, landed: None, mark: 0.0, wait: Wait::Begin };
     if module {
         p.url = listed.and_then(|l| l.url);
         // (…its graph's entry's fetch, begun at its end tag — an inline one's none: the tasks queued before "the end"'s wait
@@ -732,7 +765,7 @@ fn prepare(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (by, awaited,
 // mark `arg` (bridge.entry.js `parserSpin`); run it on for the `arg` ms its server took past the clock (the host's tick,
 // Browser#server_slept_ms); spin it until the fetch `arg` has landed (`awaitLanding`); the wait over, the script to run;
 // the wait over, none to run — its fetch let go of; spin it, `arg` ms at most, until no style sheet whose load task is
-// queued blocks it (`sheetsQueuedBlock`).
+// queued blocks it (`sheetsBlockingLate`).
 const WAIT_SPIN: u32 = 1;
 const WAIT_SERVER: u32 = 2;
 const WAIT_AWAIT: u32 = 3;
@@ -761,7 +794,7 @@ fn wait_next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 fn wait_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>) -> Result<(u32, f64), Terminated> {
     let arena = realm(scope, cid);
     let Some(p) = lists_of(arena, cid).and_then(|lists| lists.prepared.iter().find(|p| p.id == id)) else { return Ok((WAIT_STOP, 0.0)) };
-    let (doc, fetch, wait, mark, blocking, awaited) = (p.doc, p.fetch, p.wait, p.mark, p.blocking, p.awaited);
+    let (doc, fetch, wait, mark, blocking, awaited, at_end_tag) = (p.doc, p.fetch, p.wait, p.mark, p.blocking, p.awaited, p.at_end_tag);
     let (aborts, generation) = (p.aborts, p.generation);
     let lc = arena.document_states.lifecycle(doc);
     if lc.aborts() != aborts || lc.generation() != generation {
@@ -796,17 +829,16 @@ fn wait_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Loca
         }
         // (…and the style sheets that block it whose load task its server's time puts later still: HTML "spin the event
         // loop until the parser's Document has no style sheet that is blocking scripts" — what a nested step of the event
-        // loop, whose server's sleeps run no event loop of their own, left to come)
+        // loop, whose server's sleeps run no event loop of their own, left to come, a sheet's `@import` tree as its load
+        // tasks learn of it; none for a script out of "the end"'s lists, whose branch states no such wait)
         Wait::Sheets => {
             set(arena, Wait::Over);
-            let clock = arena.event_loop.clock;
-            let late = lists_of(arena, cid).map_or(0.0, |lists| lists.sheets.iter().filter(|s| s.queued).map(|s| s.due - clock).fold(0.0, f64::max));
-            if late > 0.0 {
-                return Ok((WAIT_SHEETS, late));
+            if at_end_tag && lists_of(arena, cid).is_some_and(|lists| lists.sheets.iter().any(|s| s.queued)) {
+                return Ok((WAIT_SHEETS, 0.0));
             }
             wait_next(scope, cid, id, host)
         }
-        Wait::Spun { .. } | Wait::Over => {
+        Wait::Over => {
             set(arena, Wait::Over);
             if lc.is_aborted() {
                 return stop(scope, cid, id, host);
