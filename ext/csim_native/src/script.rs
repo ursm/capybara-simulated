@@ -186,7 +186,6 @@ pub(crate) fn blocks_parser_from_source(n: &crate::dom::NodeData) -> bool {
 pub(crate) struct Listed {
     pub(crate) module: bool,
     pub(crate) is_async: bool,
-    pub(crate) url: Option<Option<String>>,
 }
 
 impl RealmArena {
@@ -196,8 +195,8 @@ impl RealmArena {
     // document's sandboxing blocks, nothing more (`LISTED`); one with an empty `src` its `error` queued, never listed
     // (`LISTED_ERROR`); else on the list "the end" runs — where it is connected now, the lists kept, not the tree walked
     // again (HTML §13.2.7) — with what was decided (`Listed`, an inline one's source text as it is now), its fetch begun by
-    // the bindings (script_fetch.rs): a classic one's (`LISTED_CLASSIC`), a module script's graph's entry (`LISTED_MODULE`),
-    // none for an inline module (`LISTED`). One preparing returns from before it is "already started" is left preparable
+    // the bindings (script_fetch.rs): a classic one's (`LISTED_CLASSIC`), a module script's graph (`LISTED_MODULE`, an inline
+    // one's of the source text its end tag found). One preparing returns from before it is "already started" is left preparable
     // (`leave_preparable`).
     pub(crate) fn list_parser_script(&mut self, cid: i32, id: NodeId, scripting: bool) -> u32 {
         let Some(n) = self.get_mut_quietly(id) else { return LISTED };
@@ -215,7 +214,8 @@ impl RealmArena {
             return LISTED;
         }
         let src = n.plain_attr("src").map(str::to_owned);
-        let is_async = src.is_some() && n.plain_attr("async").is_some();
+        // (…an inline module script `async` too: HTML "prepare the script element" lists it as soon as possible)
+        let is_async = (src.is_some() || ty == MODULE) && n.plain_attr("async").is_some();
         let skipped = (ty == CLASSIC && n.plain_attr("nomodule").is_some()) || !scripting || self.scripts_sandboxed(n.realm);
         if let Some(n) = self.get_mut_quietly(id) {
             n.script_flags |= SCRIPT_ALREADY_STARTED | if src.is_some() { SCRIPT_FROM_EXTERNAL_FILE } else { 0 };
@@ -229,20 +229,16 @@ impl RealmArena {
         if src.as_deref() == Some("") {
             return LISTED_ERROR;
         }
-        let url = match (&src, ty) {
-            (Some(src), MODULE) => Some(self.parse_document_url(self.root_of(id), src).map(|u| u.href().to_owned())),
-            _ => None,
-        };
         let text = src.is_none().then(|| self.child_text(id));
         if let Some(state) = self.realm_state_mut(cid) {
             state.parser_list.push(id);
-            state.parser_decided.insert(id, Listed { module: ty == MODULE, is_async, url });
+            state.parser_decided.insert(id, Listed { module: ty == MODULE, is_async });
             if let Some(text) = text {
                 state.parser_sources.insert(id, text);
             }
         }
         match (src.is_some(), ty) {
-            (true, MODULE) => LISTED_MODULE,
+            (_, MODULE) => LISTED_MODULE,
             (true, _) => LISTED_CLASSIC,
             _ => LISTED,
         }
@@ -580,10 +576,10 @@ pub(crate) fn module_content(content_type: &str, kind: &str) -> bool {
         _ => crate::mime::extract(content_type).is_some_and(|m| is_javascript_mime(&m.essence)),
     }
 }
-// Capybara::Simulated::Native.module_content(content_type, json) -> `module_content`, a script's — or, for a module the
-// host takes for a JSON one (by its URL: no import attributes reach it yet), a JSON one's or a script's.
-pub(crate) fn module_content_for_ruby(content_type: String, json: bool) -> bool {
-    module_content(&content_type, "script") || (json && module_content(&content_type, "json"))
+// Capybara::Simulated::Native.module_content(content_type, type) -> `module_content` for a module of the module type
+// `type` (module_map.rs `ModuleType`): its destination's.
+pub(crate) fn module_content_for_ruby(content_type: String, ty: u32) -> bool {
+    module_content(&content_type, crate::module_map::destination(ty))
 }
 // __dom.moduleContent(contentType, kind) -> `module_content`.
 fn module_content_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -810,7 +806,8 @@ mod tests {
         assert!(!module_content("text/javascript", "style") && !module_content("text/javascript", "json"));
         assert!(module_content("text/css", "style") && module_content("application/ld+json", "json"));
         assert!(module_content("text/plain", "text") && !module_content("text/plain", "script"));
-        assert!(module_content_for_ruby("application/json".into(), true) && module_content_for_ruby("text/javascript".into(), true));
+        assert!(module_content_for_ruby("application/json".into(), 1) && !module_content_for_ruby("text/javascript".into(), 1));
+        assert!(!module_content_for_ruby("application/json".into(), 0) && module_content_for_ruby("text/plain".into(), 3));
     }
 
     #[test]

@@ -1178,6 +1178,8 @@ pub(crate) struct RealmState {
     pub(crate) script_fetches: crate::script_fetch::ScriptFetches,
     // …and the lists its scripts land on, and the style sheets that block them (script_lists.rs).
     pub(crate) script_lists: crate::script_lists::ScriptLists,
+    // Its module map, import map and resolved module set, and the module graphs its scripts fetch (module_map.rs).
+    pub(crate) modules: crate::module_map::ModuleMap,
     // Its document's declarative refresh, `(delay ms, url)`, waiting for it to have completely loaded — a `Refresh` header's
     // told before the parse begins, let go of as its next document begins (declarative_refresh.rs).
     pub(crate) refresh_pending: Option<(f64, String)>,
@@ -1878,6 +1880,8 @@ impl RealmArena {
         // speculative places its own, `parserBegins`, which the new parse takes before this runs)
         self.script_fetches = Default::default();
         self.script_lists.reset();
+        // (…nor its module map: the new document's is its own)
+        self.modules = Default::default();
         // (…nor what the old page planned for its navigable, which the host took or let go — and the form it held with it)
         self.navigation_plan = Default::default();
         self.laid_out_at = None;
@@ -3472,7 +3476,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::viewport::install(scope, ns, context_id);
     crate::navigator::install(scope, ns, context_id);
     crate::navigation_plan::install(scope, ns, context_id);
-    crate::import_map::install(scope, ns, context_id);
+    crate::module_map::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);
     crate::dom_matrix::install(scope, ns, context_id);

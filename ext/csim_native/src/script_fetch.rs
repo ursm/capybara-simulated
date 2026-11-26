@@ -1,6 +1,6 @@
 // The fetches of scripts a document's elements began as "prepare the script element" — an inserted script's, the parser's
-// `async` and `defer` ones; a classic one's (subresource_obtain.rs `classic_script_begin`), a module script's graph's entry
-// (`scriptFetchBeginModule`, its graph fetched as it runs, the entry's answer kept for it) — each in parallel, its network
+// `async` and `defer` ones; a classic one's (subresource_obtain.rs `classic_script_begin`), a module script's graph
+// (module_map.rs `moduleScriptFetch`, landing as its last module comes in) — each in parallel, its network
 // leg the host's (browser.rb `script_fetch_start`), and each landing as the event loop comes to it: as a task queued as it
 // began, behind the tasks due with it (timers.rs `BEHIND`), a network's time away — which is its server's: what its
 // sleeps came to (the request made as it begins, in the order the fetches begin, the host answering how long its server
@@ -9,7 +9,7 @@
 
 use crate::dom::{realm, realm_id, register, NodeId};
 use crate::font_files::Terminated;
-use crate::subresource_obtain::{call, classic_script_begin, classic_script_delay, classic_script_drop, classic_script_land, next_slot, slept_ms, ClassicFetch, ClassicRequest, Landed, H_SCRIPT_FORGET, H_SCRIPT_START, H_SCRIPT_TAKE};
+use crate::subresource_obtain::{classic_script_begin, classic_script_delay, classic_script_drop, classic_script_land, ClassicFetch, ClassicRequest, Landed};
 
 // A realm's script fetches (`RealmState::script_fetches`), by number.
 #[derive(Default)]
@@ -27,16 +27,14 @@ struct ScriptFetch {
     landed: bool,
     fetch: Fetch,
 }
-// What it fetches: a classic script, or a module graph's entry — the host's (its slot's number), or answered from memory
-// as it began.
+// What it fetches: a classic script, or a module script's graph (module_map.rs), by its number.
 enum Fetch {
     Classic(ClassicFetch),
-    Module(Option<u32>),
+    Module(u32),
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "scriptFetchBegin", begin_op, context_id);
-    register(scope, ns, "scriptFetchBeginModule", begin_module_op, context_id);
     register(scope, ns, "scriptFetchDue", due_op, context_id);
     register(scope, ns, "scriptFetchLanded", landed_op, context_id);
     register(scope, ns, "parserBegins", parser_begins_op, context_id);
@@ -127,41 +125,9 @@ fn file(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (began, delay): 
     id
 }
 
-// __dom.scriptFetchBeginModule(el, url, host, plan, scanned) -> the number of the fetch of the module script `el`'s graph's
-// entry `url` (resolved), its request the engine's `plan` of it — a CORS one — begun through the asset cache (browser.rb
-// `script_fetch_start`), whose document's module map answers the graph's fetch of it as the script runs; `url` null, one
-// the host makes nothing of, landing at once (a service worker's to answer as its graph runs, a scheme's, none); 0 where
-// none began.
-fn begin_module_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(2)) else { return rv.set_uint32(0) };
-    let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    let (began, client) = (began_at(arena, cid, args.get(4).is_true()), arena.get(el).map(|n| n.realm));
-    let client = match client {
-        Some(realm) => v8::Integer::new(scope, realm).into(),
-        None => v8::undefined(scope).into(),
-    };
-    let (slot, delay) = if args.get(1).is_string() {
-        let id = next_slot();
-        let start = [
-            args.get(1),
-            args.get(3),
-            v8::null(scope).into(),
-            client,
-            v8::Integer::new(scope, 2).into(),
-            v8::Number::new(scope, began).into(),
-            v8::Integer::new_from_unsigned(scope, id).into()
-        ];
-        let Ok(started) = call(scope, host, H_SCRIPT_START, &start) else { return };
-        match started.map(|s| v8::Local::new(scope, s)).filter(|s| s.is_number()) {
-            Some(slept) => (Some(id), slept_ms(scope, slept)),
-            None => (None, 0.0),
-        }
-    } else {
-        (None, 0.0)
-    };
-    rv.set_uint32(file(scope, cid, el, (began, delay), Fetch::Module(slot)));
+// …a module script's graph's, `gid`, begun at `began` for the script `el`: its number.
+pub(crate) fn file_module(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, began: f64, gid: u32) -> u32 {
+    file(scope, cid, el, (began, 0.0), Fetch::Module(gid))
 }
 
 // The number of the fetch the script `el` began and has not landed, 0 for none — the parser's `async` or `defer` one's,
@@ -170,11 +136,14 @@ pub(crate) fn fetch_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId) -
     fetches_of(scope, cid).and_then(|f| f.list.iter().rev().find(|f| f.el == el).map(|f| f.id)).unwrap_or(0)
 }
 
-// How long after now the fetch `id` of realm `cid` lands — its network leg's time, past the clock as it began — none for a
-// fetch it has no more.
+// How long after now the fetch `id` of realm `cid` lands — its network leg's time, past the clock as it began; a module
+// graph's as its fetches have gone on by now (module_map.rs `due_in`) — none for a fetch it has no more.
 pub(crate) fn due_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) -> Option<f64> {
     let clock = realm(scope, cid).event_loop.clock;
     let f = fetches_of(scope, cid).and_then(|f| find(f, id))?;
+    if let Fetch::Module(gid) = f.fetch {
+        return crate::module_map::due_in(scope, cid, gid);
+    }
     // (…none left of it within a nanosecond: the clock a server's time moved on to in steps, Browser#server_slept_ms)
     Some(Some(f.began + f.delay - clock).filter(|due| *due > 1e-6).unwrap_or(0.0))
 }
@@ -205,23 +174,17 @@ pub(crate) fn landed(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, mark: 
     f.landed
 }
 
-// What a fetch landed as: a classic script's response, or a module graph's entry's, which its document's module map keeps.
+// What a fetch landed as: a classic script's response, or a module script's graph, by its number, every module of it in.
 pub(crate) enum Fetched {
     Classic(Landed),
-    Module,
+    Module(u32),
 }
 // The fetch `id` of realm `cid` landed — taken — none for one it has no more.
 pub(crate) fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>) -> Result<Option<Fetched>, Terminated> {
     let Some(f) = take(scope, cid, id) else { return Ok(None) };
     Ok(Some(match f.fetch {
         Fetch::Classic(fetch) => Fetched::Classic(classic_script_land(scope, cid, host, fetch)?),
-        Fetch::Module(slot) => {
-            if let Some(id) = slot {
-                let id = v8::Integer::new_from_unsigned(scope, id).into();
-                call(scope, host, H_SCRIPT_TAKE, &[id])?;
-            }
-            Fetched::Module
-        }
+        Fetch::Module(gid) => Fetched::Module(gid),
     }))
 }
 
@@ -229,10 +192,10 @@ pub(crate) fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8
 pub(crate) fn drop_fetch(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>) -> Result<(), Terminated> {
     match take(scope, cid, id).map(|f| f.fetch) {
         Some(Fetch::Classic(fetch)) => classic_script_drop(scope, host, fetch),
-        Some(Fetch::Module(Some(slot))) => {
-            let slot = v8::Integer::new_from_unsigned(scope, slot).into();
-            call(scope, host, H_SCRIPT_FORGET, &[slot]).map(|_| ())
+        Some(Fetch::Module(gid)) => {
+            crate::module_map::drop_graph(scope, cid, gid);
+            Ok(())
         }
-        _ => Ok(()),
+        None => Ok(()),
     }
 }

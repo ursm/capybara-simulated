@@ -31,7 +31,7 @@ module Capybara
 
       # Native ES-module evaluation of a worker MAIN script + its static import
       # graph (a `{type: 'module'}` worker), via V8's native module API
-      # (the same surface the main realm's eval_esm_module uses). The whole graph
+      # (the same surface a window's module scripts are run with). The whole graph
       # resolves through the root's instantiate callback (V8 calls it per
       # unresolved edge, transitively). `fetch_import` is called on the worker's
       # own thread for each resolved static import URL and returns the script

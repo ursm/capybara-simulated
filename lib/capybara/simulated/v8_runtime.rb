@@ -212,7 +212,7 @@ module Capybara
         #
         # `to_h` dedups re-attached names to their latest proc, matching
         # attach's override semantics. NOTE: context-bound fns
-        # (`runScript*`, `evalEsmEntry`) get realm-bound
+        # (`runScript*`, the module steps) get realm-bound
         # overrides in `create_frame_realm` after this replay.
         def create_context
           realm = @iso.create_context
@@ -349,12 +349,14 @@ module Capybara
         @snapshot = self.class.snapshot
         # `@compiled_module_urls` / `@compiled_script_keys` track what this
         # isolate has already compiled, for the no-cd paths in
-        # `native_module_for` / `attach_run_script_with_cache`. They persist
+        # `compile_fetched_module` / `attach_run_script_with_cache`. They persist
         # across warm realm resets (same isolate, warm in-memory compilation
         # cache) and are cleared only on a true rebuild (different isolate,
         # cold cache).
         @compiled_module_urls = {}
         @compiled_script_keys = {}
+        # The number of the last module record made (`module_record`), the map's for it: one series for every realm.
+        @module_record_seq = 0
       end
 
       def eval(code)         = walks_guarded { ctx.eval(code.to_s) }
@@ -612,7 +614,7 @@ module Capybara
       # (…but those of `kept`: the windows `window.open` made in this isolate and their frames, top-level traversables of
       # their own, which outlive the page that opened them — `window_realm_trees`)
       def dispose_frame_realms(kept: [])
-        [@realm_module_handles, @module_sw_ctxs, @module_fetch_options, @window_realm_meta, @loading_frame_realms].each do |realms|
+        [@realm_module_tables, @window_realm_meta, @loading_frame_realms].each do |realms|
           realms&.select! {|id, _| kept.include?(id) }
         end
         # Free each frame realm's native arena (an isolate-global Dom entry keyed by its context_id)
@@ -798,10 +800,7 @@ module Capybara
         @browser.terminate_realm_workers(id) rescue nil
         # …and the session history entry a navigation of it was leaving let go of (Browser#leave_frame_entry).
         @browser.frame_realm_disposed(id)
-        @realm_module_handles&.delete(id)
-        @module_sw_ctxs&.delete(id)
-        @module_fetch_options&.delete(id)
-        @browser.forget_importmap(id)
+        @realm_module_tables&.delete(id)
         window_realms_changed if @window_realm_meta&.delete(id)
         # Evict from the main realm's stepped windows so the event loop stops
         # running a disposed context's tasks. A FRAME realm is also evicted via the DOM
@@ -1169,7 +1168,8 @@ module Capybara
         # The window's clock as a step moves it, where the tab has a worker to follow it (`clock_at_least`).
         c.attach('@windowClockAt', ->(ms) { clock_at_least(ms); nil })
         attach_run_script_with_cache(c)
-        attach_native_module_loader(c)
+        attach_module_steps(c)
+        attach_dynamic_imports(c)
         attach_frame_realm_loader(c)
         seed_layout(c)
       end
@@ -1335,13 +1335,13 @@ module Capybara
 
       # Bring a freshly-created realm context — made from the snapshot, its bindings in it already — up to a runnable
       # bridge, shared by the frame and window realm constructors. The
-      # replayed `runScriptCached` / `evalEsmEntry` close over the MAIN
+      # replayed `runScriptCached` / module steps close over the MAIN
       # ctx they were first attached to, so a realm script routing through them
       # (≥64KB, or `type=module`) would run against the main
       # document — rebind realm-executing variants on top, then reseed per-realm JS.
       def seed_realm_bridge(realm, group = nil)
         attach_run_script_with_cache(realm)
-        attach_realm_esm_entry(realm)
+        attach_module_steps(realm, realm)
         reseed_realm_js(realm, group)
         realm
       end
@@ -1750,75 +1750,71 @@ module Capybara
         nil
       end
 
-      # `target` is the context the module graph compiles + evaluates in,
-      # `handles` its module-handle cache — the main ctx + `native_module_handles`
-      # by default, or a frame realm + its realm-local cache (Module handles are
-      # context-bound; sharing the main cache would link a frame's imports
-      # against main-context modules). True where its graph was fetched and ran (a throw in it reported), false where it
-      # could not be fetched — the element's `error` (HTML "execute the script element": a null result) — or its error to
-      # rethrow, `ModuleError#to_a`, which the bridge reports before the element's `load`. `options` its element's
-      # fetch options (`ModuleFetchOptions`), which its graph's every fetch is made with (HTML "fetch the descendants of a
-      # module script": the descendant script fetch options keep them).
-      # (…`integrity` its element's integrity metadata, its entry's response checked by it — none given, the import map's)
-      def eval_esm_module(url, inline_src = nil, target: nil, handles: nil, options: ModuleFetchOptions::NONE, sw: nil, integrity: nil)
-        target  ||= ctx
-        handles ||= native_module_handles
-        # A CONTROLLED document's module-graph source fetches dispatch SW fetch
-        # events (destination 'script', mode 'cors'). The context is recorded per
-        # REALM (not scoped to this call) so a dynamic `import()` resolved later
-        # by the isolate resolver still finds it; `root` carries the entry URL,
-        # whose fetch alone uses the element's own `integrity` attribute.
-        # KNOWN LOSS (documented divergence): one slot per realm means the LAST
-        # evaluated script's fetch options win — a deferred import() from an
-        # earlier script picks up the later script's credentials/root. Spec wants
-        # per-referring-script options; no vendored test observes the difference.
-        module_sw_ctxs[realm_key(target)] = sw&.merge(root: inline_src ? nil : url.to_s)
-        m = native_module_for(url, inline_src, target, handles, options: options, integrity: integrity)
-        return false unless m
-        return m.to_a if m.is_a?(ModuleError)
-        begin
-          instantiate_native_module(m, url, target, handles, options)
-          return true if V8Runtime.engine_call(target, 'moduleCancelled') == true
+      # ── Module scripts ──
+      #
+      # The engine keeps each document's module map and fetches its module graphs (module_map.rs); the host compiles each
+      # module that comes in into a record of its realm (`module_record`) — the map keeps its number — and, as a module
+      # script runs, links its graph by the links the map hands over and evaluates it (`eval_module_graph`). `target` is
+      # the realm: nil for the main one, or a frame's / a window's context (a Module is bound to its context).
 
-          # (…its evaluation's rejection — a top-level throw, a top-level await's — reported at its window, `error`
-          # event and all, as HTML "run a module script" reports it: the realm's own `reportError` step)
-          m.evaluate(report: '@steps.reportError')
-        rescue ModuleFetchFailed
-          return false
-        rescue ModuleParseFailed => e
-          return e.error.to_a
-        rescue RustyRacer::ParseError, RustyRacer::RuntimeError => e
-          # (…its graph's failure to link — an export none of its modules has — its error to rethrow too)
-          # ScriptTerminatedError deliberately propagates (a watchdog terminate must escalate).
-          return module_error(e.message).to_a
-        end
+      # What a module of `target` came in as — `source`, its base URL `base` (its response's URL; an inline one's its
+      # document's), its module type `type` (module_map.rs `ModuleType`) — made a module script (HTML "create a … module
+      # script"): `[record, body, base]`, `body` the source a JavaScript one compiled from (whose requests the map reads off
+      # it); or its parse error `[name, message, filename, lineno]`.
+      def module_record(target, source, base, type, inline: false)
+        target ||= ctx
+        base = base.to_s
+        body = Native.module_body(RuntimeShared.utf8_text(source.to_s), type.to_i) or return ['SyntaxError', 'JSON module is not valid JSON', base, nil]
+        m = inline ? compile_inline_module(body, base, target) : compile_fetched_module(body, base, target)
+        id = (@module_record_seq += 1)
+        module_table(target)[:records][id] = m
+        [id, type.to_i.zero? ? body : nil, base]
+      rescue RustyRacer::ParseError => e
+        module_error(e.message, base).to_a
+      end
+
+      # A module script's graph run (bridge.entry.js `runModuleScript`), as the map handed it over (`moduleGraphResult`):
+      # its links taken — `[root, base, [specifier, record, …], …]` — its root linked and evaluated: true where it ran (a
+      # throw in it, or its top-level await's rejection, reported at its window, `error` event and all, as HTML "run a
+      # module script" reports it: the realm's own `reportError` step), or its link's error to rethrow (an export none of
+      # its modules has), `ModuleError#to_a`.
+      def eval_module_graph(target, result)
+        m = linked_module(target || ctx, result) or return false
+        m.evaluate(report: '@steps.reportError')
         true
+      rescue RustyRacer::ParseError, RustyRacer::RuntimeError => e
+        # (ScriptTerminatedError deliberately propagates: a watchdog terminate must escalate)
+        module_error(e.message).to_a
       end
-      # A module script's fetch options (HTML "script fetch options") the driver keeps: its referrer policy (nil: its
-      # document's) and its credentials mode — its graph's element's `referrerpolicy` and `crossorigin` (a module
-      # script's "same-origin" by default).
-      ModuleFetchOptions = Data.define(:policy, :credentials) do
-        def self.of(policy, credentials) = new(policy: policy.to_s.empty? ? nil : policy.to_s, credentials: credentials.to_s.empty? ? 'same-origin' : credentials.to_s)
+      # …its root's record, linked: each module's requests resolved to the records the map handed over for them, in the
+      # order V8 asks — its module requests' (the map read them off the same compile) — none where one is missing.
+      def linked_module(target, result)
+        table = module_table(target)
+        root, *links = result
+        links.each_slice(2) {|base, pairs| table[:links][base.to_s] = pairs.each_slice(2).to_a }
+        m = table[:records][root.to_i] or return nil
+        return m unless m.status == :uninstantiated
+
+        asked = Hash.new(0)
+        m.instantiate do |specifier, referrer|
+          requests = table[:links][referrer.to_s] || []
+          at = asked[referrer]
+          at = requests.index {|s, _| s == specifier } unless requests[at]&.first == specifier
+          raise ModuleLinkFailed, "module not found: #{specifier}" unless at
+
+          asked[referrer] = at + 1
+          table[:records][requests[at][1].to_i] or raise ModuleLinkFailed, "module not found: #{specifier}"
+        end
+        m
       end
-      ModuleFetchOptions::NONE = ModuleFetchOptions.new(policy: nil, credentials: 'same-origin')
-      # What a module of the graph came to where it is no module record (HTML "fetch a single module script"): it could
-      # not be fetched — the graph's result null, the element's `error` — or it has an error to rethrow, the graph's
-      # (`ModuleError`, kept as the URL's handle): it could not be parsed, or a specifier it imports resolves to none — the
-      # element's `load`, the error reported at its window (HTML "run a module script"), by its kind, its message and where
-      # V8 found it (none for a specifier: the document's), as the bridge makes it anew (`[name, message, filename,
-      # lineno]`: the value V8 threw is its once, and only as it is thrown).
+
+      # A module's parse error (HTML "module script"'s), or its graph's link error to rethrow (`[name, message, filename,
+      # lineno]`: the value V8 threw is its once, and only as it is thrown) — reported by the bridge at its window
+      # (`reportModuleError`), by its kind, its message and where V8 found it (none for a link's: the document's).
       ModuleError = Data.define(:name, :message, :filename, :lineno) do
         def to_a = [name, message, filename, lineno]
       end
-      class ModuleFetchFailed < StandardError; end
-      class ModuleParseFailed < StandardError
-        attr_reader :error
-
-        def initialize(error)
-          @error = error
-          super(error.message)
-        end
-      end
+      class ModuleLinkFailed < StandardError; end
       # …of V8's message for a failure of the module at `url` (`SyntaxError: Unexpected token ';' at http://…/m.js:1`): its
       # kind, its text, and the location the host appended to it — that URL, which may hold spaces (a `data:` one's), and
       # a line; none for a failure the host names no location of (a link's).
@@ -1830,269 +1826,79 @@ module Capybara
         name, message = 'SyntaxError', name.to_s unless message
         ModuleError.new(name, message, at && url.to_s, at&.[](1)&.to_i)
       end
-      # …a specifier none of a module's imports resolve (HTML "resolve a module specifier": a TypeError).
-      def unresolved_specifier(specifier)
-        ModuleError.new('TypeError', RuntimeShared.unresolved_specifier(specifier), nil, nil)
-      end
 
-      # A `.json` module is exposed as the default export of its parsed value;
-      # every other body is the fetched source as-is. Module SOURCE is text,
-      # but it arrives as the raw Rack / File.binread body — tagged
-      # ASCII-8BIT (see `RuntimeShared.utf8_text`).
-      def module_body(url, src)
-        src = RuntimeShared.utf8_text(src)
-        json_module?(url) ? "export default #{src};" : src
-      end
-      def json_module?(url)
-        url.to_s.match?(/\.json(?:\?|$)/)
-      end
+      # A fetched module's body compiled under its URL. No-cd warm path: once this isolate has compiled a URL, its in-memory
+      # compilation cache holds the bytecode keyed by source — skip `cached_data` so V8 hits that cache directly (~0.04
+      # ms/module) instead of paying the forced kConsumeCodeCache deserialize (~0.15 ms/module). The first compile of each
+      # URL goes through the on-disk bytecode cache and warms it. The in-memory cache is source-keyed and re-populated by
+      # every compile, so a changed body or a GC-aged-out entry costs ONE re-parse and is warm again — no sticky cliff.
+      # (Only the on-disk blob for a changed body stays unwarmed; acceptable, module URLs here are fingerprinted-immutable.)
+      # Realms share the isolate's cache, so the tracking applies to frame-realm compiles too. On a cold rebuild
+      # `@compiled_module_urls` is cleared and everything returns to the `cached_data` path.
+      def compile_fetched_module(body, url, target)
+        return target.compile_module(body, filename: url) if @compiled_module_urls.key?(url)
 
-      # `RustyRacer::Module` handles are bound to their realm; both rebuild
-      # paths invalidate them. The key carries `Ctx#generation` because a
-      # warm reset keeps the same Ctx OBJECT — object_id alone can't see it.
-      def native_module_handles
-        @native_module_handles ||= {}
-        key = [ctx.object_id, ctx.generation]
-        if @native_module_handles_key != key
-          @native_module_handles     = {}
-          @native_module_handles_key = key
-        end
-        @native_module_handles
+        sha     = Digest::SHA256.hexdigest(body)
+        version = self.class.cached_data_version_tag
+        cached  = ScriptCache.lookup(sha, version, kind: :module)
+        m       = target.compile_module(body, filename: url, cached_data: cached)
+        ScriptCache.queue_warm(target, sha, url, body, version, kind: :module, stale: !cached.nil?) if cached.nil? || m.cache_rejected?
+        @compiled_module_urls[url] = true
+        m
       end
-
-      # The document a realm has loading, as its bridge holds it (`documentToken`): whose asset memo a module fetch
-      # reads (`Browser#external_asset_response`).
-      def asset_document_of(target)
-        V8Runtime.engine_call(target, 'documentToken')
-      rescue StandardError
-        nil
-      end
-
-      # The module script of `url` — or, `inline_src` given, the inline one whose base URL `url` is: a script of its own
-      # each time, in no module map (HTML "create a JavaScript module script"), its `import.meta.url` that base URL. An
-      # imported one's request is referred by `referrer`, the base URL of the script importing it; a graph's entry by its
-      # document ("client") — each with `options`, its graph's element's fetch options: its referrer policy and its
-      # credentials mode.
-      # (…`integrity` the entry's element's metadata, none for an import, whose the import map's: HTML "resolve a module
-      # integrity metadata" — a response that does not match it no module, as a network error: SRI, Fetch "main fetch")
-      def native_module_for(url, inline_src, target, handles, referrer: nil, options: ModuleFetchOptions::NONE, integrity: nil)
-        return handles[url] if !inline_src && handles.key?(url)
-        url_s = url.to_s
-        src   = inline_src
-        # (…a `blob:` or `data:` one's its own, which no network nor service worker fetches)
-        local = inline_src.nil? && @browser.local_module_source(url_s, realm_key(target))
-        if local
-          src, content_type = local
-        elsif src.nil? && (sw = module_sw_ctxs[realm_key(target)])
-          # Only the graph's ENTRY fetch carries the element's integrity
-          # attribute; every other module resolves integrity from the import map
-          # (HTML "resolve a module integrity metadata").
-          integ = url_s == sw[:root] ? sw[:integrity].to_s : ''
-          integ = @browser.importmap_integrity(url_s, realm_key(target)) if integ.empty?
-          # (…its destination its module type's, a JSON module's `json`, as the network's below)
-          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          r = @browser.sw_script_subresource_fetch(
-            sw[:handle],
-            url_s,
-            sw[:client_id],
-            sw[:referrer],
-            json_module?(url_s) ? 'json' : 'script',
-            'cors',
-            sw[:credentials] || 'same-origin',
-            integrity: integ,
-            referrer_policy: sw[:referrer_policy],
-            client:          sw[:client]
-          )
-          @browser.note_module_fetch(url_s, started, answer: r) if r   # its Resource Timing entry ('script'), the answer's
-          return handles[url] = nil if r && r['blocked']   # respondWith failed the load
-          src = r && r['body']
-          content_type = r && r['contentType']
-        end
-        if src.nil? && !local
-          # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
-          # link fetched it too), none across visits while the response says it is fresh — a CORS request, as every
-          # module script's is (HTML "fetch a single module script"), with the graph's credentials mode: a module of
-          # another origin whose response does not allow it fails to load. (…its destination its module type's, a JSON
-          # module's `json`, as a `modulepreload` of its `as` fetches it)
-          dest = json_module?(url_s) ? 'json' : 'script'
-          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          src, meta, raw = @browser.external_asset_response(url_s, asset_document_of(target), realm_key(target), options.policy, referrer: referrer, dest: dest, mode: 'cors',
-                                                                                                                            credentials: options.credentials, module_map: true)
-          integ = integrity.nil? ? @browser.importmap_integrity(url_s, realm_key(target)).to_s : integrity.to_s
-          src = nil if src && !integ.empty? && Native.integrity_refuses((raw || src).b, integ)
-          @browser.note_module_fetch(url_s, started) if src   # its Resource Timing entry ('script')
-          content_type = meta&.dig('headers', 'content-type')
-        end
-        # (…a response of a MIME type no module script is — no JavaScript one, nor a JSON one for a JSON module — no
-        # module at all, whoever answered it: HTML "fetch a single module script")
-        src = nil if src && !inline_src && !Native.module_content(Array(content_type).join(', '), json_module?(url_s))
-        return handles[url] = nil unless src
-        return compile_inline_module(src, url_s, target) if inline_src
-        # (…its fetch options, for an `import()` it makes — a fetched module's, which the map keys by its URL: an inline
-        # one's name is its document's base URL, every inline module's alike, so an `import()` it makes is fetched with
-        # its document's defaults)
-        module_fetch_options(realm_key(target))[url_s] = options unless options == ModuleFetchOptions::NONE
-        @browser.note_module_source_map(url_s, src)
-        body = module_body(url_s, src)
-        # No-cd warm path: once this isolate has compiled a URL, its in-memory
-        # compilation cache holds the bytecode keyed by source — skip
-        # `cached_data` so V8 hits that cache directly (~0.04 ms/module)
-        # instead of paying the forced kConsumeCodeCache deserialize
-        # (~0.15 ms/module). The first compile of each URL goes through the
-        # on-disk bytecode cache and warms it. The in-memory cache is
-        # source-keyed and re-populated by every compile, so a changed body
-        # or a GC-aged-out entry costs ONE re-parse and is warm again — no
-        # sticky cliff. (Only the on-disk blob for a changed body stays
-        # unwarmed; acceptable, module URLs here are fingerprinted-
-        # immutable.) Realms share the isolate's cache, so the tracking
-        # applies to frame-realm compiles too. On a cold rebuild
-        # `@compiled_module_urls` is cleared and everything returns to the
-        # `cached_data` path.
-        if @compiled_module_urls.key?(url_s)
-          m = target.compile_module(body, filename: url_s)
-        else
-          sha     = Digest::SHA256.hexdigest(body)
-          version = self.class.cached_data_version_tag
-          cached  = ScriptCache.lookup(sha, version, kind: :module)
-          m       = target.compile_module(body, filename: url_s, cached_data: cached)
-          if cached.nil? || m.cache_rejected?
-            ScriptCache.queue_warm(target, sha, url_s, body, version, kind: :module, stale: !cached.nil?)
-          end
-          @compiled_module_urls[url_s] = true
-        end
-        handles[url] = m
-      rescue RustyRacer::ParseError => e
-        handles[url] = module_error(e.message, url_s)
-      end
-      def compile_inline_module(src, url, target)
-        body    = RuntimeShared.utf8_text(src)
+      # …an inline one's under its document's base URL: a script of its own each time, in no module map (HTML "create a
+      # JavaScript module script"), cached by its source alone.
+      def compile_inline_module(body, url, target)
         sha     = Digest::SHA256.hexdigest(body)
         version = self.class.cached_data_version_tag
         cached  = ScriptCache.lookup(sha, version, kind: :module)
         m       = target.compile_module(body, filename: url, cached_data: cached)
         ScriptCache.queue_warm(target, sha, url, body, version, kind: :module, stale: !cached.nil?) if cached.nil? || m.cache_rejected?
         m
-      rescue RustyRacer::ParseError => e
-        module_error(e.message, url)
       end
 
-      def instantiate_native_module(m, importer_url, target, handles, options = ModuleFetchOptions::NONE)
-        return unless m.status == :uninstantiated
-        browser = @browser
-        realm = realm_key(target)
-        m.instantiate do |specifier, referrer|
-          resolved, base = browser.resolve_module_request(specifier, referrer || importer_url, realm)
-          raise ModuleParseFailed, unresolved_specifier(specifier) unless resolved
-          child = native_module_for(resolved, nil, target, handles, referrer: base, options: options)
-          raise ModuleFetchFailed, "module not found: #{resolved}" unless child
-          raise ModuleParseFailed, child if child.is_a?(ModuleError)
-          child
-        end
+      # A realm's module records, by the number the map keeps, and the links of each module the map handed over, by its base
+      # URL: the main realm's until a rebuild or a warm reset makes it again (the key carries `Ctx#generation`: a warm reset
+      # keeps the same Ctx OBJECT), a frame's or a window's until its realm is disposed.
+      def module_table(target)
+        return (@realm_module_tables ||= {})[target.id] ||= {records: {}, links: {}} unless target.equal?(ctx)
+
+        key = [ctx.object_id, ctx.generation]
+        @main_module_table = {records: {}, links: {}} if @main_module_table_key != key
+        @main_module_table_key = key
+        @main_module_table
       end
 
-      # `import('x')` routes through this callback; rusty's native side
-      # finishes the dynamic import per the V8 host contract — it
-      # instantiates + evaluates the returned Module (TLA-aware, via the
-      # evaluation promise) before resolving the outer `import()` promise.
-      # The resolver is per-ISOLATE; rusty hands it the INITIATING realm's
-      # Context as the third argument, so a frame realm's `import()`
-      # compiles + links in that realm with its own handle cache — same
-      # realm-correctness as static `<script type=module>` via
-      # `attach_realm_esm_entry`.
-      def attach_native_module_loader(c)
-        c.attach('@evalEsmEntry', ->(url, inline, policy, credentials, integrity, *sw) {
-          options = ModuleFetchOptions.of(policy, credentials)
-          esm_entry_result(RuntimeShared.safe_call { eval_esm_module(url, inline, options: options, sw: esm_sw_ctx(sw), integrity: integrity) })
+      # The host's steps of a realm's module scripts (subresource-host.js, bridge.entry.js), bound to it — nil the main
+      # realm, whichever Ctx it is when they are called: a module's fetch landed and compiled (`H_MODULE_TAKE`), an inline
+      # one's source compiled (`H_MODULE_INLINE`), a module script's graph run.
+      def attach_module_steps(c, realm = nil)
+        c.attach('@moduleFetchTake', ->(id, type, now) {
+          RuntimeShared.safe_call { (answer = @browser.module_fetch_take(id, now)) && module_record(realm, answer[:source], answer[:base], type) }
         })
+        c.attach('@moduleInline', ->(source, base) { RuntimeShared.safe_call { module_record(realm, source, base, 0, inline: true) } })
+        c.attach('@evalModuleGraph', ->(result) { RuntimeShared.safe_call { eval_module_graph(realm, result) } })
+      end
+
+      # `import('x')` routes through this callback; rusty's native side finishes the dynamic import per the V8 host contract
+      # — it evaluates the returned Module (TLA-aware, via the evaluation promise) before resolving the outer `import()`
+      # promise. The resolver is per-ISOLATE; rusty hands it the INITIATING realm's Context as the third argument, so a
+      # frame realm's `import()` is fetched and linked in that realm: its graph the map's (`moduleImport`), its root
+      # handed back linked.
+      # (…the import's rejection the engine's Error, of no kind — rusty_racer — its graph's error to rethrow the console's
+      # alone; a static graph's the bridge reports, which logs it)
+      def attach_dynamic_imports(c)
         c.dynamic_import_resolver = lambda do |specifier, referrer, initiating|
-          target, handles =
-            if initiating && initiating.id != 0
-              [initiating, realm_module_handles(initiating.id)]
-            else
-              [ctx, native_module_handles]
-            end
-          resolved, base = @browser.resolve_module_request(specifier, referrer, realm_key(target))
-          raise ModuleParseFailed, unresolved_specifier(specifier) unless resolved
-          options = module_fetch_options(realm_key(target))[referrer.to_s] || ModuleFetchOptions::NONE
-          m = native_module_for(resolved, nil, target, handles, referrer: base, options: options)
-          raise "module not found: #{resolved}" unless m
-          raise ModuleParseFailed, m if m.is_a?(ModuleError)
-          instantiate_native_module(m, resolved, target, handles, options)
-          m
-        rescue ModuleParseFailed => e
-          # (…its graph's error to rethrow the console's alone: the `import()` rejects with the engine's Error, of no kind
-          # — a static graph's the bridge reports, which logs it)
-          @browser.log_console('error', "#{e.error.name}: #{e.error.message}")
-          raise
+          target = initiating && initiating.id != 0 ? initiating : ctx
+          result = V8Runtime.engine_call(target, 'moduleImport', specifier.to_s, referrer.to_s)
+          raise ModuleLinkFailed, "module not found: #{specifier}" unless result.is_a?(Array)
+          if result[0].is_a?(Array)
+            name, message = result[0]
+            @browser.log_console('error', "#{name}: #{message}")
+            raise ModuleLinkFailed, message.to_s
+          end
+          linked_module(target, result) or raise ModuleLinkFailed, "module not found: #{specifier}"
         end
-      end
-
-      # Per-realm module-handle caches, keyed by realm id (Module handles are
-      # context-bound). Shared by the realm's static `evalEsmEntry`
-      # and the isolate resolver's dynamic-import routing; dropped with the
-      # realm in the dispose paths.
-      def realm_module_handles(realm_id)
-        (@realm_module_handles ||= {})[realm_id] ||= {}
-      end
-
-      # realm -> SW fetch context for module-source fetches (see eval_esm_module).
-      # Invalidated exactly like native_module_handles (a service worker OUTLIVES
-      # navigation, so a stale entry would be ACTIVE, not inert: the next page's
-      # dynamic import would dispatch fetch events for an uncontrolled document);
-      # frame-realm entries also drop with their realm in the dispose paths.
-      def module_sw_ctxs
-        @module_sw_ctxs ||= {}
-        key = [ctx.object_id, ctx.generation]
-        if @module_sw_ctxs_key != key
-          @module_sw_ctxs     = {}
-          @module_sw_ctxs_key = key
-        end
-        @module_sw_ctxs
-      end
-      # …and realm -> {module URL -> its fetch options}, where its graph's element set any (`referrerpolicy`,
-      # `crossorigin`): what an `import()` the module makes is fetched with (HTML HostLoadImportedModule: the referencing
-      # script's fetch options), kept as the module map keeps the module — its first fetch's (a fetched module's alone:
-      # `native_module_for`). Invalidated as the handles are.
-      def module_fetch_options(realm)
-        key = [ctx.object_id, ctx.generation]
-        if @module_fetch_options_key != key
-          @module_fetch_options     = {}
-          @module_fetch_options_key = key
-        end
-        @module_fetch_options[realm] ||= {}
-      end
-
-      def realm_key(target)
-        target.equal?(ctx) ? 0 : target.id
-      end
-
-      # What `evalEsmEntry` answers the bridge, of `eval_esm_module`'s result: true where the graph ran, false where
-      # it could not be fetched — a host failure (`safe_call`'s nil) alike — or its error to rethrow, `[name, message]`.
-      def esm_entry_result(result) = result.is_a?(Array) ? result : result == true
-
-      # The optional [handle, clientId, referrer, credentials, integrity, referrer policy, client] tail
-      # moduleSwCtx (bridge.entry.js) appends to evalEsmEntry, or nil.
-      def esm_sw_ctx(sw)
-        return nil unless sw && sw[0].to_i.positive?
-        {
-          handle:          sw[0].to_i,
-          client_id:       sw[1].to_s,
-          referrer:        sw[2].to_s,
-          credentials:     sw[3].to_s,
-          integrity:       sw[4].to_s,
-          referrer_policy: sw[5].to_s,
-          client:          sw[6]
-        }
-      end
-
-      # Frame-document `<script type=module>` entry, bound to the realm.
-      def attach_realm_esm_entry(realm)
-        realm.attach('@evalEsmEntry', ->(url, inline, policy, credentials, integrity, *sw) {
-          esm_entry_result(RuntimeShared.safe_call {
-            eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id), options: ModuleFetchOptions.of(policy, credentials), sw: esm_sw_ctx(sw),
-                                         integrity: integrity)
-          })
-        })
       end
 
       # Override the JS-side `runScript` fallback with a Ruby host fn
@@ -2133,7 +1939,7 @@ module Capybara
         # don't pay the rendezvous round-trip.
         c.attach('@runScriptCached', ->(label, body) {
           src = body.to_s
-          # No-cd warm path, mirroring `native_module_for`: once this
+          # No-cd warm path, mirroring `compile_fetched_module`: once this
           # isolate has compiled a (label, bytesize), re-visits compile
           # straight against V8's source-keyed in-memory cache — skipping
           # the SHA256 of a 140KB+ chunk per visit (rbspy: ~4.8% of the

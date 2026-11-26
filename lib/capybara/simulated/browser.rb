@@ -496,6 +496,9 @@ module Capybara
         @script_fetch_seq   = 0
         @script_fetches     = {}
         @asset_flights      = {}
+        # …and of those a module graph began (`module_fetch_start`), what each one is: its URL, module type, integrity
+        # metadata and its beginning on the page's clock.
+        @module_fetches     = {}
         # The module fetches each thread's graphs noted for this window, until a realm files them (`note_module_fetch`) — the
         # window's own, which another session's never takes.
         @module_rt          = {}.compare_by_identity
@@ -3791,6 +3794,7 @@ module Capybara
           @image_load_pending = 0
         end
         @script_fetches.clear
+        @module_fetches.clear
         # (…and the module fetches its graphs noted and no realm filed — a frame's `import()` whose page went before its
         # timing was taken: `note_module_fetch`)
         @module_rt.clear
@@ -3978,28 +3982,22 @@ module Capybara
       # sheet's, an image's `error`).
       def resource_loaded?(result) = result && !result['body_error']
 
-      # A module the graph loader just fetched (via `rack_fetch_body`, whose facts are stashed in
-      # `csim_asset_meta`) — collected so the bridge can file its 'script' Resource Timing entry.
-      # One per URL, as the browser files it: the loader's handle cache already skips a re-import
-      # before it fetches, and the dedup here keeps that true for any path that does not.
-      # (…`answer` a controlling service worker's, which its entry is made of where it answered)
-      def note_module_fetch(url, started, answer: nil)
-        meta = Thread.current[:csim_asset_meta] unless answer
-        # (…its fetch's own times where its document's module map answered it: `asset_request`)
-        times, Thread.current[:csim_asset_times] = Thread.current[:csim_asset_times], nil
+      # A module a graph fetched (`module_fetch_take`) — collected so the bridge can file its 'script' Resource Timing entry:
+      # the facts of its response (`meta`) or a controlling service worker's answer (`answer`), and its fetch's times
+      # (`take_module_rt`). One per URL, as the browser files it.
+      def note_module_fetch(url, times:, meta: nil, answer: nil)
         return unless meta || answer
 
         url  = url.to_s
         list = (@module_rt[Thread.current] ||= [])
         return if list.any? {|m| m['url'] == url }
 
-        times ||= [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]
         list << {'url' => url, 'meta' => meta, 'answer' => answer, 'times' => times}
       end
       # The modules fetched since the last call, for the bridge to time as 'script' — cleared on read — each with when its
-      # fetch began and ended on the page's clock (`startTime`, `endTime`): a graph's entry's, whose fetch was a script
-      # fetch's slot (`[:page, started, ended]`, script_fetch_take); or how long ago, in ms (`startAge`, `endAge`), which
-      # the bridge's clock places: one its graph fetched as it ran.
+      # fetch began and ended on the page's clock (`startTime`, `endTime`): one whose fetch was a slot (`[:page, started,
+      # ended]`, `module_fetch_take`); or how long ago, in ms (`startAge`, `endAge`), which the bridge's clock places: one
+      # a service worker answered, or a memo whose fetch was made then.
       def take_module_rt
         list = @module_rt.delete(Thread.current) || []
         now = nil
@@ -4321,12 +4319,6 @@ module Capybara
           end
         end
         [text, meta, bytes]
-      end
-
-      # Native ESM entry point: `Context#compile_module` +
-      # `Module#instantiate` / `#evaluate` + `Context#dynamic_import_resolver=`.
-      def eval_esm_module(url, src = nil)
-        @runtime.eval_esm_module(url, src)
       end
 
       # ── EventSource (SSE) ──────────────────────────────────────────
@@ -8913,39 +8905,130 @@ module Capybara
       # `attach_cookies`)
       # (…the time its server took is its sleeps — `SleepHook` counts them in the slot, its `:csim_server_slept`, rather than
       # moving the clock — which the event loop lands it that far after it began by)
-      # (…a module script's graph's entry's, `graph_entry`, its answer its document's module map's, which the graph's fetch
-      # of it takes — answered true for it, its destination its module type's as that fetch's: V8Runtime#json_module?)
-      # (…and one the document's same request under way already shares that one's slot, as the graph's fetch, or a
-      # modulepreload's, takes it, the rest of its server's time its own: `asset_request`)
+      # (…and one the document's same request under way already shares that one's slot, as a modulepreload's takes it, the
+      # rest of its server's time its own: `asset_request`)
       # (…a slot a Hash of its own and nothing more per script — no Proc, no key Array: one is begun per script of a page)
       # (…`excuse`, a parser-blocking script's, whose request's work is the page's time: the sleeps of its server this
       # request made counted none of it — the virtual clock's to show — and none of one whose flight it joined)
-      def script_fetch_start(url, realm, plan, document, referrer, graph_entry, began, id, started, excuse: false)
+      def script_fetch_start(url, realm, plan, document, referrer, began, id, excuse: false)
         realm = realm.to_i
         if document
           mode, credentials, policy, dest = request_of_plan(plan)
-          dest = 'json' if graph_entry && @runtime.json_module?(url)
-          request = asset_request(url, document, realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, dest: dest, mode: mode, credentials: credentials,
-                                                                joins: false, module_map: graph_entry)
+          request = asset_request(url, document, realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, dest: dest, mode: mode, credentials: credentials, joins: false)
           return request unless request.is_a?(AssetRequest)
 
-          # (…one under way of the same request for the same document: its slot shared, one fetch — what is left of its server's
-          # time past the joiner's own beginning the joiner's wait, none of it where it has passed)
-          flights = (@asset_flights[document.to_i] ||= {})
-          if (slot = flights[request.memo_key])
-            @script_fetches[id.to_i] = slot
-            return [slot[:began] + slot[:slept] - began.to_f, 0.0].max
-          end
-
-          slot = {began: began.to_f, started: started, slept: 0.0, cookies: nil, request: request, graph_entry: graph_entry, document: document.to_i, realm: realm}
-          flights[request.memo_key] = slot
+          slot, wait = asset_slot(request, document, began, id)
+          return wait if wait
         else
           slot = {began: began.to_f, slept: 0.0, cookies: nil, request: nil, url: url, plan: plan, realm: realm}
+          script_fetch_make(slot)
+          @script_fetches[id.to_i] = slot
         end
-        script_fetch_make(slot)
-        @script_fetches[id.to_i] = slot
         @runtime.call('agentExcuse', slot[:slept]) if excuse && slot[:slept].positive?
         slot[:slept]
+      end
+      # …the slot of an asset's request (`asset_request`) for its `document`, filed as `id`, and — one of the same request
+      # under way for the same document shared, one fetch — what is left of its server's time past the joiner's own beginning,
+      # none of it where it has passed (nil for a slot made now).
+      private def asset_slot(request, document, began, id)
+        flights = (@asset_flights[document.to_i] ||= {})
+        if (slot = flights[request.memo_key])
+          @script_fetches[id.to_i] = slot
+          return [slot, [slot[:began] + slot[:slept] - began.to_f, 0.0].max]
+        end
+
+        slot = {began: began.to_f, slept: 0.0, cookies: nil, request: request, document: document.to_i, realm: request.realm}
+        flights[request.memo_key] = slot
+        script_fetch_make(slot)
+        @script_fetches[id.to_i] = slot
+        [slot, nil]
+      end
+      # A module's fetch as its graph begins it (module_map.rs `H_MODULE_START`): HTML "fetch a single module script" — a
+      # CORS request of the module type's destination (a JSON module's `json`, a CSS module's `style`, a text module's
+      # `text`), referred by `referrer` (the referring module's base URL; nil: its client), the credentials mode and referrer
+      # policy of its graph's `plan` — made now, filed as slot `id` (`script_fetch_start`'s), answered as it lands
+      # (`module_fetch_take`): a `data:` or `blob:` URL's from its own bytes, a controlling service worker's (`sw`, the
+      # module's worker context: subresource-host.js `moduleWorkerContext`) from its `fetch` event, any other through the
+      # asset cache — its document's module map's memo, which a modulepreload's fetch fills — on the network. How long its
+      # server took, the virtual milliseconds after `began` it lands at; nil for a URL that resolves to none.
+      # (…`started` when it began on the page's clock, which its Resource Timing entry is timed from)
+      MODULE_DESTINATIONS = %w[script json style text].freeze
+      def module_fetch_start(url, realm, plan, document, referrer, integrity, type, began, id, started, sw)
+        realm = realm.to_i
+        url   = url.to_s
+        @module_fetches[id.to_i] = {url: url, type: type.to_i, integrity: integrity.to_s, started: started.to_f}
+        referrer = nil if referrer.to_s.empty?
+        dest = MODULE_DESTINATIONS[type.to_i] || 'script'
+        if (local = local_module_source(url, realm))
+          slot = {began: began.to_f, slept: 0.0, cookies: nil, request: nil, realm: realm, result: {local: local}}
+        elsif sw
+          handle, client_id, client_url, credentials, policy, client = sw
+          started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          answer = sw_script_subresource_fetch(handle, url, client_id, referrer || client_url, dest, 'cors', credentials || 'same-origin', integrity: integrity.to_s,
+                                                                                                                                     referrer_policy: policy, client: client)
+          # (…none where the worker let the request through: the network's)
+          slot = {began: began.to_f, slept: 0.0, cookies: nil, request: nil, realm: realm, result: {sw: answer, times: [started_at, Process.clock_gettime(Process::CLOCK_MONOTONIC)]}} if answer
+        end
+        if slot
+          @script_fetches[id.to_i] = slot
+          return 0.0
+        end
+
+        _, credentials, policy = request_of_plan(plan)
+        request = asset_request(url, document, realm, policy, referrer: referrer, dest: dest, mode: 'cors', credentials: credentials, joins: false, module_map: true)
+        return @module_fetches.delete(id.to_i) && nil unless request
+        # (…its document's module map's memo, a modulepreload's — or the cross-visit cache's — answer at once)
+        unless request.is_a?(AssetRequest)
+          @script_fetches[id.to_i] = {began: began.to_f, slept: 0.0, cookies: nil, request: nil, realm: realm,
+                                      result: {answered: request, times: Thread.current[:csim_asset_times]}}
+          Thread.current[:csim_asset_times] = nil
+          return 0.0
+        end
+
+        slot, wait = asset_slot(request, document, began, id)
+        wait || slot[:slept]
+      end
+      # …the milliseconds a request took, of its host times (`asset_fetch`'s `[started, ended]`), 0 for none.
+      private def request_ms(times) = times ? (times[1] - times[0]) * 1000 : 0
+      # …and as it lands: what came in, judged — `{source:, base:}`, the module's source text and its base URL (its
+      # response's URL), its Resource Timing entry noted (`take_module_rt`, timed from its beginning to `now` on the page's
+      # clock) — nil where none came in: a network error, a response the integrity metadata does not match (SRI), one of a
+      # MIME type no module of its type is (a text module's any).
+      def module_fetch_take(id, now)
+        mod  = @module_fetches.delete(id.to_i)
+        slot = @script_fetches.delete(id.to_i)
+        return nil unless mod && slot
+
+        script_fetch_landed(slot)
+        store_kept_cookies(slot[:cookies])
+        url    = mod[:url]
+        result = slot[:result] or return nil
+        if (local = result[:local])
+          source, content_type = local
+          base = url
+        elsif (answer = result[:sw])
+          return nil if answer['blocked']
+
+          note_module_fetch(url, answer: answer, times: result[:times])
+          source, content_type = answer['body'], answer['contentType']
+          base = answer['url'].to_s.empty? ? url : answer['url'].to_s
+        else
+          # (…a fetch made for it timed on the page's clock, as a classic script's — from its beginning to its landing, or,
+          # where it lands as it began (none of its server's time to wait: an import fetched as its referrer landed), as
+          # long as the request took — one a memo answered as that fetch was)
+          times = result[:answered] ? result[:times] : [:page, mod[:started], [now.to_f, mod[:started] + request_ms(result[:times])].max]
+          source, meta, raw = result[:answered] || asset_answer(slot[:request], result.merge(times: times))
+          return nil unless source
+          return nil if !mod[:integrity].to_s.empty? && Native.integrity_refuses((raw || source).b, mod[:integrity].to_s)
+
+          note_module_fetch(url, meta: meta, times: times)
+          content_type = meta&.dig('headers', 'content-type')
+          base = meta&.[]('url').to_s.empty? ? url : meta['url']
+        end
+        return nil unless source && Native.module_content(Array(content_type).join(', '), mod[:type])
+
+        note_module_source_map(url, source)
+        {source: source, base: base}
       end
       # …and a font's download (CSS Font Loading "load()", font_files.rs): made now — a slot as a script's, its server's
       # sleeps counted in it — and taken as it lands, the face's file `{path, meta, ok}` (`web_font_fetch`); answered at
@@ -8991,18 +9074,14 @@ module Capybara
       # …and its answer, taken as it lands (the slot let go of), the cookies its responses set stored now: the network's
       # response (a font's file, `web_font_fetch`), or the asset cache's answer — kept by the memos it is kept by — nil for
       # a network error.
-      # (…a module's Resource Timing entry timed as a classic script's is, on the page's clock: from as its fetch began,
-      # `started`, to as it lands, `now` — `take_module_rt`)
-      def script_fetch_take(id, now)
+      def script_fetch_take(id)
         slot = @script_fetches.delete(id.to_i) or return nil
         script_fetch_landed(slot)
         store_kept_cookies(slot[:cookies])
         result = slot[:result]
         return result unless (request = slot[:request]) && result
 
-        result[:times] = [:page, slot[:started], now] if slot[:graph_entry]
-        answered = asset_answer(request, result)
-        slot[:graph_entry] || answered
+        asset_answer(request, result)
       end
       # …the cookies a script's fetch's responses set, kept (`store_set_cookies`), stored now and let go of.
       private def store_kept_cookies(kept)
@@ -9014,6 +9093,7 @@ module Capybara
       # …or let go of, unanswered: its fetch cancelled (its document aborted, its realm gone), never made where it was still
       # to be.
       def script_fetch_forget(id)
+        @module_fetches.delete(id.to_i)
         slot = @script_fetches.delete(id.to_i)
         script_fetch_landed(slot) if slot
         nil
@@ -9022,7 +9102,7 @@ module Capybara
       # left to land them.
       def script_fetches_forget_realm(realm)
         realm = realm.to_i
-        @script_fetches.delete_if {|_, slot| slot[:realm] == realm && (script_fetch_landed(slot) || true) }
+        @script_fetches.delete_if {|id, slot| slot[:realm] == realm && (script_fetch_landed(slot) || @module_fetches.delete(id) || true) }
         nil
       end
       # …no fetch under way that another request of the document's takes from then on: what it answered is the memo's.
@@ -10650,65 +10730,14 @@ module Capybara
         out
       end
 
-      # Each realm's document's import map (import_map.rs, as JSON), which the realm's `registerImportMap` keeps and pushes
-      # here, by realm id, so the host resolves a realm's module specifiers as that realm does — a frame's map neither
-      # replaces its parent's nor clears it.
-      def set_importmap(json, realm)
-        (@importmaps ||= {})[realm.to_i] = json.to_s
-      end
-
-      # …gone with its realm.
-      def forget_importmap(realm)
-        @importmaps&.delete(realm.to_i)
-      end
-
-      # Import-map "integrity" metadata for a RESOLVED module URL in `realm` ('' when unmapped).
-      def importmap_integrity(url, realm)
-        map = @importmaps&.[](realm.to_i)
-        map ? Native.import_map_integrity(map, url.to_s) : ''
-      end
-
-      # A module request of the script named `base_url` (the referrer): [HTML "resolve a module specifier" against its base
-      # URL through `realm`'s import map — the URL, or nil where it resolves to none (a bare one nothing maps: a
-      # TypeError, no fetch) — and that base URL, which the request is referred by (HTML "fetch the descendants of a
-      # module script", HostLoadImportedModule: the referring script's base URL its referrer)].
-      # (…an inline classic script's — no URL of its own — its base URL, its document's as it ran (`inlineScriptBase`:
-      # a frame's, not the page's, its `<base href>` heeded, one inserted after it not); a script the realm knows by no
-      # name — a handler's, a string timer's — its document's base URL now, and no referring script at all: the request
-      # referred by its client, nil)
-      def resolve_module_request(specifier, base_url, realm)
-        referrer = module_base_url(base_url) || realm_text(realm, 'inlineScriptBase', base_url.to_s)
-        base     = referrer || realm_text(realm, 'baseURL') || effective_module_base(nil)
-        [Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base), referrer]
-      end
-      # …a string realm `realm` (0 the page) answers `name` with, nil for none.
-      private def realm_text(realm, name, *args)
-        text = @runtime.realm_direct_call(realm.to_i, name, *args).to_s
-        text.empty? ? nil : text
-      end
-
-      # The base a module specifier resolves against: the importer's URL — for a nested relative import, and for a
-      # dynamic `import()` the referring script's. An inline script / module has no real URL — its pseudo-name is
-      # `<eval>` (no scheme, from V8) or `inline://<hash>` (from `runScript`) — and, its document's base URL out of
-      # reach, resolves against the PAGE URL.
-      private def effective_module_base(base)
-        module_base_url(base) || page_url || default_host
-      end
-      # …the importer's URL where it has a real one.
-      private def module_base_url(base)
-        base if base.is_a?(String) && base =~ %r{\A[a-z]+://}i && !base.start_with?('inline:')
-      end
-
+      # `url` parsed against `base` — a source map's against its script's URL, a redirect's `Location` against its request's —
+      # one that names no real URL (V8's `<eval>`, an inline script's `inline://<hash>`) the page's URL in its place.
+      # Memoized per Browser — a pure function of (base, url) — as a page's scripts name the same few map URLs visit
+      # after visit.
       def resolve_against(url, base)
         return url if url =~ %r{\A[a-z]+://}i
-        eff = effective_module_base(base)
-        # Memo of `url` parsed against `eff` — a pure function of (effective base, url).
-        # A heavy ESM app re-resolves the same ~80 module specifiers against the
-        # same base on every visit (a fresh VM re-instantiates the whole module
-        # graph); Ruby's URI parser was a measured ~11% of per-visit wall. The
-        # Browser persists across a suite's visits, so this instance-level memo
-        # (same scope/threading assumptions as @importmap) turns
-        # all but the first visit's resolves into hash hits.
+        eff = base if base.is_a?(String) && base =~ %r{\A[a-z]+://}i && !base.start_with?('inline:')
+        eff ||= page_url || default_host
         cache = (@resolve_against_cache ||= {})
         cache[[eff, url]] ||= parse_url(url.to_s, eff)&.fetch(:href) || url
       end
@@ -12971,10 +13000,7 @@ module Capybara
       end
       # Rebuild the JS Context and load `html` into it. Called from
       # every code path that handles a full-page Rack response (`navigate`
-      # for GETs, `navigate_post` for POSTs). `loadDocument` walks
-      # importmaps + module scripts during `theEnd`; the bridge
-      # pushes the importmap back via `pushImportmap` before any
-      # module loads so resolver lookups agree with the JS side.
+      # for GETs, `navigate_post` for POSTs).
       #
       # The post-nav grace bridges Capybara's outer-synchronize gap when
       # the new page has no scripts of its own to flip `@timers_active`

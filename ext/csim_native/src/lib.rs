@@ -151,6 +151,7 @@ mod preload_map;
 mod realm_identity;
 mod message_ports;
 mod mime;
+mod module_map;
 mod multipart;
 mod mutation;
 mod mutation_observers;
@@ -282,9 +283,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // A font pattern matched, and the families it is substituted through, by this machine's fontconfig.
     native.define_module_function("font_match", magnus::function!(fontconfig::font_match_for_ruby, 1))?;
     native.define_module_function("font_family_list", magnus::function!(font_faces::family_list_for_ruby, 1))?;
-    // The document's import map, as the page's module loader keeps it (import_map.rs).
-    native.define_module_function("import_map_resolve", magnus::function!(import_map::resolve_for_ruby, 3))?;
-    native.define_module_function("import_map_integrity", magnus::function!(import_map::integrity_for_ruby, 2))?;
     native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;
     // A URL's parts as the URL Standard's parser makes them, the page's own (url_ops.rs).
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;
@@ -466,6 +464,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("http_token", magnus::function!(fetch_rules::http_token_for_ruby, 1))?;
     native.define_module_function("javascript_content", magnus::function!(script::javascript_content_for_ruby, 1))?;
     native.define_module_function("module_content", magnus::function!(script::module_content_for_ruby, 2))?;
+    // What a module script of a module type compiles as (module_map.rs).
+    native.define_module_function("module_body", magnus::function!(module_map::module_body, 2))?;
     native.define_module_function("integrity_refuses", magnus::function!(integrity::integrity_refuses_for_ruby, 2))?;
     // A driver session's IndexedDB, Cache Storage, Web Locks, system clipboard and emulated position: a new partition of
     // their registries (idb_databases.rs, cache_storage.rs, web_locks.rs, system_clipboard.rs, geolocation.rs), cleared

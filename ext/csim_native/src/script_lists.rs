@@ -78,12 +78,13 @@ enum State {
 }
 
 // What an inserted script runs, decided as it lands: nothing (it moved to another document), its `error` (its fetch
-// failed, or its document aborted it), its classic script's response, its module script.
+// failed, or its document aborted it), its classic script's response, its module script's graph (module_map.rs, 0 for
+// none: one whose URL did not parse).
 enum Exec {
     Nothing,
     Error,
     Classic(Landed),
-    Module,
+    Module(u32),
 }
 
 struct Landing {
@@ -370,7 +371,8 @@ fn then(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_,
                             }
                             Exec::Classic(landed)
                         }
-                        _ if module => Exec::Module,
+                        Some(Fetched::Module(gid)) => Exec::Module(gid),
+                        _ if module => Exec::Module(0),
                         _ => Exec::Error,
                     };
                 }
@@ -426,8 +428,8 @@ const RUN_ERROR: u32 = 3;
 const RUN_MODULE: u32 = 4;
 
 // __dom.scriptLandingTake(id, host) -> `[el, what, body, prepared]`: the landing `id`, run now, taken — what its script runs
-// (`RUN_*`), none where it moved to another document since it landed, or its document was aborted, its source text, and
-// what the bindings handed over to run it by — its fetch let go of where it has one still; null for none.
+// (`RUN_*`), none where it moved to another document since it landed, or its document was aborted, its source text (a
+// module script's graph's number), and what the bindings handed over to run it by — its fetch let go of where it has one still; null for none.
 fn take_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
@@ -442,10 +444,18 @@ fn take_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         && l.landed_aborts == Some(realm(scope, cid).document_states.lifecycle(l.doc).aborts());
     let mut body: v8::Local<v8::Value> = v8::undefined(scope).into();
     let what = match l.exec {
+        // (…a module script's graph let go of where none of it runs)
+        Exec::Module(gid) if !current => {
+            crate::module_map::drop_graph(scope, cid, gid);
+            RUN_NOTHING
+        }
         _ if !current => RUN_NOTHING,
         Exec::Nothing => RUN_NOTHING,
         Exec::Error => RUN_ERROR,
-        Exec::Module => RUN_MODULE,
+        Exec::Module(gid) => {
+            body = v8::Integer::new_from_unsigned(scope, gid).into();
+            RUN_MODULE
+        }
         Exec::Classic((false, _, _)) => RUN_ERROR,
         Exec::Classic((true, text, _)) => {
             body = match text {
@@ -653,7 +663,6 @@ struct Prepared {
     // A module script, run whole once its graph's entry has landed — from the URL its end tag parsed its `src` to (`Some(None)`
     // none: one that did not parse), an inline one's none.
     module: bool,
-    url: Option<Option<String>>,
     // An inline one's source text as it was prepared.
     text: Option<Vec<u16>>,
     // Its fetch (script_fetch.rs, 0 for none): a parser-blocking one's begun as it was prepared, dated as its parse began
@@ -729,12 +738,23 @@ fn prepare(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (by, awaited,
     let module = listed.as_ref().map_or_else(|| n.is_some_and(|n| crate::script::script_type(n) == crate::script::MODULE), |l| l.module);
     let src = n.and_then(|n| n.plain_attr("src")).filter(|s| !s.is_empty()).map(str::to_owned);
     let lc = arena.document_states.lifecycle(doc);
-    let mut p = Prepared { id: 0, el, doc, aborts: lc.aborts(), generation: lc.generation(), module, url: None, text: None, fetch: 0, blocking: false, at_end_tag: by == crate::script::BY_PARSER, awaited, landed: None, mark: 0.0, wait: Wait::Begin };
+    let mut p = Prepared { id: 0, el, doc, aborts: lc.aborts(), generation: lc.generation(), module, text: None, fetch: 0, blocking: false, at_end_tag: by == crate::script::BY_PARSER, awaited, landed: None, mark: 0.0, wait: Wait::Begin };
     if module {
-        p.url = listed.and_then(|l| l.url);
-        // (…its graph's entry's fetch, begun at its end tag — an inline one's none: the tasks queued before "the end"'s wait
-        // run first)
+        // (…its graph's fetch, begun at its end tag — an inline one's descendants' too; none for a `src` that does not parse,
+        // its `error` as it runs. One the parser did not list, an XML parser's, begun now and landed: its graph fetched
+        // whole as it runs)
         p.fetch = crate::script_fetch::fetch_of(scope, cid, el);
+        if p.fetch == 0 && listed.is_none() {
+            let arena = realm(scope, cid);
+            let (url, source) = match &src {
+                Some(src) => (node_doc.and_then(|d| arena.parse_document_url(d, src)).map(|u| u.href().to_owned()), None),
+                None => (None, Some(String::from_utf16_lossy(&arena.child_text(el)))),
+            };
+            if url.is_some() || source.is_some() {
+                p.fetch = crate::module_map::begin_script(scope, cid, el, url, source, host, false)?;
+                crate::script_fetch::landed(scope, cid, p.fetch, true);
+            }
+        }
         if awaited && p.fetch == 0 {
             p.mark = realm(scope, cid).parser_waits(cid, false);
         }
@@ -909,16 +929,16 @@ fn run_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
             let _ = crate::script_fetch::drop_fetch(scope, cid, p.fetch, host);
             (RUN_PARSER_NOTHING, v8::undefined(scope).into())
         } else {
-            if p.fetch != 0 && crate::script_fetch::land(scope, cid, p.fetch, host).is_err() {
-                return;
-            }
-            // (…from the URL its end tag parsed its `src` to — null one that did not parse — an inline one's none)
-            let url = match &p.url {
-                Some(Some(url)) => crate::subresource_obtain::text(scope, url),
-                Some(None) => v8::null(scope).into(),
-                None => v8::undefined(scope).into(),
+            // (…its graph, every module of it in — none for one whose `src` did not parse)
+            let gid = match p.fetch {
+                0 => 0,
+                fetch => match crate::script_fetch::land(scope, cid, fetch, host) {
+                    Ok(Some(Fetched::Module(gid))) => gid,
+                    Ok(_) => 0,
+                    Err(_) => return,
+                },
             };
-            (RUN_PARSER_MODULE, url)
+            (RUN_PARSER_MODULE, v8::Integer::new_from_unsigned(scope, gid).into())
         }
     } else {
         let (ok, body, inline) = match p.text {

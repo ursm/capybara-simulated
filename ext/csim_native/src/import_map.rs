@@ -1,12 +1,12 @@
 // Import maps (HTML §8.1.5.3): a `<script type="importmap">`'s JSON parsed — its `imports`, `scopes` and `integrity`, each
 // key normalized (a URL-like one parsed against the map's base URL), each address parsed and refused where it is no URL
 // or a prefix key's is no prefix — merged into the document's (a later map's entry for a key the map already has
-// ignored), and a module specifier resolved through it: the scopes that cover the referrer's URL first, most specific
-// first, then the top-level imports, an exact key or the longest prefix key (`foo/`), then the specifier as a URL — a
-// bare one nothing maps a TypeError. One answer for the page's module loader (esm-loader.js) and the host's
-// (`Native.import_map_resolve`), which kept their own exact-key lookups. The map travels as JSON between them.
+// ignored, and so is one that would change how a specifier already resolved resolves), and a module specifier resolved
+// through it: the scopes that cover the referrer's URL first, most specific first, then the top-level imports, an exact
+// key or the longest prefix key (`foo/`), then the specifier as a URL — a bare one nothing maps a TypeError. The map and
+// the resolved module set are the global's (module_map.rs `ModuleMap`).
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
 // A specifier map: (key, address — None for one refused), sorted by key, descending in code-unit order — so a longer
 // prefix is tried before a shorter one.
@@ -100,9 +100,21 @@ pub(crate) fn parse(text: &str, base: &str) -> Result<ImportMap, ParseError> {
     Ok(map)
 }
 
-// "Merge existing and new import maps": the new map's entries added where the existing one has none for the key — the
-// existing entry wins — scope by scope, and the top-level imports and the integrity alike.
-pub(crate) fn merge(existing: &mut ImportMap, new: ImportMap) {
+// A record of the global's resolved module set (HTML "specifier resolution record"): the base URL a specifier was resolved
+// against, the specifier as resolution normalized it, and — its "specifier as a URL", which only matters as whether it is
+// null or special — None for a bare one, else whether its URL is special.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Resolved {
+    base: String,
+    specifier: String,
+    special: Option<bool>,
+}
+
+// "Merge existing and new import maps": the new map's scopes, its integrity and its top-level imports merged into the
+// existing map — an entry for a key the existing one already has ignored ("merge module specifier maps"), and so is one
+// that would change how a specifier already resolved resolves: a scoped rule whose scope covers a resolved record's base
+// URL and whose key is, or as a prefix covers, its specifier; a top-level rule whose key starts with a resolved specifier.
+pub(crate) fn merge(existing: &mut ImportMap, mut new: ImportMap, resolved: &[Resolved]) {
     fn merge_map(into: &mut SpecifierMap, from: SpecifierMap) {
         for (key, address) in from {
             if !into.iter().any(|(k, _)| *k == key) {
@@ -111,6 +123,15 @@ pub(crate) fn merge(existing: &mut ImportMap, new: ImportMap) {
         }
         sort_map(into);
     }
+    for (prefix, imports) in &mut new.scopes {
+        for record in resolved {
+            if *prefix == record.base || (prefix.ends_with('/') && record.base.starts_with(prefix.as_str())) {
+                imports.retain(|(key, _)| {
+                    !(*key == record.specifier || (key.ends_with('/') && record.specifier.starts_with(key.as_str()) && record.special != Some(false)))
+                });
+            }
+        }
+    }
     for (prefix, imports) in new.scopes {
         match existing.scopes.iter_mut().find(|(p, _)| *p == prefix) {
             Some((_, into)) => merge_map(into, imports),
@@ -118,18 +139,20 @@ pub(crate) fn merge(existing: &mut ImportMap, new: ImportMap) {
         }
     }
     sort_map(&mut existing.scopes);
-    merge_map(&mut existing.imports, new.imports);
     for (url, metadata) in new.integrity {
         if !existing.integrity.iter().any(|(u, _)| *u == url) {
             existing.integrity.push((url, metadata));
         }
     }
+    new.imports.retain(|(key, _)| !resolved.iter().any(|record| key.starts_with(record.specifier.as_str())));
+    merge_map(&mut existing.imports, new.imports);
 }
 
 // "Resolve an imports match": Some(Ok(url)) for a match, Some(Err(())) for a match blocked (a TypeError), None for none.
-fn imports_match(normalized: &str, as_url: Option<&str>, map: &SpecifierMap) -> Option<Result<String, ()>> {
+// (…`special` whether the specifier as a URL is special, None for a bare one)
+fn imports_match(normalized: &str, special: Option<bool>, map: &SpecifierMap) -> Option<Result<String, ()>> {
     // (…a prefix key matching a bare specifier, or a URL-like one of a special scheme)
-    let special = as_url.is_none_or(|u| ada_url::Url::parse(u, None).is_ok_and(|u| matches!(u.protocol(), "http:" | "https:" | "ws:" | "wss:" | "ftp:" | "file:")));
+    let special = special != Some(false);
     for (key, address) in map {
         if key == normalized {
             return Some(address.clone().ok_or(()));
@@ -145,164 +168,80 @@ fn imports_match(normalized: &str, as_url: Option<&str>, map: &SpecifierMap) -> 
     }
     None
 }
-// "Resolve a module specifier" against `base` (the referrer's URL): the URL, or None for a TypeError.
-pub(crate) fn resolve(map: &ImportMap, specifier: &str, base: &str) -> Option<String> {
+// "Resolve a module specifier" against `base` (the referrer's URL): the URL, and the record the global's resolved module
+// set adds — or None for a TypeError.
+pub(crate) fn resolve(map: &ImportMap, specifier: &str, base: &str) -> Option<(String, Resolved)> {
     let as_url = resolve_url_like(specifier, base);
     let normalized = as_url.as_deref().unwrap_or(specifier);
+    let special = as_url.as_deref().map(is_special);
+    let record = || Resolved { base: base.to_owned(), specifier: normalized.to_owned(), special };
     for (prefix, imports) in &map.scopes {
         if prefix == base || (prefix.ends_with('/') && base.starts_with(prefix.as_str())) {
-            if let Some(found) = imports_match(normalized, as_url.as_deref(), imports) {
-                return found.ok();
+            if let Some(found) = imports_match(normalized, special, imports) {
+                return found.ok().map(|url| (url, record()));
             }
         }
     }
-    if let Some(found) = imports_match(normalized, as_url.as_deref(), &map.imports) {
-        return found.ok();
+    if let Some(found) = imports_match(normalized, special, &map.imports) {
+        return found.ok().map(|url| (url, record()));
     }
-    as_url
+    as_url.clone().map(|url| (url, record()))
+}
+fn is_special(url: &str) -> bool {
+    ada_url::Url::parse(url, None).is_ok_and(|u| matches!(u.protocol(), "http:" | "https:" | "ws:" | "wss:" | "ftp:" | "file:"))
 }
 // "Resolve a module integrity metadata": the metadata the map gives `url`, '' for none.
 pub(crate) fn integrity<'m>(map: &'m ImportMap, url: &str) -> &'m str {
     map.integrity.iter().find(|(u, _)| u == url).map_or("", |(_, m)| m)
 }
 
-// ── as JSON, between the page's loader and the host's ──
-fn map_json(map: &SpecifierMap) -> Value {
-    Value::Array(map.iter().map(|(k, a)| json!([k, a])).collect())
-}
-fn map_of(value: &Value) -> SpecifierMap {
-    value
-        .as_array()
-        .map(|entries| {
-            entries
-                .iter()
-                .filter_map(|e| Some((e.get(0)?.as_str()?.to_owned(), e.get(1)?.as_str().map(str::to_owned))))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-pub(crate) fn to_json(map: &ImportMap) -> String {
-    json!({
-        "imports": map_json(&map.imports),
-        "scopes": map.scopes.iter().map(|(p, m)| json!([p, map_json(m)])).collect::<Vec<_>>(),
-        "integrity": map.integrity.iter().map(|(u, m)| json!([u, m])).collect::<Vec<_>>(),
-    })
-    .to_string()
-}
-// …and the map a JSON text is, the last few read kept (most recent first): a page's module graph resolves its specifiers
-// one by one through the same map, which was read again for each (40 µs a resolve with 250 pins) — and a parent and its
-// frames resolve through theirs in turn.
-const KEPT_MAPS: usize = 4;
-fn cached(text: &str) -> std::sync::Arc<ImportMap> {
-    type Kept = Vec<(String, std::sync::Arc<ImportMap>)>;
-    static KEPT: std::sync::Mutex<Kept> = std::sync::Mutex::new(Vec::new());
-    let mut kept = KEPT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let entry = match kept.iter().position(|(json, _)| json == text) {
-        Some(i) => kept.remove(i),
-        None => (text.to_owned(), std::sync::Arc::new(from_json(text))),
-    };
-    let map = entry.1.clone();
-    kept.insert(0, entry);
-    kept.truncate(KEPT_MAPS);
-    map
-}
-pub(crate) fn from_json(text: &str) -> ImportMap {
-    let Ok(v) = serde_json::from_str::<Value>(text) else { return ImportMap::default() };
-    ImportMap {
-        imports: map_of(&v["imports"]),
-        scopes: v["scopes"]
-            .as_array()
-            .map(|s| s.iter().filter_map(|e| Some((e.get(0)?.as_str()?.to_owned(), map_of(e.get(1)?)))).collect())
-            .unwrap_or_default(),
-        integrity: v["integrity"]
-            .as_array()
-            .map(|s| s.iter().filter_map(|e| Some((e.get(0)?.as_str()?.to_owned(), e.get(1)?.as_str()?.to_owned()))).collect())
-            .unwrap_or_default(),
-    }
-}
-
-pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "importMapMerge", merge_op, context_id);
-    crate::dom::register(scope, ns, "importMapResolve", resolve_op, context_id);
-    crate::dom::register(scope, ns, "importMapIntegrity", integrity_op, context_id);
-}
-fn text(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> String {
-    if v.is_null_or_undefined() { String::new() } else { v.to_rust_string_lossy(scope) }
-}
-fn string_or_null(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Value>, s: Option<&str>) {
-    match s.and_then(|s| v8::String::new(scope, s)) {
-        Some(s) => rv.set(s.into()),
-        None => rv.set_null(),
-    }
-}
-// __dom.importMapMerge(existing, text, base) -> the document's map (JSON; null `existing` an empty one) with the map
-// `text` parses to against `base` merged in; where `text` is no import map, the SyntaxError or TypeError parsing it throws.
-fn merge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (existing, map_text, base) = (text(scope, args.get(0)), text(scope, args.get(1)), text(scope, args.get(2)));
-    let new = match parse(&map_text, &base) {
-        Ok(new) => new,
-        Err(error) => {
-            let message = v8::String::new(scope, "Failed to parse import map").unwrap();
-            let exception = match error {
-                ParseError::Syntax => v8::Exception::syntax_error(scope, message),
-                ParseError::Type => v8::Exception::type_error(scope, message),
-            };
-            scope.throw_exception(exception);
-            return;
-        }
-    };
-    let mut map = from_json(&existing);
-    merge(&mut map, new);
-    let json = to_json(&map);
-    string_or_null(scope, &mut rv, Some(&json));
-}
-// __dom.importMapResolve(map, specifier, base) -> the URL `specifier` resolves to through the map (JSON), or null for a
-// TypeError.
-fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (map, specifier, base) = (text(scope, args.get(0)), text(scope, args.get(1)), text(scope, args.get(2)));
-    let url = resolve(&cached(&map), &specifier, &base);
-    string_or_null(scope, &mut rv, url.as_deref());
-}
-// __dom.importMapIntegrity(map, url) -> `integrity`.
-fn integrity_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (map, url) = (text(scope, args.get(0)), text(scope, args.get(1)));
-    let map = cached(&map);
-    string_or_null(scope, &mut rv, Some(integrity(&map, &url)));
-}
-// Capybara::Simulated::Native.import_map_resolve(map, specifier, base) -> `resolve`, nil for a TypeError; and
-// .import_map_integrity(map, url).
-pub(crate) fn resolve_for_ruby(map: String, specifier: String, base: String) -> Option<String> {
-    resolve(&cached(&map), &specifier, &base)
-}
-pub(crate) fn integrity_for_ruby(map: String, url: String) -> String {
-    integrity(&cached(&map), &url).to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn url(map: &ImportMap, specifier: &str, base: &str) -> Option<String> {
+        resolve(map, specifier, base).map(|(url, _)| url)
+    }
 
     #[test]
     fn specifiers_resolve_through_a_map_as_html_says() {
         let base = "https://a.test/app/index.html";
         let mut map = parse(r#"{"imports": {"lodash": "/js/lodash.js", "lib/": "./lib/", "bad/": "/nope", "": "/x"},
                                 "scopes": {"/app/": {"lodash": "/js/lodash-app.js"}}}"#, base).unwrap();
-        merge(&mut map, parse(r#"{"imports": {"lodash": "/js/other.js", "react": "https://cdn.test/react.js"}}"#, base).unwrap());
-        assert_eq!(resolve(&map, "lodash", "https://a.test/other.js").as_deref(), Some("https://a.test/js/lodash.js"));
-        assert_eq!(resolve(&map, "lodash", base).as_deref(), Some("https://a.test/js/lodash-app.js"));
-        assert_eq!(resolve(&map, "lib/x.js", "https://a.test/").as_deref(), Some("https://a.test/app/lib/x.js"));
-        assert_eq!(resolve(&map, "react", "https://a.test/").as_deref(), Some("https://cdn.test/react.js"));
-        assert_eq!(resolve(&map, "bad/y", "https://a.test/"), None);
-        assert_eq!(resolve(&map, "./m.js", base).as_deref(), Some("https://a.test/app/m.js"));
-        assert_eq!(resolve(&map, "unmapped", base), None);
-        let back = from_json(&to_json(&map));
-        assert_eq!(resolve(&back, "lodash", base).as_deref(), Some("https://a.test/js/lodash-app.js"));
+        merge(&mut map, parse(r#"{"imports": {"lodash": "/js/other.js", "react": "https://cdn.test/react.js"}}"#, base).unwrap(), &[]);
+        assert_eq!(url(&map, "lodash", "https://a.test/other.js").as_deref(), Some("https://a.test/js/lodash.js"));
+        assert_eq!(url(&map, "lodash", base).as_deref(), Some("https://a.test/js/lodash-app.js"));
+        assert_eq!(url(&map, "lib/x.js", "https://a.test/").as_deref(), Some("https://a.test/app/lib/x.js"));
+        assert_eq!(url(&map, "react", "https://a.test/").as_deref(), Some("https://cdn.test/react.js"));
+        assert_eq!(url(&map, "bad/y", "https://a.test/"), None);
+        assert_eq!(url(&map, "./m.js", base).as_deref(), Some("https://a.test/app/m.js"));
+        assert_eq!(url(&map, "unmapped", base), None);
         assert_eq!(parse("[]", base).err(), Some(ParseError::Type));
         assert_eq!(parse("{", base).err(), Some(ParseError::Syntax));
         assert_eq!(parse(r#"{"scopes": {"/a/": []}}"#, base).err(), Some(ParseError::Type));
         assert_eq!(parse(r#"{"scopes": {"http://[": []}}"#, base).err(), Some(ParseError::Type));
         // (…a key normalized to another's, the later in the source winning)
         let dup = parse(r#"{"imports": {"/js/a1.js": "/js/a1.js", "./a1.js": "/js/a2.js"}}"#, "https://a.test/js/").unwrap();
-        assert_eq!(resolve(&dup, "/js/a1.js", "https://a.test/").as_deref(), Some("https://a.test/js/a2.js"));
+        assert_eq!(url(&dup, "/js/a1.js", "https://a.test/").as_deref(), Some("https://a.test/js/a2.js"));
+    }
+
+    #[test]
+    fn a_later_map_changes_no_specifier_already_resolved() {
+        let base = "https://a.test/app/index.html";
+        let mut map = ImportMap::default();
+        let (_, bare) = resolve(&parse(r#"{"imports": {"a": "/a1.js"}}"#, base).unwrap(), "a", base).unwrap();
+        let (_, prefixed) = resolve(&parse(r#"{"imports": {"pkg/": "/pkg/"}}"#, base).unwrap(), "pkg/x.js", base).unwrap();
+        let resolved = [bare, prefixed];
+        merge(&mut map, parse(r#"{"imports": {"a": "/a2.js", "ab": "/ab.js", "b": "/b.js", "pkg/x.js": "/other.js"},
+                                  "scopes": {"/app/": {"a": "/s.js", "pkg/": "/spkg/", "c": "/c.js"}, "/elsewhere/": {"a": "/e.js"}}}"#, base).unwrap(), &resolved);
+        // (…top-level keys starting with a resolved specifier ignored — `a` and `ab` alike — the rest kept)
+        assert_eq!(url(&map, "a", "https://a.test/x.js"), None);
+        assert_eq!(url(&map, "ab", "https://a.test/x.js"), None);
+        assert_eq!(url(&map, "b", "https://a.test/x.js").as_deref(), Some("https://a.test/b.js"));
+        assert_eq!(url(&map, "pkg/x.js", "https://a.test/x.js"), None);
+        // (…a scope covering the resolved base: its rule for the specifier, and its prefix rule covering one, ignored)
+        assert_eq!(url(&map, "c", base).as_deref(), Some("https://a.test/c.js"));
+        assert_eq!(url(&map, "pkg/y.js", base), None);
+        assert_eq!(url(&map, "a", "https://a.test/elsewhere/z.js").as_deref(), Some("https://a.test/e.js"));
     }
 }

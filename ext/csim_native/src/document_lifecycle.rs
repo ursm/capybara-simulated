@@ -36,10 +36,8 @@ pub(crate) struct Lifecycle {
     mute_iframe_load: bool,
     // Its DOMContentLoaded's task over: "the end" has only its load left to do.
     content_loaded_over: bool,
-    // How many aborts have come to it: what a fetch of its begun before the last of them finds cancelled (`docAborts`) — and
-    // that count as the module graph being fetched began, none for no graph (`docModuleFetches`).
+    // How many aborts have come to it: what a fetch of its begun before the last of them finds cancelled (`docAborts`).
     aborts: u32,
-    module_fetches: Option<u32>,
     // Aborted while its parser was active (HTML "navigate" → "abort a document and its descendants" → "abort a parser"):
     // "the end" runs for it no more — no DOMContentLoaded, no load of its own, none at its container.
     aborted: bool,
@@ -61,7 +59,6 @@ impl Default for Lifecycle {
             mute_iframe_load: false,
             content_loaded_over: false,
             aborts: 0,
-            module_fetches: None,
             aborted: false,
         }
     }
@@ -157,8 +154,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "docAbortParser", abort_parser_op, context_id);
     crate::dom::register(scope, ns, "docLoadAborted", load_aborted, context_id);
     crate::dom::register(scope, ns, "docAborts", aborts, context_id);
-    crate::dom::register(scope, ns, "docModuleFetches", module_fetches, context_id);
-    crate::dom::register(scope, ns, "docModuleCancelled", module_cancelled, context_id);
     crate::dom::register(scope, ns, "docParserAborted", parser_aborted, context_id);
     crate::dom::register(scope, ns, "docAbortStep", abort_step, context_id);
     crate::dom::register(scope, ns, "docCompleteInitial", complete_initial, context_id);
@@ -509,22 +504,6 @@ fn abort_parser_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn aborts(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     rv.set_uint32(lifecycle_of(scope, doc).aborts);
-}
-// __dom.docModuleFetches(docNid, since) -> the count the module graph being fetched began at (null for none), `since` that
-// of the graph fetched from now on (null for none): a nested one's in place of the one it ran inside, that one's again after.
-fn module_fetches(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let since = args.get(1).uint32_value(scope).filter(|_| !args.get(1).is_null_or_undefined());
-    match std::mem::replace(&mut lifecycle_of(scope, doc).module_fetches, since) {
-        Some(outer) => rv.set_uint32(outer),
-        None => rv.set_null(),
-    }
-}
-// __dom.docModuleCancelled(docNid) -> whether an abort has come to the document since the module graph being fetched began.
-fn module_cancelled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let lc = lifecycle_of(scope, doc);
-    rv.set_bool(lc.module_fetches.is_some_and(|since| since != lc.aborts));
 }
 // __dom.docLoadAborted() — the calling realm's document aborted: nothing of it delays its parent's load any more.
 fn load_aborted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
