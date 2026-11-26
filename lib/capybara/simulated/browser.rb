@@ -54,6 +54,8 @@ module Capybara
         return ::Capybara.app_host if ::Capybara.app_host
         host = ::Capybara.server_host
         return 'http://www.example.com' if host == '127.0.0.1'
+        # (…an IPv6 address bracketed, as a URL's host is)
+        host = "[#{host}]" if host.to_s.include?(':') && !host.to_s.start_with?('[')
         port = ::Capybara.server_port.to_i
         port > 0 ? "http://#{host}:#{port}" : "http://#{host}"
       end
@@ -216,9 +218,9 @@ module Capybara
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
-        # Whether a request of a host the app does not serve goes to the network — off by default, a network error (the
-        # driver's `external_network:`): `dispatched`.
-        @external_network             = external_network
+        # Whether a request of a host the app does not serve goes to the network — off by default, a network error — or of
+        # which hosts (`host` or `host:port`, downcased): the driver's `external_network:`, `network_refused?`.
+        @external_network             = external_network.is_a?(Array) ? external_network.map {|h| h.to_s.downcase }.freeze : external_network == true
         @browsing_context_group       = "g#{object_id}"
         # (…the thread the window's isolate is driven on: a worker's thread waiting on another worker touches nothing of
         # the window's — `await_worker_reply`)
@@ -288,11 +290,6 @@ module Capybara
         # (…the response its first document — an about:blank before any visit — reports)
         record_response(*ABOUT_BLANK_RESPONSE)
         @timers_active                = false
-        # Capybara config is set once per suite; cache the derived
-        # origin so the per-request fallback path doesn't re-dispatch
-        # `Capybara.app_host` / `server_host` / `server_port` on every
-        # rack call (CLAUDE.md: cache env decisions at construction).
-        @default_host                 = self.class.default_host
         # The WPT runner serves EVERY host through one in-process Rack app (the
         # wptserve catch-all), so cross-origin test fixtures are genuinely local
         # there. Setting this makes `reaches_app?` true for all hosts, so a
@@ -303,9 +300,7 @@ module Capybara
         # window opened LATER — after the runner restored the env — still inherits it.
         # nil override (a stand-alone Browser) falls back to the live env check.
         @all_hosts_local              = @all_hosts_local_override.nil? ? (ENV['CSIM_LOCAL_ALL_HOSTS'] == '1') : @all_hosts_local_override
-        # (…a session that serves every host at the URL it asks for has no stand-in)
-        @loopback_stand_in            = self.class.default_host_stands_in? && !@all_hosts_local
-        @session_history.loopback_stand_in = @loopback_stand_in
+        loopback_stand_in?
         # Handle IDs are per-Context integer sequences: a handle from
         # a pre-rebuild context could collide with a fresh node's id
         # in the new context. Node captures this on construction;
@@ -711,7 +706,7 @@ module Capybara
           # freshly-opened window) can't yield an origin — fall back to the
           # default host so a subsequent relative `visit` still resolves.
           current   = parse_url(current.to_s)
-          host_root = current && !current[:host].empty? ? url_root(current) : @default_host.sub(/\/+$/, '')
+          host_root = current && !current[:host].empty? ? url_root(current) : default_host.sub(/\/+$/, '')
           s = "/#{s}" unless s.start_with?('/')
           s = "#{host_root}#{s}"
         end
@@ -2393,7 +2388,7 @@ module Capybara
       def entry_about_base(history, id) = history&.text(id, :about_base)
       # HTML "create and initialize a Document object": what the document a navigation commits at `url` is made of
       # (document_init.rs `initialize_document`, `params` as that reads them) — the host's to make it in a realm and load.
-      def document_init(url, **params) = Native.initialize_document(params.merge!(url: url.to_s, loopback: @loopback_stand_in))
+      def document_init(url, **params) = Native.initialize_document(params.merge!(url: url.to_s, loopback: loopback_stand_in?))
       # …the page's next document's: of the response the page has (`@last_response_headers`), at its URL, its referrer the
       # Referer its navigation sent (`@current_referer`) — `made` what its navigation makes of it besides; controlled where
       # a fetch made it (`controlled` false: a `javascript:` URL's, an initial about:blank) by the worker its URL matches in
@@ -4664,7 +4659,7 @@ module Capybara
         # connection", its response a network error)
         # (…nor goes one to a host the app does not serve, unless the session allows the network: `dispatched`'s rule — a
         # connection of the app's own, its handshake the app's to answer, with the network allowed)
-        unless step == 'dispatch' && (@external_network || reaches_app?(facts[1]))
+        unless step == 'dispatch' && !network_refused?(facts[1])
           queue << {id: id, type: '__error', message: 'websocket handshake refused'}
           return id
         end
@@ -9361,7 +9356,7 @@ module Capybara
         # origin's request of it is a fetch of its own — CSS Fonts 4 §4.9.1)
         cached = [client_origin_of(client).to_s, key]
         @@font_file_lock.synchronize do
-          if @@font_file_cache.key?(cached)
+          if !network_refused?(key) && @@font_file_cache.key?(cached)
             path, meta = @@font_file_cache[cached]
             return [path, meta && meta.merge('cached' => 'cache')]
           end
@@ -10721,7 +10716,7 @@ module Capybara
       # `<eval>` (no scheme, from V8) or `inline://<hash>` (from `runScript`) — and, its document's base URL out of
       # reach, resolves against the PAGE URL.
       private def effective_module_base(base)
-        module_base_url(base) || page_url || @default_host
+        module_base_url(base) || page_url || default_host
       end
       # …the importer's URL where it has a real one.
       private def module_base_url(base)
@@ -10891,7 +10886,9 @@ module Capybara
           method      = plan.request_method
           target      = plan.target
           # The stored response for the hop's URL, the plan's to judge (the HTTP cache keeps it; http_cache.rs its policy).
-          cache_entry   = @@asset_cache.lookup(target)
+          # (…none for a request the session refuses: a stored response is the network's, which another session — one that
+          # allows it — put there)
+          cache_entry   = network_refused?(target) ? nil : @@asset_cache.lookup(target)
           cache_headers = cache_entry&.headers
           stored        = cache_entry && [cache_entry.status, cache_entry.fresh?, Native.location_fields(cache_headers)]
           step, *args = plan.begin_hop(stored, Process.clock_gettime(Process::CLOCK_MONOTONIC))
@@ -12547,7 +12544,7 @@ module Capybara
         url = opener_cookie_url(realm) unless http_url?(url)
         return url if cookie_host(url)
 
-        realm.to_i.positive? && !@runtime.window_realm_meta.key?(realm.to_i) ? nil : @default_host
+        realm.to_i.positive? && !@runtime.window_realm_meta.key?(realm.to_i) ? nil : default_host
       end
       private def opener_cookie_url(realm)
         meta = @runtime.window_realm_meta[realm.to_i] if realm.to_i.positive?
@@ -13385,7 +13382,7 @@ module Capybara
         # `SERVER_PORT` from the URL but leaves `HTTP_HOST` nil: the Host every real request sends, set here — but the default
         # host's, the stand-in a real run's 127.0.0.1 is no name of, which an app's host check (Sinatra's) refuses. The
         # IPv4/IPv6 loopback choice reads SERVER_NAME, which matches what real Chrome would have done after DNS resolution.
-        unless @loopback_stand_in && env['SERVER_NAME'] == 'www.example.com'
+        unless loopback_stand_in? && env['SERVER_NAME'] == 'www.example.com'
           default_port = env['rack.url_scheme'] == 'https' ? '443' : '80'
           env['HTTP_HOST'] ||= env['SERVER_PORT'].to_s == default_port ? env['SERVER_NAME'] : "#{env['SERVER_NAME']}:#{env['SERVER_PORT']}"
         end
@@ -13578,7 +13575,7 @@ module Capybara
         # `ws_open` gates the same way.
         own = reaches_app?(url)
         unless own
-          return nil unless @external_network
+          return nil if network_refused?(url, own)
 
           remote = transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)
           return nil if remote == :network_error
@@ -13684,34 +13681,69 @@ module Capybara
         out
       end
 
+      # The app's host — `Capybara.app_host`, the server's, or the default stand-in — as Capybara has it NOW: a test may set
+      # `Capybara.app_host` whenever it likes (a tenant's subdomain per test), and the session's Browsers live across tests.
+      # Read as each request is made; its parts parsed once per host (`app_url_parts`).
+      private def default_host = self.class.default_host
+      # …and whether that host is the stand-in for the app's server on 127.0.0.1 — a secure context as that is (url_ops.rs
+      # `LOOPBACK_STAND_IN`), the session history told as it changes — none for a session that serves every host at the URL
+      # it asks for.
+      private def loopback_stand_in?
+        on = self.class.default_host_stands_in? && !@all_hosts_local
+        unless on == @loopback_stand_in
+          @loopback_stand_in = on
+          @session_history.loopback_stand_in = on
+        end
+        on
+      end
+
       # Whether a browser's request of `url` would have reached the app's server — asked of its host, whatever page made it:
-      # the app's own host and port (`@default_host`: `Capybara.app_host`, the server's, or the default stand-in), or that port
-      # under another name that resolves to the server, which a run with one listens on under any: a subdomain's, an apex's
-      # — a name of the app's site, or any name at a port no CDN is on (cuprite with `host-resolver-rules`, measured). A
-      # limit: another site's name at the same non-default port counts, which a browser reaches only where it resolves here.
-      # (…none of the sibling names on the default stand-in: a real run's server is 127.0.0.1 and a port, which
-      # `www.example.com`'s sibling names do not reach.) Every host does where the session serves them all in-process (the
-      # WPT runner's `@all_hosts_local`); a URL of no host — relative, or a scheme's of none — is no other host's.
+      # the app's own host and port (`default_host`), or that port under another name that resolves to the server, which a
+      # run with one listens on under any: a subdomain's, an apex's — a name of the app's site, or any name at a port no CDN
+      # is on (cuprite with `host-resolver-rules`, measured). A limit: another site's name at the same non-default port
+      # counts, which a browser reaches only where it resolves here. (…none of the sibling names on the default stand-in: a
+      # real run's server is 127.0.0.1 and a port, which `www.example.com`'s sibling names do not reach.) A loopback name —
+      # `127.0.0.1`, `localhost`, `[::1]` — at `Capybara.server_port` reaches the app's own server whatever stands in for it
+      # (a mailer's link from `default_url_options`). Every host does where the session serves them all in-process (the WPT
+      # runner's `@all_hosts_local`); a URL of no host — relative, or a scheme's of none — is no other host's.
       private def reaches_app?(url)
         return true if @all_hosts_local
 
         uri = parse_url(url.to_s)
         return true if uri.nil? || uri[:hostname].empty?
+        return true if LOOPBACK_NAMES.include?(uri[:hostname]) && (port = ::Capybara.server_port.to_i).positive? && effective_port(uri) == port
 
         app = app_url_parts
         return true if app.nil? || app[:hostname].empty?
         return false if effective_port(uri) != effective_port(app)
         return true if uri[:hostname] == app[:hostname]
-        return false if @loopback_stand_in
+        return false if loopback_stand_in?
 
-        ![80, 443].include?(effective_port(uri).to_i) || Native.site(url.to_s).to_s == Native.site(@default_host.to_s).to_s
+        ![80, 443].include?(effective_port(uri).to_i) || Native.site(url.to_s).to_s == Native.site(default_host.to_s).to_s
+      end
+      LOOPBACK_NAMES = %w[127.0.0.1 localhost [::1]].freeze
+
+      # The app's host's URL parts (`default_host`'s), parsed once per host.
+      private def app_url_parts
+        host = default_host
+        @app_url_parts = [host, parse_url(host.to_s)].freeze unless @app_url_parts&.first == host
+        @app_url_parts.last
       end
 
-      # The app's host's URL parts (`@default_host`'s), parsed once.
-      private def app_url_parts = (@app_url_parts ||= parse_url(@default_host.to_s))
+      # Whether a request of `url` is refused — a host the app does not serve, which the session sends nothing to
+      # (`external_network:` false), or none it lists (an Array of `host` / `host:port`): `dispatched`, and the caches a
+      # response of the network may be served from without coming to it.
+      private def network_refused?(url, own = reaches_app?(url))
+        return false if own
+        return true unless @external_network
+        return false if @external_network == true
+
+        uri = parse_url(url.to_s) or return true
+        !@external_network.any? {|allowed| allowed == uri[:hostname] || allowed == "#{uri[:hostname]}:#{effective_port(uri)}" }
+      end
 
       def effective_port(url)
-        url[:port].empty? ? (url[:protocol] == 'https:' ? 443 : 80) : url[:port].to_i
+        url[:port].empty? ? (%w[https: wss:].include?(url[:protocol]) ? 443 : 80) : url[:port].to_i
       end
 
       # Returns a Rack-shaped triple, `:network_error` where the server
@@ -13820,7 +13852,7 @@ module Capybara
       def resolve_against_current(url, use_base: false)
         # Inside a `within_frame` block the "current document" is the frame's,
         # so links / form actions resolve against the frame's URL + <base href>.
-        doc_url = current_browsing_context_url || @default_host
+        doc_url = current_browsing_context_url || default_host
         # The document's base URL — its `<base href>`'s — when the page's own links / form actions are being resolved,
         # there being a document (before the first visit there is only the empty one, at about:blank); `visit` passes no
         # `use_base`, so an address-bar navigation reaches the URL the test typed.

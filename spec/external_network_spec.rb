@@ -69,4 +69,93 @@ RSpec.describe 'a request of a host the app does not serve' do
       expect(fetched).to include('http://outside.test/x', 'http://outside.test/i.png', 'http://outside.test/f')
     end
   end
+
+  context 'with some hosts allowed' do
+    let(:session) {
+      Capybara.register_driver(:simulated_some_network) {|a| Capybara::Simulated::Driver.new(a, external_network: ['allowed.test', 'localhost:4020']) }
+      simulated_session(app, mode: :simulated_some_network)
+    }
+
+    it 'sends those alone to the network' do
+      fetched = []
+      allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch) {|_, url, *| fetched << url.to_s; nil }
+      session.visit 'http://www.example.com/'
+      session.evaluate_async_script(<<~JS)
+        const d = arguments[0];
+        const urls = ['http://allowed.test/a', 'http://localhost:4020/b', 'http://localhost:4021/c', 'http://outside.test/d'];
+        Promise.all(urls.map((u) => fetch(u, {mode: 'no-cors'}).catch(() => 0))).then(() => d(1));
+      JS
+      expect(fetched).to eq(['http://allowed.test/a', 'http://localhost:4020/b'])
+    end
+  end
+
+  # The app's host as Capybara has it as each request is made: a test sets `Capybara.app_host` whenever it likes (a tenant's
+  # subdomain), the session's Browser made long before.
+  context 'as the app host changes' do
+    let(:session) { simulated_session(app) }
+
+    after { Capybara.app_host = nil }
+
+    it "follows Capybara.app_host" do
+      session.visit '/'
+      Capybara.app_host = 'http://tenant1.lvh.test'
+      session.visit '/'
+      expect([session.current_url, session.title]).to eq(['http://tenant1.lvh.test/', 'app'])
+      Capybara.app_host = 'http://other.test:3000'
+      session.reset!
+      session.visit '/x'
+      expect([session.current_url, session.title]).to eq(['http://other.test:3000/x', 'app'])
+    end
+  end
+
+  # A loopback name at the server's port reaches the app's own server, whatever stands in for it (a mailer's link).
+  context 'on a loopback name at the server port' do
+    let(:session) { simulated_session(app) }
+
+    around do |example|
+      port = Capybara.server_port
+      Capybara.server_port = 4567
+      example.run
+    ensure
+      Capybara.server_port = port
+    end
+
+    it 'asks the app, another port not' do
+      %w[http://127.0.0.1:4567/a http://localhost:4567/a http://[::1]:4567/a].each do |url|
+        session.visit url
+        expect(session.title).to eq('app')
+      end
+      session.visit 'http://localhost:4568/a'
+      expect(session.title).to eq('')
+    end
+  end
+
+  # A response an allowing session stored is the network's, which a refusing one does not get from the cache either.
+  it "serves no stored response of another host to a session that refuses it" do
+    Capybara.register_driver(:simulated_external_network) {|a| Capybara::Simulated::Driver.new(a, external_network: true) }
+    script = [200, {'content-type' => 'text/javascript', 'cache-control' => 'max-age=31536000, immutable'}, ['window.ran = true']]
+    allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch).and_return(script)
+    load = "const d = arguments[0]; const s = document.createElement('script'); s.src = 'http://cdn.test/cached.js'; s.onload = () => d('load'); s.onerror = () => d('error'); document.head.append(s);"
+    open = simulated_session(app, mode: :simulated_external_network)
+    open.visit 'http://www.example.com/'
+    expect(open.evaluate_async_script(load)).to eq('load')
+    shut = simulated_session(app)
+    shut.visit 'http://www.example.com/'
+    expect(shut.evaluate_async_script(load)).to eq('error')
+  end
+
+  # (…an IPv6 server host bracketed in the URL the app is reached at, and a secure WebSocket's default port 443)
+  it 'brackets an IPv6 server host and takes wss: to port 443' do
+    host, port = Capybara.server_host, Capybara.server_port
+    Capybara.server_host, Capybara.server_port = '::1', 4567
+    expect(Capybara::Simulated::Browser.default_host).to eq('http://[::1]:4567')
+  ensure
+    Capybara.server_host, Capybara.server_port = host, port
+  end
+
+  it 'takes ws: to port 80 and wss: to 443' do
+    browser = Capybara::Simulated::Browser.allocate
+    ports = %w[ws://a.test/ wss://a.test/ http://a.test/ https://a.test/].map {|u| browser.send(:effective_port, browser.send(:parse_url, u)) }
+    expect(ports).to eq([80, 443, 80, 443])
+  end
 end

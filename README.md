@@ -157,10 +157,27 @@ end
 - `external_network:` — whether a request may go to a host your app does not serve (a CDN, a video embed, a payment
   widget, an API). Off by default: nothing leaves the process. Such a request fails as a browser's does when the
   network refuses it: a page or a frame gets the browser's network-error document (a frame's `load` still fires), an
-  image or a script its `error` event, a `fetch()` a rejected promise, a WebSocket or an `EventSource` its failure. A
-  host your app serves is its own (`Capybara.app_host`, or the server's), and any name of its site at its port. Turn it
-  on to fetch everything else from the network, at that network's speed; where the network refuses a request, the app
-  is asked for it.
+  image or a script its `error` event, a `fetch()` a rejected promise, a WebSocket or an `EventSource` its failure.
+  `true` sends every other host's request to the network, at that network's speed (where the network refuses one, the
+  app is asked for it); an Array of `host` or `host:port` sends only those:
+
+  ```ruby
+  Capybara::Simulated::Driver.new(app, external_network: ['localhost:4020'])   # a local streaming server
+  ```
+
+  The hosts your app serves are read as each request is made, so a test may set `Capybara.app_host` whenever it likes
+  (a tenant's subdomain per test):
+
+  - the app's host and port: `Capybara.app_host` where it is set, else `Capybara.server_host` and
+    `Capybara.server_port` — and, for the default server host `127.0.0.1` with no `app_host`, the stand-in
+    `http://www.example.com`, which the driver treats as a secure context as it does the loopback address;
+  - another name at that port, where a real server would answer it too: a name of the app's site
+    (`admin.shop.test` beside `shop.test`), or any name where the port is not 80 or 443 (none of these with the
+    stand-in);
+  - `localhost`, `127.0.0.1` and `[::1]` at `Capybara.server_port`.
+
+  Anything else is another host — `localhost` at another port among them: a local streaming server, a Vite dev server.
+  Name it in the Array to reach it.
 
 ## Trace
 

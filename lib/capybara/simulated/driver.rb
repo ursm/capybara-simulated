@@ -94,6 +94,8 @@ module Capybara
       # `external_network: true` lets a request of a host the app does not serve
       # — any kind: a page, a frame, a subresource, a worker's, a WebSocket —
       # go to the network; by default it is a network error (Browser#dispatched).
+      # An Array of `host` / `host:port` lets those alone (a local streaming
+      # server: `['localhost:4020']`).
       def initialize(app, viewport: nil, user_agent: nil, touch: false, external_network: false)
         # `Capybara.disable_animation` is delivered to the real drivers by a SERVER
         # middleware (session.rb adds AnimationDisabler to the Puma stack), which
