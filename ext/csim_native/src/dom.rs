@@ -1310,13 +1310,11 @@ pub(crate) struct RealmState {
     // (font_resolve.rs `family_face`), and those it is to take no more, none having asked.
     pub(crate) own_tentative: Vec<usize>,
     pub(crate) own_refused: Vec<usize>,
-    // …and those the style engine resolved a stack without, which the walk shares (font_resolve.rs `family_face`).
-    pub(crate) own_declined: Vec<usize>,
     // What a face of that list came to, once asked (font_resolve.rs `indexed_file`) — its download under way, or the file
-    // it is read from — and the face each family stack takes at a bucket (`family_face`): both forgotten when the list
-    // moves, or a download lands.
+    // it is read from — and the face each family stack takes at a bucket (`family_face`), with whether a layout pass took
+    // its own face tentatively: both forgotten when the list moves, or a download lands.
     pub(crate) face_files: Vec<Option<crate::font_files::FaceFile>>,
-    pub(crate) family_faces: std::collections::HashMap<String, std::collections::HashMap<String, crate::font_resolve::Resolved>>,
+    pub(crate) family_faces: std::collections::HashMap<String, std::collections::HashMap<String, (crate::font_resolve::Resolved, bool)>>,
     // Its performance timeline's entry buffers, ids and registered observers (perf_timeline.rs).
     pub(crate) perf_timeline: crate::perf_timeline::PerfTimeline,
 }

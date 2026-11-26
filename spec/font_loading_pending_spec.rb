@@ -72,6 +72,7 @@ RSpec.describe 'web fonts loading in parallel' do
         var c = document.createElement('canvas').getContext('2d');
         c.font = '20px L';
         L.push('ascent:' + c.measureText('\u0434\u0434').fontBoundingBoxAscent);
+        L.push('status:' + Array.from(document.fonts)[0].status);
       </script>
     HTML
   end
@@ -147,8 +148,9 @@ RSpec.describe 'web fonts loading in parallel' do
         </style><span id="s" style="font: 20px L, monospace">\u4e00</span><div id="m" style="font: 20px monospace">\u4e00</div>
       HTML
       # A style's `ch` and a canvas measuring, before any layout, by a stack whose first available font the host has a file
-      # of from an earlier page, no character asking for it: as a page whose host has none would (csim-bench rv
-      # `cache.rb`, `cache2.rb`).
+      # of from an earlier page: they ask for it — read with it at once where the host has it, with the fallback while it
+      # downloads (Chrome and Firefox, csim-bench font7 `cc2`: `ch` 200px warm, 100px cold, the face `loaded` and
+      # `loading`).
       '/canvas-cached.html' => head + canvas_split(cached_font),
       '/canvas-cold.html' => head + canvas_split(font(0, 'lato')),
       # `stop()` while the face downloads: its download cancelled, the face failed a task later, the set loaded.
@@ -306,11 +308,13 @@ RSpec.describe 'web fonts loading in parallel' do
     expect(s.evaluate_script("document.getElementById('s').getBoundingClientRect().height")).to eq(s.evaluate_script("document.getElementById('m').getBoundingClientRect().height"))
   end
 
-  it 'resolves a style\'s ch and measures a canvas\'s text by no face the host has a file of that no character asked for' do
+  it 'asks for a stack\'s first available font as a style\'s ch or a canvas\'s text reads it, at once where it is cached' do
     visit('/cached-first.html')
-    warm = log(visit('/canvas-cached.html')).first(2)
-    expect(warm).to match([start_with('ch:'), start_with('ascent:')])
-    expect(warm).to eq(log(visit('/canvas-cold.html')).first(2))
+    warm = log(visit('/canvas-cached.html')).first(3)
+    cold = log(visit('/canvas-cold.html')).first(3)
+    expect([warm.last, cold.last]).to eq(%w[status:loaded status:loading])
+    expect(warm[0]).not_to eq(cold[0])
+    expect(warm[1]).not_to eq(cold[1])
   end
 
   it 'fails a face whose download the document\'s stop() cancelled, a task later' do
