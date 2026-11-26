@@ -1226,7 +1226,7 @@ pub(crate) struct RealmState {
     pub(crate) active_controls: Vec<NodeId>,
     // Its "sequential focus navigation starting point" (HTML §6.6.3), where Tab goes on from when nothing is focused:
     // the element focus last moved to — kept as focus leaves it for the viewport (Chrome: Tab after `blur()` goes on
-    // from the blurred element) — or the node a press that focused nothing landed on (`setFocusStart`).
+    // from the blurred element) — or the node a press that focused nothing landed on (focus_update.rs `press_focus`).
     pub(crate) focus_start: Option<NodeId>,
     // The modal dialogs, in the order they were shown — the top layer's: the last blocks the document (`is_inert`).
     pub(crate) modals: Vec<NodeId>,
@@ -1236,7 +1236,7 @@ pub(crate) struct RealmState {
     // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
     pub(crate) focus_ring_hidden: bool,
     // Whether the user's last driven input in it was a pointer's (a press) rather than the keyboard's (Tab, keys sent),
-    // which a focus it moves shows no ring for (dom.rs `latchFocusRing`).
+    // which a focus it moves shows no ring for (focus_update.rs `latch_focus_ring`).
     pub(crate) pointer_modality: bool,
     // The realm document and its target fragments (as it stands, then decoded), when it has any — what `:target`
     // resolves (`is_target`).

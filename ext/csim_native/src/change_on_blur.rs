@@ -62,15 +62,8 @@ impl RealmArena {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "changeArm", arm_op, context_id);
     crate::dom::register(scope, ns, "changeEdited", edited_op, context_id);
     crate::dom::register(scope, ns, "changeCommit", commit_op, context_id);
-}
-
-// __dom.changeArm(nid): the control is focused (`change_armed`).
-fn arm_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return };
-    crate::dom::dom(scope).arena.change_armed(id);
 }
 
 // __dom.changeEdited(nid, edited): the user edited the control's value (true), or a `change` the edit fired at once —

@@ -579,6 +579,11 @@ pub(crate) fn focusable_of(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> Opti
 pub(crate) fn focus_target_of(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> Option<Option<NodeId>> {
     Some(ask_engine(scope, el, |engine, arena, now| focus_target(engine, arena, el, now))?.flatten())
 }
+// …and HTML "get the focusable area" for `el` where it is none itself: itself where it is one, else a delegating shadow
+// host's focusable area.
+pub(crate) fn focusable_area_of(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> Option<Option<NodeId>> {
+    Some(ask_engine(scope, el, |engine, arena, now| if focusable(engine, arena, el, now) { Some(el) } else { focusable_area(engine, arena, el, now) })?.flatten())
+}
 pub(crate) fn press_target_of(scope: &mut v8::PinScope<'_, '_>, n: NodeId) -> Option<Option<NodeId>> {
     Some(ask_engine(scope, n, |engine, arena, now| press_target(engine, arena, n, now))?.flatten())
 }

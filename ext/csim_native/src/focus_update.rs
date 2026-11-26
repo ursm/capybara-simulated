@@ -250,6 +250,10 @@ fn focus_update(scope: &mut v8::PinScope<'_, '_>, mut old: Vec<Entry>, mut new: 
     }
     if !committed {
         commit(scope, &new_docs, &old_docs, &system_before)?;
+        // (…a Window the system focus left, blurred there, whose listener moved the focus)
+        if crate::dom::dom(scope).arena.focus_updates != update {
+            return Some(());
+        }
     }
     for (k, &entry) in new.iter().enumerate().rev() {
         match entry {
@@ -319,9 +323,10 @@ fn lose_system_focus(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()>
 
 // HTML "update the rendering"'s focus fixup for realm `realm`'s document: "if the focused area of doc is not a focusable
 // area, then run the focusing steps for doc's viewport" — an element hidden, made inert, disabled, given `display: none`
-// or `visibility: hidden`, moved into such a subtree. Where its document is not on the focus chain, that element is no
-// focused one: its viewport takes its place silently, as Chrome's (measured 2026-11-27: no events, the page's focus
-// staying where it was) — HTML's focusing steps would take the focus into the frame from wherever it is.
+// or `visibility: hidden`, moved into such a subtree. Where its document is not on the focus chain — a frame's the focus
+// left, a window without the system focus — that element is no focused one: its viewport takes its place silently, as
+// Chrome's (measured 2026-11-27: no events, the page's focus staying where it was) — HTML's focusing steps would take the
+// focus into it from wherever it is.
 fn focus_fixup(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()> {
     let arena = &crate::dom::dom(scope).arena;
     let Some(focused) = arena.realm_state(realm).and_then(|st| st.focus).filter(|&f| arena.document_realm_of(f) == Some(realm)) else { return Some(()) };
@@ -329,7 +334,7 @@ fn focus_fixup(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()> {
         return Some(());
     }
     let arena = &mut crate::dom::dom(scope).arena;
-    if arena.on_focus_chain(realm) {
+    if arena.focus_chain().contains(&realm) {
         focusing_steps(scope, Target::Viewport(realm)).map(drop)
     } else {
         arena.designate(realm, None);
@@ -339,8 +344,10 @@ fn focus_fixup(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()> {
 
 // HTML "flush autofocus candidates" for realm `realm`'s document, a top-level one owed it: its next candidate whose
 // document is fully active, of its traversable, with no document of a navigable up from it at a fragment, and which is
-// (or stands for) a focusable area, focused — its autofocus processed then; the ones before it dropped. The element
-// focused (None: a script was terminated).
+// a focusable area or stands for one (HTML "get the focusable area": a delegating shadow host's — no label's control,
+// which only `focus()` forwards to), focused — its autofocus processed then; the ones before it dropped. The element
+// focused (None: a script was terminated). (A candidate whose document has script-blocking style sheets is not kept for
+// the next flush, as HTML has it: there are none here to wait for.)
 fn flush_autofocus_candidates(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<Option<NodeId>> {
     let arena = &mut crate::dom::dom(scope).arena;
     let Some(top) = arena.realm_document(realm) else { return Some(None) };
@@ -357,7 +364,7 @@ fn flush_autofocus_candidates(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> O
         if !fully_active || arena.top_level_realm(own) != realm || at_fragment {
             continue;
         }
-        let Some(target) = crate::focus::focus_target_of(scope, el)? else { continue };
+        let Some(target) = crate::focus::focusable_area_of(scope, el)? else { continue };
         crate::dom::dom(scope).arena.autofocus_processed(top);
         focusing_steps(scope, Target::Element(target))?;
         return Some(Some(target));
@@ -401,8 +408,13 @@ fn sequential_navigation(scope: &mut v8::PinScope<'_, '_>, cid: i32, reverse: bo
             Some(true)
         },
         None => {
+            // (…every document's of the old chain, and the one the navigation began in: none comes back from where it left)
+            let mut docs = crate::dom::dom(scope).arena.focus_chain();
+            docs.push(cid);
             lose_system_focus(scope, realm)?;
-            crate::dom::dom(scope).arena.enter(realm).focus_start = None;
+            for doc in docs {
+                crate::dom::dom(scope).arena.enter(doc).focus_start = None;
+            }
             Some(false)
         },
     }
@@ -417,8 +429,20 @@ fn focus_window(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()> {
     if arena.realm_document(realm).is_none() || !crate::focus::allow_focus_steps(arena, realm) {
         return Some(());
     }
-    let kept = arena.realm_state(realm).and_then(|st| st.focus).filter(|&f| arena.document_realm_of(f) == Some(realm));
-    let area = kept.map_or(Entry::Viewport(realm), Entry::Element);
+    // (…a document with the focus already — the focus in it, or in a frame of it — keeps it where it is)
+    if arena.focus_chain().contains(&realm) {
+        return Some(());
+    }
+    // (…down a kept container to what its frame's document kept, as the focus chain goes)
+    let (mut at, mut kept) = (realm, None);
+    for _ in 0..crate::navigables::MAX_NESTING {
+        kept = arena.realm_state(at).and_then(|st| st.focus).filter(|&f| arena.document_realm_of(f) == Some(at));
+        match kept.and_then(|f| crate::focus::child_document_realm(arena, f)) {
+            Some(child) => at = child,
+            None => break,
+        }
+    }
+    let area = kept.map_or(Entry::Viewport(at), Entry::Element);
     let top = arena.top_level_realm(realm);
     if arena.currently_focused_area(top) == Some(area) {
         return Some(());
@@ -458,12 +482,12 @@ fn focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(fixup_owed(scope, area));
 }
 
-// __dom.focusMethod(nid, focusVisible) -> [the element focused, or null; whether a rendering update is owed the focus
-// fixup], or undefined where nothing was focused: HTMLOrSVGElement's `focus(options)` — "If the allow focus steps given
-// this's node document return false, then return. Run the focusing steps for this. If options["focusVisible"] is true, or
-// does not exist but in an implementation-defined way the user agent determines it would be best to do so, then indicate
-// focus" (`focusVisible`: 1 true, 0 false, -1 absent, the ring then latched as the focus moved). The bindings scroll the
-// element into view after, unless `preventScroll`.
+// __dom.focusMethod(nid, focusVisible) -> whether a rendering update is owed the focus fixup, or undefined where the
+// steps focused nothing: HTMLOrSVGElement's `focus(options)` — "If the allow focus steps given this's node document return
+// false, then return. Run the focusing steps for this. If options["focusVisible"] is true, or does not exist but in an
+// implementation-defined way the user agent determines it would be best to do so, then indicate focus" (`focusVisible`:
+// 1 true, 0 false, -1 absent, the ring then latched as the focus moved). The bindings scroll this into view after, unless
+// `preventScroll`.
 fn focus_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let visible = args.get(1).int32_value(scope).unwrap_or(-1);
@@ -472,20 +496,14 @@ fn focus_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     if !crate::focus::allow_focus_steps(arena, realm) {
         return;
     }
-    let Some(Some(Entry::Element(focused))) = focusing_steps(scope, Target::Element(el)) else { return };
-    let arena = &mut crate::dom::dom(scope).arena;
-    let holds = arena.document_realm_of(focused).and_then(|r| arena.realm_state(r)).and_then(|st| st.focus) == Some(focused);
-    if !holds {
-        return;
+    let Some(Some(area)) = focusing_steps(scope, Target::Element(el)) else { return };
+    if let (Entry::Element(focused), true) = (area, visible >= 0) {
+        let arena = &mut crate::dom::dom(scope).arena;
+        if let Some(realm) = arena.document_realm_of(focused).filter(|_| crate::focus::document_focus(arena, focused) == Some(focused)) {
+            arena.enter(realm).set_focus_ring_hidden(visible == 0);
+        }
     }
-    if visible >= 0 {
-        let Some(realm) = arena.document_realm_of(focused) else { return };
-        arena.enter(realm).set_focus_ring_hidden(visible == 0);
-    }
-    let owed = fixup_owed(scope, Some(Entry::Element(focused)));
-    let focused = crate::dom::node_value(scope, Some(focused));
-    let owed = v8::Boolean::new(scope, owed).into();
-    rv.set(v8::Array::new_with_elements(scope, &[focused, owed]).into());
+    rv.set_bool(fixup_owed(scope, Some(area)));
 }
 
 // __dom.unfocusingSteps(nid): HTMLOrSVGElement's `blur()` (`unfocusing_steps`).
