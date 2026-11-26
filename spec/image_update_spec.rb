@@ -231,4 +231,49 @@ RSpec.describe 'update the image data' do
     sleep 1
     expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).to be < 1.5
   end
+
+  # A `sleep` that runs past an image's landing lands it in turn: before a timer due after it (rv `sleeppast`).
+  it "lands an image a test's sleep ran past ahead of the timers due after it" do
+    app = lambda {|env|
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] if env['PATH_INFO'] == '/'
+
+      sleep 1
+      [200, {'content-type' => 'image/png'}, [File.binread(File.join(__dir__, 'wpt/images/green-1x1.png'))]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const i = new Image();
+      i.onload = () => log.push('img');
+      i.src = '/slow.png';
+      setTimeout(() => log.push('t2000'), 2000);
+    JS
+    sleep 3
+    poll_until { s.evaluate_script('log.length') >= 2 }
+    expect(s.evaluate_script('log')).to eq(%w[img t2000])
+  end
+
+  # A frame whose image holds its load keeps a wait for its container's `load` polling until the image lands (rv
+  # `frameimg`).
+  it "keeps a wait polling while a frame's image holds its load" do
+    app = lambda {|env|
+      case env['PATH_INFO']
+      when '/' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
+      when '/f' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><img src=/slow.png>']]
+      else
+        sleep 0.6
+        [200, {'content-type' => 'image/png'}, [File.binread(File.join(__dir__, 'wpt/images/green-1x1.png'))]]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(<<~'JS')
+      const f = document.createElement('iframe');
+      f.onload = () => { const p = document.createElement('p'); p.id = 'loaded'; document.body.append(p); };
+      f.src = '/f';
+      document.body.append(f);
+    JS
+    expect(s).to have_css('#loaded', wait: 3)
+  end
 end

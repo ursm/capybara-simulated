@@ -3060,12 +3060,12 @@ module Capybara
       # so this only short-circuits genuinely idle loops.
       def polling?
         # Background-thread work (workers, EventSource, MessageBus long-poll) keeps the settle loop alive even when settle_gen
-        # is otherwise idle — and, where a window `window.open` made in this isolate is open, an image a document's load
-        # waits for: a pop-up's, whose `w.onload` a wait of its opener's is for (the page's own load its visit waits out).
+        # is otherwise idle — and an image fetch in flight that a document's load waits for, any document's of this isolate:
+        # a frame's, whose container's `load` a wait is for, a pop-up's, whose `w.onload` its opener's is (`imagesHoldLoad`).
         # (…a worker's work under way, not a message posted to one that may never answer: a worker that only listens kept every
         # failing matcher waiting out its wait)
         return true if worker_drive_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || window_tasks_takeable? || websocket_pending?
-        return true if image_fetches_pending? && !@runtime.window_realm_meta.empty?
+        return true if image_fetches_pending? && @runtime.call('imagesHoldLoad') == true
         # …and a worker whose own timers are still to fire counts as the page's own do: it runs on its own thread and
         # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
         # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
@@ -8928,6 +8928,9 @@ module Capybara
         @clock_moved_at = now
         return unless image_fetches_pending?
 
+        # (…what finished meanwhile — over a `sleep`, say — taken first, whatever is left to wait: it lands in turn inside
+        # the step, ahead of the timers due after it)
+        deliver_image_fetches
         deadline = now + [(ms / 1000.0) - since, 0.0].max
         await_image_fetch(deadline) while image_fetches_pending? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
         @clock_moved_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)

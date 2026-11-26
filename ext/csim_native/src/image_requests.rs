@@ -256,6 +256,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageBitmap", bitmap_op, context_id);
     crate::dom::register(scope, ns, "imageLazyPending", lazy_pending, context_id);
     crate::dom::register(scope, ns, "imageFetchRealm", fetch_realm, context_id);
+    crate::dom::register(scope, ns, "imagesHoldLoad", hold_load, context_id);
     crate::dom::register(scope, ns, "imageFetchLand", fetch_land, context_id);
     crate::dom::register(scope, ns, "imageLazyResume", lazy_resume, context_id);
 }
@@ -899,6 +900,15 @@ fn fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let r = v8::Local::<v8::Object>::try_from(args.get(1)).ok();
         let _ = land_fetched(scope, host, node, load, &src, start, r);
     }
+}
+// __dom.imagesHoldLoad() -> whether an image fetch the host is making holds the load of any document of the isolate's still
+// to fire: what keeps a wait polling for it — a frame's container's `load`, a pop-up's (browser.rb `polling?`).
+fn hold_load(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let arena = &crate::dom::dom(scope).arena;
+    rv.set_bool(arena.image_fetches.values().any(|f| {
+        let unloaded = arena.realm_document(f.realm).is_some_and(|doc| !arena.document_states.lifecycle(doc).is_load_fired());
+        unloaded && arena.get(f.node).is_some() && arena.image_request_live(f.node, f.load)
+    }));
 }
 // __dom.imageFetchRealm(id) -> the realm that began the host's request `id` — the one to hand its result to — or -1 for
 // none (a request of a realm gone, or of a page left).
