@@ -278,6 +278,11 @@ pub(crate) struct ModuleMap {
     entries: HashMap<Key, Entry>,
     graphs: Vec<Graph>,
     next_graph: u32,
+    // The fetch options of the scripts an `import()` may name as its referrer that are no entry of the map — a classic
+    // script's (by its name: its URL, an inline one's `inline://…`), an inline module script's (by its base URL, its
+    // document's) — None where two of one name have different ones: their `import()`s take the defaults (KNOWN GAP,
+    // rusty_racer: the engine's dynamic-import hook names a script by its resource name alone, no host-defined options).
+    referring: HashMap<String, Option<u32>>,
     // The realm's host steps (subresource-host.js), which a graph's fetches go on through as they are asked about.
     host: Option<v8::Global<v8::Function>>,
 }
@@ -350,6 +355,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "moduleScriptFetch", module_script_fetch_op, context_id);
     register(scope, ns, "moduleGraphResult", module_graph_result_op, context_id);
     register(scope, ns, "moduleImport", module_import_op, context_id);
+    register(scope, ns, "noteReferringScript", note_referring_script_op, context_id);
 }
 
 fn map_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut ModuleMap> {
@@ -473,6 +479,28 @@ fn host_of<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32) -> Option<v8::Local<'
     Some(v8::Local::new(scope, host))
 }
 
+impl ModuleMap {
+    // …a script named `name`, of the fetch options `plan`, that an `import()` may name as its referrer.
+    fn note_referring(&mut self, name: &str, plan: u32) {
+        let kept = self.referring.entry(name.to_owned()).or_insert(Some(plan));
+        if *kept != Some(plan) {
+            *kept = None;
+        }
+    }
+}
+// __dom.noteReferringScript(name, el) — the classic script `el`, named `name`, about to run: its fetch options (HTML
+// "script fetch options": its `crossorigin`'s credentials mode, its `referrerpolicy`) kept for an `import()` it makes.
+fn note_referring_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    let Some(el) = crate::dom::nid_arg(scope, &args, 1) else { return };
+    let cid = realm_id(scope, &args);
+    let doc = crate::node_handle::node_document_of(scope, el);
+    let plan = crate::subresource_plan::plan_in(realm(scope, cid), crate::subresource_plan::J_MODULE_SCRIPT, Some(el), doc, None);
+    if let Some(map) = map_of(scope, cid) {
+        map.note_referring(&name, plan);
+    }
+}
+
 fn new_graph(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: Root, plan: u32, waiting: Vec<(Key, f64)>) -> Option<u32> {
     let map = map_of(scope, cid)?;
     map.next_graph += 1;
@@ -494,6 +522,9 @@ fn begin_inline(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: String, base
     let (source_value, base_value) = (text(scope, &source), text(scope, &base));
     let answer = call(scope, host, H_MODULE_INLINE, &[source_value, base_value])?;
     let Some(script) = script_of(scope, answer, ModuleType::JavaScript, &base, plan) else { return Ok(None) };
+    if let Some(map) = map_of(scope, cid) {
+        map.note_referring(&base, plan);
+    }
     let Some(gid) = new_graph(scope, cid, Root::Inline(script), plan, Vec::new()) else { return Ok(None) };
     walk(scope, cid, gid, None, began)?;
     Ok(Some(gid))
@@ -908,8 +939,8 @@ fn module_graph_result_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 // __dom.moduleImport(specifier, name, referrer, base, host) -> what an `import()` of `specifier` comes to
 // (`moduleGraphResult`'s answer), made by the script named `name` (a module's base URL, a classic script's name), referred
 // by `referrer` (the referring script's base URL; null: its client, where no script refers it) and resolved against `base`:
-// HostLoadImportedModule — its graph fetched now, as the script waits inside the import (its fetch options the referring
-// module's; any other script's the defaults).
+// HostLoadImportedModule — its graph fetched now, as the script waits inside the import, with the referring script's
+// fetch options.
 // KNOWN GAP (rusty_racer): the engine's dynamic-import hook hands the host no import attributes, so an `import()`'s module
 // type is told by its URL's `.json` suffix — a JSON module of another URL, or a `type` naming none, is not told — and the
 // import is answered as the script waits, with none of its servers' time on the clock.
@@ -928,12 +959,16 @@ fn module_import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         return rv.set(value);
     };
     // (…the referring module's fetch options; a classic script's, an inline module's, the defaults)
+    // (…the referring script's fetch options — HostLoadImportedModule's originalFetchOptions: a fetched module's, an inline
+    // module's or a classic script's as it ran — the defaults for none, an event handler's)
     let referring = match map.entries.get(&(name.clone(), ModuleType::JavaScript)) {
         Some(Entry::Ready(script, _)) => Some(script.plan),
-        // (…a redirected one's by its base URL, the name it was compiled under)
-        _ => map.entries.values().find_map(|e| match e {
-            Entry::Ready(script, _) if script.base == name => Some(script.plan),
-            _ => None,
+        _ => map.referring.get(&name).copied().flatten().or_else(|| {
+            // (…a redirected one's by its base URL, the name it was compiled under)
+            map.entries.values().find_map(|e| match e {
+                Entry::Ready(script, _) if script.base == name => Some(script.plan),
+                _ => None,
+            })
         }),
     };
     let arena = realm(scope, cid);

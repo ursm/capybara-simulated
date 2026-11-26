@@ -19,11 +19,13 @@ RSpec.describe 'the module map' do
   # at each path of `files`, `?ct=` naming the response's type in place of its extension's, `/slow/<ms>/…` the same file
   # as late; `/redir?to=` a redirect; every request counted (`/counts`).
   let(:counts) { Hash.new(0) }
+  let(:referers) { {} }
 
   def session_of(page, files = {})
-    counts = self.counts
+    counts, referers = self.counts, self.referers
     simulated_session(lambda {|env|
       path, query = env['PATH_INFO'], Rack::Utils.parse_query(env['QUERY_STRING'])
+      referers[[path, env['QUERY_STRING']].reject(&:empty?).join('?')] = env['HTTP_REFERER']
       next [200, {'content-type' => 'application/json'}, [counts.to_json]] if path == '/counts'
       next [302, {'location' => query['to']}, []] if path == '/redir'
 
@@ -204,6 +206,17 @@ RSpec.describe 'the module map' do
         expect(session).to have_title('done', wait: 10)
         expect(session.find('#out', visible: :all).text(:all)).to eq('x-ran true')
       end
+    end
+
+    # HostLoadImportedModule: an `import()` is fetched with its referencing script's fetch options — a classic script's
+    # and an inline module script's their element's (`referrerpolicy` here), an event handler's the defaults.
+    it "fetches an import() with its referring script's fetch options" do
+      log_of(<<~HTML, files)
+        <script referrerpolicy="no-referrer">import('/x.js?classic');</script>
+        <script type="module" referrerpolicy="no-referrer">import('/x.js?module');</script>
+        <script>import('/x.js?plain'); setTimeout(done, 300);</script>
+      HTML
+      expect(referers.slice('/x.js?classic', '/x.js?module', '/x.js?plain')).to eq('/x.js?classic' => nil, '/x.js?module' => nil, '/x.js?plain' => 'http://www.example.com/')
     end
 
     it "takes a redirected module's base URL from its response, keying it by its request's" do
