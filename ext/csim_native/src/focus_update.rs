@@ -198,8 +198,9 @@ pub(crate) fn focusing_steps(scope: &mut v8::PinScope<'_, '_>, target: Target, b
     let system = by == By::User || system_chain.is_empty() || system_chain.first() == Some(&top);
     let current = if system { arena.currently_focused_area(top) } else { arena.window_focused_area(top) };
     if current == Some(area) {
-        // (…a keyboard's re-interaction latches its ring again: `send_keys` to the focused element)
-        if let Entry::Element(el) = area {
+        // (…a keyboard's re-interaction latches its ring again: `send_keys` to the focused element — a script's focus of
+        // it changes nothing of it, Chrome)
+        if let (Entry::Element(el), By::User) = (area, by) {
             arena.latch_focus_ring(el);
         }
         return Some(Some(area));
@@ -639,12 +640,16 @@ fn focus_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     if !crate::focus::allow_focus_steps(arena, realm) {
         return;
     }
-    let before = arena.realm_state(realm).and_then(|st| st.focus);
+    let updates = arena.focus_updates;
     let Some(area) = focusing_steps(scope, Target::Element(el), By::Script) else { return };
     let Some(area) = area else { return rv.set_uint32(FOCUS_MOVED) };
-    let arena = crate::dom::dom(scope).arena.enter(realm);
-    if before.map(Entry::Element) == Some(area) && arena.focus_centred == Some((el, centring_generations(arena))) {
-        return rv.set_uint32(FOCUS_CENTRED);
+    // (…the element focused already: its ring as it was — "indicate focus" moves no ring of a focus that did not move,
+    // Chrome: `focus({focusVisible: true})` of a button focused without one shows none — and its scroll skipped where it
+    // is centred already)
+    if crate::dom::dom(scope).arena.focus_updates == updates {
+        let arena = crate::dom::dom(scope).arena.enter(realm);
+        let centred = arena.focus_centred == Some((el, centring_generations(arena)));
+        return rv.set_uint32(if centred { FOCUS_CENTRED } else { FOCUS_MOVED });
     }
     if let (Entry::Element(focused), true) = (area, visible >= 0) {
         let arena = &mut crate::dom::dom(scope).arena;

@@ -178,4 +178,29 @@ RSpec.describe 'Focus update steps' do
     session.within_window(w2) { expect(session.evaluate_script('document.hasFocus()')).to be(true) }
     expect(session.evaluate_script('document.hasFocus()')).to be(true)
   end
+
+  # "Scroll a target into view" walks every ancestor scrolling box, the documents of same-origin ancestor navigables
+  # among them: an element focused in a frame low on a long page brings the page to it (Chrome).
+  it "scrolls the parent document to an element focused or scrolled to in a frame" do
+    tall = simulated_session(lambda {|env|
+      body = env['PATH_INFO'] == '/inner' ? '<input id="x"><p id="y">y</p>' : '<div style="height:3000px"></div><iframe id="fr" src="/inner" style="height:100px"></iframe><div style="height:3000px"></div>'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]]
+    })
+    tall.visit '/'
+    expect(tall.evaluate_script("fr.contentDocument.getElementById('x').focus(); scrollY > 2000")).to be(true)
+    expect(tall.evaluate_script("scrollTo(0, 0); fr.contentDocument.getElementById('y').scrollIntoView(); scrollY > 2000")).to be(true)
+  end
+
+  # `focus({focusVisible})` of the element focused already indicates nothing anew: the focus did not move (Chrome).
+  it 'leaves the ring of an element focused already as it was' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        b.focus({focusVisible: true});
+        const first = b.matches(':focus-visible');
+        b.focus({focusVisible: false});
+        return [first, b.matches(':focus-visible')];
+      })()
+    JS
+    expect(got).to eq([true, true])
+  end
 end

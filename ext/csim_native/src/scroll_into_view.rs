@@ -40,17 +40,45 @@ fn cssom_plan(arena: &mut RealmArena, id: NodeId, block: Align, inline: Align) -
     }
     // (…the box scrolled to is the border box grown by the gap a page asks to be left around it — how a site with a
     // fixed header keeps an anchor from landing under it)
-    let [top, right, bottom, left] = box_style(arena, id).map_or([0.0; 4], |s| {
+    let margin = box_style(arena, id).map_or([0.0; 4], |s| {
         let m = s.get_margin();
         [m.clone_scroll_margin_top(), m.clone_scroll_margin_right(), m.clone_scroll_margin_bottom(), m.clone_scroll_margin_left()].map(|l| f64::from(l.px()))
     });
+    let start = if Some(id) == root { root } else { flat_parent(arena, id) };
+    align_through(arena, start, |arena| rendered_box(arena, id), margin, block, inline).0
+}
+// …and for a box in the document of the navigable `container` holds — `rect`, in that document's viewport — the
+// container's document's part of it: its scrolling boxes from the container's out (CSSOM View "scroll a target into
+// view": "for each ancestor element or viewport that establishes a scrolling box", the documents of ancestor navigables
+// among them), the box carried by each, and where it is in this document's viewport once they moved.
+fn frame_plan(arena: &mut RealmArena, container: NodeId, rect: [f64; 4], block: Align, inline: Align) -> (Vec<(NodeId, [f64; 2])>, Option<[f64; 4]>) {
+    let in_viewport = |arena: &RealmArena| {
+        let [x, y, ..] = rendered_box(arena, container)?;
+        let e = edges(arena, container).unwrap_or([0.0; 12]);
+        Some([x + e[7] + e[3] + rect[0], y + e[4] + e[0] + rect[1], rect[2], rect[3]])
+    };
+    align_through(arena, Some(container), in_viewport, [0.0; 4], block, inline)
+}
+// The moves of every scrolling box from `start` out — the viewport the last — that align the target box (`target`: where
+// it is in the viewport as the boxes stand), grown by `margin`, as `block` and `inline` ask; none past a fixed box, which
+// carries it; and where the target is once they moved.
+fn align_through(
+    arena: &mut RealmArena,
+    start: Option<NodeId>,
+    target: impl Fn(&RealmArena) -> Option<[f64; 4]>,
+    margin: [f64; 4],
+    block: Align,
+    inline: Align,
+) -> (Vec<(NodeId, [f64; 2])>, Option<[f64; 4]>) {
+    let root = arena.layout_root;
+    let [top, right, bottom, left] = margin;
     let mut plan = Plan::default();
-    let mut at = if Some(id) == root { root } else { flat_parent(arena, id) };
+    let mut at = start;
     while let Some(p) = at {
         let is_root = Some(p) == root;
         let pb = arena.get(p).and_then(|n| laid(arena, n)).copied();
         if is_root || pb.is_some_and(|b| b.clip & CLIP_SCROLLS != 0) {
-            if let (Some(port), Some([x, y, w, h])) = (scrollport(arena, p, is_root), box_in(arena, id, p)) {
+            if let (Some(port), Some([x, y, w, h])) = (scrollport(arena, p, is_root), target(arena).and_then(|r| rect_in(arena, r, p))) {
                 let [ax, ay] = physical(arena, p, block, inline);
                 let dy = align_delta(y - top - port[1], h + top + bottom, port[3], ay);
                 let dx = align_delta(x - left - port[0], w + left + right, port[2], ax);
@@ -67,7 +95,8 @@ fn cssom_plan(arena: &mut RealmArena, id: NodeId, block: Align, inline: Align) -
         }
         at = flat_parent(arena, p);
     }
-    plan.done(arena)
+    let landed = target(arena);
+    (plan.done(arena), landed)
 }
 
 // The plan a driver's interaction runs first (Blink's `scrollIntoViewIfNeeded`, CDP `DOM.scrollIntoViewIfNeeded`, which
@@ -162,7 +191,10 @@ fn set_scroll(arena: &mut RealmArena, p: NodeId, to: [f64; 2]) {
 // to the target's offset in its content, 400, not to where the halved box is drawn, 198.5). None where a transform
 // flattens it, and nothing maps back.
 fn box_in(arena: &RealmArena, id: NodeId, p: NodeId) -> Option<[f64; 4]> {
-    let r = rendered_box(arena, id)?;
+    rect_in(arena, rendered_box(arena, id)?, p)
+}
+// …a rect of the viewport's so.
+fn rect_in(arena: &RealmArena, r: [f64; 4], p: NodeId) -> Option<[f64; 4]> {
     match transform_chain(arena, p) {
         Some(m) => Some(transformed_rect(&inverse_homography(&m)?, r)),
         None => Some(r),
@@ -225,6 +257,23 @@ fn fits_within(pos: f64, size: f64, visible: f64) -> bool {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "scrollIntoViewPlan", plan_op, context_id);
+    crate::dom::register(scope, ns, "scrollFrameTargetPlan", frame_plan_op, context_id);
+}
+
+// __dom.scrollFrameTargetPlan(containerNid, x, y, w, h, block, inline) -> Float64Array `[x, y, w, h, scroller nid, x, y,
+// …]`: the moves of this document's scrolling boxes that bring a box of the document the container's navigable holds —
+// `x, y, w, h` in that document's viewport — into view (`frame_plan`), led by where it then is in this one's viewport
+// (NaN where it has no box here), for the parent's part in turn.
+fn frame_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(container) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let rect = [1, 2, 3, 4].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+    let [block, inline] = [5, 6].map(|i| Align::of(args.get(i).int32_value(scope).unwrap_or(0)));
+    let arena = crate::dom::realm(scope, cid);
+    let (plan, landed) = frame_plan(arena, container, rect, block, inline);
+    let mut out: Vec<f64> = landed.unwrap_or([f64::NAN; 4]).to_vec();
+    out.extend(plan.into_iter().flat_map(|(p, [x, y])| [p.to_f64(), x, y]));
+    rv.set(crate::dom::f64_array(scope, &out).into());
 }
 
 // __dom.scrollIntoViewPlan(nid, ifNeeded, block, inline) -> Float64Array `[scroller nid, x, y, …]`, innermost first: the
