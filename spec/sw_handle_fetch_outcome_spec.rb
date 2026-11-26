@@ -37,13 +37,16 @@ RSpec.describe 'Handle Fetch outcomes', :app_answers_every_host do
     JS
   }
   let(:requests) { [] }
+  let(:legs) { [] }
   let(:app) {
-    sw  = worker
-    log = requests
+    sw   = worker
+    log  = requests
+    raced = legs
     Rack::Builder.new {
       run lambda {|env|
         req = Rack::Request.new(env)
         log << "#{req.request_method} #{req.path_info}"
+        raced << env.values_at('HTTP_X_RACE', 'HTTP_COOKIE', 'HTTP_REFERER') if req.path_info == '/raced'
         case req.path_info
         when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [sw]]
         else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
@@ -135,6 +138,20 @@ RSpec.describe 'Handle Fetch outcomes', :app_answers_every_host do
     expect(requests).not_to include('HEAD /raced')
     session.evaluate_async_script("const done = arguments[0]; fetch('/raced').then(r => done(r.status));")
     expect(requests).to include('GET /raced')
+  end
+
+  # Handle Fetch's network leg is "fetch given request" — the request itself, not a bare GET of its URL: its author's
+  # headers, its credentials mode (`omit`: no cookie), its referrer under its policy.
+  it 'sends the raced request itself as its network leg' do
+    session = controlled_session
+    session.execute_script("document.cookie = 'c=1; path=/';")
+    legs.clear
+    status = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      fetch('/raced', {headers: {'X-Race': 'yes'}, credentials: 'omit', referrerPolicy: 'origin'}).then(r => done(r.status));
+    JS
+    expect(status).to eq(200)
+    expect(legs).to eq([['yes', nil, "#{session.evaluate_script('location.origin')}/"]])
   end
 
   context 'with a navigation its worker answers late, or never' do

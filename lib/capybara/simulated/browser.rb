@@ -5994,42 +5994,34 @@ module Capybara
         w[:inbox] << {kind: 'fetch_cancel', fetch_id: fetch_id.to_i}
       end
 
-      # Run the NETWORK LEG of a race-network-and-fetch-handler route — called
-      # by the worker (its own thread) just before dispatching the fetch event,
-      # and the leg runs synchronously right here; the winner is decided later
-      # by the modeled-delay comparison (`WorkerHost#race_winner`): the server's
-      # MODELED delay against the handler's measured dispatch time — deterministic
-      # under any scheduler, where a first-delivery-wins thread race lost the
-      # "server faster" leg whenever a saturated runner starved the leg thread
-      # past the handler's 200 ms busy-wait. A ≥400/failed network
-      # response records nothing — the handler's response wins by default
-      # ("server faster, but not found" uses the handler's 200). For a
-      # NAVIGATION (negative id) the parked nav thread decides as its reply comes
-      # in (its leg by realm 0). Direct-reply fids (worker main-script fetches)
-      # are not raced.
-      # (…its `Accept` the request's, the one Fetch gave it: a navigation's a document's, an image's image types)
-      private def sw_race_network(handle, fetch_id, realm_id, url, accept)
+      # Run the NETWORK LEG of a race-network-and-fetch-handler route — called by the worker (its own thread) just before
+      # dispatching the fetch event, the leg run synchronously right here; the winner is decided later by the modeled-delay
+      # comparison (`WorkerHost#race_winner`): the server's MODELED delay against the handler's measured dispatch time —
+      # deterministic under any scheduler, where a first-delivery-wins thread race lost the "server faster" leg whenever a
+      # saturated runner starved the leg thread past the handler's 200 ms busy-wait. Sequential-on-one-thread makes the
+      # race scheduling-independent; simultaneity is restored at DECISION time: the leg's cost is the server's MODELED
+      # delay (the wpt py shim virtualizes `time.sleep` and surfaces the total as X-Csim-Server-Delay-Ms; a response
+      # without the header modeled no delay), the handler's cost is its real dispatch-to-respondWith span, and whichever is
+      # smaller wins (sw_deliver_fetch_response / the fetch_stream hook / the parked nav loop all ask the same
+      # `race_winner`). For a NAVIGATION (negative id) the parked nav thread decides as its reply comes in (its leg by
+      # realm 0). Direct-reply fids (worker main-script fetches) are not raced.
+      # The leg is Handle Fetch's "fetch given request": `request` the request itself as the network takes it
+      # (fetch_request.rs `fetchRequest` of the worker's `event.request`) — its method, headers, credentials, mode,
+      # referrer — and a response of no ok status records nothing: the handler serves alone ("server faster, but not
+      # found" uses the handler's 200). (…a navigation's leg follows its redirects itself, its response committed at the
+      # final URL like any network navigation's — a gap: Fetch hands a navigate request's redirect to the navigation.)
+      private def sw_race_network(fetch_id, realm_id, request)
         fid = fetch_id.to_i
         return if WorkerHost.direct?(fid)
-        # Run the network leg RIGHT HERE, on the worker's own thread, before the
-        # fetch event dispatches (this hook fires at the top of
-        # swDispatchFetch). Sequential-on-one-thread makes the race
-        # scheduling-independent; simultaneity is restored at DECISION time: the
-        # leg's cost is the server's MODELED delay (the wpt py shim virtualizes
-        # `time.sleep` and surfaces the total as X-Csim-Server-Delay-Ms; a
-        # response without the header modeled no delay), the handler's cost is
-        # its real dispatch-to-respondWith span, and whichever is smaller wins
-        # (sw_deliver_fetch_response / the fetch_stream hook / the parked nav
-        # loop all ask the same `race_winner`). Its dispatch start is stamped
-        # HERE, on the worker thread just before dispatch.
+
+        request = request.to_h
+        request = request.merge('redirect' => 'follow') if request['mode'] == 'navigate'
         r = begin
-          rack_fetch('GET', url.to_s, '', accept.to_s.empty? ? {} : {'Accept' => accept.to_s}, 'follow')
+          rack_fetch_request(request, '')
         rescue StandardError
           nil
         end
-        # An unusable leg (error / ≥400) records nothing: the handler serves
-        # alone, exactly the "not found" preference the tests assert.
-        return unless r && r['status'].to_i < 400
+        return unless r && (200..299).cover?(r['status'].to_i)
 
         @worker_host.race_leg(fid.negative? ? 0 : realm_id.to_i, fid, JSON.generate(sw_race_wire(r)), sw_server_delay_ms(r))
         nil
@@ -9831,7 +9823,7 @@ module Capybara
           # A race-network-and-fetch-handler route matched: run the network leg on a
           # host thread concurrently with the fetch-event dispatch the worker is
           # about to (possibly synchronously-blocking) run. See sw_race_network.
-          race_network:   ->(fetch_id, realm_id, url2, accept) { sw_race_network(handle, fetch_id, realm_id, url2, accept) },
+          race_network:   ->(fetch_id, realm_id, request) { sw_race_network(fetch_id, realm_id, request) },
           # The install handler registered Static Routing API rules (addRoutes) — the
           # rules themselves live in the worker isolate (evaluated at its dispatch
           # point); the host records only their EXISTENCE, which keeps a router SW
