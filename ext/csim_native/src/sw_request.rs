@@ -336,8 +336,10 @@ impl SwChain {
         o.insert("siteSeed".into(), self.site.as_deref().map_or(Json::Null, Json::from));
         o.insert("redirected".into(), Json::Bool(true));
         // (…its origin its client's — the one its Sec-Fetch-Site measures from, not its referrer's: a style sheet's image
-        // refers by the sheet's URL)
-        o.insert("initiator".into(), Json::from(r.initiator.as_deref().unwrap_or(&self.origin)));
+        // refers by the sheet's URL — none where the chain knows none, the network's own then)
+        if let Some(origin) = r.initiator.as_deref().or(Some(self.origin.as_str())).filter(|o| !o.is_empty()) {
+            o.insert("initiator".into(), Json::from(origin));
+        }
         if let Some((url, origin, ancestors)) = &r.client {
             o.insert("clientUrl".into(), Json::from(url.as_str()));
             o.insert("clientOrigin".into(), Json::from(origin.as_str()));

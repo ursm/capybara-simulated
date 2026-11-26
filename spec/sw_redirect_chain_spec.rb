@@ -25,7 +25,7 @@ RSpec.describe 'a redirect a service worker answers with' do
       self.addEventListener('fetch', e => {
         const p = new URL(e.request.url).pathname;
         seen.push(p);
-        const to = {'/a.png': '/b.png', '/s1.js': '/s2.js', '/es1': '/es2'}[p];
+        const to = {'/a.png': '/b.png', '/s1.js': '/s2.js', '/es1': '/es2', '/m1.mjs': '/m2.mjs'}[p];
         if (to) e.respondWith(Response.redirect(to, 302));
         if (p === '/p1') e.respondWith(new Response(null, {status: 302, headers: {location: new URL('/p2', self.location).href, 'referrer-policy': 'no-referrer'}}));
         if (p === '/racenav') {
@@ -50,6 +50,7 @@ RSpec.describe 'a redirect a service worker answers with' do
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [sw]]
       when '/b.png' then [200, {'content-type' => 'image/png'}, [png]]
       when '/s2.js' then [200, {'content-type' => 'text/javascript'}, ['window.s2ran = true;']]
+      when '/m2.mjs' then [200, {'content-type' => 'text/javascript'}, ['window.m2ran = true;']]
       when '/p2' then [200, {'content-type' => 'text/plain'}, ['p2']]
       when '/es2' then [200, {'content-type' => 'text/event-stream'}, ["data: hello\n\n"]]
       when '/racenav' then [302, {'location' => '/elsewhere'}, []]
@@ -94,6 +95,21 @@ RSpec.describe 'a redirect a service worker answers with' do
     expect(seen(session)).to include('/a.png', '/b.png', '/s1.js', '/s2.js', '/es1', '/es2')
     expect(requests).to include('/b.png', '/s2.js', '/es2')
     expect(requests).not_to include('/a.png', '/s1.js', '/es1')
+  end
+
+  # …and a module script's, its graph's fetch the host's: the request at the hop sent as the page's (its Origin the
+  # page's, a module script's fetch being CORS).
+  it "is the worker's again for a module script, its hop let through the page's request" do
+    session = controlled_session
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const s = document.createElement('script'); s.type = 'module'; s.src = '/m1.mjs';
+      s.onload = () => done('load ' + window.m2ran); s.onerror = () => done('error');
+      document.body.append(s);
+    JS
+    expect(got).to eq('load true')
+    expect(seen(session)).to include('/m1.mjs', '/m2.mjs')
+    expect(requests).to include('/m2.mjs')
   end
 
   # HTTP-redirect fetch "set request's referrer policy on redirect" (the response's Referrer-Policy), then main fetch
