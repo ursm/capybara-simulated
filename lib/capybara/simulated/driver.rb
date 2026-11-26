@@ -761,7 +761,7 @@ module Capybara
       # planned as a task of its own — or, `noopener`, a Browser of its own, nil returned: `window.open` returns null, its
       # about:blank document a new opaque origin, not the opener's. (…`about_base` the opener document's base URL, which
       # its about:blank takes, and `referrer` / `referrer_policy` its navigation's, the calling document's)
-      def open_window_from_js(opener_browser, url, name, opener_realm_id = 0, about_base = nil, noopener: false, referrer: nil, referrer_policy: nil)
+      def open_window_from_js(opener_browser, url, name, opener_realm_id = 0, about_base = nil, noopener: false, referrer: nil, referrer_policy: nil, size: nil)
         resolved = url.to_s.empty? ? nil : opener_browser.resolve_document_url(url)
         # Opening a blob: URL whose storage partition differs from the opener's
         # top-level site is forced NOOPENER (cross-partition-navigation): the new
@@ -781,6 +781,10 @@ module Capybara
           planned:          true
         )
         window = window_browser(handle)
+        # (…its content area the size its features asked for, the default's for a dimension they left out)
+        if size && window
+          window.set_viewport(size[0] || window.viewport_width, size[1] || window.viewport_height)
+        end
         window.realm if window.is_a?(RealmWindow)
       end
 

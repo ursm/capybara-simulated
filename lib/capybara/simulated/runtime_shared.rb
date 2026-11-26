@@ -74,7 +74,7 @@ module Capybara
         # `window.open`: a new window of this window's browsing context group, a realm of this isolate (its number), or —
         # noopener — a browsing context group of its own (nil). a[2] is the opener's realm id (for wiring window.opener);
         # a[3] the opener document's base URL, which an about:blank popup inherits.
-        'windowOpen'                   => ->(b, *a) { b.open_child_window(*a[0, 6]) },
+        'windowOpen'                   => ->(b, *a) { b.open_child_window(*a[0, 7]) },
         # A `target=_blank`/named link/area activation from a frame or window realm:
         # open a new auxiliary window (the realm's VM isn't rebuilt — a fresh window
         # is). `opener` = rel=opener (target=_blank defaults to noopener); the Driver

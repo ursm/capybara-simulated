@@ -1462,10 +1462,33 @@ pub(crate) fn open_features(features: &str) -> u32 {
         0
     }
 }
+// The size a new window's content area is asked for (CSSOM View "the window open features": `width` / `innerWidth`,
+// `height` / `innerHeight`, each its integer value, at least 100 — "clamped … to a minimum of 100") — None where it asks
+// for neither, either missing one the user agent's default.
+pub(crate) fn open_size(features: &str) -> Option<(Option<u32>, Option<u32>)> {
+    let tokens = tokenize_features(features);
+    let dimension = |names: [&str; 2]| {
+        names.iter().find_map(|n| tokens.get(*n)).and_then(|v| crate::validity::parse_html_integer(v)).map(|n| n.clamp(100, i64::from(u32::MAX)) as u32)
+    };
+    let size = (dimension(["width", "innerwidth"]), dimension(["height", "innerheight"]));
+    (size.0.is_some() || size.1.is_some()).then_some(size)
+}
 // __dom.openFeatures(features) -> `open_features`.
 fn open_features_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let features = args.get(0).to_rust_string_lossy(scope);
     rv.set_uint32(open_features(&features));
+}
+// __dom.openSize(features) -> [width, height] (each null where not asked for) or null (`open_size`).
+fn open_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let features = args.get(0).to_rust_string_lossy(scope);
+    let Some((w, h)) = open_size(&features) else { return rv.set_null() };
+    let items = [w, h].map(|d| -> v8::Local<'_, v8::Value> {
+        match d {
+            Some(d) => v8::Integer::new_from_unsigned(scope, d).into(),
+            None => v8::null(scope).into(),
+        }
+    });
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -1473,6 +1496,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "documentFullyActive", document_fully_active, context_id);
     crate::dom::register(scope, ns, "neuterRealm", neuter_realm, context_id);
     crate::dom::register(scope, ns, "openFeatures", open_features_op, context_id);
+    crate::dom::register(scope, ns, "openSize", open_size_op, context_id);
     crate::dom::register(scope, ns, "windowName", window_name, context_id);
     crate::dom::register(scope, ns, "setWindowName", set_window_name, context_id);
     crate::dom::register(scope, ns, "setFrameRealm", set_frame_realm, context_id);

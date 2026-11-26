@@ -94,6 +94,20 @@ RSpec.describe 'multi-window' do
     expect([session.windows.size, session.current_path]).to eq([2, '/other'])
   end
 
+  # CSSOM View's window open features: `width` / `height` (`innerWidth` / `innerHeight` alike) size the new window's
+  # content area, clamped to at least 100; one left out keeps the default.
+  it "sizes a JS-opened window's content area by its width and height features" do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const a = window.open('/popup', 'sized', 'width=320,height=40');
+        const b = window.open('/popup', 'wide', 'innerWidth=500');
+        return [a.innerWidth, a.innerHeight, b.innerWidth, b.innerHeight === innerHeight];
+      })()
+    JS
+    expect(got).to eq([320, 100, 500, true])
+  end
+
   it 'sets window.opener on a JS-opened window' do
     win = session.window_opened_by { session.find(:css, '#open').click }
     session.within_window(win) do
