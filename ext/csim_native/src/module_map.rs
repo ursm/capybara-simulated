@@ -585,6 +585,13 @@ fn module_requests(scope: &mut v8::PinScope<'_, '_>, source: v8::Local<'_, v8::S
 // a graph whose every module is in, or one a failure ended; None for none. The entries it waits on are come to in the order of the times they
 // come in (each fetch's landing; one in already, as the graph reached it), so a module's imports are requested in that
 // order — the host's slots, its server's view, the cookies its responses set — however many land by now.
+// (…its waits held in a queue of this call's while it goes on, the graph's list empty meanwhile: no page script runs
+// inside it to find them so. What it asks of the host as a module lands (`H_MODULE_TAKE`) is the response — its server's
+// sleeps counted in its slot, never run on the event loop (browser.rb `script_fetch_make`; a passthrough's slot never
+// joins a flight under way, whose wait would) — a controlling worker's answer, waited for in place with the window's
+// event loop stopped (`await_worker_reply`'s follower: the jobs the worker waits on run there, what they tell the page
+// told it at its next step, a message a client is posted delivered then), and the compile, which evaluates nothing.
+// spec/module_map_spec.rb "runs none of the page's script inside a module's landing")
 fn advance(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, sync: bool) -> Result<Option<f64>, Terminated> {
     let now = realm(scope, cid).event_loop.clock;
     let Some(map) = map_of(scope, cid) else { return Ok(None) };

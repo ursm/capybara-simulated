@@ -243,6 +243,40 @@ RSpec.describe 'the module map' do
       # (…its server's time on the clock once: a timer due after it runs after it, as the uncontrolled page's does)
       expect(session.find('#out', visible: :all).text(:all).split).to start_with('t100', 'x-ran').and include('m-ran', 'm-on-time:true', 'dyn-ok').and end_with('t400')
     end
+
+    # …and one whose worker talks to the page as it answers a module's request — the page's script, which the message
+    # runs, never inside the module map's landing (module_map.rs `advance`): the message waits for the window's next
+    # step, an import it makes waits on the entry being fetched.
+    it "runs none of the page's script inside a module's landing" do
+      files = {'/x.js' => "L.push('x-ran'); export const x = 1;", '/m.js' => "import '/slow/200/x.js'; L.push('m-ran');",
+               '/sw.js' => <<~JS}
+                 addEventListener('install', () => skipWaiting());
+                 addEventListener('activate', (e) => e.waitUntil(clients.claim()));
+                 addEventListener('fetch', (e) => {
+                   if (!e.request.url.includes('/slow/')) return;
+                   e.respondWith(clients.matchAll().then((all) => { all.forEach((c) => c.postMessage('told')); return fetch(e.request); }));
+                 });
+               JS
+      session = session_of(<<~HTML, files)
+        <script>
+          if (!navigator.serviceWorker.controller) {
+            navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => { L.push('registered'); done(); });
+          } else {
+            navigator.serviceWorker.onmessage = (e) => {
+              L.push(e.data);
+              import('/slow/200/x.js').then(() => L.push('dyn-ok'), () => L.push('dyn-fail'));
+            };
+            setTimeout(done, 1000);
+          }
+        </script>
+        <script type="module" src="/m.js"></script>
+      HTML
+      session.visit '/'
+      expect(session).to have_title('done', wait: 10)
+      session.visit '/'
+      expect(session).to have_title('done', wait: 10)
+      expect(session.find('#out', visible: :all).text(:all).split).to include('told', 'x-ran', 'm-ran', 'dyn-ok').and(satisfy {|log| !log.include?('dyn-fail') })
+    end
   end
 
   # HTML "merge existing and new import maps": a map registered after a specifier resolved keeps that resolution, its
