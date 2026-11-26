@@ -58,6 +58,8 @@ pub(crate) struct RealmSheets {
     // and the owners whose fetch its document's abort cancelled (`sheetFetchesAbort`).
     flights: HashMap<NodeId, u32>,
     cancelled: std::collections::HashSet<NodeId>,
+    // …and the `@import`s of an owner's sheet under way, begun as it came to have them (`sheetImportsBegin`).
+    imports: HashMap<NodeId, Vec<u32>>,
     encodings: HashMap<String, &'static str>,
     answers: HashMap<String, Option<v8::Global<v8::Value>>>,
     blob_texts: HashMap<String, Option<String>>,
@@ -71,6 +73,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sheetFetchBegin", fetch_begin_op, context_id);
     register(scope, ns, "sheetFetchLand", fetch_land_op, context_id);
     register(scope, ns, "sheetFetchesAbort", fetches_abort_op, context_id);
+    register(scope, ns, "sheetImportsBegin", imports_begin_op, context_id);
+    register(scope, ns, "sheetImportsOf", imports_of_op, context_id);
+    register(scope, ns, "sheetImportsLand", imports_land_op, context_id);
 }
 
 // __dom.sheetFetchBegin(owner, url, plan, scanned, host) -> how many ms after now the response of the `<link>` `owner`'s
@@ -93,7 +98,6 @@ fn fetch_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId, url: &str, plan: u32, scanned: bool) -> Result<f64, Terminated> {
-    use crate::subresource_obtain::{next_slot, slept_ms, H_SCRIPT_START};
     forget_flight(scope, cid, host, el)?;
     if crate::fetch_rules::fetch_route(url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
         return Ok(0.0);
@@ -105,10 +109,37 @@ fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
     if call(scope, host, H_CONTROLLER, &[])?.is_some_and(|c| v8::Local::new(scope, c).uint32_value(scope).unwrap_or(0) != 0) {
         return Ok(0.0);
     }
+    match begin_flight(scope, cid, host, Some(el), url, plan, scanned)? {
+        Flight::Slot(id, due) => {
+            if let Some(s) = realm(scope, cid).realm_state_mut(cid) {
+                s.sheet_fetches.flights.insert(el, id);
+            }
+            Ok(due)
+        }
+        Flight::Answered(answer) => {
+            let answer = v8::Local::new(scope, answer);
+            keep_answer(scope, cid, el, url, plan, answer);
+            Ok(0.0)
+        }
+        Flight::None => Ok(0.0),
+    }
+}
+// A style resource's fetch begun in parallel (`begin_flight`): the host's slot and how many ms after now its response
+// comes in; the asset cache's answer at once; or none.
+enum Flight {
+    Slot(u32, f64),
+    Answered(v8::Global<v8::Value>),
+    None,
+}
+// …the host's slot (browser.rb `script_fetch_start`, the asset cache's flight for the document, which a fetch of the
+// request made later joins: `asset_request`), the request of the client of `el` (none: the document's), its server's sleeps
+// counted as it is made — one a preload scanner saw dated as its parse began (`scanned`).
+fn begin_flight(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: Option<NodeId>, url: &str, plan: u32, scanned: bool) -> Result<Flight, Terminated> {
+    use crate::subresource_obtain::{next_slot, slept_ms, H_SCRIPT_START};
     let arena = realm(scope, cid);
     let began = crate::script_fetch::began_at(arena, cid, scanned);
     let clock = arena.event_loop.clock;
-    let client = match arena.get(el).map(|n| n.realm) {
+    let client = match el.and_then(|el| arena.get(el)).map(|n| n.realm) {
         Some(c) => v8::Integer::new(scope, c).into(),
         None => v8::undefined(scope).into(),
     };
@@ -122,17 +153,92 @@ fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
         v8::Number::new(scope, began).into(),
         v8::Integer::new_from_unsigned(scope, id).into(),
     ];
-    let Some(started) = call(scope, host, H_SCRIPT_START, &args)? else { return Ok(0.0) };
-    let started = v8::Local::new(scope, started);
-    if !started.is_number() {
-        keep_answer(scope, cid, el, url, plan, started);
+    let Some(started) = call(scope, host, H_SCRIPT_START, &args)? else { return Ok(Flight::None) };
+    if !v8::Local::new(scope, &started).is_number() {
+        return Ok(Flight::Answered(started));
+    }
+    let slept = slept_ms(scope, v8::Local::new(scope, started));
+    Ok(Flight::Slot(id, (began + slept - clock).max(0.0)))
+}
+
+// __dom.sheetImportsBegin(owner, urls, referrer, host) -> how many ms after now the last of the `@import`s `urls` of the
+// sheet of `owner` (a `<style>`, a `<link>`) — imported from `referrer` (its location; null its document's) — comes in:
+// CSS Values 4 "fetch a style resource" in parallel, each its own flight the cascade's fetch of it joins, its server's
+// sleeps counted as it is made; the owner's load task, which "update a style block" / the link's "process the linked
+// resource" fire once its critical subresources are in, queued that much later (bridge.entry.js). 0 for none begun.
+fn imports_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_double(0.0);
+    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let urls: Vec<String> = match v8::Local::<v8::Array>::try_from(args.get(1)) {
+        Ok(list) => (0..list.length()).filter_map(|i| list.get_index(scope, i)).map(|v| v.to_rust_string_lossy(scope)).collect(),
+        Err(_) => return,
+    };
+    let referrer = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(3)) else { return };
+    let cid = realm_id(scope, &args);
+    if let Ok(due) = imports_begin(scope, cid, host, el, &urls, referrer.as_deref()) {
+        rv.set_double(due);
+    }
+}
+fn imports_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId, urls: &[String], referrer: Option<&str>) -> Result<f64, Terminated> {
+    imports_land(scope, cid, host, el)?;
+    if urls.is_empty() || call(scope, host, H_CONTROLLER, &[])?.is_some_and(|c| v8::Local::new(scope, c).uint32_value(scope).unwrap_or(0) != 0) {
         return Ok(0.0);
     }
-    let slept = slept_ms(scope, started);
-    if let Some(s) = realm(scope, cid).realm_state_mut(cid) {
-        s.sheet_fetches.flights.insert(el, id);
+    let plan = sheet_plan(scope, cid, None, referrer);
+    let scanned = crate::script_fetch::parser_input_scanned(scope, cid);
+    let (mut slots, mut due) = (Vec::new(), 0.0f64);
+    for url in urls {
+        if crate::fetch_rules::fetch_route(url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
+            continue;
+        }
+        if let Flight::Slot(id, d) = begin_flight(scope, cid, host, None, url, plan, scanned)? {
+            slots.push(id);
+            due = due.max(d);
+        }
     }
-    Ok((began + slept - clock).max(0.0))
+    if !slots.is_empty() {
+        if let Some(s) = realm(scope, cid).realm_state_mut(cid) {
+            s.sheet_fetches.imports.insert(el, slots);
+        }
+    }
+    Ok(due)
+}
+// __dom.sheetImportsOf(owner) -> `[urls, location]`: the `@import`s of the `<link>` `owner`'s sheet as it was answered
+// (`SheetRequest::answered`), resolved against the URL it came from, and that URL — null where it kept none.
+fn imports_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let Some((key, answer)) = realm(scope, cid).sheet_requests.get(&el).and_then(|r| r.answered.clone()) else { return };
+    let answer = v8::Local::new(scope, answer);
+    let Ok(array) = v8::Local::<v8::Array>::try_from(answer) else { return };
+    let Some(text) = array.get_index(scope, 0).filter(|t| t.is_string()).map(|t| t.to_rust_string_lossy(scope)) else { return };
+    let meta = array.get_index(scope, 1).and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
+    let requested = key.split_once(' ').map_or(key.as_str(), |(_, u)| u).to_owned();
+    let location = string_member(scope, meta, "url").filter(|u| !u.is_empty()).unwrap_or(requested);
+    let doc = crate::node_handle::node_document_of(scope, el);
+    let quirks = realm(scope, cid).document_mode(doc).0;
+    let urls: Vec<v8::Local<v8::Value>> = crate::sheets::import_urls(&text, &location, quirks).iter().map(|u| text_value(scope, u)).collect();
+    let urls = v8::Array::new_with_elements(scope, &urls).into();
+    let items = [urls, text_value(scope, &location)];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.sheetImportsLand(owner, host) — the `@import`s the owner's sheet began fetching landed as its load task runs: their
+// slots taken (the document's asset memo, their cookies).
+fn imports_land_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
+    let cid = realm_id(scope, &args);
+    let _ = imports_land(scope, cid, host, el);
+}
+fn imports_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId) -> Result<(), Terminated> {
+    let Some(slots) = realm(scope, cid).realm_state_mut(cid).and_then(|s| s.sheet_fetches.imports.remove(&el)) else { return Ok(()) };
+    for id in slots {
+        let id = v8::Integer::new_from_unsigned(scope, id).into();
+        call(scope, host, crate::subresource_obtain::H_SCRIPT_TAKE, &[id])?;
+    }
+    Ok(())
 }
 // What became of a `<link>`'s fetch as its load task runs (`sheetFetchLand`): none was begun (its load obtains its sheet as
 // it is); it landed; its document's abort cancelled it — a network error.

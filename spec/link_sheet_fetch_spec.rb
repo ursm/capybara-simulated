@@ -14,9 +14,10 @@ RSpec.describe "a link's style sheet fetch" do
       when '/b.js'
         sleep 0.05
         [200, {'content-type' => 'text/javascript'}, ['R.push("b")']]
-      when '/s.css'
+      when '/s.css', '/i.css'
         sleep 0.2
         [200, {'content-type' => 'text/css'}, ['p { color: red }']]
+      when '/imp.css' then [200, {'content-type' => 'text/css'}, ['@import url(/i.css);']]
       else [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><title>t</title><script>window.R = []; addEventListener('DOMContentLoaded', () => R.push('dcl')); addEventListener('load', () => R.push('load'))</script>#{head}"]]
       end
     }
@@ -38,5 +39,16 @@ RSpec.describe "a link's style sheet fetch" do
     head = '<script>setTimeout(() => { stop(); R.push("stopped") }, 50)</script>' \
            '<link rel=stylesheet href="/s.css" onload="R.push(\'css\')" onerror="R.push(\'csserr\')">'
     expect(log_of(head)).to eq('stopped csserr')
+  end
+
+  # (…and an `@import`'s, a `<style>`'s or a linked sheet's: its owner's `load` once its server has answered — Chrome and
+  # Firefox `t0 b.js-ran inl dcl css load`, csim-bench theend5 `t6_timer_import`, `t6_timer_linkimport`)
+  ['<style>@import url(/i.css);</style>', '<link rel=stylesheet href="/imp.css">'].each do |sheet|
+    it "loads #{sheet} inserted as the parser waits once its import's server has answered" do
+      insert = "const t = document.createElement('template'); t.innerHTML = #{sheet.inspect}; const s = t.content.firstChild; " \
+               's.onload = () => R.push("css"); document.head.append(s); R.push("t0")'
+      head = "<script>setTimeout(() => { #{insert} })</script><script src=\"/b.js\"></script><script>R.push(\"inl\")</script>"
+      expect(log_of(head)).to eq('t0 b inl dcl css load')
+    end
   end
 end
