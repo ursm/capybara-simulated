@@ -66679,6 +66679,56 @@ html/dom/render-blocking/script-inserted-style-element.html:
 - Rendering is blocked before render-blocking resources are loaded
 html/dom/render-blocking/script-inserted-stylesheet-link.html:
 - Rendering is blocked before render-blocking resources are loaded
+html/interaction/focus/anchor-element-focus-ring.html:
+- "!= html/interaction/focus/anchor-element-focus-ring-ref.html"
+html/interaction/focus/document-level-focus-apis/document-has-system-focus.html:
+- Top-level document receives blur/focus events and loses system focus during opening/closing
+  of a popup
+- "[harness] TIMEOUT"
+html/interaction/focus/focus-selection.html:
+- div has contenteditable=false
+- div has contenteditable=true
+html/interaction/focus/processing-model/focus-fixup-rule-one-no-dialogs.html:
+- "#button1"
+- "#button4"
+html/interaction/focus/processing-model/focusVisible.html:
+- 'FocusOptions.focusVisible: #contenteditable'
+- 'FocusOptions.focusVisible: #tabindex'
+- 'FocusOptions.focusVisible: button'
+- 'FocusOptions.focusVisible: input'
+html/interaction/focus/processing-model/preventScroll.html:
+- elm.focus() without arguments
+- elm.focus(null)
+- elm.focus(undefined)
+- 'elm.focus({preventScroll: false})'
+- elm.focus({})
+html/interaction/focus/processing-model/textarea-scroll-selection.html:
+- programatic focus() scrolls selection into view including ancestors
+html/interaction/focus/sequential-focus-navigation-starting-point.html:
+- Focus navigation starting point should be maintained when focused element is removed.
+- Focus navigation starting point should be maintained when parent element is removed.
+- Focus navigation starting point should be maintained when shadow host is removed.
+- Focus navigation starting point should be maintained when slotted focused element
+  is removed.
+- Focus navigation starting point should be set when scrolling to fragment (and should
+  not be overwritten when <a> is blurred).
+- Focus navigation starting point should not change when focused element at end of
+  shadow tree is removed.
+- Focus navigation starting point should not change when next element is moved with
+  moveBefore.
+- Focus navigation starting point should not change when next element is removed.
+- Focus navigation starting point should not change when previous element gets new
+  children.
+- Focus navigation starting point should not change when previous element is moved
+  with moveBefore.
+- Focus navigation starting point should not change when previous element is removed.
+html/interaction/focus/the-autofocus-attribute/autofocus-area.html:
+- autofocus works on area element
+html/interaction/focus/the-autofocus-attribute/supported-elements.html:
+- Area element should support autofocus
+html/interaction/focus/the-autofocus-attribute/update-the-rendering.html:
+- '"Flush autofocus candidates" should be happen before a scroll event and animation
+  frame callbacks'
 html/rendering/bidi-rendering/slot-no-isolate-001.html:
 - "== html/rendering/bidi-rendering/slot-no-isolate-001-ref.html"
 html/rendering/bindings/the-select-element-0/option-label.html:

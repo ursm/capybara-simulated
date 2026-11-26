@@ -98,6 +98,9 @@ const TREES = [
                                        // subtests need layout the gate holds them to like any other)
   'close-watcher',                     // CloseWatcher and the close watcher manager its groups, user activation and
                                        // close requests share with dialogs and popovers
+  'html/interaction/focus',            // HTML §6.6 focus: the focusing / unfocusing / focus update steps across
+                                       // shadow trees and navigables, focusable areas, sequential navigation,
+                                       // tabindex, autofocus, the focus fixup, hasFocus / activeElement
   'html/semantics/forms',              // form submission / constraint validation / FormData / input /
                                        // select / textarea / labels — the form-driven surface every app
                                        // suite exercises (layout-dependent widget-rendering subtests are
@@ -339,9 +342,6 @@ const SUPPORT_FILES = [
   // dom/nodes/insertion-removing-steps' meta-referrer test reads the Referer its fetches carried through this echo
   // handler, from a tree we don't vendor (its other tests are of base URLs).
   'html/infrastructure/urls/terminology-0/resources/echo-referrer-text.py',
-  // html/semantics/interactive-elements' dialog and details tests drive autofocus through these focus utilities, by
-  // path into a tree we don't vendor; plain testdriver code.
-  'html/interaction/focus/the-autofocus-attribute/resources/utils.js',
   'pointerevents/pointerevent_support.js',
   'html/cross-origin-embedder-policy/credentialless/resources/common.js',
   'html/cross-origin-embedder-policy/resources/script-factory.js',
