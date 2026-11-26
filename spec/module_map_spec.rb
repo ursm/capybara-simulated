@@ -218,6 +218,31 @@ RSpec.describe 'the module map' do
     end
   end
 
+  # A controlling service worker that lets a module's request through: the network's response, landing as far after its
+  # fetch as its server took — the event loop running on meanwhile — and one module however many ask for it.
+  describe 'under a service worker that lets its requests through' do
+    it "lands a module's imports as late as their servers take" do
+      files = {'/x.js' => "L.push('x-ran'); export const x = 1;", '/m.js' => "import '/slow/300/x.js'; L.push('m-ran');",
+               '/sw.js' => "addEventListener('install', () => skipWaiting()); addEventListener('activate', (e) => e.waitUntil(clients.claim())); addEventListener('fetch', () => {});"}
+      session = session_of(<<~HTML, files)
+        <script>
+          if (!navigator.serviceWorker.controller) {
+            navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => { L.push('registered'); done(); });
+          } else {
+            setTimeout(() => { L.push('t100'); import('/slow/300/x.js').then(() => L.push('dyn-ok'), () => L.push('dyn-fail')); }, 100);
+            setTimeout(done, 1000);
+          }
+        </script>
+        <script type="module" src="/m.js"></script>
+      HTML
+      session.visit '/'
+      expect(session).to have_title('done', wait: 10)
+      session.visit '/'
+      expect(session).to have_title('done', wait: 10)
+      expect(session.find('#out', visible: :all).text(:all).split).to start_with('t100', 'x-ran').and include('m-ran', 'dyn-ok')
+    end
+  end
+
   # HTML "merge existing and new import maps": a map registered after a specifier resolved keeps that resolution, its
   # other rules merged (Chrome `a1 a1 b b`; Firefox registers no map once a module has loaded: `b!TypeError c!TypeError`
   # — the spec's merge is explicit, csim-bench mod8 `im_late`).

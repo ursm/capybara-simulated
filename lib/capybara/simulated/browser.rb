@@ -8990,27 +8990,35 @@ module Capybara
       # timed — or, where the worker lets the request through, the network's, through the asset cache.
       private def module_worker_answer(url, mod, result)
         handle, client_id, client_url, credentials, policy, client = result[:worker]
-        document, plan, referrer, dest = result[:network]
         started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        _, plan, referrer, dest = result[:network]
         answer = sw_script_subresource_fetch(handle, url, client_id, referrer || client_url, dest, 'cors', credentials || 'same-origin', integrity: mod[:integrity],
                                                                                                                                    referrer_policy: policy, client: client)
-        return {sw: answer, times: [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]} if answer
-
-        # (…its server's sleeps counted, none run on the event loop: the module map is landing it — KNOWN GAP, none of that
-        # time on the clock either, as a module the worker answers lands with none of its time)
+        answer && {sw: answer, times: [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]}
+      end
+      # …or, the worker letting the request through, the network's: a slot of its own filed as `id`, made now and dated
+      # `began` (its landing's), its server's sleeps counted in it — answered at once where a memo has it (a result), else
+      # how long its server took, which it lands that much later by (the module map's entry fetching again) or, none,
+      # its slot.
+      private def module_passthrough(url, mod, network, id, began)
+        document, plan, referrer, dest = network
         _, credentials, policy = request_of_plan(plan)
         Thread.current[:csim_asset_times] = nil
-        answered, = server_timed_sleeps {
-          external_asset_response(url, document, mod[:realm], policy, referrer: referrer, dest: dest, mode: 'cors', credentials: credentials, module_map: true)
-        }
-        {answered: answered || [nil, nil, nil], times: Thread.current[:csim_asset_times] || [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]}
+        request = asset_request(url, document, mod[:realm], policy, referrer: referrer, dest: dest, mode: 'cors', credentials: credentials, joins: false, module_map: true)
+        return {answered: [nil, nil, nil]} unless request
+        return {answered: request, times: Thread.current[:csim_asset_times]} unless request.is_a?(AssetRequest)
+
+        slot, wait = asset_slot(request, document, began, id)
+        slept = wait || slot[:slept]
+        slept.positive? ? slept.to_f : slot
       end
       # …the milliseconds a request took, of its host times (`asset_fetch`'s `[started, ended]`), 0 for none.
       private def request_ms(times) = times ? (times[1] - times[0]) * 1000 : 0
       # …and as it lands: what came in, judged — `{source:, base:}`, the module's source text and its base URL (its
       # response's URL), its Resource Timing entry noted (`take_module_rt`, timed from its beginning to `now` on the page's
       # clock) — nil where none came in: a network error, a response the integrity metadata does not match (SRI), one of a
-      # MIME type no module of its type is (a text module's any).
+      # MIME type no module of its type is (a text module's any) — or, a controlling worker letting it through to a server
+      # that takes time, how many milliseconds later it lands (`module_passthrough`).
       def module_fetch_take(id, now)
         mod  = @module_fetches.delete(id.to_i)
         slot = @script_fetches.delete(id.to_i)
@@ -9020,7 +9028,24 @@ module Capybara
         store_kept_cookies(slot[:cookies])
         url    = mod[:url]
         result = slot[:result] or return nil
-        result = module_worker_answer(url, mod, result) if result[:worker]
+        if result[:worker]
+          worker = result
+          result = module_worker_answer(url, mod, worker)
+          unless result
+            landed = module_passthrough(url, mod, worker[:network], id, slot[:began])
+            if landed.is_a?(Float)
+              @module_fetches[id.to_i] = mod
+              return landed
+            end
+            if landed.is_a?(Hash) && landed.key?(:began)
+              slot = @script_fetches.delete(id.to_i)
+              script_fetch_landed(slot)
+              store_kept_cookies(slot[:cookies])
+              landed = slot[:result] || {answered: [nil, nil, nil]}
+            end
+            result = landed
+          end
+        end
         if (local = result[:local])
           source, content_type = local
           base = url

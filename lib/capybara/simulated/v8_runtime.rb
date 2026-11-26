@@ -1874,7 +1874,10 @@ module Capybara
       # one's source compiled (`H_MODULE_INLINE`), a module script's graph run.
       def attach_module_steps(c, realm = nil)
         c.attach('@moduleFetchTake', ->(id, type, now) {
-          RuntimeShared.safe_call { (answer = @browser.module_fetch_take(id, now)) && module_record(realm, answer[:source], answer[:base], type) }
+          RuntimeShared.safe_call {
+            answer = @browser.module_fetch_take(id, now)
+            answer.is_a?(Hash) ? module_record(realm, answer[:source], answer[:base], type) : answer
+          }
         })
         c.attach('@moduleInline', ->(source, base) { RuntimeShared.safe_call { module_record(realm, source, base, 0, inline: true) } })
         c.attach('@evalModuleGraph', ->(result) { RuntimeShared.safe_call { eval_module_graph(realm, result) } })

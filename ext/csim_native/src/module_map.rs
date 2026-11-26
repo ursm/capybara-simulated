@@ -29,7 +29,8 @@ use crate::subresource_obtain::{call, next_slot, slept_ms, text};
 //   H_MODULE_TAKE (id, type)          its answer as it lands, compiled: `[record, source, base URL]` — the record's number,
 //                                     the source text a JavaScript one was compiled from, the response's URL — or a parse
 //                                     error `[name, message, filename, lineno]`, null for none (a network error, a MIME
-//                                     type no module of its type is, an integrity mismatch)
+//                                     type no module of its type is, an integrity mismatch) — or how many milliseconds later
+//                                     it lands (a controlling worker let it through to a server that took time)
 //   H_MODULE_INLINE (source, base URL) an inline module script's source compiled, answered as `H_MODULE_TAKE` answers
 pub(crate) const H_MODULE_START: u32 = 34;
 pub(crate) const H_MODULE_TAKE: u32 = 35;
@@ -603,6 +604,11 @@ fn advance(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, sync: bool) -> 
         }
         if let Some(&Entry::Fetching { slot, due, plan }) = map_of(scope, cid).and_then(|map| map.entries.get(&key)) {
             land(scope, cid, &key, slot, due, plan)?;
+            // (…one landing later than it was due: waited for again)
+            if let Some(&Entry::Fetching { due, .. }) = map_of(scope, cid).and_then(|map| map.entries.get(&key)) {
+                queue.put_back(due, key, reached);
+                continue;
+            }
         }
         walk(scope, cid, gid, Some(&key), reached)?;
         let Some(map) = map_of(scope, cid) else { return Ok(None) };
@@ -668,6 +674,15 @@ fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, slot: u32, due: f
     let Some(host) = host_of(scope, cid) else { return Ok(()) };
     let (id, ty) = (v8::Integer::new_from_unsigned(scope, slot).into(), v8::Integer::new_from_unsigned(scope, key.1 as u32).into());
     let answer = call(scope, host, H_MODULE_TAKE, &[id, ty])?;
+    // (…a controlling worker letting it through to a server that takes time: its fetch going on that much later)
+    let later = answer.as_ref().map(|a| v8::Local::new(scope, a)).filter(|a| a.is_number());
+    if let Some(later) = later {
+        let due = due + slept_ms(scope, later);
+        if let Some(map) = map_of(scope, cid) {
+            map.entries.insert(key.clone(), Entry::Fetching { slot, due, plan });
+        }
+        return Ok(());
+    }
     let entry = match script_of(scope, answer, key.1, &key.0, plan) {
         Some(script) => Entry::Ready(script, due),
         None => Entry::Failed,
