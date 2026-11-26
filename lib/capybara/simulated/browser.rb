@@ -8922,11 +8922,12 @@ module Capybara
                                                                 joins: false, module_map: graph_entry)
           return request unless request.is_a?(AssetRequest)
 
-          # (…one under way of the same request for the same document: its slot shared, one fetch)
+          # (…one under way of the same request for the same document: its slot shared, one fetch — what is left of its server's
+          # time past the joiner's own beginning the joiner's wait, none of it where it has passed)
           flights = (@asset_flights[document.to_i] ||= {})
           if (slot = flights[request.memo_key])
             @script_fetches[id.to_i] = slot
-            return slot[:slept]
+            return [slot[:began] + slot[:slept] - began.to_f, 0.0].max
           end
 
           slot = {began: began.to_f, started: started, slept: 0.0, cookies: nil, request: request, graph_entry: graph_entry, document: document.to_i, realm: realm}
