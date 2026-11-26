@@ -49,9 +49,17 @@ enum Mode {
     // SharedArrayBuffers shared where the agent cluster is cross-origin isolated (else a DataCloneError), its
     // WebAssembly.Modules shared.
     Agent,
-    // A message to another agent, a worker's or another window's isolate: no SharedArrayBuffer, which no isolate here
-    // shares with another, nor a ReadableStream transferred (the bindings' `transferCheck`); its WebAssembly.Modules
-    // shared, read back in the agent cluster it was serialized in alone.
+    // A message to another agent, a worker's or another window's isolate: no SharedArrayBuffer, nor a ReadableStream
+    // transferred (the bindings' `transferCheck`); its WebAssembly.Modules shared, read back in the agent cluster it was
+    // serialized in alone.
+    //
+    // (…no SharedArrayBuffer, though HTML shares one with a dedicated worker of a cross-origin isolated agent cluster:
+    // a deliberate gap for now. Its memory could ride the registry as a transferred buffer's does, but a worker here is
+    // run in lockstep with its window's virtual clock (worker_records.rs): a window's step waits for its workers to
+    // catch up, so a worker parked in `Atomics.wait` for its page to `notify` — the very use a shared buffer is for —
+    // never catches up, and the window waits on it, both stalled till the lockstep's guard. Its timeout would be real
+    // time on a virtual clock besides. Sharing one needs the wait seen by the lockstep first — V8's atomics-wait
+    // callback marking the worker parked, as a worker waiting on its inbox is — not the memory alone.)
     Across,
     // StructuredSerializeForStorage — a session history entry's state, an IndexedDB record, a document's persisted form
     // state: no SharedArrayBuffer and no WebAssembly.Module, nothing transferred.
@@ -68,14 +76,14 @@ impl Mode {
     }
 }
 
-// A value serialized: its bytes; the memory of the SharedArrayBuffers it shares and the compiled modules of the
+// A value serialized: its bytes (`Written`); the memory of the SharedArrayBuffers it shares and the compiled modules of the
 // WebAssembly.Modules it shares, by their places, with the key of the agent cluster it was serialized in where it
 // shares any (realm_location.rs `agent_cluster_key`); and its transfer data holders, in the transfer list's order — of
 // the realm that serialized it, whose counterparts the moved objects are: its context, not its number, which the next
 // document of a navigable takes on.
 #[derive(Default)]
 pub(crate) struct Serialized {
-    bytes: Vec<u8>,
+    written: Written,
     shared: Vec<v8::SharedRef<v8::BackingStore>>,
     modules: Vec<Arc<v8::CompiledWasmModule>>,
     cluster: Option<String>,
@@ -343,19 +351,18 @@ impl v8::ValueDeserializerImpl for Deserializer<'_> {
     }
 }
 
-// A DOMException of this realm's, thrown.
+// A DOMException of this realm's, thrown — made by its bindings' own constructor (dom-exception.js `newDOMException`), not
+// whatever a page has put at `globalThis.DOMException`; an Error where the realm has no bindings.
 pub(crate) fn throw_dom_exception(scope: &mut v8::PinScope<'_, '_>, message: v8::Local<'_, v8::String>, name: &str) {
-    let context = scope.get_current_context();
-    let global = context.global(scope);
-    let constructor = v8::String::new(scope, "DOMException")
-        .and_then(|k| global.get(scope, k.into()))
-        .and_then(|c| v8::Local::<v8::Function>::try_from(c).ok());
-    let name = v8::String::new(scope, name);
-    let exception = match (constructor, name) {
-        (Some(constructor), Some(name)) => constructor.new_instance(scope, &[message.into(), name.into()]).map(Into::into),
-        _ => None,
+    let exception = match (host_step(scope, "newDOMException"), v8::String::new(scope, name)) {
+        (Some(make), Some(name)) => {
+            let undefined = v8::undefined(scope).into();
+            // (…a step that threw, its exception the one thrown)
+            let Some(exception) = make.call(scope, undefined, &[message.into(), name.into()]) else { return };
+            exception
+        }
+        _ => v8::Exception::error(scope, message),
     };
-    let exception = exception.unwrap_or_else(|| v8::Exception::error(scope, message));
     scope.throw_exception(exception);
 }
 // …a DataCloneError in `words`.
@@ -365,10 +372,43 @@ fn throw_data_clone_error(scope: &mut v8::PinScope<'_, '_>, words: &str) {
     }
 }
 
-// The bytes of a value with its platform objects, by V8's serializer: how many platform objects it holds (four bytes,
-// little-endian), each one's place among them and data — its length so written, then its bytes — those another's names
-// before it, and then the value's own; each ArrayBuffer of `buffers` written as its place in the transfer list, each
-// object of `listed` as its own. None where it threw.
+// The bytes of a value with its platform objects (`write`): each platform object's data — how many there are (four
+// bytes, little-endian), each one's place among them, the length of its data so written and its data, those another's
+// names before it; none at all for a value that holds no platform object — and the value's own, as V8's serializer
+// wrote them, kept apart: no copy of them made to join the two but for storage (`joined`).
+#[derive(Default)]
+struct Written {
+    entries: Vec<u8>,
+    main: Vec<u8>,
+}
+
+impl Written {
+    // …as one run of bytes, as storage keeps them: the entries — a count of none for no platform object — then the value.
+    fn joined(self) -> Vec<u8> {
+        let entries = if self.entries.is_empty() { 0u32.to_le_bytes().to_vec() } else { self.entries };
+        let mut out = Vec::with_capacity(entries.len() + self.main.len());
+        out.extend_from_slice(&entries);
+        out.extend_from_slice(&self.main);
+        out
+    }
+
+    // …and such a run apart again (None for one too short to hold what it says it does).
+    fn split(bytes: &[u8]) -> Option<Self> {
+        let word = |at: usize| -> Option<usize> { Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize) };
+        let count = word(0)?;
+        let mut at = 4;
+        for _ in 0..count {
+            at += 8 + word(at + 4)?;
+        }
+        let entries = if count == 0 { Vec::new() } else { bytes.get(..at)?.to_vec() };
+        Some(Written { entries, main: bytes.get(at..)?.to_vec() })
+    }
+}
+
+// A value's bytes with its platform objects, by V8's serializer: each ArrayBuffer of `buffers` written as its place in
+// the transfer list — in a platform object's data too (an ImageData's pixels: HTML's sub-serialization of its `data`
+// with the value's memory, so a transferred buffer is the one the object is read back over, as Firefox has it; Chrome
+// copies) — and each object of `listed` as its own. None where it threw.
 fn write(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
@@ -376,21 +416,19 @@ fn write(
     listed: &[(u32, v8::Local<'_, v8::Object>)],
     shared: Option<&Shared>,
     modules: ModuleRule<'_>,
-) -> Option<Vec<u8>> {
+) -> Option<Written> {
     let describe = Step::named("cloneDescribe");
     let platform = RefCell::new(Platform::default());
     let object_prototype = v8::Object::new(scope).get_prototype(scope);
     let delegate = |modules, data| Serializer { describe: &describe, asked: RefCell::new(None), listed, platform: &platform, data, shared, modules, object_prototype };
-    let main = {
-        let serializer = v8::ValueSerializer::new(scope, Box::new(delegate(modules, false)));
-        serializer.write_header();
-        for &(place, buffer) in buffers {
-            serializer.transfer_array_buffer(place, buffer);
-        }
-        let context = scope.get_current_context();
-        serializer.write_value(context, value)?;
-        serializer.release()
-    };
+    let serializer = v8::ValueSerializer::new(scope, Box::new(delegate(modules, false)));
+    serializer.write_header();
+    for &(place, buffer) in buffers {
+        serializer.transfer_array_buffer(place, buffer);
+    }
+    let context = scope.get_current_context();
+    serializer.write_value(context, value)?;
+    let main = serializer.release();
     // (…each platform object's data, as found — its own may name more — with the places it names)
     let mut entries: Vec<(Vec<u8>, Vec<u32>)> = Vec::new();
     while entries.len() < platform.borrow().described.len() {
@@ -398,19 +436,24 @@ fn write(
         platform.borrow_mut().named.clear();
         let serializer = v8::ValueSerializer::new(scope, Box::new(delegate(ModuleRule::Refuse, true)));
         serializer.write_header();
+        for &(place, buffer) in buffers {
+            serializer.transfer_array_buffer(place, buffer);
+        }
         let context = scope.get_current_context();
         serializer.write_value(context, description)?;
         let bytes = serializer.release();
         entries.push((bytes, std::mem::take(&mut platform.borrow_mut().named)));
     }
-    let mut out = Vec::with_capacity(4 + entries.iter().map(|e| 8 + e.0.len()).sum::<usize>() + main.len());
+    if entries.is_empty() {
+        return Some(Written { entries: Vec::new(), main });
+    }
+    let mut out = Vec::with_capacity(4 + entries.iter().map(|e| 8 + e.0.len()).sum::<usize>());
     out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
     let mut written = vec![false; entries.len()];
     for place in 0..entries.len() {
         write_entry(&entries, place, &mut written, &mut out);
     }
-    out.extend_from_slice(&main);
-    Some(out)
+    Some(Written { entries: out, main })
 }
 // (…an entry written after those it names, each once: a cycle among them — which no data a platform object's steps make
 // holds — written as it is reached, the object it names not yet made as it is read)
@@ -453,31 +496,27 @@ fn read_value<'s>(
 // realm by the bindings (`cloneMake`) — between V8's reads, in which no script may run — then the value.
 fn read<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    bytes: &[u8],
+    written: &Written,
     buffers: &[(u32, v8::Local<'_, v8::ArrayBuffer>)],
     received: &[Option<v8::Global<v8::Value>>],
     shared: Vec<v8::SharedRef<v8::BackingStore>>,
     modules: Vec<Arc<v8::CompiledWasmModule>>,
 ) -> Option<v8::Local<'s, v8::Value>> {
-    let mut at = 0;
-    let word = |at: &mut usize| -> Option<usize> {
-        let w = u32::from_le_bytes(bytes.get(*at..*at + 4)?.try_into().ok()?) as usize;
-        *at += 4;
-        Some(w)
-    };
-    let count = word(&mut at)?;
+    let bytes = &written.entries;
+    let word = |at: usize| -> Option<usize> { Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize) };
+    let count = if bytes.is_empty() { 0 } else { word(0)? };
     let mut made: Vec<Option<v8::Global<v8::Object>>> = vec![None; count];
     let make = Step::named("cloneMake");
+    let mut at = 4;
     for _ in 0..count {
-        let place = word(&mut at)?;
-        let length = word(&mut at)?;
-        let entry = bytes.get(at..at + length)?;
-        at += length;
-        let description = read_value(scope, entry, &[], received, &made, Vec::new(), Vec::new())?;
+        let (place, length) = (word(at)?, word(at + 4)?);
+        let entry = bytes.get(at + 8..at + 8 + length)?;
+        at += 8 + length;
+        let description = read_value(scope, entry, buffers, received, &made, Vec::new(), Vec::new())?;
         let object = v8::Local::<v8::Object>::try_from(make.call(scope, &[description])?).ok()?;
         *made.get_mut(place)? = Some(v8::Global::new(scope, object));
     }
-    read_value(scope, bytes.get(at..)?, buffers, received, &made, shared, modules)
+    read_value(scope, &written.main, buffers, received, &made, shared, modules)
 }
 
 // A transferable of the transfer list: an ArrayBuffer, or an object the bindings move — a MessagePort or another.
@@ -593,13 +632,13 @@ fn structured_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let shared = (mode == Mode::Agent && realm(scope, cid).location.cross_origin_isolated()).then(Shared::default);
     let modules = Modules::default();
     let rule = if mode == Mode::Storage { ModuleRule::Refuse } else { ModuleRule::Share(&modules) };
-    let Some(bytes) = write(scope, args.get(0), &buffers, &objects, shared.as_ref(), rule) else { return };
+    let Some(written) = write(scope, args.get(0), &buffers, &objects, shared.as_ref(), rule) else { return };
     let Some(held) = transfer(scope, list, across, &check) else { return };
     let shared = shared.map(RefCell::into_inner).unwrap_or_default();
     let modules = modules.into_inner();
     let cluster = (!modules.is_empty() || !shared.is_empty()).then(|| crate::realm_location::agent_cluster_key(scope, cid));
     let realm = Some(v8::Global::new(scope, scope.get_current_context()));
-    let number = keep(scope, Serialized { bytes, shared, modules, cluster, held, realm });
+    let number = keep(scope, Serialized { written, shared, modules, cluster, held, realm });
     rv.set(v8::Integer::new_from_unsigned(scope, number).into());
 }
 
@@ -691,7 +730,7 @@ fn receive_and_read<'s>(scope: &mut v8::PinScope<'s, '_>, serialized: Serialized
             }
         }
     }
-    read(scope, &serialized.bytes, &buffers, &received, serialized.shared, serialized.modules)
+    read(scope, &serialized.written, &buffers, &received, serialized.shared, serialized.modules)
 }
 
 // __dom.structuredDiscard(number): a serialization let go of unread — a message the target origin turned away, one held
@@ -710,10 +749,11 @@ fn structured_discard(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // persisted form state.
 pub(crate) fn take_bytes(scope: &mut v8::PinScope<'_, '_>, number: u32) -> Option<Vec<u8>> {
     let serialized = dom(scope).serialized.remove(&number)?;
-    Some(serialized.bytes)
+    Some(serialized.written.joined())
 }
-pub(crate) fn keep_bytes(scope: &mut v8::PinScope<'_, '_>, bytes: Vec<u8>) -> u32 {
-    keep(scope, Serialized { bytes, ..Default::default() })
+pub(crate) fn keep_bytes(scope: &mut v8::PinScope<'_, '_>, bytes: &[u8]) -> u32 {
+    let written = Written::split(bytes).unwrap_or_default();
+    keep(scope, Serialized { written, ..Default::default() })
 }
 
 // __dom.structuredBytes(number) -> the bytes of a serialization for storage, as a Uint8Array; it is gone.
@@ -733,7 +773,7 @@ fn structured_from_bytes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(args.get(0)) else { return };
     let mut bytes = vec![0; view.byte_length()];
     view.copy_contents(&mut bytes);
-    let number = keep_bytes(scope, bytes);
+    let number = keep_bytes(scope, &bytes);
     rv.set(v8::Integer::new_from_unsigned(scope, number).into());
 }
 
@@ -741,16 +781,14 @@ fn structured_from_bytes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 // between are: its bytes, the compiled modules of the WebAssembly.Modules it shares with the agent cluster it was
 // serialized in, and what it transferred — an ArrayBuffer's memory, or the form a transferable of the bindings' crosses
 // in (`transferForm`: a MessagePort's channel end, an ImageBitmap's pixels), all of them written in `forms`, by their
-// places, as data. Of the session's partition (lib.rs `session_partition_new`), let go of with it; read once, or — a
-// broadcast's — by every channel it reaches.
+// places, as data. Of the session's partition (lib.rs `session_partition_new`), let go of with it; read once.
 struct Exported {
     partition: u64,
-    bytes: Vec<u8>,
+    written: Written,
     modules: Vec<Arc<v8::CompiledWasmModule>>,
     cluster: Option<String>,
     carried: Vec<Carried>,
-    forms: Vec<u8>,
-    broadcast: bool,
+    forms: Written,
 }
 
 enum Carried {
@@ -761,7 +799,7 @@ enum Carried {
 // An ArrayBuffer's memory between isolates. A SharedRef<BackingStore> is not Send — a BackingStore is Send but not Sync
 // — but the registry only moves it between threads under its lock, the exporter's thread putting it in and the
 // importer's taking it out, never sharing a reference to it across them; and a shared_ptr's count is atomic, so it may
-// be dropped on either. (A broadcast, read by many, transfers nothing.)
+// be dropped on either.
 struct SendStore(v8::SharedRef<v8::BackingStore>);
 unsafe impl Send for SendStore {}
 
@@ -776,49 +814,45 @@ fn exports() -> MutexGuard<'static, Exports> {
 }
 
 // __dom.structuredExport(number, partition, broadcast) -> the token of serialization `number` carried out of the
-// isolate, of session `partition`, read by every channel it reaches where `broadcast`: each transferable it moved but
-// an ArrayBuffer given the form it crosses in. It shares no SharedArrayBuffer, which no isolate here shares with another
-// (`Mode::Across`). A broadcast's — read by however many channels, whenever each is reached, which no registry here can
-// count off — is its bytes themselves, base64, the wire's to hold and let go of: one sharing a WebAssembly.Module alone
-// is held by its token, till its session ends.
+// isolate, of session `partition`: each transferable it moved but an ArrayBuffer given the form it crosses in. It shares
+// no SharedArrayBuffer (`Mode::Across`: a deliberate gap, see there). A broadcast's (`broadcast`) — read by however many
+// channels, whenever each is reached, which no registry here could count off — is no token but the serialization itself,
+// the wire's to hold and let go of (`broadcast_wire`).
+//
+// The forms are made those of the transferables but MessagePorts first — the steps that can fail — and each port's
+// channel end last, which gives the port up to the host: a step that fails before closes the ports, one after takes each
+// end given back into this isolate and closes it, so no end is left with the host that no isolate will take; its
+// exception thrown again (a script terminated meanwhile, nothing run).
 fn structured_export(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(number) = number_arg(scope, args.get(0)) else { return };
     let partition = args.get(1).integer_value(scope).unwrap_or(0) as u64;
     let broadcast = args.get(2).boolean_value(scope);
     let Some(serialized) = dom(scope).serialized.remove(&number) else { return };
-    debug_assert!(!broadcast || serialized.held.is_empty(), "a broadcast transfers nothing");
-    if broadcast && serialized.modules.is_empty() {
-        // (…one past the length of a string, a DataCloneError)
-        let Some(bytes) = v8::String::new(scope, &crate::data_url::base64_encode(&serialized.bytes)) else {
-            return throw_data_clone_error(scope, "The message is too large to be broadcast.");
-        };
-        return rv.set(bytes.into());
+    if broadcast {
+        return broadcast_wire(scope, serialized, &mut rv);
     }
-    let form = Step::named("transferForm");
-    let mut carried = Vec::with_capacity(serialized.held.len());
-    let mut forms = Vec::with_capacity(serialized.held.len());
-    for held in serialized.held {
-        match held {
-            Held::Buffer(store) => {
-                carried.push(Carried::Buffer(SendStore(store)));
-                forms.push(v8::null(scope).into());
+    let Serialized { written, modules, cluster, held, .. } = serialized;
+    let made = {
+        v8::tc_scope!(let tc, scope);
+        let mut forms: Vec<Option<v8::Global<v8::Value>>> = (0..held.len()).map(|_| None).collect();
+        let made = export_forms(tc, &held, &mut forms);
+        if made.is_none() {
+            if !tc.has_terminated() {
+                take_back(tc, &held, &forms);
             }
-            Held::Moved { object, port } => {
-                let object = v8::Local::new(scope, object);
-                let Some(f) = form.call(scope, &[object]) else { return };
-                forms.push(f);
-                carried.push(Carried::Form { port });
-            }
+            tc.rethrow();
         }
-    }
-    let forms = if carried.iter().any(|c| matches!(c, Carried::Form { .. })) {
-        let forms = v8::Array::new_with_elements(scope, &forms).into();
-        let Some(bytes) = write(scope, forms, &[], &[], None, ModuleRule::Refuse) else { return };
-        bytes
-    } else {
-        Vec::new()
+        made
     };
-    let exported = Exported { partition, bytes: serialized.bytes, modules: serialized.modules, cluster: serialized.cluster, carried, forms, broadcast };
+    let Some(forms) = made else { return };
+    let carried = held
+        .into_iter()
+        .map(|h| match h {
+            Held::Buffer(store) => Carried::Buffer(SendStore(store)),
+            Held::Moved { port, .. } => Carried::Form { port },
+        })
+        .collect();
+    let exported = Exported { partition, written, modules, cluster, carried, forms };
     let token = {
         let mut exports = exports();
         exports.last += 1;
@@ -828,70 +862,185 @@ fn structured_export(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     };
     rv.set(v8::Number::new(scope, token as f64).into());
 }
-
-// __dom.structuredImport(token) -> the number of the serialization another isolate carried out under `token` (or, a
-// broadcast's, as its base64 bytes), brought into this one as if this realm had made it: its transferred ArrayBuffers'
-// memory, and each other transferable made of the form it crossed in (`transferFromForm`). -1 for a token no longer held
-// — read already, or its session ended — which is a message that cannot be read back.
-fn structured_import(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    if args.get(0).is_string() {
-        let text = args.get(0).to_rust_string_lossy(scope);
-        let Ok(bytes) = data_url::forgiving_base64::decode_to_vec(text.as_bytes()) else { return rv.set_int32(-1) };
-        let realm = Some(v8::Global::new(scope, scope.get_current_context()));
-        let number = keep(scope, Serialized { bytes, realm, ..Default::default() });
-        return rv.set(v8::Integer::new_from_unsigned(scope, number).into());
+// …the forms, as `structured_export` makes them, written; each made put in `forms` by its place as it is.
+fn export_forms(scope: &mut v8::PinScope<'_, '_>, held: &[Held], forms: &mut [Option<v8::Global<v8::Value>>]) -> Option<Written> {
+    if held.iter().all(|h| matches!(h, Held::Buffer(_))) {
+        return Some(Written::default());
     }
-    let token = args.get(0).number_value(scope).unwrap_or(0.0) as u64;
-    let exported = {
-        let mut exports = exports();
-        match exports.by_token.get(&token) {
-            Some(exported) if exported.broadcast => Some(Exported {
-                partition: exported.partition,
-                bytes: exported.bytes.clone(),
-                modules: exported.modules.clone(),
-                cluster: exported.cluster.clone(),
-                carried: Vec::new(),
-                forms: Vec::new(),
-                broadcast: true,
-            }),
-            Some(_) => exports.by_token.remove(&token),
-            None => None,
-        }
-    };
-    let Some(exported) = exported else { return rv.set_int32(-1) };
-    let forms = if exported.forms.is_empty() {
-        None
-    } else {
-        let Some(forms) = read(scope, &exported.forms, &[], &[], Vec::new(), Vec::new()) else { return };
-        let Ok(forms) = v8::Local::<v8::Array>::try_from(forms) else { return };
-        Some(forms)
-    };
-    let from_form = Step::named("transferFromForm");
-    let mut held = Vec::with_capacity(exported.carried.len());
-    for (place, carried) in exported.carried.into_iter().enumerate() {
-        match carried {
-            Carried::Buffer(store) => held.push(Held::Buffer(store.0)),
-            Carried::Form { port } => {
-                let Some(form) = forms.and_then(|f| f.get_index(scope, place as u32)) else { return };
-                let Some(object) = from_form.call(scope, &[form]) else { return };
-                held.push(Held::Moved { object: v8::Global::new(scope, object), port });
+    let form = Step::named("transferForm");
+    for ports in [false, true] {
+        for (place, h) in held.iter().enumerate() {
+            if let Held::Moved { object, port } = h {
+                if *port == ports {
+                    let object = v8::Local::new(scope, object);
+                    let made = form.call(scope, &[object])?;
+                    forms[place] = Some(v8::Global::new(scope, made));
+                }
             }
         }
     }
+    let forms: Vec<v8::Local<v8::Value>> =
+        forms.iter().map(|f| f.as_ref().map_or_else(|| v8::null(scope).into(), |f| v8::Local::new(scope, f))).collect();
+    let forms = v8::Array::new_with_elements(scope, &forms).into();
+    write(scope, forms, &[], &[], None, ModuleRule::Refuse)
+}
+// …and, where they could not all be made, each MessagePort closed: one whose channel end was given up taken back first.
+fn take_back(scope: &mut v8::PinScope<'_, '_>, held: &[Held], forms: &[Option<v8::Global<v8::Value>>]) {
+    let from_form = Step::named("transferFromForm");
+    let mut ports = Vec::new();
+    for (h, form) in held.iter().zip(forms) {
+        let Held::Moved { object, port: true } = h else { continue };
+        let port = match form {
+            Some(form) => {
+                let form = v8::Local::new(scope, form);
+                from_form.call(scope, &[form])
+            }
+            None => Some(v8::Local::new(scope, object)),
+        };
+        ports.extend(port);
+    }
+    abandon(scope, &ports);
+}
+
+// A broadcast's wire (`structured_export`): its serialization as one run of bytes, base64 — the key of the agent cluster
+// it was serialized in (its length, four bytes little-endian, then its UTF-8; none for one sharing no WebAssembly.Module),
+// how many WebAssembly.Modules it shares, each one's wire bytes (length, then bytes), compiled again where it is read
+// back — and then the value's (`Written::joined`). A DataCloneError where it is too long for a string.
+fn broadcast_wire(scope: &mut v8::PinScope<'_, '_>, serialized: Serialized, rv: &mut v8::ReturnValue<'_, v8::Value>) {
+    debug_assert!(serialized.held.is_empty(), "a broadcast transfers nothing");
+    let cluster = serialized.cluster.unwrap_or_default();
+    let mut out = Vec::new();
+    out.extend_from_slice(&(cluster.len() as u32).to_le_bytes());
+    out.extend_from_slice(cluster.as_bytes());
+    out.extend_from_slice(&(serialized.modules.len() as u32).to_le_bytes());
+    for module in &serialized.modules {
+        let wire = module.get_wire_bytes_ref();
+        out.extend_from_slice(&(wire.len() as u32).to_le_bytes());
+        out.extend_from_slice(wire);
+    }
+    out.extend_from_slice(&serialized.written.joined());
+    let Some(text) = v8::String::new(scope, &crate::data_url::base64_encode(&out)) else {
+        return throw_data_clone_error(scope, "The message is too large to be broadcast.");
+    };
+    rv.set(text.into());
+}
+// …and one read back in this isolate: the serialization, its modules compiled here; None for bytes no broadcast wrote.
+fn broadcast_read(scope: &mut v8::PinScope<'_, '_>, text: &str) -> Option<Serialized> {
+    let bytes = data_url::forgiving_base64::decode_to_vec(text.as_bytes()).ok()?;
+    let mut rest: &[u8] = &bytes;
+    let mut take = |length: usize| -> Option<&[u8]> {
+        let (part, after) = (rest.get(..length)?, rest.get(length..)?);
+        rest = after;
+        Some(part)
+    };
+    let length = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
+    let cluster = String::from_utf8(take(length)?.to_vec()).ok().filter(|c| !c.is_empty());
+    let count = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
+    let mut modules = Vec::with_capacity(count);
+    for _ in 0..count {
+        let length = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
+        let module = v8::WasmModuleObject::compile(scope, take(length)?)?;
+        modules.push(Arc::new(module.get_compiled_module()));
+    }
+    let written = Written::split(rest)?;
     let realm = Some(v8::Global::new(scope, scope.get_current_context()));
-    let serialized = Serialized { bytes: exported.bytes, shared: Vec::new(), modules: exported.modules, cluster: exported.cluster, held, realm };
-    let number = keep(scope, serialized);
+    Some(Serialized { written, modules, cluster, realm, ..Default::default() })
+}
+
+// __dom.structuredImport(token) -> the number of the serialization another isolate carried out under `token` (a
+// broadcast's, its wire's own text: `broadcast_read`), brought into this one as if this realm had made it: its
+// transferred ArrayBuffers' memory, and each other transferable made of the form it crossed in (`transferFromForm`) —
+// MessagePorts last, each taking its channel end: one that fails closes every port, taking the end of each not made
+// yet, so none is left with the host. -1 for a token no longer held — read already, or its session ended — which is a
+// message that cannot be read back.
+fn structured_import(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if args.get(0).is_string() {
+        let text = args.get(0).to_rust_string_lossy(scope);
+        let Some(serialized) = broadcast_read(scope, &text) else { return rv.set_int32(-1) };
+        let number = keep(scope, serialized);
+        return rv.set(v8::Integer::new_from_unsigned(scope, number).into());
+    }
+    let token = args.get(0).number_value(scope).unwrap_or(0.0) as u64;
+    let Some(exported) = exports().by_token.remove(&token) else { return rv.set_int32(-1) };
+    let Exported { written, modules, cluster, carried, forms, .. } = exported;
+    let held = {
+        v8::tc_scope!(let tc, scope);
+        let mut made: Vec<Option<v8::Global<v8::Value>>> = (0..carried.len()).map(|_| None).collect();
+        let forms = if forms.main.is_empty() { None } else { read(tc, &forms, &[], &[], Vec::new(), Vec::new()) };
+        let forms = forms.and_then(|f| v8::Local::<v8::Array>::try_from(f).ok());
+        let complete = import_forms(tc, &carried, forms, &mut made);
+        if complete.is_none() {
+            if !tc.has_terminated() {
+                close_imported(tc, &carried, forms, &made);
+            }
+            tc.rethrow();
+            return;
+        }
+        carried
+            .into_iter()
+            .zip(made)
+            .map(|(c, made)| match (c, made) {
+                (Carried::Buffer(store), _) => Held::Buffer(store.0),
+                (Carried::Form { port }, Some(object)) => Held::Moved { object, port },
+                (Carried::Form { .. }, None) => unreachable!("every form is made once import_forms completes"),
+            })
+            .collect()
+    };
+    let realm = Some(v8::Global::new(scope, scope.get_current_context()));
+    let number = keep(scope, Serialized { written, shared: Vec::new(), modules, cluster, held, realm });
     rv.set(v8::Integer::new_from_unsigned(scope, number).into());
+}
+// …each transferable but an ArrayBuffer made of its form, those not MessagePorts first; each put in `made` as it is.
+fn import_forms(
+    scope: &mut v8::PinScope<'_, '_>,
+    carried: &[Carried],
+    forms: Option<v8::Local<'_, v8::Array>>,
+    made: &mut [Option<v8::Global<v8::Value>>],
+) -> Option<()> {
+    let from_form = Step::named("transferFromForm");
+    for ports in [false, true] {
+        for (place, c) in carried.iter().enumerate() {
+            if let Carried::Form { port } = c {
+                if *port == ports {
+                    let form = forms?.get_index(scope, place as u32)?;
+                    let object = from_form.call(scope, &[form])?;
+                    made[place] = Some(v8::Global::new(scope, object));
+                }
+            }
+        }
+    }
+    Some(())
+}
+// …and, where they could not all be made, every MessagePort closed — one not made yet first taking its end.
+fn close_imported(
+    scope: &mut v8::PinScope<'_, '_>,
+    carried: &[Carried],
+    forms: Option<v8::Local<'_, v8::Array>>,
+    made: &[Option<v8::Global<v8::Value>>],
+) {
+    let from_form = Step::named("transferFromForm");
+    let mut ports = Vec::new();
+    for (place, (c, made)) in carried.iter().zip(made).enumerate() {
+        if !matches!(c, Carried::Form { port: true }) {
+            continue;
+        }
+        let port = match made {
+            Some(port) => Some(v8::Local::new(scope, port)),
+            None => forms.and_then(|f| f.get_index(scope, place as u32)).and_then(|form| from_form.call(scope, &[form])),
+        };
+        ports.extend(port);
+    }
+    abandon(scope, &ports);
 }
 
 // The serializations session `partition`'s isolates carried out and none brought in — a message to a worker that ended
-// first, a broadcast sharing a WebAssembly.Module — let go of, as the session's other registries are (lib.rs `session_partition_clear`).
+// first — let go of, as the session's other registries are (lib.rs `session_partition_clear`).
 pub(crate) fn clear(partition: u64) {
     exports().by_token.retain(|_, exported| exported.partition != partition);
 }
 
 // — for the host — Native.structured_exports_held -> how many serializations are carried out of their isolates and not
-// yet brought in: none, once every message but a broadcast of a WebAssembly.Module is read.
+// yet brought in: none, once every message is read.
 pub(crate) fn exports_held_for_ruby() -> usize {
     exports().by_token.len()
 }

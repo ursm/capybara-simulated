@@ -216,6 +216,47 @@ RSpec.describe 'Structured clone of platform objects' do
     expect([got, Capybara::Simulated::Native.structured_exports_held]).to eq([7, held])
   end
 
+  # (…a transferred buffer is the one a platform object's data is read back over: HTML's sub-serialization of an
+  # ImageData's `data` with the value's memory — Firefox 161 the same, Chrome 158 copies it — the source detached in both)
+  it "reads a platform object's data back over a buffer the transfer moved" do
+    session.visit '/'
+    out = probe(<<~JS)
+      const id = new ImageData(1, 1), b = id.data.buffer;
+      id.data[0] = 7;
+      const c = structuredClone({ id, b }, { transfer: [b] });
+      return { same: c.id.data.buffer === c.b, first: c.id.data[0], detached: b.detached };
+    JS
+    expect(out).to eq('same' => true, 'first' => 7, 'detached' => true)
+  end
+
+  # (…the engine's DataCloneError made by the realm's own DOMException, whatever a page put at `globalThis.DOMException`)
+  it "throws the realm's own DOMException whatever the page has put in its place" do
+    session.visit '/'
+    out = probe(<<~JS)
+      const own = DOMException;
+      let called = 0;
+      globalThis.DOMException = function () { called++; return { name: 'fake' }; };
+      let thrown;
+      try { structuredClone(() => 1); } catch (e) { thrown = e; }
+      globalThis.DOMException = own;
+      return { own: thrown instanceof own, name: thrown.name, called };
+    JS
+    expect(out).to eq('own' => true, 'name' => 'DataCloneError', 'called' => 0)
+  end
+
+  # (…a broadcast of a WebAssembly.Module carries its wire bytes, compiled again where it is read: nothing held for it)
+  it 'broadcasts a WebAssembly.Module holding nothing for it' do
+    session.visit '/'
+    held = Capybara::Simulated::Native.structured_exports_held
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], a = new BroadcastChannel('m'), b = new BroadcastChannel('m');
+      b.onmessage = (e) => done(e.data instanceof WebAssembly.Module);
+      b.onmessageerror = () => done('messageerror');
+      a.postMessage(new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])));
+    JS
+    expect([got, Capybara::Simulated::Native.structured_exports_held]).to eq([true, held])
+  end
+
   it "keeps a FileList's files the Files the value holds, and builds its descriptors as data" do
     session.visit '/'
     out = probe(<<~JS)

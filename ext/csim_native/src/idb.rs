@@ -898,7 +898,7 @@ fn retrieve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         items.push(key_value(scope, primary));
         items.push(match value {
             Some(bytes) => {
-                let number = crate::clone::keep_bytes(scope, bytes.to_vec());
+                let number = crate::clone::keep_bytes(scope, &bytes);
                 v8::Integer::new_from_unsigned(scope, number).into()
             }
             None => v8::undefined(scope).into(),
@@ -1131,7 +1131,7 @@ fn cursor_iterate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let primary = key_value(scope, &p);
     let value: v8::Local<v8::Value> = match value {
         Some(bytes) => {
-            let number = crate::clone::keep_bytes(scope, bytes.to_vec());
+            let number = crate::clone::keep_bytes(scope, &bytes);
             v8::Integer::new_from_unsigned(scope, number).into()
         }
         None => v8::undefined(scope).into(),
