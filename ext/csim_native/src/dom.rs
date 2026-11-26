@@ -1226,8 +1226,10 @@ pub(crate) struct RealmState {
     pub(crate) active_controls: Vec<NodeId>,
     // Its "sequential focus navigation starting point" (HTML §6.6.3), where Tab goes on from when nothing is focused:
     // the element focus last moved to — kept as focus leaves it for the viewport (Chrome: Tab after `blur()` goes on
-    // from the blurred element) — or the node a press that focused nothing landed on (focus_update.rs `press_focus`).
-    pub(crate) focus_start: Option<NodeId>,
+    // from the blurred element) — the node a press that focused nothing landed on (focus_update.rs `press_focus`), the
+    // target a fragment navigation scrolled to, or where such a node was in the tree as it was removed (focus.rs
+    // `StartingPoint`).
+    pub(crate) focus_start: Option<crate::focus::StartingPoint>,
     // The modal dialogs, in the order they were shown — the top layer's: the last blocks the document (`is_inert`).
     pub(crate) modals: Vec<NodeId>,
     // Whether a shadow root of the realm's trees has had a host — its tree and attribute writes run the slot steps only
@@ -2136,7 +2138,7 @@ impl RealmArena {
         // which would take back a starting point moved since: the start a Tab past the last left)
         let focus_moved = (had ^ bits) & STATE_FOCUSED != 0;
         if focus_moved && bits & STATE_FOCUSED != 0 {
-            state.focus_start = Some(id);
+            state.focus_start = Some(crate::focus::StartingPoint::Node(id));
         }
         // (…and a dialog shown modally goes on top, one closed off)
         if was_modal != (bits & STATE_MODAL != 0) {
@@ -4649,6 +4651,7 @@ pub(crate) fn take_out(scope: &mut v8::PinScope<'_, '_>, cid: i32, child: NodeId
     };
     if let Some((parent, index)) = at {
         crate::ranges::removing(scope, cid, parent, child, index);
+        realm(scope, cid).starting_point_removing(parent, child);
     }
     let (arena, mut engine) = arena_and_engine(scope, cid);
     let old = arena.parent_of(child);
@@ -4684,6 +4687,9 @@ pub(crate) fn take_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeI
     if !kids.is_empty() {
         crate::node_iterators::removing_all(scope, cid, parent);
         crate::ranges::removing_all(scope, cid, parent);
+        for &child in kids.iter().rev() {
+            realm(scope, cid).starting_point_removing(parent, child);
+        }
         let (arena, mut engine) = arena_and_engine(scope, cid);
         // (…from the last: each leaves the end of the list, which moves no other)
         for &child in kids.iter().rev() {

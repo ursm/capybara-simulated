@@ -834,12 +834,17 @@ fn set_location_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 
 // __dom.setTargetHash(docNid[, hash]) — the realm's target fragment is `hash`, as `location.hash` spells it (none: the
 // one it has, the URL's until something scrolled to one), and its document's target (-1: none in the arena yet) the
-// element it indicates.
+// element it indicates — which a fragment navigation, given its `hash`, focuses as it scrolls to it
+// (focus_update.rs `fragment_focus`).
 fn set_target_hash(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let doc = nid_arg(scope, &args, 0);
     let hash = (!args.get(1).is_undefined()).then(|| args.get(1).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
+    let navigated = hash.is_some();
     realm(scope, cid).retarget(doc, hash);
+    if navigated {
+        crate::focus_update::fragment_focus(scope, cid);
+    }
 }
 
 // An origin's effective domain (HTML §7.5.2): `domain`, the one a `document.domain` write set, else its host — None

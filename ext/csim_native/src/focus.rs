@@ -340,7 +340,7 @@ impl Scope {
 // §6.6.5 "sequential focus navigation": "the user agent should transfer focus to its own controls"; Chrome leaves the
 // document, its body the active element — Firefox, with no controls in a headless window, keeps it). With nothing focused
 // (focus came back from them), its first (last) element; none where nothing is focusable.
-pub(crate) fn next(engine: &mut StyleEngine, arena: &RealmArena, doc: NodeId, current: Option<NodeId>, reverse: bool, now: f64) -> Option<NodeId> {
+pub(crate) fn next(engine: &mut StyleEngine, arena: &RealmArena, doc: NodeId, current: Option<StartingPoint>, reverse: bool, now: f64) -> Option<NodeId> {
     let children = arena.get(doc)?.children.clone();
     let mut triggered = arena.popovers.triggered();
     for popovers in triggered.values_mut() {
@@ -348,12 +348,16 @@ pub(crate) fn next(engine: &mut StyleEngine, arena: &RealmArena, doc: NodeId, cu
     }
     let owned = triggered.iter().flat_map(|(&trigger, popovers)| popovers.iter().map(move |&p| (p, trigger))).collect();
     let root = Navigator { engine, arena, now, radio_stops: HashMap::new(), triggered, owned }.scope(None, &children);
-    if let Some(cur) = current {
-        let mut chain = Vec::new();
-        return match root.locate(cur, &mut chain) {
-            Some(k) => step_out(&chain, k, reverse),
-            None => step_from_position(arena, &root, cur, reverse),
-        };
+    match current {
+        Some(StartingPoint::Node(cur)) => {
+            let mut chain = Vec::new();
+            return match root.locate(cur, &mut chain) {
+                Some(k) => step_out(&chain, k, reverse),
+                None => step_from_position(arena, &root, |s| tree_order(arena, cur, s), reverse),
+            };
+        },
+        Some(gap @ StartingPoint::Gap { .. }) => return step_from_position(arena, &root, |s| gap.order(arena, s), reverse),
+        None => {},
     }
     root.edge(reverse).or_else(|| {
         let mut flat = Vec::new();
@@ -386,16 +390,65 @@ fn step_out(chain: &[&Scope], k: usize, reverse: bool) -> Option<NodeId> {
     }
     None
 }
-fn step_from_position(arena: &RealmArena, root: &Scope, cur: NodeId, reverse: bool) -> Option<NodeId> {
+// …from a place in tree order that is no stop: `after(s)` whether stop `s` lies after it (Less), before it (Greater).
+fn step_from_position(arena: &RealmArena, root: &Scope, after: impl Fn(NodeId) -> Ordering, reverse: bool) -> Option<NodeId> {
     let mut flat = Vec::new();
     root.flatten(&mut flat);
     if flat.windows(2).any(|w| tree_order(arena, w[0], w[1]) == Ordering::Greater) {
         return None;
     }
     if reverse {
-        flat.into_iter().rev().find(|&s| tree_order(arena, s, cur) == Ordering::Less)
+        flat.into_iter().rev().find(|&s| after(s) == Ordering::Greater)
     } else {
-        flat.into_iter().find(|&s| tree_order(arena, cur, s) == Ordering::Less)
+        flat.into_iter().find(|&s| after(s) == Ordering::Less)
+    }
+}
+
+// A document's sequential focus navigation starting point: a node, or — that node, or a node holding it, removed —
+// the place in its parent's children it was taken out of, just after `after` (none: at their start). HTML leaves where
+// the point goes as its node is removed to the user agent; Chrome and Firefox keep it where the node was, so Tab goes on
+// to what came after it and Shift+Tab to what came before (WPT sequential-focus-navigation-starting-point).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum StartingPoint {
+    Node(NodeId),
+    Gap { parent: NodeId, after: Option<NodeId> },
+}
+
+impl StartingPoint {
+    // The node the point is at or in.
+    pub(crate) fn anchor(self) -> NodeId {
+        match self {
+            StartingPoint::Node(n) | StartingPoint::Gap { parent: n, .. } => n,
+        }
+    }
+    // Whether `s` lies after the point (Less) or before it (Greater) in tree order: a gap after `after` has it and its
+    // subtree before it; one at the start of `parent`'s children has `parent` before it, its subtree after.
+    fn order(self, arena: &RealmArena, s: NodeId) -> Ordering {
+        match self {
+            StartingPoint::Node(n) => tree_order(arena, n, s),
+            StartingPoint::Gap { after: Some(a), .. } => {
+                if s == a || arena.shadow_including_ancestor(a, s) { Ordering::Greater } else { tree_order(arena, a, s) }
+            },
+            StartingPoint::Gap { parent, after: None } => {
+                if s == parent { Ordering::Greater } else { tree_order(arena, parent, s) }
+            },
+        }
+    }
+}
+
+impl RealmArena {
+    // The starting point as `child` leaves `parent`: where it was in the tree where it, or a node it was in, is taken out
+    // — and where it was just after `child`, just after what came before that.
+    pub(crate) fn starting_point_removing(&mut self, parent: NodeId, child: NodeId) {
+        let Some(point) = self.focus_start else { return };
+        let gone = |n: NodeId| n == child || self.shadow_including_ancestor(child, n);
+        let moved = match point {
+            StartingPoint::Node(n) => gone(n),
+            StartingPoint::Gap { parent: p, after } => gone(p) || after == Some(child),
+        };
+        if moved {
+            self.focus_start = Some(StartingPoint::Gap { parent, after: self.sibling(child, -1) });
+        }
     }
 }
 // Shadow-including tree order: a shadow root before its host's children. Nodes in no common tree compare equal.
@@ -688,8 +741,8 @@ fn sequential_next(scope: &mut v8::PinScope<'_, '_>, now: f64, cid: i32, current
         let d = crate::dom::dom(scope);
         let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
         let Some(doc) = arena.realm_document(cid) else { return };
-        let start = from_start.then(|| arena.focus_start.filter(|&s| arena.shadow_including_root(s) == doc)).flatten();
-        found = next(engine, arena, doc, current.or(start), reverse, now);
+        let start = from_start.then(|| arena.focus_start.filter(|s| arena.shadow_including_root(s.anchor()) == doc)).flatten();
+        found = next(engine, arena, doc, current.map(StartingPoint::Node).or(start), reverse, now);
         engine.take_verify_failures();
     });
     found

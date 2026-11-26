@@ -371,6 +371,22 @@ fn flush_autofocus_candidates(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> O
     }
 }
 
+// HTML "scroll to the fragment"'s focus for realm `cid`'s document, its target element just set: "Run the focusing steps
+// for target, with the Document's viewport as the fallback target. Move the sequential focus navigation starting point to
+// target." — a link to a fragment taking the focus from the link (Chrome, Firefox).
+pub(crate) fn fragment_focus(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> Option<()> {
+    let arena = &crate::dom::dom(scope).arena;
+    let doc = arena.realm_document(cid)?;
+    let target = arena.target_element_of(cid, doc)?;
+    let area = match crate::focus::focus_target_of(scope, target)? {
+        Some(_) => Target::Element(target),
+        None => Target::Viewport(cid),
+    };
+    focusing_steps(scope, area)?;
+    crate::dom::dom(scope).arena.enter(cid).focus_start = Some(crate::focus::StartingPoint::Node(target));
+    Some(())
+}
+
 // The element a press on `n` focuses (focus.rs `press_target`), or, where none can take the focus, its document's
 // viewport — the focused element losing it, as Chrome's does on a click outside it (a dropdown closing on blur, an input's
 // `change`) — and Tab going on from the node pressed (Chrome).
@@ -380,7 +396,7 @@ fn press_focus(scope: &mut v8::PinScope<'_, '_>, n: NodeId) -> Option<()> {
         None => {
             let Some(realm) = crate::dom::dom(scope).arena.document_realm_of(n) else { return Some(()) };
             focusing_steps(scope, Target::Viewport(realm))?;
-            crate::dom::dom(scope).arena.enter(realm).focus_start = Some(n);
+            crate::dom::dom(scope).arena.enter(realm).focus_start = Some(crate::focus::StartingPoint::Node(n));
             Some(())
         },
     }

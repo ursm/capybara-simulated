@@ -10,6 +10,7 @@ RSpec.describe 'Focus update steps' do
       <!DOCTYPE html><meta charset="utf-8">
       <script>var log = []; function L(s) { log.push(s); }</script>
       <input id="a"><button id="b">b</button><fieldset id="fs"><input id="c"></fieldset>
+      <a id="lnk" href="#t">to t</a><button id="before">before</button><div id="t">t</div><button id="after">after</button>
       <iframe id="fr" src="/frame"></iframe>
       <script>
         for (const id of ['a', 'b', 'c']) for (const t of ['focus', 'blur']) document.getElementById(id).addEventListener(t, () => L(id + ':' + t));
@@ -71,5 +72,26 @@ RSpec.describe 'Focus update steps' do
     expect(session.evaluate_script('document.hasFocus()')).to be(false)
     session.find(:css, 'body').send_keys(:tab)
     expect(session.evaluate_script('[document.activeElement.id, document.hasFocus()]')).to eq(['a', true])
+  end
+
+  # The starting point stays where the focused element was as it is removed: Tab goes on to what came after it, Shift+Tab
+  # to what came before (Chrome and Firefox; WPT sequential-focus-navigation-starting-point).
+  it 'goes on from where a focused element was removed' do
+    session.execute_script('b.focus(); b.remove()')
+    session.find(:css, 'body').send_keys(:tab)
+    expect(session.evaluate_script('document.activeElement.id')).to eq('c')
+    session.execute_script('c.focus(); c.remove()')
+    session.find(:css, 'body').send_keys(%i[shift tab])
+    expect(session.evaluate_script('document.activeElement.id')).to eq('a')
+  end
+
+  # HTML "scroll to the fragment": "Run the focusing steps for target, with the Document's viewport as the fallback
+  # target. Move the sequential focus navigation starting point to target." — the link loses the focus, and Tab goes on
+  # from the target.
+  it 'moves the focus and the starting point to the target of a fragment navigation' do
+    session.click_link('to t')
+    expect(session.evaluate_script('[location.hash, document.activeElement.tagName]')).to eq(['#t', 'BODY'])
+    session.find(:css, 'body').send_keys(:tab)
+    expect(session.evaluate_script('document.activeElement.id')).to eq('after')
   end
 end
