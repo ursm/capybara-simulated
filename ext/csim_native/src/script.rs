@@ -719,12 +719,12 @@ fn listed_async(arena: &crate::dom::RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.plain_attr("async").is_some() && n.plain_attr("src").is_some())
 }
 impl RealmArena {
-    // The mark the realm's parser spins the event loop by as it waits on a fetch — a pending
-    // parsing-blocking script's, a style sheet's that blocks a script, a deferred script's in "the end" — 0 for no spin
+    // The mark the realm's parser spins the event loop by as it waits on a fetch — a pending parsing-blocking script's, a
+    // style sheet's that blocks a script, a deferred script's in "the end" — 0 for no spin
     // (timers.rs `spin_mark`): the tasks queued by now run before the fetch lands, as its response is a task queued as it
     // began (Chrome and Firefox: a zero timer set before a parser-blocking script, or before or after a deferred one, runs
     // before it — r13 `p_t0blk_*`, `p_t0dfr_*`, `q_dfrt0_0`, `q_t0css`). `lands`: a wait of the parser's own, with which its
-    // async scripts land (`ASYNC_WAITED`).
+    // async scripts land (`take_parser_async`'s `waited`).
     pub(crate) fn parser_waits(&mut self, cid: i32, lands: bool) -> f64 {
         if lands {
             if let Some(state) = self.realm_state_mut(cid) {

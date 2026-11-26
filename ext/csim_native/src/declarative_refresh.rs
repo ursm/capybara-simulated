@@ -119,11 +119,11 @@ fn declarative_refresh_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     }
     rv.set(refresh_value(scope, due));
 }
-// `[delayMs, url]` of a refresh due.
+// `[delayMs, url]` of a refresh due — null where its URL makes no string.
 pub(crate) fn refresh_value<'s>(scope: &mut v8::PinScope<'s, '_>, (delay, url): (f64, String)) -> v8::Local<'s, v8::Value> {
+    let Some(url) = v8::String::new(scope, &url) else { return v8::null(scope).into() };
     let delay = v8::Number::new(scope, delay).into();
-    let url = v8::String::new(scope, &url).map_or_else(|| v8::null(scope).into(), Into::into);
-    v8::Array::new_with_elements(scope, &[delay, url]).into()
+    v8::Array::new_with_elements(scope, &[delay, url.into()]).into()
 }
 
 #[cfg(test)]

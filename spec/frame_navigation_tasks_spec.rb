@@ -1314,7 +1314,7 @@ RSpec.describe 'a frame navigation as tasks' do
 
     # DOMContentLoaded waits for the list of scripts to execute after parsing, which an `async` one is not on. Its fetch takes
     # no time here, so it has landed where its parser has had to wait on a fetch, and not otherwise (script.rs
-    # `takeParserAsync`): each as Chrome and Firefox agree where they do (rvfn `d_*`, `l_*`, `e_mix*`, r13 `p_*`, `q_*`), at
+    # `take_parser_async`): each as Chrome and Firefox agree where they do (rvfn `d_*`, `l_*`, `e_mix*`, r13 `p_*`, `q_*`), at
     # Firefox's place where they part. A deferred script's fetch lands those whose fetches began before its own, every one
     # where its server took its time.
     {

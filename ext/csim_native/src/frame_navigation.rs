@@ -1179,11 +1179,7 @@ fn load_task_pays(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let (owes, fired, written) = (args.get(0).is_true(), args.get(1).is_true(), args.get(2).is_true());
     let cid = realm_id(scope, &args);
     if !fired {
-        let delay = load_delay_of(scope, cid);
-        let delayed = *delay != 0;
-        if owes && delayed {
-            *delay = CONTAINER_LOAD_OWED;
-        }
+        let delayed = if owes { owe_container_load_of(scope, cid) } else { *load_delay_of(scope, cid) != 0 };
         if !written || delayed {
             return rv.set_bool(false);
         }

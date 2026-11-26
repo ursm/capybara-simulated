@@ -37,7 +37,6 @@ enum Fetch {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "scriptFetchBegin", begin_op, context_id);
     register(scope, ns, "scriptFetchBeginModule", begin_module_op, context_id);
-    register(scope, ns, "scriptFetchOf", of_op, context_id);
     register(scope, ns, "scriptFetchDue", due_op, context_id);
     register(scope, ns, "scriptFetchLanded", landed_op, context_id);
     register(scope, ns, "parserBegins", parser_begins_op, context_id);
@@ -165,13 +164,8 @@ fn begin_module_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set_uint32(file(scope, cid, el, (began, delay), Fetch::Module(slot)));
 }
 
-// __dom.scriptFetchOf(el) -> the number of the fetch the script `el` began and has not landed, 0 for none — the parser's
-// `async` or `defer` one's, begun at its end tag, which "the end" runs.
-fn of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let el = crate::dom::nid_arg(scope, &args, 0);
-    let cid = realm_id(scope, &args);
-    rv.set_uint32(el.map_or(0, |el| fetch_of(scope, cid, el)));
-}
+// The number of the fetch the script `el` began and has not landed, 0 for none — the parser's `async` or `defer` one's,
+// begun at its end tag, which "the end" runs.
 pub(crate) fn fetch_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId) -> u32 {
     fetches_of(scope, cid).and_then(|f| f.list.iter().rev().find(|f| f.el == el).map(|f| f.id)).unwrap_or(0)
 }

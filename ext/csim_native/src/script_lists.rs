@@ -429,7 +429,7 @@ fn take_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
                 ScriptText::Host(host_text) => v8::Local::new(scope, host_text),
                 ScriptText::Decoded(decoded) => crate::subresource_obtain::text(scope, &decoded),
             };
-            if body.is_string() && body.to_string(scope).is_some_and(|s| s.length() == 0) { RUN_LOADED } else { RUN_CLASSIC }
+            if !body.is_string() || body.to_string(scope).is_some_and(|s| s.length() == 0) { RUN_LOADED } else { RUN_CLASSIC }
         }
     };
     let el = crate::dom::node_value(scope, Some(l.el));
@@ -605,6 +605,9 @@ struct Prepared {
     fetch: u32,
     blocking: bool,
     awaited: bool,
+    // …a parser-blocking one's response, landed as the parser's wait ends — at script nesting level zero, where a
+    // controlling service worker is asked for it — run once the wait is over.
+    landed: Option<Landed>,
     // The mark of the tasks its wait runs first (script.rs `parser_waits`): a style sheet's that blocks it.
     mark: f64,
     wait: Wait,
@@ -659,7 +662,7 @@ fn prepare(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (by, awaited,
     let Some(doc) = arena.realm_document(cid) else { return Ok((PREPARED_NONE, 0)) };
     let lc = arena.document_states.lifecycle(doc);
     let src = arena.get(el).and_then(|n| n.plain_attr("src")).filter(|s| !s.is_empty()).map(str::to_owned);
-    let mut p = Prepared { id: 0, el, doc, aborts: lc.aborts(), generation: lc.generation(), module, text: None, fetch: 0, blocking: false, awaited, mark: 0.0, wait: Wait::Begin };
+    let mut p = Prepared { id: 0, el, doc, aborts: lc.aborts(), generation: lc.generation(), module, text: None, fetch: 0, blocking: false, awaited, landed: None, mark: 0.0, wait: Wait::Begin };
     if module {
         // (…its graph's entry's fetch, begun at its end tag — an inline one's none: the tasks queued before "the end"'s wait
         // run first)
@@ -671,7 +674,6 @@ fn prepare(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (by, awaited,
         // (…its `src` parsed against its node document's base URL as it is prepared, one that does not parse fetched as the
         // attribute is)
         let arena = realm(scope, cid);
-        let url = node_doc.and_then(|d| arena.parse_document_url(d, &src)).map(|u| u.href().to_owned());
         if by == BY_PARSER_LIST {
             // (…an `async` or a deferred one's the fetch its end tag began: "prepare the script element" fetched it there —
             // none is a network error)
@@ -680,6 +682,7 @@ fn prepare(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (by, awaited,
             // (…the parser waiting on it, its `async` scripts landing with that — the tasks queued by now run first, or, none
             // being, those a style sheet that blocks it does: script.rs `parser_waits`)
             p.mark = Some(arena.parser_waits(cid, true)).filter(|&m| m != 0.0).unwrap_or(mark);
+            let url = node_doc.and_then(|d| arena.parse_document_url(d, &src)).map(|u| u.href().to_owned());
             let scanned = crate::script_fetch::parser_input_scanned(scope, cid);
             let mut request = crate::subresource_obtain::ClassicRequest::of_element(realm(scope, cid), el, doc, url, true);
             request.blocking = true;
@@ -767,6 +770,15 @@ fn wait_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Loca
             if lc.is_aborted() {
                 return stop(scope, cid, id, host);
             }
+            if blocking {
+                let landed = match crate::script_fetch::land(scope, cid, fetch, host)? {
+                    Some(Fetched::Classic(landed)) => landed,
+                    _ => (false, ScriptText::Decoded(String::new()), None),
+                };
+                if let Some(p) = lists_of(realm(scope, cid), cid).and_then(|lists| lists.prepared.iter_mut().find(|p| p.id == id)) {
+                    p.landed = Some(landed);
+                }
+            }
             Ok((WAIT_GO, 0.0))
         }
     }
@@ -819,7 +831,7 @@ fn run_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     } else {
         let (ok, body, inline) = match p.text {
             Some(text) => (true, v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into), true),
-            None => match crate::script_fetch::land(scope, cid, p.fetch, host) {
+            None => match p.landed.map_or_else(|| crate::script_fetch::land(scope, cid, p.fetch, host), |landed| Ok(Some(Fetched::Classic(landed)))) {
                 Err(_) => return,
                 Ok(Some(Fetched::Classic((ok, text, entry)))) => {
                     if let Some(entry) = entry {
@@ -865,7 +877,7 @@ struct TheEnd {
     stage: Stage,
     // The scripts of the stage under way still to come: a parse that handed none to a handler's (the XML parser's), in
     // tree order (script.rs `parser_scripts`), or the `async` ones taken off the list.
-    queue: std::collections::VecDeque<NodeId>,
+    queue: VecDeque<NodeId>,
     // Its document's number as its deferred scripts began: one a task their waits ran opened again runs none of them.
     generation: u32,
 }
