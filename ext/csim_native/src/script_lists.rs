@@ -149,6 +149,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "scriptPrepare", prepare_op, context_id);
     register(scope, ns, "scriptWaitNext", wait_next_op, context_id);
     register(scope, ns, "scriptRun", run_op, context_id);
+    register(scope, ns, "scriptRelease", release_op, context_id);
     register(scope, ns, "theEndBegin", the_end_begin_op, context_id);
     register(scope, ns, "theEndNext", the_end_next_op, context_id);
     register(scope, ns, "theEndOver", the_end_over_op, context_id);
@@ -782,6 +783,14 @@ fn wait_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Loca
             Ok((WAIT_GO, 0.0))
         }
     }
+}
+// __dom.scriptRelease(id, host) — the parser done with its script `id`, however its wait and run ended (a throw out of a
+// spin, a parser aborted between them): the record let go of, its fetch with it — none left where its run took it.
+fn release_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
+    let cid = realm_id(scope, &args);
+    let _ = stop(scope, cid, id, host);
 }
 // …the wait over with none to run: the script prepared let go of, its fetch with it.
 fn stop(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>) -> Result<(u32, f64), Terminated> {
