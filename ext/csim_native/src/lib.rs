@@ -346,7 +346,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("keepalive_release", magnus::function!(keepalive::release, 1))?;
     native.define_module_function("keepalive_retire", magnus::function!(keepalive::retire, 2))?;
     native.define_module_function("keepalive_clear", magnus::function!(keepalive::clear, 1))?;
-    native.define_module_function("structured_exports_held", magnus::function!(clone::exports_held_for_ruby, 0))?;
+    native.define_module_function("structured_exports_held", magnus::function!(clone::exports_held_for_ruby, 1))?;
+    native.define_module_function("structured_drop", magnus::function!(clone::drop_wire_for_ruby, 1))?;
     // …and its HTTP authentication entries (http_auth.rs).
     native.define_module_function("http_auth_new", magnus::function!(http_auth::new_for_ruby, 0))?;
     native.define_module_function("http_auth_clear", magnus::function!(http_auth::clear_for_ruby, 1))?;

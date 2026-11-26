@@ -171,12 +171,24 @@ struct Platform {
     objects: Vec<v8::Global<v8::Object>>,
     described: Vec<v8::Global<v8::Value>>,
     named: Vec<u32>,
+    by_hash: HashMap<i32, Vec<u32>>,
 }
 
 impl Platform {
-    // (…the place of an object found before — one the value holds, named again by another's data: a few per value)
+    // (…the place of an object found before — one the value holds, named again by another's data, a FileList's every
+    // File — by its identity hash, those of the same hash compared)
     fn place_of(&self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> Option<u32> {
-        self.objects.iter().position(|o| v8::Local::new(scope, o) == object).map(|place| place as u32)
+        let places = self.by_hash.get(&object.get_identity_hash().get())?;
+        places.iter().copied().find(|&place| v8::Local::new(scope, &self.objects[place as usize]) == object)
+    }
+
+    // …and a new one found, at the next place.
+    fn add(&mut self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>, description: v8::Local<'_, v8::Value>) -> u32 {
+        let place = self.objects.len() as u32;
+        self.objects.push(v8::Global::new(scope, object));
+        self.described.push(v8::Global::new(scope, description));
+        self.by_hash.entry(object.get_identity_hash().get()).or_default().push(place);
+        place
     }
 }
 
@@ -209,10 +221,7 @@ impl Serializer<'_> {
         if description.is_undefined() {
             return Some(None);
         }
-        let mut platform = self.platform.borrow_mut();
-        platform.objects.push(v8::Global::new(scope, object));
-        platform.described.push(v8::Global::new(scope, description));
-        Some(Some(platform.objects.len() as u32 - 1))
+        Some(Some(self.platform.borrow_mut().add(scope, object, description)))
     }
 }
 
@@ -267,6 +276,15 @@ impl v8::ValueSerializerImpl for Serializer<'_> {
             None => {
                 let proto = object.get_prototype(scope)?;
                 if proto.is_null() || self.object_prototype.is_some_and(|p| p == proto) {
+                    // (…but a Node whose prototype a page set so, which its brand tells — its handle, not its
+                    // prototype, as Chrome and Firefox tell it by its internal slots. A platform object of the
+                    // bindings' slots is told by a private field of theirs no API reads, and is taken for the ordinary
+                    // object its prototype says: a deliberate gap — asking the bindings of every ordinary object is the
+                    // cost of the plain data every message is)
+                    if object.internal_field_count() > 0 && crate::node_handle::handle_of(scope, object.into()).is_some() {
+                        throw_data_clone_error(scope, "A Node could not be cloned.");
+                        return None;
+                    }
                     return Some(false);
                 }
                 match self.platform_place(scope, object)? {
@@ -321,6 +339,15 @@ struct Deserializer<'a> {
     made: &'a [Option<v8::Global<v8::Object>>],
     shared: Vec<v8::SharedRef<v8::BackingStore>>,
     modules: Vec<Arc<v8::CompiledWasmModule>>,
+    // (…reading platform objects' data, none of them made yet: each it names read as a marker, an empty object of the
+    // engine's holding the place under `MARKER`, which `resolve` puts the object made in place of — and whether any was)
+    markers: Option<(&'a std::cell::Cell<bool>, v8::Global<v8::Private>)>,
+}
+
+// The private key a marker holds its place under (`Deserializer::markers`).
+fn marker_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
+    let name = v8::String::new(scope, "csim#cloneMarker")?;
+    Some(v8::Private::for_api(scope, Some(name)))
 }
 
 impl v8::ValueDeserializerImpl for Deserializer<'_> {
@@ -335,10 +362,17 @@ impl v8::ValueDeserializerImpl for Deserializer<'_> {
         }
         if how == TRANSFERRED {
             let received = v8::Local::new(scope, self.received.get(place as usize)?.as_ref()?);
-            v8::Local::<v8::Object>::try_from(received).ok()
-        } else {
-            Some(v8::Local::new(scope, self.made.get(place as usize)?.as_ref()?))
+            return v8::Local::<v8::Object>::try_from(received).ok();
         }
+        if let Some((marked, key)) = &self.markers {
+            let marker = v8::Object::new(scope);
+            let key = v8::Local::new(scope, key);
+            let place = v8::Integer::new_from_unsigned(scope, place).into();
+            marker.set_private(scope, key, place)?;
+            marked.set(true);
+            return Some(marker);
+        }
+        Some(v8::Local::new(scope, self.made.get(place as usize)?.as_ref()?))
     }
 
     fn get_shared_array_buffer_from_id<'s>(&self, scope: &mut v8::PinScope<'s, '_>, place: u32) -> Option<v8::Local<'s, v8::SharedArrayBuffer>> {
@@ -372,10 +406,11 @@ fn throw_data_clone_error(scope: &mut v8::PinScope<'_, '_>, words: &str) {
     }
 }
 
-// The bytes of a value with its platform objects (`write`): each platform object's data — how many there are (four
-// bytes, little-endian), each one's place among them, the length of its data so written and its data, those another's
-// names before it; none at all for a value that holds no platform object — and the value's own, as V8's serializer
-// wrote them, kept apart: no copy of them made to join the two but for storage (`joined`).
+// The bytes of a value with its platform objects (`write`): each platform object's data — how many there are and the
+// length of their stream (four bytes each, little-endian), the order they are made in (their places, four bytes each:
+// each after those its data names), and the stream, each one's data one V8 value after another, in the order they were
+// found; none at all for a value that holds no platform object — and the value's own, as V8's serializer wrote them,
+// kept apart: no copy of them made to join the two but for storage (`joined`).
 #[derive(Default)]
 struct Written {
     entries: Vec<u8>,
@@ -396,10 +431,7 @@ impl Written {
     fn split(bytes: &[u8]) -> Option<Self> {
         let word = |at: usize| -> Option<usize> { Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize) };
         let count = word(0)?;
-        let mut at = 4;
-        for _ in 0..count {
-            at += 8 + word(at + 4)?;
-        }
+        let at = if count == 0 { 4 } else { 8 + 4 * count + word(4)? };
         let entries = if count == 0 { Vec::new() } else { bytes.get(..at)?.to_vec() };
         Some(Written { entries, main: bytes.get(at..)?.to_vec() })
     }
@@ -429,46 +461,51 @@ fn write(
     let context = scope.get_current_context();
     serializer.write_value(context, value)?;
     let main = serializer.release();
-    // (…each platform object's data, as found — its own may name more — with the places it names)
-    let mut entries: Vec<(Vec<u8>, Vec<u32>)> = Vec::new();
-    while entries.len() < platform.borrow().described.len() {
-        let description = v8::Local::new(scope, &platform.borrow().described[entries.len()]);
-        platform.borrow_mut().named.clear();
-        let serializer = v8::ValueSerializer::new(scope, Box::new(delegate(ModuleRule::Refuse, true)));
-        serializer.write_header();
-        for &(place, buffer) in buffers {
-            serializer.transfer_array_buffer(place, buffer);
-        }
-        let context = scope.get_current_context();
-        serializer.write_value(context, description)?;
-        let bytes = serializer.release();
-        entries.push((bytes, std::mem::take(&mut platform.borrow_mut().named)));
-    }
-    if entries.is_empty() {
+    // (…each platform object's data, as found — its own may name more — one value after another in one stream, with the
+    // places each names)
+    if platform.borrow().described.is_empty() {
         return Some(Written { entries: Vec::new(), main });
     }
-    let mut out = Vec::with_capacity(4 + entries.iter().map(|e| 8 + e.0.len()).sum::<usize>());
-    out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
-    let mut written = vec![false; entries.len()];
-    for place in 0..entries.len() {
-        write_entry(&entries, place, &mut written, &mut out);
+    let mut named: Vec<Vec<u32>> = Vec::new();
+    let serializer = v8::ValueSerializer::new(scope, Box::new(delegate(ModuleRule::Refuse, true)));
+    serializer.write_header();
+    for &(place, buffer) in buffers {
+        serializer.transfer_array_buffer(place, buffer);
     }
-    Some(Written { entries: out, main })
+    while named.len() < platform.borrow().described.len() {
+        let description = v8::Local::new(scope, &platform.borrow().described[named.len()]);
+        platform.borrow_mut().named.clear();
+        let context = scope.get_current_context();
+        serializer.write_value(context, description)?;
+        named.push(std::mem::take(&mut platform.borrow_mut().named));
+    }
+    let stream = serializer.release();
+    let mut order = Vec::with_capacity(named.len());
+    let mut placed = vec![false; named.len()];
+    for place in 0..named.len() {
+        make_order(&named, place, &mut placed, &mut order);
+    }
+    let mut entries = Vec::with_capacity(8 + 4 * order.len() + stream.len());
+    entries.extend_from_slice(&(order.len() as u32).to_le_bytes());
+    entries.extend_from_slice(&(stream.len() as u32).to_le_bytes());
+    for place in order {
+        entries.extend_from_slice(&place.to_le_bytes());
+    }
+    entries.extend_from_slice(&stream);
+    Some(Written { entries, main })
 }
-// (…an entry written after those it names, each once: a cycle among them — which no data a platform object's steps make
-// holds — written as it is reached, the object it names not yet made as it is read)
-fn write_entry(entries: &[(Vec<u8>, Vec<u32>)], place: usize, written: &mut [bool], out: &mut Vec<u8>) {
-    if written[place] {
+// (…the order the platform objects are made in as they are read back: each after those its data names, each once — a
+// cycle among them, which no data a platform object's steps make holds, made as it is reached, the object it names left
+// a marker)
+fn make_order(named: &[Vec<u32>], place: usize, placed: &mut [bool], order: &mut Vec<u32>) {
+    if placed[place] {
         return;
     }
-    written[place] = true;
-    for &named in &entries[place].1 {
-        write_entry(entries, named as usize, written, out);
+    placed[place] = true;
+    for &n in &named[place] {
+        make_order(named, n as usize, placed, order);
     }
-    let bytes = &entries[place].0;
-    out.extend_from_slice(&(place as u32).to_le_bytes());
-    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-    out.extend_from_slice(bytes);
+    order.push(place as u32);
 }
 
 // One value read from bytes, by V8's deserializer — each transferred ArrayBuffer the one `buffers` has at its place,
@@ -482,7 +519,7 @@ fn read_value<'s>(
     shared: Vec<v8::SharedRef<v8::BackingStore>>,
     modules: Vec<Arc<v8::CompiledWasmModule>>,
 ) -> Option<v8::Local<'s, v8::Value>> {
-    let delegate = Deserializer { received, made, shared, modules };
+    let delegate = Deserializer { received, made, shared, modules, markers: None };
     let deserializer = v8::ValueDeserializer::new(scope, Box::new(delegate), bytes);
     let context = scope.get_current_context();
     deserializer.read_header(context)?;
@@ -492,8 +529,10 @@ fn read_value<'s>(
     deserializer.read_value(context)
 }
 
-// …and a value with its platform objects (`write`'s bytes): each platform object's data read back and made one of this
-// realm by the bindings (`cloneMake`) — between V8's reads, in which no script may run — then the value.
+// …and a value with its platform objects (`write`'s bytes): each platform object's data read back — one stream, no
+// script run while V8 reads it, the objects each names markers — then made ones of this realm by the bindings
+// (`cloneMake`, given a run of data at a time), in the order written, those its data names put in place of their markers
+// first; then the value.
 fn read<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     written: &Written,
@@ -502,21 +541,89 @@ fn read<'s>(
     shared: Vec<v8::SharedRef<v8::BackingStore>>,
     modules: Vec<Arc<v8::CompiledWasmModule>>,
 ) -> Option<v8::Local<'s, v8::Value>> {
-    let bytes = &written.entries;
-    let word = |at: usize| -> Option<usize> { Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize) };
-    let count = if bytes.is_empty() { 0 } else { word(0)? };
-    let mut made: Vec<Option<v8::Global<v8::Object>>> = vec![None; count];
-    let make = Step::named("cloneMake");
-    let mut at = 4;
-    for _ in 0..count {
-        let (place, length) = (word(at)?, word(at + 4)?);
-        let entry = bytes.get(at + 8..at + 8 + length)?;
-        at += 8 + length;
-        let description = read_value(scope, entry, buffers, received, &made, Vec::new(), Vec::new())?;
-        let object = v8::Local::<v8::Object>::try_from(make.call(scope, &[description])?).ok()?;
-        *made.get_mut(place)? = Some(v8::Global::new(scope, object));
+    let mut made: Vec<Option<v8::Global<v8::Object>>> = Vec::new();
+    if !written.entries.is_empty() {
+        let bytes = &written.entries;
+        let word = |at: usize| -> Option<u32> { Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?)) };
+        let count = word(0)? as usize;
+        let order: Vec<usize> = (0..count).map(|i| word(8 + 4 * i).map(|p| p as usize)).collect::<Option<_>>()?;
+        let mut described = Vec::with_capacity(count);
+        let mut marked = Vec::with_capacity(count);
+        {
+            let any = std::cell::Cell::new(false);
+            let key = marker_key(scope)?;
+            let key = v8::Global::new(scope, key);
+            let delegate = Deserializer { received, made: &[], shared: Vec::new(), modules: Vec::new(), markers: Some((&any, key)) };
+            let deserializer = v8::ValueDeserializer::new(scope, Box::new(delegate), bytes.get(8 + 4 * count..)?);
+            let context = scope.get_current_context();
+            deserializer.read_header(context)?;
+            for &(place, buffer) in buffers {
+                deserializer.transfer_array_buffer(place, buffer);
+            }
+            for _ in 0..count {
+                let description = deserializer.read_value(context)?;
+                described.push(v8::Global::new(scope, description));
+                marked.push(any.replace(false));
+            }
+        }
+        made = (0..count).map(|_| None).collect();
+        let make = Step::named("cloneMake");
+        // (…a run of data that names no object made at once; one that does after the run before it, its markers resolved)
+        let mut at = 0;
+        while at < order.len() {
+            let run = if marked[order[at]] { 1 } else { order[at..].iter().take_while(|&&p| !marked[p]).count() };
+            let data: Vec<v8::Local<v8::Value>> = order[at..at + run].iter().map(|&p| v8::Local::new(scope, &described[p])).collect();
+            if marked[order[at]] {
+                let key = marker_key(scope)?;
+                resolve(scope, data[0], key, &made);
+            }
+            let data = v8::Array::new_with_elements(scope, &data);
+            let objects = v8::Local::<v8::Array>::try_from(make.call(scope, &[data.into()])?).ok()?;
+            for (i, &place) in order[at..at + run].iter().enumerate() {
+                let object = v8::Local::<v8::Object>::try_from(objects.get_index(scope, i as u32)?).ok()?;
+                made[place] = Some(v8::Global::new(scope, object));
+            }
+            at += run;
+        }
     }
     read_value(scope, &written.main, buffers, received, &made, shared, modules)
+}
+// (…the markers a platform object's data holds — in its own properties, or its arrays' or objects' — each replaced by
+// the object made of the data it stands for: an array's by index, as a FileList's files are)
+fn resolve(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, key: v8::Local<'_, v8::Private>, made: &[Option<v8::Global<v8::Object>>]) {
+    if let Ok(array) = v8::Local::<v8::Array>::try_from(value) {
+        for i in 0..array.length() {
+            let Some(member) = array.get_index(scope, i) else { continue };
+            if let Some(made) = resolved(scope, member, key, made) {
+                array.set_index(scope, i, made);
+            }
+        }
+        return;
+    }
+    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else { return };
+    let Some(names) = object.get_own_property_names(scope, v8::GetPropertyNamesArgs::default()) else { return };
+    for i in 0..names.length() {
+        let Some(name) = names.get_index(scope, i) else { continue };
+        let Some(member) = object.get(scope, name) else { continue };
+        if let Some(made) = resolved(scope, member, key, made) {
+            object.set(scope, name, made);
+        }
+    }
+}
+// …a member's: the object made in place of a marker, none for anything else (whose own markers are resolved in place).
+fn resolved<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    member: v8::Local<'_, v8::Value>,
+    key: v8::Local<'_, v8::Private>,
+    made: &[Option<v8::Global<v8::Object>>],
+) -> Option<v8::Local<'s, v8::Value>> {
+    let member = v8::Local::<v8::Object>::try_from(member).ok()?;
+    if member.has_private(scope, key) != Some(true) {
+        resolve(scope, member.into(), key, made);
+        return None;
+    }
+    let place = member.get_private(scope, key)?.uint32_value(scope)?;
+    Some(v8::Local::new(scope, made.get(place as usize)?.as_ref()?).into())
 }
 
 // A transferable of the transfer list: an ArrayBuffer, or an object the bindings move — a MessagePort or another.
@@ -1033,49 +1140,55 @@ fn close_imported(
     abandon(scope, &ports);
 }
 
+// A message's wire let go of unread (workers.js `encodeMessage`: `{"k":<token>,…}`) — at a closed port's end, in the
+// inbox of a worker that ended, to a service worker client that is gone: the serialization its token holds let go of
+// with it. (A broadcast's wire holds its serialization itself, and nothing here.)
+pub(crate) fn drop_wire(wire: &str) {
+    let Some(at) = wire.find("\"k\":") else { return };
+    let digits: String = wire[at + 4..].chars().take_while(char::is_ascii_digit).collect();
+    if let Ok(token) = digits.parse::<u64>() {
+        exports().by_token.remove(&token);
+    }
+}
+
 // The serializations session `partition`'s isolates carried out and none brought in — a message to a worker that ended
 // first — let go of, as the session's other registries are (lib.rs `session_partition_clear`).
 pub(crate) fn clear(partition: u64) {
     exports().by_token.retain(|_, exported| exported.partition != partition);
 }
 
-// — for the host — Native.structured_exports_held -> how many serializations are carried out of their isolates and not
-// yet brought in: none, once every message is read.
-pub(crate) fn exports_held_for_ruby() -> usize {
-    exports().by_token.len()
+// — for the host — Native.structured_exports_held(partition) -> how many serializations session `partition`'s isolates
+// carried out and none brought in yet: none, once every message is read or let go of.
+pub(crate) fn exports_held_for_ruby(partition: u64) -> usize {
+    exports().by_token.values().filter(|e| e.partition == partition).count()
+}
+// — for the host — Native.structured_drop(wire): `drop_wire`.
+pub(crate) fn drop_wire_for_ruby(wire: String) {
+    drop_wire(&wire);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::write_entry;
+    use super::make_order;
 
-    // The places `write_entry` writes its entries in, as read back.
-    fn order(entries: &[(Vec<u8>, Vec<u32>)]) -> Vec<u32> {
+    // The order `make_order` makes the platform objects in.
+    fn order(named: &[Vec<u32>]) -> Vec<u32> {
         let mut out = Vec::new();
-        let mut written = vec![false; entries.len()];
-        for place in 0..entries.len() {
-            write_entry(entries, place, &mut written, &mut out);
+        let mut placed = vec![false; named.len()];
+        for place in 0..named.len() {
+            make_order(named, place, &mut placed, &mut out);
         }
-        let mut places = Vec::new();
-        let mut at = 0;
-        while at < out.len() {
-            places.push(u32::from_le_bytes(out[at..at + 4].try_into().unwrap()));
-            let length = u32::from_le_bytes(out[at + 4..at + 8].try_into().unwrap()) as usize;
-            at += 8 + length;
-        }
-        places
+        out
     }
 
     #[test]
-    fn writes_a_platform_objects_data_after_the_objects_it_names() {
+    fn makes_a_platform_object_after_the_objects_its_data_names() {
         // A FileList (0) naming a File (1) the value holds besides, and another FileList (2) naming it again.
-        let entries = vec![(vec![7], vec![1]), (vec![8, 9], vec![]), (vec![], vec![1])];
-        assert_eq!(order(&entries), vec![1, 0, 2]);
+        assert_eq!(order(&[vec![1], vec![], vec![1]]), vec![1, 0, 2]);
     }
 
     #[test]
-    fn writes_each_entry_once_whatever_names_it() {
-        let entries = vec![(vec![], vec![1, 2]), (vec![], vec![2]), (vec![], vec![]), (vec![], vec![0])];
-        assert_eq!(order(&entries), vec![2, 1, 0, 3]);
+    fn makes_each_once_whatever_names_it() {
+        assert_eq!(order(&[vec![1, 2], vec![2], vec![], vec![0]]), vec![2, 1, 0, 3]);
     }
 }

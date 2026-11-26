@@ -35,9 +35,11 @@ fn other_end(end: &str) -> String {
     }
 }
 
-// A message reaching end `end`: its holder's to be delivered, or held for its next one — or nowhere, at a closed end.
+// A message reaching end `end`: its holder's to be delivered, or held for its next one — or nowhere, at a closed end,
+// its serialization let go of (clone.rs `drop_wire`).
 fn receive(end: &mut End, data: String) -> Option<Holder> {
     if end.closed {
+        crate::clone::drop_wire(&data);
         return None;
     }
     match &end.at {
@@ -90,12 +92,14 @@ pub(crate) fn redeliver(partition: u64, end: String, data: String) -> Option<Hol
 pub(crate) fn closed(partition: u64, end: String) {
     let mut reg = lock();
     let other = (partition, other_end(&end));
-    if reg.get(&other).is_some_and(|e| e.closed) {
+    let gone = if reg.get(&other).is_some_and(|e| e.closed) {
         reg.remove(&other);
-        reg.remove(&(partition, end));
+        reg.remove(&(partition, end))
     } else {
-        reg.insert((partition, end), End { closed: true, ..End::default() });
-    }
+        reg.insert((partition, end), End { closed: true, ..End::default() })
+    };
+    // (…what was held for it, which nothing will read now, let go of)
+    gone.into_iter().flat_map(|e| e.pending).for_each(|data| crate::clone::drop_wire(&data));
 }
 
 // A message posted at end `from` (none where that end is closed, or unknown: a worker's post and its close in one turn
@@ -104,6 +108,7 @@ pub(crate) fn closed(partition: u64, end: String) {
 pub(crate) fn post(partition: u64, from: String, data: String) -> Option<(String, Holder)> {
     let mut reg = lock();
     if reg.get(&(partition, from.clone())).is_none_or(|e| e.closed) {
+        crate::clone::drop_wire(&data);
         return None;
     }
     let to = other_end(&from);
@@ -117,7 +122,8 @@ pub(crate) fn post(partition: u64, from: String, data: String) -> Option<(String
 pub(crate) fn forget_window(partition: u64, window: u32) {
     for e in lock().iter_mut().filter(|((p, _), _)| *p == partition).map(|(_, e)| e) {
         if e.at.as_ref().is_some_and(|(_, w, _)| *w == window) {
-            *e = End { closed: true, ..End::default() };
+            let gone = std::mem::replace(e, End { closed: true, ..End::default() });
+            gone.pending.iter().for_each(|data| crate::clone::drop_wire(data));
         }
     }
 }

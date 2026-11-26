@@ -75,7 +75,7 @@ RSpec.describe 'Worker postMessage zero-copy transfer' do
 
     # The token was imported by the worker, so nothing stays parked in the
     # process-wide transfer registry.
-    expect(Capybara::Simulated::Native.structured_exports_held).to eq(0)
+    expect(Capybara::Simulated::Native.structured_exports_held(session.driver.browser.session_partition)).to eq(0)
   end
 
   it 'preserves a typed-array view window (byteOffset/length) across the transfer' do
@@ -88,6 +88,6 @@ RSpec.describe 'Worker postMessage zero-copy transfer' do
     # when byteOffset/length were read AFTER the transfer detached the buffer).
     expect(session).to have_title('kind=Uint8Array len=4 off=2 sum=18')
 
-    expect(Capybara::Simulated::Native.structured_exports_held).to eq(0)
+    expect(Capybara::Simulated::Native.structured_exports_held(session.driver.browser.session_partition)).to eq(0)
   end
 end

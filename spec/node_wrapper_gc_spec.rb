@@ -1,5 +1,6 @@
 require 'open3'
 require 'rbconfig'
+require_relative 'support/session_teardown'
 
 # A node object V8 DROPS young (src/v8_shim.cc, node_handle.rs `csim_node_reset_root`): the droppable reference its
 # handle holds it by from its making is cleared — a bare `NodeBase` wrapper dropped by a minor collection, and then more

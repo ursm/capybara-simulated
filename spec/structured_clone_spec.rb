@@ -18,6 +18,10 @@ RSpec.describe 'Structured clone of platform objects' do
       case env['PATH_INFO']
       when '/echo.js'
         [200, {'content-type' => 'text/javascript'}, ["onmessage = (e) => postMessage([e.data, new QuotaExceededError('wq', { quota: 3, requested: 4 })]);"]]
+      when '/close.js'
+        [200, {'content-type' => 'text/javascript'}, ["onmessage = (e) => { e.ports[0].close(); postMessage('closed'); };"]]
+      when '/idle.js'
+        [200, {'content-type' => 'text/javascript'}, ['']]
       when '/refuse.js'
         [200, {'content-type' => 'text/javascript'}, ['try { structuredClone(() => 1); } catch (e) { postMessage(e.message); }']]
       when '/popup'
@@ -207,13 +211,13 @@ RSpec.describe 'Structured clone of platform objects' do
   # (…a broadcast's serialization goes in its wire, which nothing need hold for the channels it reaches)
   it 'holds nothing for a broadcast once its channels have read it' do
     session.visit '/'
-    held = Capybara::Simulated::Native.structured_exports_held
+    held = Capybara::Simulated::Native.structured_exports_held(session.driver.browser.session_partition)
     got = session.evaluate_async_script(<<~JS)
       const done = arguments[0], a = new BroadcastChannel('c'), b = new BroadcastChannel('c');
       b.onmessage = (e) => done(e.data.n);
       a.postMessage({ n: 7 });
     JS
-    expect([got, Capybara::Simulated::Native.structured_exports_held]).to eq([7, held])
+    expect([got, Capybara::Simulated::Native.structured_exports_held(session.driver.browser.session_partition)]).to eq([7, held])
   end
 
   # (…a transferred buffer is the one a platform object's data is read back over: HTML's sub-serialization of an
@@ -247,14 +251,61 @@ RSpec.describe 'Structured clone of platform objects' do
   # (…a broadcast of a WebAssembly.Module carries its wire bytes, compiled again where it is read: nothing held for it)
   it 'broadcasts a WebAssembly.Module holding nothing for it' do
     session.visit '/'
-    held = Capybara::Simulated::Native.structured_exports_held
+    held = Capybara::Simulated::Native.structured_exports_held(session.driver.browser.session_partition)
     got = session.evaluate_async_script(<<~JS)
       const done = arguments[0], a = new BroadcastChannel('m'), b = new BroadcastChannel('m');
       b.onmessage = (e) => done(e.data instanceof WebAssembly.Module);
       b.onmessageerror = () => done('messageerror');
       a.postMessage(new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])));
     JS
-    expect([got, Capybara::Simulated::Native.structured_exports_held]).to eq([true, held])
+    expect([got, Capybara::Simulated::Native.structured_exports_held(session.driver.browser.session_partition)]).to eq([true, held])
+  end
+
+  # (…a message no isolate will read — in the inbox of a worker terminated before it ran, posted at a port whose other end
+  # was closed — lets its serialization go with it, not at the session's end)
+  it 'holds nothing for a message to a terminated worker or a closed port' do
+    session.visit '/'
+    partition = session.driver.browser.session_partition
+    held = Capybara::Simulated::Native.structured_exports_held(partition)
+    session.execute_script(<<~JS)
+      const w = new Worker('/idle.js');
+      for (let i = 0; i < 5; i++) w.postMessage(new Uint8Array(1 << 16));
+      w.terminate();
+    JS
+    session.evaluate_async_script(<<~JS)
+      const done = arguments[0], c = new MessageChannel(), w = new Worker('/close.js');
+      w.onmessage = () => { for (let i = 0; i < 5; i++) c.port1.postMessage(new Uint8Array(1 << 16)); setTimeout(done, 50); };
+      w.postMessage(null, [c.port2]);
+    JS
+    expect(poll_until { Capybara::Simulated::Native.structured_exports_held(partition) == held }).to be(true)
+  end
+
+  # (…a Node whose prototype a page took is still a Node, told by its brand: no ordinary object to clone)
+  it 'refuses a Node whatever its prototype' do
+    session.visit '/'
+    out = probe(<<~JS)
+      const div = document.createElement('div');
+      Object.setPrototypeOf(div, null);
+      const bare = document.createElement('p');
+      Object.setPrototypeOf(bare, Object.prototype);
+      return [err(() => structuredClone(div)), err(() => structuredClone({ bare }))];
+    JS
+    expect(out).to eq(%w[DataCloneError DataCloneError])
+  end
+
+  # (…a ReadableStream transferred within the agent is read through a pipe that releases its reader as it ends, as a
+  # pipeTo does: the source no longer locked once drained — Chrome 158, Firefox 161)
+  it 'unlocks a transferred stream once it is drained' do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const source = new ReadableStream({ start(c) { c.enqueue(1); c.close(); } });
+      const moved = structuredClone(source, { transfer: [source] });
+      const reader = moved.getReader();
+      (async () => { const values = []; for (;;) { const r = await reader.read(); if (r.done) break; values.push(r.value); }
+        await new Promise((r) => setTimeout(r, 0)); done([values, source.locked]); })();
+    JS
+    expect(got).to eq([[1], false])
   end
 
   it "keeps a FileList's files the Files the value holds, and builds its descriptors as data" do
@@ -290,7 +341,8 @@ RSpec.describe 'Structured clone of platform objects' do
         frames[0].postMessage({ n: 1, bitmap, stream }, '*', [bitmap, stream]);
       });
     JS
-    expect(out).to eq('spoof' => true, 'realm' => true, 'bitmap' => [true, 1, 0], 'stream' => [true, 'chunk', true])
+    # (…the stream's source drained by the pipe by the time its chunk is read, and so unlocked: Chrome 158, Firefox 161)
+    expect(out).to eq('spoof' => true, 'realm' => true, 'bitmap' => [true, 1, 0], 'stream' => [true, 'chunk', false])
   end
 
   it "carries a value's Maps, Dates, cycles and shared references to a worker and back, its buffers moved" do

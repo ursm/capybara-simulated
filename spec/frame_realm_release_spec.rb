@@ -1,5 +1,6 @@
 require 'open3'
 require 'rbconfig'
+require_relative 'support/session_teardown'
 
 # A frame navigated away from takes its realm with it: what the engine keeps of a realm for the others to ask through —
 # its arena object, which holds its `__dom` and so its whole global (`Dom.arenas`) — is held weakly, so nothing of the

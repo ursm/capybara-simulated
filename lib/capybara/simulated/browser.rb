@@ -7111,7 +7111,9 @@ module Capybara
       # A service worker's message to client `e[:client]`, to the realm the registry says it is — none for a gone one's.
       private def sw_client_message_route(e)
         browser, realm = (key = Native.sw_client_owner(@sw_partition, e[:client].to_s)) && sw_window_realm(key)
-        browser&.sw_client_message_told(realm, browser.restamped(e[:data], self), e[:handle])
+        return Native.structured_drop(e[:data].to_s) unless browser
+
+        browser.sw_client_message_told(realm, browser.restamped(e[:data], self), e[:handle])
       end
 
       private def unregister_client(client_id)
@@ -7887,6 +7889,13 @@ module Capybara
         false
       end
 
+      # A message to a worker that no isolate will read — a postMessage's wire, or one a hash of the inbox carries: what its
+      # wire holds let go of (clone.rs `drop_wire`).
+      private def drop_unread_message(msg)
+        data = msg.is_a?(Hash) ? msg[:data] : msg
+        Native.structured_drop(data) if data.is_a?(String)
+      end
+
       # Everything that must happen once a worker is out of `@workers`, whether or not we waited for
       # its thread: drain what it will never answer, release the counters it still holds, and revoke
       # what it created. Load-bearing — the counter reset at the end only fires when the LAST worker
@@ -7928,7 +7937,9 @@ module Capybara
           rescue ThreadError
             break
           end
+          drop_unread_message(msg)
           next unless msg.is_a?(Hash)
+
           case msg[:kind]
           when 'sw_message', 'port_msg' then @worker_host << {handle: handle.to_i, kind: 'swack'}
           when 'broadcast'  then @worker_host << {handle: handle.to_i, kind: 'bcack'}
@@ -10302,8 +10313,11 @@ module Capybara
             msg = pop_with_timeout(inbox, @worker_host.worker_at_inbox(handle))
             @worker_host.worker_off_inbox(handle, !msg.nil?)
             break if msg == :terminate
-            # …and the same answer from the boundary, which cannot wait for this queue.
-            break if stopping.call
+            # …and the same answer from the boundary, which cannot wait for this queue — the message taken let go of.
+            if stopping.call
+              drop_unread_message(msg)
+              break
+            end
             # Drive the worker's OWN event loop each tick, BEFORE the message: the time the window has moved since the
             # last tick passes for the timers already set — those due fire ahead of the message, the tasks queued
             # before it — and a timer the message sets starts from there, not owed what went by before it was set.

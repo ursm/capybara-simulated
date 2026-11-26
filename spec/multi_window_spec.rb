@@ -190,7 +190,7 @@ RSpec.describe 'multi-window' do
     session.within_window(win) do
       expect(session).to have_title('POPUP_BUF:20/4')    # bytes arrived intact
     end
-    expect(Capybara::Simulated::Native.structured_exports_held).to eq(0)   # imported → no parked store
+    expect(Capybara::Simulated::Native.structured_exports_held(session.driver.browser.session_partition)).to eq(0)   # imported → no parked store
   end
 
   # Structured-clone fidelity: a Map crosses the window boundary as a live Map
