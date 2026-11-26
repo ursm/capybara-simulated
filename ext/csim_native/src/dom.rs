@@ -295,6 +295,10 @@ pub(crate) struct NodeData {
 // filtered option, a form-associated custom element, a custom element that is custom (constructed or upgraded, not
 // failed), and one created with an `is` value.
 pub(crate) const STATE_FOCUSED: u32 = 1;
+// What a realm's focus shows of its ring (`RealmState::focus_ring`).
+pub(crate) const RING_SHOWN: u8 = 0;
+pub(crate) const RING_POINTER: u8 = 1;
+pub(crate) const RING_HIDDEN: u8 = 2;
 pub(crate) const STATE_HOVERED: u32 = 1 << 1;
 pub(crate) const STATE_CHECKED_DIRTY: u32 = 1 << 2;
 pub(crate) const STATE_CHECKED: u32 = 1 << 3;
@@ -1235,8 +1239,11 @@ pub(crate) struct RealmState {
     // Whether a shadow root of the realm's trees has had a host — its tree and attribute writes run the slot steps only
     // then (`slot_steps`): a web component in a frame costs the page around it nothing.
     pub(crate) shadow_hosts: bool,
-    // Whether the focus shows NO ring (not `:focus-visible`): only after a pointer focus of a non-text control.
-    pub(crate) focus_ring_hidden: bool,
+    // Whether the focus shows its ring (`:focus-visible`): `RING_SHOWN`; `RING_POINTER`, none — the focus a pointer's —
+    // but on a text entry, whose ring a browser shows however the focus came to it, what the element is as it is matched
+    // (an input whose type a click changed to text shows its ring: WPT css/selectors focus-visible-027); `RING_HIDDEN`,
+    // none at all (`focus({focusVisible: false})`).
+    pub(crate) focus_ring: u8,
     // Whether the user's last driven input in it was a pointer's (a press) rather than the keyboard's (Tab, keys sent),
     // which a focus it moves shows no ring for (focus_update.rs `latch_focus_ring`).
     pub(crate) pointer_modality: bool,
@@ -2229,12 +2236,12 @@ impl RealmArena {
         self.generations.bump(GEN_STYLE_STATE);
         self.target = target;
     }
-    // Whether the focus shows no ring.
-    pub(crate) fn set_focus_ring_hidden(&mut self, hidden: bool) {
-        if self.focus_ring_hidden != hidden {
+    // Whether the focus shows its ring (`focus_ring`).
+    pub(crate) fn set_focus_ring(&mut self, ring: u8) {
+        if self.focus_ring != ring {
             self.mutations += 1;
             self.state_epoch += 1;
-            self.focus_ring_hidden = hidden;
+            self.focus_ring = ring;
             // (…a state no other generation moves: `:focus-visible` against `:focus` on the same focused element)
             self.generations.bump(GEN_STYLE_STATE);
         }

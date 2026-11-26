@@ -878,8 +878,6 @@ impl KeyGesture {
     // and the element they go to.
     fn send_keys(&mut self, arena: &mut RealmArena, how: u32, to: NodeId, atoms: Vec<Atom>) {
         let n = self.to;
-        // (…keyboard-driven: `:focus-visible` applies)
-        arena.keyboard_modality();
         // (…not one focused already — Selenium's active element, which it sends to as it is: a container whose frame's
         // document holds the focus is focused again by no key, which would take the focus out. Nor one its document kept
         // as its focused area as the focus went to the user agent's controls (`document.activeElement` yet): the keys go
@@ -1078,6 +1076,11 @@ impl KeyGesture {
                             self.jobs.push_front(Job::Modifier(ty, key, modifiers));
                             return Some(batch);
                         }
+                        if ty == "keydown" {
+                            if let Some(realm) = arena.document_realm_of(self.to) {
+                                arena.key_pressed(realm, &key.key, modifiers);
+                            }
+                        }
                         let step = self.key_event(ty, &key, modifiers, false);
                         self.tell(step);
                     },
@@ -1229,6 +1232,10 @@ impl KeyGesture {
                 }
                 p.down = Some(self.to);
                 p.at = PressAt::KeyPress;
+                // (…keyboard-driven: `:focus-visible` applies, a shortcut's aside)
+                if let Some(realm) = arena.document_realm_of(self.to) {
+                    arena.key_pressed(realm, &p.key.key, p.held);
+                }
                 let step = self.key_event("keydown", &p.key, p.held, !line_key(&p.key.key));
                 self.ask(step);
             },
@@ -1917,8 +1924,6 @@ fn key_action(arena: &mut RealmArena, keyboard: &mut Keyboard, cid: i32, down: b
     let doc = arena.realm_document(cid)?;
     let fallback = arena.body_element(doc).or_else(|| arena.first_element_child(doc))?;
     let to = key_event_target(arena, cid, fallback);
-    // (…keyboard-driven: `:focus-visible` applies)
-    arena.keyboard_modality();
     let mut gesture = KeyGesture::new(cid, to, false);
     gesture.jobs.push_back(Job::Begin);
     let ty = if down { "keydown" } else { "keyup" };

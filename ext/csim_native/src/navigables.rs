@@ -1462,32 +1462,33 @@ pub(crate) fn open_features(features: &str) -> u32 {
         0
     }
 }
-// The size a new window's content area is asked for (CSSOM View "the window open features": `width` / `innerWidth`,
-// `height` / `innerHeight`, each its integer value, at least 100 — "clamped … to a minimum of 100") — None where it asks
-// for neither, either missing one the user agent's default.
-pub(crate) fn open_size(features: &str) -> Option<(Option<u32>, Option<u32>)> {
+// The size a new window's content area is asked for (CSSOM View "the window open features"): where the features place or
+// size the window at all (`left` / `screenX`, `top` / `screenY`, `width` / `innerWidth`, `height` / `innerHeight`), each
+// dimension its integer value — 0 for one left out or not an integer ("When code point in first position is not an ASCII
+// digit, "+" or "-", that's an error and the value becomes 0": WPT open-features-non-integer-*) — clamped to at least
+// 100; None where they do neither, the user agent's default size.
+pub(crate) fn open_size(features: &str) -> Option<(u32, u32)> {
     let tokens = tokenize_features(features);
+    const PLACING: [&str; 8] = ["left", "screenx", "top", "screeny", "width", "innerwidth", "height", "innerheight"];
+    if !PLACING.iter().any(|n| tokens.contains_key(*n)) {
+        return None;
+    }
     let dimension = |names: [&str; 2]| {
-        names.iter().find_map(|n| tokens.get(*n)).and_then(|v| crate::validity::parse_html_integer(v)).map(|n| n.clamp(100, i64::from(u32::MAX)) as u32)
+        let value = names.iter().find_map(|n| tokens.get(*n)).and_then(|v| crate::validity::parse_html_integer(v)).unwrap_or(0);
+        value.clamp(100, i64::from(u32::MAX)) as u32
     };
-    let size = (dimension(["width", "innerwidth"]), dimension(["height", "innerheight"]));
-    (size.0.is_some() || size.1.is_some()).then_some(size)
+    Some((dimension(["width", "innerwidth"]), dimension(["height", "innerheight"])))
 }
 // __dom.openFeatures(features) -> `open_features`.
 fn open_features_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let features = args.get(0).to_rust_string_lossy(scope);
     rv.set_uint32(open_features(&features));
 }
-// __dom.openSize(features) -> [width, height] (each null where not asked for) or null (`open_size`).
+// __dom.openSize(features) -> [width, height] or null (`open_size`).
 fn open_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let features = args.get(0).to_rust_string_lossy(scope);
     let Some((w, h)) = open_size(&features) else { return rv.set_null() };
-    let items = [w, h].map(|d| -> v8::Local<'_, v8::Value> {
-        match d {
-            Some(d) => v8::Integer::new_from_unsigned(scope, d).into(),
-            None => v8::null(scope).into(),
-        }
-    });
+    let items: [v8::Local<'_, v8::Value>; 2] = [v8::Integer::new_from_unsigned(scope, w).into(), v8::Integer::new_from_unsigned(scope, h).into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 

@@ -98,6 +98,8 @@ const TREES = [
                                        // subtests need layout the gate holds them to like any other)
   'close-watcher',                     // CloseWatcher and the close watcher manager its groups, user activation and
                                        // close requests share with dialogs and popovers
+  'css/selectors',                     // SELECTED files only (`SELECTED_FILES`): :focus-visible and :focus-within, the
+                                       // focus pseudo-classes HTML's focus model decides, and their support files
   'html/interaction/focus',            // HTML §6.6 focus: the focusing / unfocusing / focus update steps across
                                        // shadow trees and navigables, focusable areas, sequential navigation,
                                        // tabindex, autofocus, the focus fixup, hasFocus / activeElement
@@ -439,6 +441,13 @@ async function resolveSha(ref) {
   return (await res.text()).trim();
 }
 
+// Trees vendored in part: the files a predicate keeps, and their `support/` files whole. `css/selectors` is a thousand
+// files of every selector; the ones the focus model decides are vendored with it (html/interaction/focus), the rest a
+// backlog to vendor deliberately.
+const SELECTED_FILES = {
+  'css/selectors': (path) => /\/(focus-visible|focus-within)[^/]*$/.test(path) || path.split('/').includes('support')
+};
+
 // Parts of a vendored tree left out for now, with what brings them back. html/cross-origin-opener-policy/reporting/ is
 // backlog: HTML's "Queue a violation report" is normative, and the Reporting API it reports through is not built.
 const EXCLUDED_PREFIXES = ['html/cross-origin-opener-policy/reporting/'];
@@ -452,7 +461,8 @@ async function listBlobs(sha, tree) {
   return json.tree
     .filter((e) => e.type === 'blob')
     .map((e) => `${tree}/${e.path}`)
-    .filter((path) => !EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix)));
+    .filter((path) => !EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix)))
+    .filter((path) => SELECTED_FILES[tree]?.(path) ?? true);
 }
 
 async function fetchRaw(sha, path) {
@@ -594,6 +604,7 @@ async function main() {
     join(OUT, 'WPT_VERSION'),
     `${sha}\nweb-platform-tests/wpt\ntrees: ${TREES.join(', ')}` +
       `\nharness-only trees: ${HARNESS_ONLY_TREES.join(', ')}` +
+      `\nselected-file trees: ${Object.keys(SELECTED_FILES).join(', ')}` +
       `\nsupport: ${SUPPORT_TREES.join(', ')}, resources/testharness.js, ${SUPPORT_FILES.join(', ')}` +
       `\naliased: ${Object.entries(ALIASED_FILES).map(([served, from]) => `${served} (${from})`).join(', ')}\n`
   );

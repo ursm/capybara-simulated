@@ -194,27 +194,61 @@ impl RealmArena {
         }
         false
     }
-    // `:focus-visible`: focused, with a focus ring.
+    // `:focus-visible`: the focused element itself, with a focus ring (`focus_ring`) — not a shadow host its shadow tree's
+    // focus makes `:focus` (the ring is drawn round the element that has the focus: WPT css/selectors focus-visible-020,
+    // Chrome).
     pub(crate) fn is_focus_visible(&self, id: NodeId) -> bool {
-        !self.focus_ring_hidden && self.is_focused(id)
+        if self.focus_hidden || !self.has_state(id, STATE_FOCUSED) {
+            return false;
+        }
+        match self.focus_ring {
+            crate::dom::RING_SHOWN => true,
+            crate::dom::RING_POINTER => self.is_text_entry(id),
+            _ => false,
+        }
+    }
+    // A TEXT ENTRY: a textarea, a textual `<input>`, an editable element — whose focus ring a browser shows however the
+    // focus came to it.
+    pub(crate) fn is_text_entry(&self, id: NodeId) -> bool {
+        self.get(id).filter(|n| n.kind == NodeKind::Element).is_some_and(|n| {
+            n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::TEXTUAL)) || self.is_editable(id)
+        })
     }
     // `:focus-within`: the focused element or one of its FLAT-TREE ancestors (Selectors 4: "an element … whose descendant in
     // the flat tree (including non-element nodes, such as text nodes) matches the conditions for matching :focus" — a slot
-    // and what holds it in its shadow tree, its assigned control focused: Chrome), as `:hover` and `:active`.
+    // and what holds it in its shadow tree, its assigned control focused: Chrome), up to the first top layer element, as
+    // `:hover` and `:active` (`user_action_ancestor`).
     pub(crate) fn has_focus_within(&self, id: NodeId) -> bool {
-        !self.focus_hidden && self.focus.is_some_and(|f| crate::geometry::flat_inclusive_ancestor(self, id, f))
+        !self.focus_hidden && self.focus.is_some_and(|f| self.user_action_ancestor(id, f))
+    }
+    // Whether `a` is `b` or one of the flat-tree ancestors a user action pseudo-class matching on `b` matches on too —
+    // Selectors 4 §9: "they also match on the element's flat tree ancestors, up to and including the first top layer
+    // element or the root element, whichever is encountered first" (a modal dialog, a showing popover: WPT
+    // css/selectors focus-within-toplayer-001).
+    fn user_action_ancestor(&self, a: NodeId, b: NodeId) -> bool {
+        let mut at = Some(b);
+        while let Some(n) = at {
+            if n == a {
+                return true;
+            }
+            if self.get(n).is_some_and(|d| d.state & (STATE_MODAL | STATE_POPOVER_OPEN) != 0) {
+                return false;
+            }
+            at = crate::geometry::flat_parent(self, n);
+        }
+        false
     }
     // `:hover`: the hovered element and its FLAT-TREE ancestors (HTML §4.16.3, "Per the definition in Selectors, :hover also
     // matches flat tree ancestors of elements that are designated" — a slot and what holds it in its shadow tree, its
     // assigned content hovered: Chrome, Firefox), and the labeled control of a label among them.
     pub(crate) fn is_hovered(&self, id: NodeId) -> bool {
-        self.hover.is_some_and(|h| crate::geometry::flat_inclusive_ancestor(self, id, h) || self.hover_controls.contains(&id))
+        self.hover.is_some_and(|h| self.user_action_ancestor(id, h) || self.hover_controls.contains(&id))
     }
     // `:active` (HTML §4.16.3): the element the pointer pressed — any button, a disabled button too ("being activated if
     // it is in a formal activation state"; Chrome, Firefox) — and its flat-tree ancestors, as `:hover`'s; and the labeled
     // control of a label that matches, which "does not count as being activated", so nothing above it matches through it.
     pub(crate) fn is_active(&self, id: NodeId) -> bool {
-        self.active.is_some_and(|a| crate::geometry::flat_inclusive_ancestor(self, id, a) || self.active_controls.contains(&id))
+        self.active.is_some_and(|a| self.user_action_ancestor(id, a) || self.active_controls.contains(&id))
     }
     // The labeled controls of the labels `id` is or is among the flat-tree ancestors of (HTML §4.10.4): those that match
     // as it does.

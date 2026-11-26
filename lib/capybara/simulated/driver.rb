@@ -781,10 +781,8 @@ module Capybara
           planned:          true
         )
         window = window_browser(handle)
-        # (…its content area the size its features asked for, the default's for a dimension they left out)
-        if size && window
-          window.set_viewport(size[0] || window.viewport_width, size[1] || window.viewport_height)
-        end
+        # (…its content area the size its features asked for)
+        window.set_viewport(size[0], size[1]) if size && window
         window.realm if window.is_a?(RealmWindow)
       end
 

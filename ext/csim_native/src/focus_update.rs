@@ -122,25 +122,35 @@ impl RealmArena {
     }
 
     // `:focus-visible` latched as `el` is focused, in its realm: shown unless the focus is a pointer's — a press that
-    // focused an element, or a script's after one (a press on what takes no focus leaves none: `press_focus`) — and `el`
-    // is no TEXT ENTRY — a textarea, a textual `<input>`, an editable element — whose ring a browser shows however focus
-    // came to it (Chrome and Firefox, measured 2026-11-27: a script's focus after a click on a button or a text field shows
-    // none, after a click on the page's background one; Selectors 4's heuristics).
+    // focused an element, a label's control a click focused, or a script's after one (a press on what takes no focus
+    // leaves none: `press_focus`) — a text entry showing its ring all the same (element_state.rs `is_focus_visible`)
+    // (Chrome and Firefox, measured 2026-11-27: a script's focus after a click on a button or a text field shows none,
+    // after a click on the page's background one; Selectors 4's heuristics).
     pub(crate) fn latch_focus_ring(&mut self, el: NodeId) {
         let Some(realm) = self.document_realm_of(el) else { return };
         let arena = self.enter(realm);
-        let text_entry = arena.get(el).filter(|n| n.kind == NodeKind::Element).is_some_and(|n| {
-            n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::TEXTUAL)) || arena.is_editable(el)
-        });
-        let hidden = arena.pointer_modality && !text_entry;
-        arena.set_focus_ring_hidden(hidden);
+        let ring = if arena.pointer_modality { crate::dom::RING_POINTER } else { crate::dom::RING_SHOWN };
+        arena.set_focus_ring(ring);
     }
     // …and the user's keyboard input in the realm entered: what is focused there shows its ring from now on ("If the user
     // interacts with the page via keyboard, the currently focused element should match :focus-visible"; Chrome, a Shift
-    // pressed at a button a click focused).
+    // pressed at a button a click focused) — but a key pressed with Control, Alt or Meta, or one of those, a shortcut's,
+    // which shows none (WPT css/selectors focus-visible-012; Firefox shows none for a Shift either).
     pub(crate) fn keyboard_modality(&mut self) {
         self.pointer_modality = false;
-        self.set_focus_ring_hidden(false);
+        self.set_focus_ring(crate::dom::RING_SHOWN);
+    }
+    // …that input a key `key` pressed with `held` (keys.rs bits) at what is focused in realm `realm`: the ring shown there,
+    // where it is no shortcut's.
+    pub(crate) fn key_pressed(&mut self, realm: i32, key: &[u16], held: u32) {
+        let shortcut = held & (crate::keys::CTRL | crate::keys::ALT | crate::keys::META) != 0
+            || ["Control", "Alt", "Meta"].iter().any(|m| key.iter().copied().eq(m.encode_utf16()));
+        if shortcut {
+            return;
+        }
+        let cur = self.cur();
+        self.enter(realm).keyboard_modality();
+        self.enter(cur);
     }
 }
 
@@ -570,10 +580,17 @@ fn fixup_owed(scope: &mut v8::PinScope<'_, '_>, area: Option<Entry>) -> bool {
     crate::focus::document_focus(&crate::dom::dom(scope).arena, el) == Some(el) && crate::focus::focusable_of(scope, el).flatten() == Some(false)
 }
 
-// __dom.focusingSteps(nid) -> whether a rendering update is owed the focus fixup (`fixup_owed`): HTML's focusing steps
-// for the element — the driver's own focusing, a label's activation, a reported validity problem, `select()`.
+// __dom.focusingSteps(nid, pointer) -> whether a rendering update is owed the focus fixup (`fixup_owed`): HTML's focusing
+// steps for the element — the driver's own focusing, a label's activation (`pointer`: a pointer's click, which shows no
+// ring — WPT css/selectors focus-visible-026), a reported validity problem, `select()`.
 fn focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    if args.get(1).is_true() {
+        let arena = &mut crate::dom::dom(scope).arena;
+        if let Some(realm) = arena.document_realm_of(el) {
+            arena.enter(realm).pointer_modality = true;
+        }
+    }
     let Some(area) = focusing_steps(scope, Target::Element(el), By::User) else { return };
     rv.set_bool(fixup_owed(scope, area));
 }
@@ -597,7 +614,7 @@ fn focus_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     if let (Entry::Element(focused), true) = (area, visible >= 0) {
         let arena = &mut crate::dom::dom(scope).arena;
         if let Some(realm) = arena.document_realm_of(focused).filter(|_| crate::focus::document_focus(arena, focused) == Some(focused)) {
-            arena.enter(realm).set_focus_ring_hidden(visible == 0);
+            arena.enter(realm).set_focus_ring(if visible == 0 { crate::dom::RING_HIDDEN } else { crate::dom::RING_SHOWN });
         }
     }
     rv.set_bool(fixup_owed(scope, Some(area)));

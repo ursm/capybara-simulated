@@ -8279,7 +8279,7 @@ module Capybara
       # open_window_from_js). The URL is resolved against THIS document so a relative `window.open('/x')` targets the
       # right origin/path. Its navigation's referrer the calling document — none for `noreferrer` (the features'), which
       # implies `noopener`: a window with no opener.
-      # (…`size` the [width, height] its features ask its content area to be, each nil for the default: navigables.rs
+      # (…`size` the [width, height] its features ask its content area to be, nil for the default: navigables.rs
       # `open_size`)
       def open_child_window(url, name, opener_realm_id = 0, about_base = nil, noopener = false, noreferrer = false, size = nil)
         return nil unless @driver.respond_to?(:open_window_from_js)

@@ -1995,6 +1995,18 @@ css/cssom/serialize-values.html:
 - 'outline-color: invert'
 - 'widows: 101'
 - 'widows: inherit'
+css/selectors/focus-visible-006.html:
+- Focus should always match :focus-visible on content editable divs
+css/selectors/focus-visible-024.html:
+- ":focus-visible matches after accesskey on BUTTON"
+- ":focus-visible matches after accesskey on DIV"
+css/selectors/focus-visible-025.html:
+- ":focus-visible matches after accesskey on BUTTON after previous mouse focus"
+- ":focus-visible matches after accesskey on DIV after previous mouse focus"
+css/selectors/focus-within-004.html:
+- "== css/selectors/focus-within-001-ref.html"
+css/selectors/focus-within-013.html:
+- "== css/selectors/focus-within-013-ref.html (a frame the painter never enters)"
 custom-elements/form-associated/ElementInternals-reportValidity-bubble.html:
 - "!= custom-elements/form-associated/ElementInternals-reportValidity-bubble-notref.html"
 custom-elements/form-associated/ElementInternals-reportValidity-delegatesFocus.html:
@@ -65241,36 +65253,6 @@ html/browsers/the-window-object/open-close/open-features-is-popup-condition.html
 - '"toolbar=yes" should set BarProp visibility to false'
 - '"top=500" should set BarProp visibility to false'
 - '"width=500" should set BarProp visibility to false'
-html/browsers/the-window-object/open-close/open-features-non-integer-height.html:
-- features "height=405  " should set "height=405"
-- features "height=405*3" should set "height=405"
-- features "height=405.32" should set "height=405"
-- features "height=405.5" should set "height=405"
-- features "height=405/5" should set "height=405"
-- features "height=405LLl" should set "height=405"
-- features "height=405^4" should set "height=405"
-- features "height=405e-1" should set "height=405"
-- features "height=405e1" should set "height=405"
-html/browsers/the-window-object/open-close/open-features-non-integer-innerheight.html:
-- features "innerheight=405  " should set "height=405"
-- features "innerheight=405*3" should set "height=405"
-- features "innerheight=405.32" should set "height=405"
-- features "innerheight=405.5" should set "height=405"
-- features "innerheight=405/5" should set "height=405"
-- features "innerheight=405LLl" should set "height=405"
-- features "innerheight=405^4" should set "height=405"
-- features "innerheight=405e-1" should set "height=405"
-- features "innerheight=405e1" should set "height=405"
-html/browsers/the-window-object/open-close/open-features-non-integer-innerwidth.html:
-- features "innerwidth=405  " should set "width=405"
-- features "innerwidth=405*3" should set "width=405"
-- features "innerwidth=405.32" should set "width=405"
-- features "innerwidth=405.5" should set "width=405"
-- features "innerwidth=405/5" should set "width=405"
-- features "innerwidth=405LLl" should set "width=405"
-- features "innerwidth=405^4" should set "width=405"
-- features "innerwidth=405e-1" should set "width=405"
-- features "innerwidth=405e1" should set "width=405"
 html/browsers/the-window-object/open-close/open-features-non-integer-left.html:
 - features "left=105  " should set "left=105"
 - features "left=105*3" should set "left=105"
@@ -65311,31 +65293,6 @@ html/browsers/the-window-object/open-close/open-features-non-integer-top.html:
 - features "top=105^4" should set "top=105"
 - features "top=105e-1" should set "top=105"
 - features "top=105e1" should set "top=105"
-html/browsers/the-window-object/open-close/open-features-non-integer-width.html:
-- features "width=405  " should set "width=405"
-- features "width=405*3" should set "width=405"
-- features "width=405.32" should set "width=405"
-- features "width=405.5" should set "width=405"
-- features "width=405/5" should set "width=405"
-- features "width=405LLl" should set "width=405"
-- features "width=405^4" should set "width=405"
-- features "width=405e-1" should set "width=405"
-- features "width=405e1" should set "width=405"
-html/browsers/the-window-object/open-close/open-features-tokenization-innerheight-innerwidth.html:
-- '" innerheight = 402" should set height of opened window'
-- '" innerwidth = 401" should set width of opened window'
-- '",innerheight=402,," should set height of opened window'
-- '",innerwidth=401,," should set width of opened window'
-- '"INNERHEIGHT=402" should set height of opened window'
-- '"INNERWIDTH=401" should set width of opened window'
-- '"\ninnerheight= 402" should set height of opened window'
-- '"\ninnerwidth= 401" should set width of opened window'
-- '"innerHeight=402" should set height of opened window'
-- '"innerWidth=401" should set width of opened window'
-- '"innerheight=402" should set height of opened window'
-- '"innerheight==402" should set height of opened window'
-- '"innerwidth=401" should set width of opened window'
-- '"innerwidth==401" should set width of opened window'
 html/browsers/the-window-object/open-close/open-features-tokenization-screenx-screeny.html:
 - '" screenx = 141" should set left position of opened window'
 - '" screeny = 142" should set top position of opened window'
@@ -65370,25 +65327,6 @@ html/browsers/the-window-object/open-close/open-features-tokenization-top-left.h
 - '"top=152,left=152" should set top and left position of opened window'
 - '"top=152==left=152" should set top and left position of opened window'
 - '"top==142" should set top position of opened window'
-html/browsers/the-window-object/open-close/open-features-tokenization-width-height.html:
-- '" height = 402 , width = 401 ," should set height and width of opened window'
-- '" height = 402" should set height of opened window'
-- '" width = 401" should set width of opened window'
-- '",height=402,," should set height of opened window'
-- '",height=402,,width==401" should set height and width of opened window'
-- '",width=401,," should set width of opened window'
-- '"HEIGHT=402" should set height of opened window'
-- '"HEIGHT=402, WIDTH=401" should set height and width of opened window'
-- '"WIDTH=401" should set width of opened window'
-- '"\nheight= 402" should set height of opened window'
-- '"\nheight= 402,,width=\n401" should set height and width of opened window'
-- '"\nwidth= 401" should set width of opened window'
-- '"height=402" should set height of opened window'
-- '"height=402,width=401" should set height and width of opened window'
-- '"height==402 width = 401" should set height and width of opened window'
-- '"height==402" should set height of opened window'
-- '"width=401" should set width of opened window'
-- '"width==401" should set width of opened window'
 html/browsers/the-window-object/security-window/window-security.https.html:
 - A SecurityError exception must be thrown when window.onmousewheel is accessed from
   a different origin.
@@ -66685,29 +66623,9 @@ html/interaction/focus/document-level-focus-apis/document-has-system-focus.html:
 - Top-level document receives blur/focus events and loses system focus during opening/closing
   of a popup
 - "[harness] TIMEOUT"
-html/interaction/focus/processing-model/textarea-scroll-selection.html:
-- programatic focus() scrolls selection into view including ancestors
 html/interaction/focus/sequential-focus-navigation-starting-point.html:
-- Focus navigation starting point should be maintained when focused element is removed.
-- Focus navigation starting point should be maintained when parent element is removed.
-- Focus navigation starting point should be maintained when shadow host is removed.
 - Focus navigation starting point should be maintained when slotted focused element
   is removed.
-- Focus navigation starting point should be set when scrolling to fragment (and should
-  not be overwritten when <a> is blurred).
-- Focus navigation starting point should not change when focused element at end of
-  shadow tree is removed.
-- Focus navigation starting point should not change when next element is moved with
-  moveBefore.
-- Focus navigation starting point should not change when next element is removed.
-- Focus navigation starting point should not change when previous element gets new
-  children.
-- Focus navigation starting point should not change when previous element is moved
-  with moveBefore.
-- Focus navigation starting point should not change when previous element is removed.
-html/interaction/focus/the-autofocus-attribute/update-the-rendering.html:
-- '"Flush autofocus candidates" should be happen before a scroll event and animation
-  frame callbacks'
 html/rendering/bidi-rendering/slot-no-isolate-001.html:
 - "== html/rendering/bidi-rendering/slot-no-isolate-001-ref.html"
 html/rendering/bindings/the-select-element-0/option-label.html:
@@ -68172,8 +68090,6 @@ selection/selection-content-visibility-hidden.html:
 - 'Text with content-visibility: hidden is not selected'
 selection/selection-direction-on-single-click.html:
 - direction returns "none" when the selection is collapsed
-selection/selection-focused-element-becomes-nonfocusable.html:
-- Focused element is removed
 selection/textcontrols/focus.html:
 - focus() should cancel selection extension by pointer device
 selection/toString-user-select-none.html:
