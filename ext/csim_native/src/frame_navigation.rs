@@ -106,6 +106,17 @@ struct FrameNavigation {
     // another build begins from (`frameBuildEnd` hands them back).
     runs: Vec<LoadRun>,
     after_build: Vec<(u32, u32)>,
+    // The error document a commit's build of its navigation left to be made as its window is first read
+    // (frame_response.rs `FRAME_ERROR`) — till another navigation of it begins.
+    error_document: Option<ErrorDocument>,
+}
+
+// A network error's document, made later: the URL the navigation failed at, and the sandboxing and the source policy
+// container it began with, which the document is made with.
+pub(crate) struct ErrorDocument {
+    pub(crate) url: String,
+    pub(crate) sandbox: Option<String>,
+    pub(crate) source: Option<(String, Option<String>)>,
 }
 
 // The steps of a container's `load` for one navigation (`frameLoadBegin`), which the bindings run as its tasks, its load gate
@@ -1347,6 +1358,7 @@ impl RealmArena {
     pub(crate) fn supersede_frame_nav(&mut self, container: NodeId) {
         let nav = self.frame_navigation(container);
         nav.generation = nav.generation.wrapping_add(1);
+        nav.error_document = None;
         nav.flags &= !(LOAD_OWED | BUILD_QUEUED);
         if nav.held.take().is_some() {
             let realm = self.get(container).map(|n| n.realm);
@@ -1380,6 +1392,9 @@ impl RealmArena {
         nav.generation == generation
     }
     // The history entry the navigation pushes as it commits, let go of: one that makes no document pushes none.
+    pub(crate) fn keep_error_document(&mut self, container: NodeId, error: ErrorDocument) {
+        self.frame_navigation(container).error_document = Some(error);
+    }
     pub(crate) fn take_frame_history_url(&mut self, container: NodeId) {
         if let Some(nav) = self.frame_navigations.0.get_mut(&container) {
             nav.history = None;
@@ -1460,6 +1475,7 @@ pub(crate) enum FrameSource {
     Javascript(String),
     Blob(String),
     Fetch(String),
+    ErrorDocument(ErrorDocument),
 }
 
 impl RealmArena {
@@ -1474,6 +1490,9 @@ impl RealmArena {
     //   parses; else by its scheme.
     pub(crate) fn frame_source(&mut self, container: NodeId, doc: Option<NodeId>) -> (FrameSource, bool) {
         let nav = self.frame_navigation(container);
+        if let Some(error) = nav.error_document.take() {
+            return (FrameSource::ErrorDocument(error), false);
+        }
         let reload = nav.flags & RELOAD_NAV != 0;
         // (…a navigation of the frame's navigable to a URL — its document's own, a form's, a link's — not its attributes'
         // processing, which alone reads `srcdoc`: HTML "process the iframe attributes"; Chrome and Firefox take a srcdoc

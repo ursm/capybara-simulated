@@ -10,6 +10,7 @@ use crate::dom::{realm, realm_id, NodeId};
 use crate::font_files::Terminated;
 use crate::frame_navigation::{Content, FrameSource, COMMIT_PENDING, DEFERRED_SW, LOAD_FIRED};
 use crate::dom::member;
+use crate::frame_navigation::ErrorDocument;
 use crate::subresource_obtain::{call, now, text, text_or_null, H_FILE, H_FRAME_NAVIGATION, H_LOAD_BLOCKER_SETTLED};
 
 // What a build makes of the response (`frameResponse`'s first item): the document it answers; none yet, its navigation
@@ -21,6 +22,12 @@ const FRAME_KEPT: u32 = 2;
 // …or none yet, its response held until the event loop comes to the time its server took over it — `[FRAME_LATER, ms]`
 // — as a script's fetch lands (script_fetch.rs): a commit's build alone (`defer`), whose task comes again then.
 const FRAME_LATER: u32 = 3;
+// …or, a commit's build whose navigation came to a network error, none yet: the frame's error document made as its
+// window is first read (`FrameSource::ErrorDocument`) — a document no other origin reads anything of but its
+// WindowProxy, whose realm every visit of a page with an embed the app does not serve would otherwise make for nothing.
+// The bindings commit the navigation all the same, the document it leaves unloaded, and its container's `load` goes on as
+// it would.
+const FRAME_ERROR: u32 = 4;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "frameResponse", frame_response_op, context_id);
@@ -81,6 +88,8 @@ struct Response<'s> {
     error: bool,
     // (…how long after now the response is in, `FRAME_LATER`'s)
     later: f64,
+    // (…a network error: no response at all)
+    failed: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -95,8 +104,9 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
     };
     let (source, reload) = if initial { (FrameSource::None, false) } else { realm(scope, cid).frame_source(container, doc) };
     let empty = v8::String::empty(scope).into();
-    let mut r = Response { url: String::new(), body: empty, content_type: "text/html".to_owned(), javascript: None, client_id: None, referrer: None, policy: None, refresh: None, csp: None, origin_agent_cluster: false, error: false, later: 0.0 };
+    let mut r = Response { url: String::new(), body: empty, content_type: "text/html".to_owned(), javascript: None, client_id: None, referrer: None, policy: None, refresh: None, csp: None, origin_agent_cluster: false, error: false, later: 0.0, failed: false };
     let (carried, srcdoc) = (matches!(source, FrameSource::Navigation(_)), matches!(source, FrameSource::Srcdoc(_)));
+    let mut error_document: Option<ErrorDocument> = None;
     match source {
         // (…a scripted navigation's: its response's as it carried it)
         FrameSource::Navigation(content) => {
@@ -175,18 +185,39 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
                 FRAME_BUILD => {}
                 other => return Ok(code(scope, other, r.later)),
             }
+            if r.failed && defer {
+                let arena = realm(scope, cid);
+                let error = ErrorDocument { url: r.url.clone(), sandbox: arena.take_frame_sandbox(container), source: arena.take_frame_source(container) };
+                arena.take_frame_src_url(container);
+                arena.keep_error_document(container, error);
+                return Ok(code(scope, FRAME_ERROR, 0.0));
+            }
+        }
+        // (…the error document a commit's build left to be made as the frame's window is read: `FRAME_ERROR`)
+        FrameSource::ErrorDocument(error) => {
+            r.error = true;
+            r.url = error.url.clone();
+            error_document = Some(error);
         }
     }
     // The document's origins and sandboxing flags, as this realm — its creator's — makes them.
     let arena = realm(scope, cid);
     // (…the sandboxing its initial about:blank document is made with the container's as it stands, which leaves the
     // navigation its own: HTML "create a new child navigable")
-    let sandbox = if initial { arena.frame_sandbox(container) } else { arena.take_frame_sandbox(container) };
+    let sandbox = match &error_document {
+        Some(error) => error.sandbox.clone(),
+        None if initial => arena.frame_sandbox(container),
+        None => arena.take_frame_sandbox(container),
+    };
     // (…and the policy container of the document that began its navigation, where another than this one did: a sibling
     // frame's script, a link targeting it — `take_frame_source` — which a document of a local URL clones; the CSP-derived
     // sandboxing of the policy container document_init.rs settles on is the document's own to take as it is made:
     // v8_runtime.rb `load_frame_document`, `sandboxByPolicy`)
-    let source = if initial { None } else { arena.take_frame_source(container) };
+    let source = match error_document {
+        Some(error) => error.source,
+        None if initial => None,
+        None => arena.take_frame_source(container),
+    };
     let mut created = crate::realm_location::frame_origins(arena, cid, &r.url, sandbox.as_deref(), r.csp.as_deref());
     if r.error {
         created.document = Some("null".to_owned());
@@ -346,6 +377,7 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
     call(scope, host, H_FILE, &[entry.into()])?;
     let Some(resp) = resp else {
         r.error = true;
+        r.failed = true;
         if let Some(url) = failed_at {
             r.url = url;
         }
