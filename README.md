@@ -167,7 +167,8 @@ end
 
   Each entry is a host — a name (an internationalized one in either form), an IPv4 address, or an IPv6 address in
   brackets (`[::1]`) — optionally followed by `:port`; a host alone allows every port of it. No scheme, path or
-  whitespace: `Driver.new` raises an `ArgumentError` for those. Names compare case-insensitively, a trailing dot ignored.
+  whitespace, and no wildcards (`*.example.com` names no host — list each one): `Driver.new` raises an `ArgumentError` for
+  those. Names compare case-insensitively, a trailing dot ignored.
 
   The hosts your app serves are read as each request is made, so a test may set `Capybara.app_host` whenever it likes
   (a tenant's subdomain per test):

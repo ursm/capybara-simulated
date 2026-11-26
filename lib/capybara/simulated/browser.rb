@@ -13779,11 +13779,12 @@ module Capybara
 
       # The hosts of an `external_network:` Array, each a host or `host:port` — a name, an IPv4 address, an IPv6 one in
       # brackets — as the URL parser writes a URL's host (lowercased, an IDN its A-label) with no trailing dot; anything else
-      # (a scheme, a path, whitespace, an IPv6 address unbracketed, a port out of range) an ArgumentError.
+      # (a scheme, a path, whitespace, an IPv6 address unbracketed, a wildcard — no pattern is matched — a port out of range)
+      # an ArgumentError.
       def self.external_network_hosts(list)
         list.map do |entry|
           text = entry.to_s
-          raise ArgumentError, "external_network: #{entry.inspect} is no host or host:port" unless text.match?(/\A(?:\[[0-9A-Fa-f:.]+\]|[^\s\/:@?#\[\]]+)(?::\d{1,5})?\z/)
+          raise ArgumentError, "external_network: #{entry.inspect} is no host or host:port" unless text.match?(/\A(?:\[[0-9A-Fa-f:.]+\]|[^\s\/:@?#\[\]*]+)(?::\d{1,5})?\z/)
 
           port   = text[/:(\d+)\z/, 1]&.to_i
           raise ArgumentError, "external_network: #{entry.inspect} has a port out of range" if port && !(1..65_535).cover?(port)

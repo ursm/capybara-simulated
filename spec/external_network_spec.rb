@@ -195,7 +195,7 @@ RSpec.describe 'a request of a host the app does not serve' do
   end
 
   it 'refuses an allowed host that is no host or host:port' do
-    ['http://a.test', 'a.test/x', '::1:9', 'a.test ', 'a.test:99999'].each do |entry|
+    ['http://a.test', 'a.test/x', '::1:9', 'a.test ', 'a.test:99999', '*.a.test', '*'].each do |entry|
       expect { Capybara::Simulated::Driver.new(app, external_network: [entry]) }.to raise_error(ArgumentError)
     end
   end
