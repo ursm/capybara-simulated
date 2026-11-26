@@ -370,6 +370,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "moduleImport", module_import_op, context_id);
     register(scope, ns, "noteReferringScript", note_referring_script_op, context_id);
     register(scope, ns, "moduleGraphBegin", module_graph_begin_op, context_id);
+    register(scope, ns, "moduleGraphDue", module_graph_due_op, context_id);
 }
 
 fn map_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut ModuleMap> {
@@ -493,6 +494,13 @@ fn module_graph_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     if let Ok(Some(gid)) = begin_external(scope, cid, url, plan, None, began) {
         rv.set_uint32(gid);
     }
+}
+// __dom.moduleGraphDue(gid) -> how many milliseconds after now the graph `gid` next goes on (`advance`, as far as the event
+// loop's clock has come), 0 for one whose every module is in, -1 for none: what a worker's graph waits on with a timer.
+fn module_graph_due_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let gid = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    rv.set_double(due_in(scope, cid, gid).unwrap_or(-1.0));
 }
 fn keep_host(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>) {
     let kept = map_of(scope, cid).is_some_and(|map| map.host.is_some());

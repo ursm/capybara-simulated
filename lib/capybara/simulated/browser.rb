@@ -10598,15 +10598,13 @@ module Capybara
         rt.call('reportWorkerScriptError', e.message, file || url, line.to_i, col.to_i)
       end
 
-      # …and a module worker's (`{type: 'module'}`) as a module graph, its static imports fetched on the worker's thread as
-      # a module script's are — a 2xx response of a JavaScript MIME type (Chrome enforces it for module scripts whatever
-      # the server) — one that cannot be fetched, parsed or linked failing the graph: a plain `error` at the Worker, no
-      # exception to report (HTML "run a worker": its script null, or its error to rethrow set). An exception its
-      # evaluation throws is reported as a classic script's is (`eval_module_graph`).
+      # …and a module worker's (`{type: 'module'}`) as a module graph, begun: its imports fetched on the worker's thread as
+      # a module script's are, each landing as far after it began as its server took, the script run once the last is in
+      # (WorkerRuntime#begin_module_graph) — one that cannot be fetched, parsed or linked failing the graph: a plain `error`
+      # at the Worker, no exception to report (HTML "run a worker": its script null, or its error to rethrow set). An
+      # exception its evaluation throws is reported as a classic script's is.
       private def run_worker_module(rt, body, url, handle, outbox, module_fetch)
-        rt.eval_module_graph(body, url, module_fetch, service: false)
-      rescue WorkerRuntime::ModuleGraphFailed, RustyRacer::ParseError, RustyRacer::RuntimeError => e
-        outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
+        rt.begin_module_graph(body, url, module_fetch, ->(message) { outbox << {handle: handle, kind: '__error', message: message} })
       end
       # …the fetch of a module worker `handle` (of `worker_url`) imports, statically or by `import()` — HTML "fetch a single
       # module script": a request of mode 'cors' whose client is the worker, through the service worker that controls it
@@ -10615,6 +10613,14 @@ module Capybara
       # type, or none at all. Its source and its URL — the response's, a redirect's end, which its own imports resolve
       # against and its `import.meta.url` reports.
       private def worker_module_fetch(handle, controller, worker_url, dest)
+        fetch = worker_module_fetch_leg(handle, controller, worker_url, dest)
+        # (…and how long its server took, its sleeps counted, run on no event loop: what the module lands after)
+        lambda do |abs, type = 0|
+          answer, slept = server_timed_sleeps { fetch.call(abs, type) }
+          [*answer, slept]
+        end
+      end
+      private def worker_module_fetch_leg(handle, controller, worker_url, dest)
         lambda do |abs, type = 0|
           # (…a JSON, CSS or text module's of its type's destination: HTML "fetch destination from module type")
           dest = MODULE_DESTINATIONS[type] if type.positive?

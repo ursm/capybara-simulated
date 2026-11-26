@@ -37,29 +37,45 @@ module Capybara
       # graph linked and evaluated here. One that could not be fetched, or that has an error to rethrow, raises
       # `ModuleGraphFailed`.
       #
-      # A SERVICE worker's graph may not await at its top level ("Run Service Worker" fails the script; Chrome rejects the
-      # registration) — V8's IsGraphAsync (Module#graph_async?) answers it for the WHOLE instantiated graph, TLA hiding in
-      # an imported module included — and what its evaluation throws fails the job its caller runs. Any other worker's may,
-      # and what its evaluation throws — now, or as an awaited module settles — is reported in the worker's global as a
-      # classic script's exception is (HTML "run a module script").
-      def eval_module_graph(src, url, fetch_import, service: true)
+      # A SERVICE worker's graph, fetched whole as it waits — its job waits on its evaluation — may not await at its top
+      # level ("Run Service Worker" fails the script; Chrome rejects the registration): V8's IsGraphAsync
+      # (Module#graph_async?) answers it for the WHOLE instantiated graph, TLA hiding in an imported module included — and
+      # what its evaluation throws fails the job its caller runs. Any other worker's may, and what its evaluation throws —
+      # now, or as an awaited module settles — is reported in the worker's global as a classic script's exception is (HTML
+      # "run a module script").
+      def eval_module_graph(src, url, fetch_import)
         module_steps(fetch_import, url.to_s => [src, url.to_s, 'text/javascript'])
-        result = call('moduleWorkerGraph', url.to_s)
-        # (…its `import()`s' fetches the script's again, its graph's of the worker's destination in: HTML's
-        # HostLoadImportedModule with no load state, `script`)
+        root = linked_graph(call('moduleWorkerGraph', url.to_s), url)
+        raise 'Top-level await is disallowed in a service worker' if root.graph_async?
+
+        root.evaluate
+        nil
+      end
+      # …a dedicated or a shared worker's, begun: its graph fetched as the service worker's is, each module landing as far
+      # after its fetch began as its server took — the worker's timers waiting it out, on the clock it follows, its
+      # window's (workers.js `beginModuleWorker`) — and run once every module is in, the messages its owner posted
+      # meanwhile delivered after (HTML "run a worker": its port message queue enabled once its script has run). What
+      # fails it — none of its modules to be had, its error to rethrow, its link's — goes to `failed`.
+      def begin_module_graph(src, url, fetch_import, failed)
+        module_steps(fetch_import, url.to_s => [src, url.to_s, 'text/javascript'])
+        @ctx.attach('@moduleWorkerRun', lambda do |result|
+          linked_graph(result, url).evaluate(report: '@steps.reportError')
+          nil
+        rescue ModuleGraphFailed, RustyRacer::ParseError, RustyRacer::RuntimeError => e
+          failed.call("#{e.class}: #{e.message}")
+          nil
+        end)
+        call('beginModuleWorker', url.to_s)
+        nil
+      end
+      # …what the map handed over (`moduleGraphResult`), its root linked — its `import()`s' fetches the script's from
+      # here, its graph's of the worker's destination over (HostLoadImportedModule with no load state: `script`).
+      private def linked_graph(result, url)
         module_steps(@dynamic_fetch) if @dynamic_fetch
         raise ModuleGraphFailed, "module script failed: #{url}" unless result.is_a?(Array)
         raise ModuleGraphFailed, result[0].first(2).join(': ') if result[0].is_a?(Array)
 
-        root = RuntimeShared.linked_module(@modules, result) or raise ModuleGraphFailed, "module script failed: #{url}"
-        if service
-          raise 'Top-level await is disallowed in a service worker' if root.graph_async?
-
-          root.evaluate
-        else
-          root.evaluate(report: '@steps.reportError')
-        end
-        nil
+        RuntimeShared.linked_module(@modules, result) or raise ModuleGraphFailed, "module script failed: #{url}"
       end
       # …what a module graph of the worker's could not come to: a module none could fetch, or its error to rethrow.
       class ModuleGraphFailed < StandardError; end
@@ -82,7 +98,7 @@ module Capybara
       private
 
       # The host steps of the worker's module map (subresource-host.js `H_MODULE_START` / `H_MODULE_TAKE`): a module's
-      # fetch made at once by `fetch_import` (`[source, response URL, content type]`; raising for none) — `seeded` the
+      # fetch made at once by `fetch_import` (`[source, response URL, content type, its server's ms]`; raising for none) — `seeded` the
       # ones already in hand — and what came in compiled into a record of the worker's (`@modules`), held to its module
       # type's MIME type: `[record, body, base URL]`, its parse error `[name, message, filename, lineno]`, nil for none.
       def module_steps(fetch_import, seeded = {})
@@ -96,7 +112,8 @@ module Capybara
           rescue StandardError
             nil
           end
-          @fetched[id] && 0.0
+          # (…how long its server took: `fetch_import`'s fourth, the sleeps it counted — what the module lands after)
+          @fetched[id] && @fetched[id][3].to_f
         })
         @ctx.attach('@moduleFetchTake', ->(id, type, _now) {
           source, base, content_type = @fetched.delete(id.to_i)

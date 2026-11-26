@@ -327,6 +327,26 @@ RSpec.describe 'the module map' do
     end
   end
 
+  # …and lands as late as its servers took: the page's timer due meanwhile runs first, the messages posted to the worker
+  # before its script ran delivered after it, in order (Chrome and Firefox `t100 m:ran m:got:a,b t300`, csim-bench mod8
+  # `w_time2`).
+  describe "a module worker's graph under a slow server" do
+    it 'runs its script once its last module is in, the messages posted meanwhile after it' do
+      files = {'/z.js' => 'export const z = 1;',
+               '/wmd.js' => "import '/slow/200/z.js'; const got = []; onmessage = (e) => { got.push(e.data); if (got.length === 2) postMessage('got:' + got.join(',')); }; postMessage('ran');"}
+      expect(log_of(<<~HTML, files)).to eq('t100 m:ran m:got:a,b t300')
+        <script>
+          const w = new Worker('/wmd.js', { type: 'module' }); let n = 0;
+          w.onmessage = (e) => { L.push('m:' + e.data); if (++n === 2) setTimeout(done, 200); };
+          w.onerror = (e) => { e.preventDefault(); L.push('m:error'); done(); };
+          w.postMessage('a'); setTimeout(() => w.postMessage('b'), 50);
+          setTimeout(() => L.push('t100'), 100);
+          setTimeout(() => L.push('t300'), 300);
+        </script>
+      HTML
+    end
+  end
+
   # HTML "merge existing and new import maps": a map registered after a specifier resolved keeps that resolution, its
   # other rules merged (Chrome `a1 a1 b b`; Firefox registers no map once a module has loaded: `b!TypeError c!TypeError`
   # — the spec's merge is explicit, csim-bench mod8 `im_late`).
