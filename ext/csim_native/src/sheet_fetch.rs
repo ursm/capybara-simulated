@@ -102,6 +102,11 @@ fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
     if crate::fetch_rules::fetch_route(url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
         return Ok(0.0);
     }
+    // (…none where the cascade fetched its sheet first, as the parser connected the link: that fetch is its fetch)
+    let key = format!("{} {url}", plan & PLAN_REQUEST);
+    if realm(scope, cid).sheet_requests.get(&el).and_then(|r| r.answered.as_ref()).is_some_and(|(k, _)| *k == key) {
+        return Ok(0.0);
+    }
     let doc = crate::node_handle::node_document_of(scope, el);
     if owner_preload(scope, cid, host, Owner { id: el, doc }, url, plan)?.is_some() {
         return Ok(0.0);
@@ -658,8 +663,12 @@ pub(crate) fn asset(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<
     let response = call(scope, host, H_ASSET, &args)?;
     if let Some(o) = owner {
         let failed = response.as_ref().map(|r| v8::Local::new(scope, r)).and_then(|r| v8::Local::<v8::Array>::try_from(r).ok()).is_none_or(|a| a.get_index(scope, 0).is_none_or(|b| b.is_null_or_undefined()));
-        if failed {
-            request_of(realm(scope, cid), o.id).failed = Some((key, response.clone()));
+        let request = request_of(realm(scope, cid), o.id);
+        match (failed, &response) {
+            (true, _) => request.failed = Some((key, response.clone())),
+            // (…kept for its other readers: its load, the fetch its connection would begin — one the cascade made first)
+            (false, Some(answer)) => request.answered = Some((key, answer.clone())),
+            _ => {}
         }
     }
     Ok(response)
