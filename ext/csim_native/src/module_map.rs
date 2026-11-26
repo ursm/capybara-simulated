@@ -372,6 +372,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "moduleGraphDue", module_graph_due_op, context_id);
     register(scope, ns, "modulePreloadBegin", module_preload_begin_op, context_id);
     register(scope, ns, "modulePreloadLoaded", module_preload_loaded_op, context_id);
+    register(scope, ns, "modulePreloadsAbort", module_preloads_abort_op, context_id);
 }
 
 fn map_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut ModuleMap> {
@@ -938,6 +939,19 @@ fn module_preload_loaded_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     });
     drop_graph(scope, cid, gid, false);
     rv.set_bool(loaded == Some(true));
+}
+
+// __dom.modulePreloadsAbort() -> the numbers of the realm's modulepreloads whose fetches its document's abort cancelled
+// (HTML "abort a document": a network error at once) — each graph let go of, its fetch with it where no other graph waits
+// on it; `modulePreloadLoaded` none of them.
+fn module_preloads_abort_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let gids: Vec<u32> = map_of(scope, cid).map(|map| map.graphs.iter().filter(|g| g.single).map(|g| g.id).collect()).unwrap_or_default();
+    for &gid in &gids {
+        drop_graph(scope, cid, gid, true);
+    }
+    let items: Vec<v8::Local<v8::Value>> = gids.iter().map(|&gid| v8::Integer::new_from_unsigned(scope, gid).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // ── its result ──

@@ -12,7 +12,8 @@ RSpec.describe 'the module map' do
     'js'   => 'text/javascript',
     'json' => 'application/json',
     'css'  => 'text/css',
-    'txt'  => 'text/plain'
+    'txt'  => 'text/plain',
+    'html' => 'text/html'
   }.freeze
 
   # A page whose script logs into `L` (shown in `#out` once its title is `done`), and the files it fetches: a fixed body
