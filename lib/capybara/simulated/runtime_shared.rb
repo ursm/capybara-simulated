@@ -38,7 +38,7 @@ module Capybara
         # request the plan's (its destination too). See sw_script_subresource_fetch.
         'swScriptFetch'                => lambda {|b, *a|
           mode, credentials, _, _, destination = Native.subresource_plan_fields(a[4].to_i)
-          b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], destination, mode, credentials, binary: a[5] == true, integrity: a[6] || '', referrer_policy: a[7])
+          b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], destination, mode, credentials, binary: a[5] == true, integrity: a[6] || '', referrer_policy: a[7], client: a[8])
         },
         # A frame's navigation by its container (a `src` change, the host's of a URL no fetch here answers) commits: the
         # session-history entry it makes made now (snapshotting the OUTGOING document), so history.go(-1) can traverse

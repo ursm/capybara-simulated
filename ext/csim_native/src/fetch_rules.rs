@@ -245,6 +245,9 @@ pub(crate) struct WorkerResponse<'a> {
     pub(crate) url: &'a str,
     pub(crate) redirected: bool,
     pub(crate) location: Option<&'a str>,
+    // (…its `Referrer-Policy` header's value, which a redirect sets the request's policy by: HTTP-redirect fetch "set
+    // request's referrer policy on redirect")
+    pub(crate) referrer_policy: Option<&'a str>,
 }
 pub(crate) enum HopOutcome {
     // The response answers the request as it is.
@@ -711,7 +714,7 @@ mod tests {
             taint: RedirectTaint::SameOrigin,
             hops,
         };
-        let response = |status, location, url| WorkerResponse { status, response_type: "basic", url, redirected: false, location };
+        let response = |status, location, url| WorkerResponse { status, response_type: "basic", url, redirected: false, location, referrer_policy: None };
         let r302 = response(302, Some("y"), "http://a.test/x");
         assert!(matches!(intercepted_hop(&hop("follow", "cors", 0), &response(200, Some("y"), "")), HopOutcome::Answer));
         assert!(matches!(intercepted_hop(&hop("manual", "cors", 0), &r302), HopOutcome::OpaqueRedirect));

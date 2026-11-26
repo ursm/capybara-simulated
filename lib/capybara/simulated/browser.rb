@@ -5623,8 +5623,10 @@ module Capybara
       # EXECUTES (browsers run opaque classic scripts) — its bytes ride the private
       # render channel like the image path.
       # (…`follower` the window whose parser waits on it: `sw_direct_reply`)
+      # (…`client` the page's realm as the network judges its requests, `[URL, origin, ancestors' origins]`:
+      # fetch_request.rs `swRequestClient`)
       def sw_script_subresource_fetch(handle, url, client_id, referrer, destination = 'script', mode = 'no-cors', credentials = 'include', binary: false, integrity: '', referrer_policy: nil,
-                                      follower: self)
+                                      client: nil, follower: self)
         unless sw_host?
           return sw_host.sw_script_subresource_fetch(
             handle,
@@ -5637,6 +5639,7 @@ module Capybara
             binary:          binary,
             integrity:       integrity,
             referrer_policy: referrer_policy,
+            client:          client,
             follower:        self
           )
         end
@@ -5667,7 +5670,7 @@ module Capybara
           client_id:       client_id.to_s,
           referrer_policy: referrer_policy.to_s,
           referrer_source: referrer.to_s,
-          origin:          url_origin(referrer.to_s) || url_origin(url.to_s)
+          client:          client
         )
         wire = chain.wire
         r = nil
@@ -5675,12 +5678,20 @@ module Capybara
           r = sw_direct_fetch(handle.to_i, wire, -handle.to_i, follower:)
           if r.nil? || r['fallthrough']
             at = chain.fallthrough or return nil
-            r = sw_hop_from_network(at, mode, credentials, referrer, referrer_policy, destination) or return {'blocked' => true}
+            r = sw_hop_from_network(JSON.parse(at)) or return {'blocked' => true}
             break
           end
           return {'blocked' => true} if r['networkError']
 
-          kind, *step = chain.answer((r['status'] || 200).to_i, r['type'].to_s, r['url'].to_s, r['redirected'] == true, (loc = header_field(r['headers'] || {}, 'location')) && Array(loc).first)
+          headers = r['headers'] || {}
+          kind, *step = chain.answer(
+            (r['status'] || 200).to_i,
+            r['type'].to_s,
+            r['url'].to_s,
+            r['redirected'] == true,
+            (loc = header_field(headers, 'location')) && Array(loc).first,
+            (policy = header_field(headers, 'referrer-policy')) && Array(policy).join(',')
+          )
           case kind
           when 0
             hops, hop_url = step
@@ -5734,24 +5745,24 @@ module Capybara
         }
       end
 
-      # …the network's answer to a hop the worker let through (`at`, `Native::SwChain#fallthrough`: its method, URL, headers,
-      # redirect-taint and the Sec-Fetch-Site its chain latched), in the shape a worker's answer has — a redirected
-      # response, its URL list past one — nil for a network error.
-      private def sw_hop_from_network(at, mode, credentials, referrer, referrer_policy, destination)
-        method, target, headers, taint, site = at
-        res = rack_fetch(method, target, '', headers, 'follow', (mode.to_s unless mode.to_s == 'no-cors'), credentials: credentials.to_s, referrer: referrer.to_s, referrer_policy: referrer_policy,
-                                                                    redirect_taint: taint, site_seed: site, origin_null: taint != 'same-origin', redirected: true, dest: destination.to_s)
+      # …the network's answer to the request at a hop the worker let through (`Native::SwChain#fallthrough`: the request as
+      # the host takes one — its referrer, redirect-taint and Sec-Fetch-Site latch the chain's), in the shape a worker's
+      # answer has — a redirected response, an opaque one's bytes on its private render channel — nil for a network error.
+      private def sw_hop_from_network(request)
+        res = rack_fetch_request(request, '')
         return nil unless resource_loaded?(res)
 
-        bytes = res['body_bytes'] || res['body'].to_s.b
-        {
+        bytes  = res['body_bytes'] || res['body'].to_s.b
+        answer = {
           'status'     => res['status'].to_i,
           'type'       => res['type'] || 'basic',
           'headers'    => res['headers'] || {},
-          'url'        => res['url'].to_s.empty? ? target : res['url'].to_s,
+          'url'        => res['url'].to_s.empty? ? request['url'].to_s : res['url'].to_s,
           'redirected' => true,
           'body_b64'   => Base64.strict_encode64(bytes)
         }
+        answer.merge!('render_b64' => Base64.strict_encode64(res['opaque_render']), 'render_status' => res['render_status']) if res['opaque_render']
+        answer
       end
 
       def sw_import_script_fetch(sw_handle, url, client_handle)
@@ -6469,6 +6480,7 @@ module Capybara
             sw_tell_realms('swRegistrationUpdateFound', n)
           when 'activate'      then sw_update_worker_state(n, 'activating') { @workers[n]&.dig(:inbox)&.push({kind: 'sw_activate'}) }
           when 'controller'    then sw_controller_told(n, *args)
+          when 'report_client' then sw_report_client(n)
           when 'queue_step'    then @runtime.call('swQueueStep', n)
           when 'continue'      then sw_run(Native.sw_continue(@sw_partition, n))
           when 'try_clear'     then try_clear_uninstalls
@@ -6478,7 +6490,6 @@ module Capybara
             sw_with_realms { sw_browsers.each(&:sw_navigations_due!) }
           when 'queue_job'     then @runtime.call('swQueueJob', n)
           when 'fetch'         then sw_fetch_job(n)
-          when 'report_client' then sw_report_client(n)
           # (…with its registration's versions as this step leaves them, which an object of it a realm makes as the promise
           # resolves starts from — the next version's later steps reaching it after, in order: `swRegistrationVersions`)
           when 'settled'       then sw_broadcast('swJobSettled', n, *args, *(args[0].to_i.positive? ? sw_versions_now(args[0].to_i) : []))

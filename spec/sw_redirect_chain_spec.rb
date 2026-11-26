@@ -27,6 +27,7 @@ RSpec.describe 'a redirect a service worker answers with' do
         seen.push(p);
         const to = {'/a.png': '/b.png', '/s1.js': '/s2.js', '/es1': '/es2'}[p];
         if (to) e.respondWith(Response.redirect(to, 302));
+        if (p === '/p1') e.respondWith(new Response(null, {status: 302, headers: {location: new URL('/p2', self.location).href, 'referrer-policy': 'no-referrer'}}));
         if (p === '/racenav') {
           e.respondWith(new Promise(r => setTimeout(() => r(new Response('<!doctype html><meta charset=utf-8><body>handler page', {headers: {'content-type': 'text/html'}})), 200)));
         }
@@ -35,17 +36,21 @@ RSpec.describe 'a redirect a service worker answers with' do
     JS
   }
   let(:requests) { [] }
+  let(:referers) { {} }
   let(:app) {
-    sw  = worker
-    log = requests
+    sw       = worker
+    log      = requests
+    referers = self.referers
     png = ['89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000001e221bc330000000049454e44ae426082'].pack('H*')
     lambda {|env|
       path = env['PATH_INFO']
       log << path
+      referers[path] = env['HTTP_REFERER']
       case path
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [sw]]
       when '/b.png' then [200, {'content-type' => 'image/png'}, [png]]
       when '/s2.js' then [200, {'content-type' => 'text/javascript'}, ['window.s2ran = true;']]
+      when '/p2' then [200, {'content-type' => 'text/plain'}, ['p2']]
       when '/es2' then [200, {'content-type' => 'text/event-stream'}, ["data: hello\n\n"]]
       when '/racenav' then [302, {'location' => '/elsewhere'}, []]
       when '/elsewhere' then [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>network elsewhere']]
@@ -89,6 +94,16 @@ RSpec.describe 'a redirect a service worker answers with' do
     expect(seen(session)).to include('/a.png', '/b.png', '/s1.js', '/s2.js', '/es1', '/es2')
     expect(requests).to include('/b.png', '/s2.js', '/es2')
     expect(requests).not_to include('/a.png', '/s1.js', '/es1')
+  end
+
+  # HTTP-redirect fetch "set request's referrer policy on redirect" (the response's Referrer-Policy), then main fetch
+  # "determine request's referrer" again for the hop: the worker sees, and the network is sent, the hop's.
+  it "takes a redirect's Referrer-Policy for the next hop, its referrer determined again" do
+    session = controlled_session
+    expect(session.evaluate_async_script("const d = arguments[0]; fetch('/p1').then(r => r.text()).then(d, e => d(String(e)))")).to eq('p2')
+    expect(seen(session)).to include('/p1', '/p2')
+    expect(requests).not_to include('/p1')
+    expect(referers.fetch('/p2')).to be_nil
   end
 
   it "hands a raced navigation's redirect to the navigation: the handler's answer, the network asked once" do

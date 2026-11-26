@@ -1900,7 +1900,8 @@ module Capybara
             'cors',
             sw[:credentials] || 'same-origin',
             integrity: integ,
-            referrer_policy: sw[:referrer_policy]
+            referrer_policy: sw[:referrer_policy],
+            client:          sw[:client]
           )
           @browser.note_module_fetch(url_s, started, answer: r) if r   # its Resource Timing entry ('script'), the answer's
           return handles[url] = nil if r && r['blocked']   # respondWith failed the load
@@ -2069,7 +2070,7 @@ module Capybara
       # it could not be fetched — a host failure (`safe_call`'s nil) alike — or its error to rethrow, `[name, message]`.
       def esm_entry_result(result) = result.is_a?(Array) ? result : result == true
 
-      # The optional [handle, clientId, referrer, credentials, integrity] tail
+      # The optional [handle, clientId, referrer, credentials, integrity, referrer policy, client] tail
       # moduleSwCtx (bridge.entry.js) appends to evalEsmEntry, or nil.
       def esm_sw_ctx(sw)
         return nil unless sw && sw[0].to_i.positive?
@@ -2079,7 +2080,8 @@ module Capybara
           referrer:        sw[2].to_s,
           credentials:     sw[3].to_s,
           integrity:       sw[4].to_s,
-          referrer_policy: sw[5].to_s
+          referrer_policy: sw[5].to_s,
+          client:          sw[6]
         }
       end
 

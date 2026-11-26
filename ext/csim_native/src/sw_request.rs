@@ -222,54 +222,52 @@ fn request_of(ruby: &Ruby, params: RHash) -> Result<SwRequest, Error> {
 }
 
 // Native::SwChain — a chain the host runs (a script, a style sheet or an image the parser or a module graph waits on,
-// answered in place): `SwChain.new(params)` of `Native.sw_request`'s params and the client's `origin`; `#wire` the
-// request of its hop; `#answer(status, type, url, redirected, location)` what the worker's response to it does — `[0,
-// hops, hop URL]`, `[1, hop URL]`, `[2, the next hop's wire]`, `[3, why]` (`swChainAnswer`); `#fallthrough` the request
-// at the hop the worker let through, nil at its first (`swChainFallthrough`): `[method, URL, headers, redirect-taint,
-// Sec-Fetch-Site latched]`.
+// answered in place): `SwChain.new(params)` of `Native.sw_request`'s params and its `client` (`[URL, origin, ancestors]`);
+// `#wire` the request of its hop; `#answer(status, type, url, redirected, location, referrer_policy)` what the worker's
+// response to it does — `[0, hops, hop URL]`, `[1, hop URL]`, `[2, the next hop's wire]`, `[3, why]` (`swChainAnswer`);
+// `#fallthrough` the request the network is sent of the hop the worker let through, JSON, nil at its first
+// (`swChainFallthrough`).
 #[magnus::wrap(class = "Capybara::Simulated::Native::SwChain", free_immediately)]
 pub(crate) struct RbSwChain(std::cell::RefCell<SwChain>);
 impl RbSwChain {
     fn new(ruby: &Ruby, params: RHash) -> Result<Self, Error> {
-        let origin = Option::<String>::try_convert(params.aref::<_, Value>(ruby.to_symbol("origin"))?)?.unwrap_or_default();
-        let request = request_of(ruby, params)?;
+        // (…its client `[URL, origin, ancestors' origins]`, the page's: fetch_request.rs `swRequestClient`)
+        let client = Option::<(String, String, Vec<Option<String>>)>::try_convert(params.aref::<_, Value>(ruby.to_symbol("client"))?)?;
+        let mut request = request_of(ruby, params)?;
+        let origin = client.as_ref().map(|c| c.1.clone()).unwrap_or_default();
+        request.client = client;
         Ok(RbSwChain(std::cell::RefCell::new(SwChain { request, origin, hops: 0, crossed: false, taint: Default::default(), site: None })))
     }
     fn wire(&self) -> String {
         self.0.borrow().request.wire()
     }
-    fn answer(ruby: &Ruby, rb_self: &Self, status: u32, response_type: String, url: String, redirected: bool, location: Option<String>) -> Value {
+    fn answer(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
+        let args = magnus::scan_args::scan_args::<(u32, String, String, bool, Option<String>, Option<String>), (), (), (), (), ()>(args)?.required;
+        let (status, response_type, url, redirected, location, policy) = args;
         let response = crate::fetch_rules::WorkerResponse {
             status,
             response_type: if response_type.is_empty() { "default" } else { &response_type },
             url: &url,
             redirected,
             location: location.as_deref(),
+            referrer_policy: policy.as_deref(),
         };
-        match rb_self.0.borrow_mut().answer(&response) {
+        Ok(match rb_self.0.borrow_mut().answer(&response) {
             ChainStep::Answer(hops, url) => (0, hops, url).into_value_with(ruby),
             ChainStep::OpaqueRedirect(url) => (1, url).into_value_with(ruby),
             ChainStep::Follow(wire) => (2, wire).into_value_with(ruby),
             ChainStep::Fail(why) => (3, why).into_value_with(ruby),
-        }
+        })
     }
-    fn fallthrough(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
-        let c = rb_self.0.borrow();
-        if c.hops == 0 {
-            return Ok(ruby.qnil().as_value());
-        }
-        let headers = ruby.hash_new();
-        for (name, value) in &c.request.headers {
-            headers.aset(name.as_str(), value.as_str())?;
-        }
-        Ok((c.request.method.as_str(), c.request.url.as_str(), headers, c.taint.name(), c.site.clone()).into_value_with(ruby))
+    fn fallthrough(&self) -> Option<String> {
+        self.0.borrow().network_request()
     }
 }
 pub(crate) fn define(native: magnus::RModule, ruby: &Ruby) -> Result<(), Error> {
     let class = native.define_class("SwChain", ruby.class_object())?;
     class.define_singleton_method("new", magnus::function!(RbSwChain::new, 1))?;
     class.define_method("wire", magnus::method!(RbSwChain::wire, 0))?;
-    class.define_method("answer", magnus::method!(RbSwChain::answer, 5))?;
+    class.define_method("answer", magnus::method!(RbSwChain::answer, -1))?;
     class.define_method("fallthrough", magnus::method!(RbSwChain::fallthrough, 0))?;
     Ok(())
 }
@@ -316,6 +314,37 @@ pub(crate) enum ChainStep {
     Fail(String),
 }
 impl SwChain {
+    // …the request the network is sent of the hop the worker let through — nil at its first, the request as it was made —
+    // as the host takes a request (browser.rb `rack_fetch_request`), JSON: its method, URL, headers, modes, its referrer as
+    // determined for the hop and its policy, the redirect-taint and the Sec-Fetch-Site its chain latched (its origin
+    // "null" past "same-origin", its cookies cross-site at "cross-site": fetch_plan.rs), its URL list past one
+    // (`redirected`), its origin, its destination and its client.
+    pub(crate) fn network_request(&self) -> Option<String> {
+        if self.hops == 0 {
+            return None;
+        }
+        let r = &self.request;
+        let headers: Map<String, Json> = r.headers.iter().map(|(n, v)| (n.clone(), Json::from(v.as_str()))).collect();
+        let mut o = Map::new();
+        for (key, value) in [("method", &r.method), ("url", &r.url), ("mode", &r.mode), ("credentials", &r.credentials), ("redirect", &r.redirect), ("cache", &r.cache), ("referrerPolicy", &r.referrer_policy), ("dest", &r.destination)] {
+            o.insert(key.into(), Json::from(value.as_str()));
+        }
+        o.insert("headers".into(), Json::Object(headers));
+        o.insert("referrer".into(), r.referrer.as_deref().map_or(Json::Null, Json::from));
+        o.insert("redirectTaint".into(), Json::from(self.taint.name()));
+        o.insert("originNull".into(), Json::Bool(self.taint != crate::referrer::RedirectTaint::SameOrigin));
+        o.insert("siteSeed".into(), self.site.as_deref().map_or(Json::Null, Json::from));
+        o.insert("redirected".into(), Json::Bool(true));
+        // (…its origin its client's — the one its Sec-Fetch-Site measures from, not its referrer's: a style sheet's image
+        // refers by the sheet's URL)
+        o.insert("initiator".into(), Json::from(r.initiator.as_deref().unwrap_or(&self.origin)));
+        if let Some((url, origin, ancestors)) = &r.client {
+            o.insert("clientUrl".into(), Json::from(url.as_str()));
+            o.insert("clientOrigin".into(), Json::from(origin.as_str()));
+            o.insert("ancestors".into(), Json::Array(ancestors.iter().map(|a| a.as_deref().map_or(Json::Null, Json::from)).collect()));
+        }
+        Some(Json::Object(o).to_string())
+    }
     // …the worker's `response` to the hop.
     pub(crate) fn answer(&mut self, response: &crate::fetch_rules::WorkerResponse<'_>) -> ChainStep {
         use crate::fetch_rules::{intercepted_hop, request_body_header, HopOutcome, InterceptedHop};
@@ -347,7 +376,12 @@ impl SwChain {
                     r.body_b64.clear();
                 }
                 r.url = next.url;
-                // (…its referrer determined again for the hop, of the one it had: main fetch step 9, every pass)
+                // (…its referrer policy the redirect's where it names one — HTTP-redirect fetch "set request's referrer
+                // policy on redirect" — and its referrer determined again for the hop, of the one it had: main fetch step 9,
+                // every pass)
+                if let Some(policy) = response.referrer_policy.and_then(crate::url_ops::policy_of_header) {
+                    policy.clone_into(&mut r.referrer_policy);
+                }
                 if let Some(last) = r.referrer.clone().filter(|s| !s.is_empty()) {
                     let policy = r.referrer_policy.clone();
                     r.refer(&policy, &last);
@@ -396,21 +430,23 @@ fn chain_start_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 
-// __dom.swChainAnswer(chain, status, type, url, redirected, location) -> what the worker's response to the chain's hop
-// does (`SwChain::answer`; `location` its Location header, null for none): [0, hops, hop URL] it answers the request,
+// __dom.swChainAnswer(chain, status, type, url, redirected, location, referrerPolicy) -> what the worker's response to the
+// chain's hop does (`SwChain::answer`; `location` its Location header, `referrerPolicy` its Referrer-Policy, null for
+// none): [0, hops, hop URL] it answers the request,
 // [1, hop URL] an opaque redirect of the hop's URL answers it, [2, wire] the request of the next hop, [3, why] a network
 // error. The chain ends but at a next hop; undefined for one gone.
 fn chain_answer_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
     let response_type = args.get(2).to_rust_string_lossy(scope);
     let url = if args.get(3).is_null_or_undefined() { String::new() } else { args.get(3).to_rust_string_lossy(scope) };
-    let location = (!args.get(5).is_null_or_undefined()).then(|| args.get(5).to_rust_string_lossy(scope));
+    let [location, policy] = [5, 6].map(|k| (!args.get(k).is_null_or_undefined()).then(|| args.get(k).to_rust_string_lossy(scope)));
     let response = crate::fetch_rules::WorkerResponse {
         status: args.get(1).uint32_value(scope).unwrap_or(0),
         response_type: if response_type.is_empty() { "default" } else { &response_type },
         url: &url,
         redirected: args.get(4).is_true(),
         location: location.as_deref(),
+        referrer_policy: policy.as_deref(),
     };
     let Some(Some(step)) = chains(scope, &args, |c| {
         let step = c.live.get_mut(&id)?.answer(&response);
@@ -431,23 +467,14 @@ fn chain_answer_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 }
 
 // __dom.swChainFallthrough(chain) -> the worker fell through on the chain's hop, which goes to the network: undefined at
-// its first hop — the request as it was made — else the request at the hop, [method, URL, headers (a map of byte
-// strings, of no prototype), its redirect-taint by name, the Sec-Fetch-Site its chain latched], which its network leg
-// carries on (fetch_plan.rs: its origin "null" past "same-origin", its cookies cross-site at "cross-site"). The chain ends.
+// its first hop — the request as it was made — else the request at the hop, as the host takes a request, JSON
+// (`SwChain::network_request`). The chain ends.
 fn chain_fallthrough_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
     let Some(Some(chain)) = chains(scope, &args, |c| c.live.remove(&id)) else { return };
-    if chain.hops == 0 {
-        return;
+    if let Some(request) = chain.network_request() {
+        rv.set(string(scope, &request));
     }
-    let r = &chain.request;
-    let headers: Vec<(Vec<u8>, Vec<u8>)> = r.headers.iter().map(|(n, v)| (latin1(n), latin1(v))).collect();
-    let site = match &chain.site {
-        Some(site) => string(scope, site),
-        None => v8::null(scope).into(),
-    };
-    let items = [string(scope, &r.method), string(scope, &r.url), crate::fetch_request::header_record(scope, &headers), string(scope, chain.taint.name()), site];
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.swChainDrop(chain): the chain's request given up on.
@@ -456,10 +483,6 @@ fn chain_drop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     chains(scope, &args, |c| c.live.remove(&id));
 }
 
-// A byte string's bytes, its code points each one.
-pub(crate) fn latin1(s: &str) -> Vec<u8> {
-    s.chars().map(|c| c as u32 as u8).collect()
-}
 // …and the text a byte string is.
 pub(crate) fn byte_text(bytes: &[u8]) -> String {
     bytes.iter().map(|&b| char::from(b)).collect()
@@ -512,7 +535,7 @@ mod tests {
         let mut chains = Chains::default();
         let id = chains.begin(request, "https://a.test".into());
         let chain = chains.live.get_mut(&id).unwrap();
-        let redirect = |location| crate::fetch_rules::WorkerResponse { status: 303, response_type: "default", url: "https://a.test/form", redirected: false, location };
+        let redirect = |location| crate::fetch_rules::WorkerResponse { status: 303, response_type: "default", url: "https://a.test/form", redirected: false, location, referrer_policy: None };
         let ChainStep::Follow(wire) = chain.answer(&redirect(Some("/next"))) else { panic!() };
         let wire: Json = serde_json::from_str(&wire).unwrap();
         assert_eq!((wire["method"].as_str(), wire["url"].as_str(), wire["body_b64"].as_str()), (Some("GET"), Some("https://a.test/next"), Some("")));
@@ -527,7 +550,7 @@ mod tests {
             assert!(matches!(chain.answer(&redirect(Some("/next"))), ChainStep::Follow(_)));
         }
         assert_eq!(chain.answer(&redirect(Some("/next"))), ChainStep::Fail("exceeded 20 redirects".into()));
-        let ok = crate::fetch_rules::WorkerResponse { status: 200, response_type: "default", url: "", redirected: false, location: None };
+        let ok = crate::fetch_rules::WorkerResponse { status: 200, response_type: "default", url: "", redirected: false, location: None, referrer_policy: None };
         assert_eq!(chain.answer(&ok), ChainStep::Answer(20, "https://a.test/next".into()));
     }
 

@@ -328,21 +328,17 @@ fn dispatch(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>,
     Ok(realm(scope, cid).obtains.remove(&token))
 }
 
-// __dom.obtainResume(token, answer, redirected, render, host, at): a service worker's `fetch` event's answer to the
-// request `token` named (`fetch_timed`'s, a link's, an image's) — `answer` its facts as an entry reads them (sw-client.js
+// __dom.obtainResume(token, answer, redirected, render, host): a service worker's `fetch` event's answer to the request
+// `token` named (`fetch_timed`'s, a link's, an image's) — `answer` its facts as an entry reads them (sw-client.js
 // `workerAnswerFacts`, `{blocked}` for a network error), `redirected` whether the response it answered with says it was,
 // `render` an opaque one's bytes, which an image paints though no script reads them — or null where it let the request
-// through, which the network answers then: the request as it was made, whatever its element is now — at `at`, the URL
-// of the hop it let through where the worker's redirects moved it on (sw-client.js `swFetchChain`). An answer Fetch
+// through, which the network answers then: the request as it was made, whatever its element is now. An answer Fetch
 // "HTTP fetch" step 5.5 does not let answer it is a network error.
 fn resume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return };
     let token = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    let Some(mut r) = realm(scope, cid).obtains.remove(&token) else { return };
-    if args.get(5).is_string() {
-        r.url = args.get(5).to_rust_string_lossy(scope);
-    }
+    let Some(r) = realm(scope, cid).obtains.remove(&token) else { return };
     if r.kind & 0xff == crate::subresource_judge::J_AUDIO {
         let render = view_bytes(scope, args.get(3));
         let _ = audio_answered(scope, host, &r, v8::Local::<v8::Object>::try_from(args.get(1)).ok(), args.get(2).is_true(), render);
