@@ -222,7 +222,8 @@ fn request_of(ruby: &Ruby, params: RHash) -> Result<SwRequest, Error> {
 }
 
 // Native::SwChain — a chain the host runs (a script, a style sheet or an image the parser or a module graph waits on,
-// answered in place): `SwChain.new(params)` of `Native.sw_request`'s params and its `client` (`[URL, origin, ancestors]`);
+// answered in place): `SwChain.new(params)` of `Native.sw_request`'s params and its `client` (`[URL, origin, ancestors,
+// referrer source]`: fetch_request.rs `swRequestClient`);
 // `#wire` the request of its hop; `#answer(status, type, url, redirected, location, referrer_policy)` what the worker's
 // response to it does — `[0, hops, hop URL]`, `[1, hop URL]`, `[2, the next hop's wire]`, `[3, why]` (`swChainAnswer`);
 // `#fallthrough` the request the network is sent of the hop the worker let through, JSON, nil at its first
@@ -232,7 +233,8 @@ pub(crate) struct RbSwChain(std::cell::RefCell<SwChain>);
 impl RbSwChain {
     fn new(ruby: &Ruby, params: RHash) -> Result<Self, Error> {
         // (…its client `[URL, origin, ancestors' origins]`, the page's: fetch_request.rs `swRequestClient`)
-        let client = Option::<(String, String, Vec<Option<String>>)>::try_convert(params.aref::<_, Value>(ruby.to_symbol("client"))?)?;
+        let client = Option::<(String, String, Vec<Option<String>>, Option<String>)>::try_convert(params.aref::<_, Value>(ruby.to_symbol("client"))?)?
+            .map(|(url, origin, ancestors, _)| (url, origin, ancestors));
         let mut request = request_of(ruby, params)?;
         let origin = client.as_ref().map(|c| c.1.clone()).unwrap_or_default();
         request.client = client;

@@ -24,13 +24,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // __dom.swRequestClient() -> the calling realm as a request's client is judged by the network (`Client`): `[URL, origin,
-// its document's ancestors' origins]` — what the host's chain of a request it answers in place is made with
-// (sw_request.rs `RbSwChain`).
+// its document's ancestors' origins, its referrer source]` — what the host's chain of a request it answers in place is
+// made with (sw_request.rs `RbSwChain`), and the referrer source it refers by (a srcdoc document's its container's;
+// null for none).
 fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let client = Client::of(&mut dom(scope).arena, cid);
     let ancestors: Vec<v8::Local<v8::Value>> = client.ancestors.iter().map(|a| optional(scope, a.as_deref())).collect();
-    let items = [text(scope, &client.url), text(scope, &client.origin), v8::Array::new_with_elements(scope, &ancestors).into()];
+    let source = optional(scope, client.referrer.as_deref());
+    let items = [text(scope, &client.url), text(scope, &client.origin), v8::Array::new_with_elements(scope, &ancestors).into(), source];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 

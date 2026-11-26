@@ -289,7 +289,8 @@ fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
             let (source, policy) = referrer_source(arena, parent(arena, doc.realm));
             (opaque, source, policy)
         }
-        Some(opaque) => (opaque, doc.url.clone(), ""),
+        // (…its document's policy all the same — a `<meta name=referrer>` its parser met set it: referrer_source)
+        Some(opaque) => (opaque, doc.url.clone(), referrer_source(arena, doc.realm).1),
     };
     let url = creator_url(arena, doc.realm, if told.is_none() { source.clone() } else { doc.url });
     let cross_site_ancestor = has_cross_site_ancestor(&document_chain(arena, doc.realm, true, known_origin_key));
