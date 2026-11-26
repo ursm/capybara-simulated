@@ -8996,9 +8996,13 @@ module Capybara
                                                                                                                                    referrer_policy: policy, client: client)
         return {sw: answer, times: [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]} if answer
 
+        # (…its server's sleeps counted, none run on the event loop: the module map is landing it — KNOWN GAP, none of that
+        # time on the clock either, as a module the worker answers lands with none of its time)
         _, credentials, policy = request_of_plan(plan)
         Thread.current[:csim_asset_times] = nil
-        answered = external_asset_response(url, document, mod[:realm], policy, referrer: referrer, dest: dest, mode: 'cors', credentials: credentials, module_map: true)
+        answered, = server_timed_sleeps {
+          external_asset_response(url, document, mod[:realm], policy, referrer: referrer, dest: dest, mode: 'cors', credentials: credentials, module_map: true)
+        }
         {answered: answered || [nil, nil, nil], times: Thread.current[:csim_asset_times] || [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]}
       end
       # …the milliseconds a request took, of its host times (`asset_fetch`'s `[started, ended]`), 0 for none.
