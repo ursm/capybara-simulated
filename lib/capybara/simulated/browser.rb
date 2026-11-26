@@ -2776,7 +2776,7 @@ module Capybara
         # who set CSIM_TRACE=off.
         return yield if @trace.nil? && @trace_mode == :off
         if @trace.nil?
-          @trace = Trace.new(metadata: {auto_started_at: Time.now.utc.iso8601(3)})
+          @trace = Trace.new(metadata: {auto_started_at: Time.now.getutc.iso8601(3)})
           @runtime.call('setTraceActive', true)
         end
         return yield if @recording_action

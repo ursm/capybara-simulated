@@ -26,6 +26,9 @@ RSpec.describe 'the virtual clock’s Date', engine_global: true do
        Object.getPrototypeOf(Date) === Function.prototype, typeof Date.UTC, new (class extends Date {})(0).getTime()]
     JS
     expect(got).to eq(['string', 'Date', 7, true, true, later.year, 0, true, true, 'function', 0])
+    # (…the host's clock read, never changed: a Time it hands out made UTC in place moved `later.year` back a year where
+    # `later` fell on a New Year's Day's first hours east of UTC)
+    expect(later).not_to be_utc
   end
 
   # `Date` and `performance.now()` read the virtual clock the timers run on, and beside it only the time the page's
