@@ -66,8 +66,9 @@ RSpec.describe 'web fonts loading in parallel' do
       <style>
         @font-face { font-family: L; src: url(#{latin}); unicode-range: U+0-FF }
         @font-face { font-family: L; src: url(#{font(0)}); unicode-range: U+400-4FF }
-      </style><span id="s"></span>
+      </style><span id="s"></span><div id="ch" style="display: none; font: 20px L; width: 10ch"></div>
       <script>
+        L.push('ch:' + getComputedStyle(document.getElementById('ch')).width);
         var c = document.createElement('canvas').getContext('2d');
         c.font = '20px L';
         L.push('ascent:' + c.measureText('\u0434\u0434').fontBoundingBoxAscent);
@@ -145,8 +146,9 @@ RSpec.describe 'web fonts loading in parallel' do
           @font-face { font-family: L; src: url(#{font(0)}); unicode-range: U+4E00-4FFF }
         </style><span id="s" style="font: 20px L, monospace">\u4e00</span><div id="m" style="font: 20px monospace">\u4e00</div>
       HTML
-      # A canvas measuring, before any layout, a stack whose first available font the host has a file of from an earlier
-      # page, no character asking for it: measured as a page whose host has none would (csim-bench rv `cache.rb`).
+      # A style's `ch` and a canvas measuring, before any layout, by a stack whose first available font the host has a file
+      # of from an earlier page, no character asking for it: as a page whose host has none would (csim-bench rv
+      # `cache.rb`, `cache2.rb`).
       '/canvas-cached.html' => head + canvas_split(cached_font),
       '/canvas-cold.html' => head + canvas_split(font(0, 'lato')),
       # `stop()` while the face downloads: its download cancelled, the face failed a task later, the set loaded.
@@ -304,11 +306,11 @@ RSpec.describe 'web fonts loading in parallel' do
     expect(s.evaluate_script("document.getElementById('s').getBoundingClientRect().height")).to eq(s.evaluate_script("document.getElementById('m').getBoundingClientRect().height"))
   end
 
-  it 'measures a canvas\'s text by no face the host has a file of that no character asked for' do
+  it 'resolves a style\'s ch and measures a canvas\'s text by no face the host has a file of that no character asked for' do
     visit('/cached-first.html')
-    warm = log(visit('/canvas-cached.html')).first
-    expect(warm).to start_with('ascent:')
-    expect(warm).to eq(log(visit('/canvas-cold.html')).first)
+    warm = log(visit('/canvas-cached.html')).first(2)
+    expect(warm).to match([start_with('ch:'), start_with('ascent:')])
+    expect(warm).to eq(log(visit('/canvas-cold.html')).first(2))
   end
 
   it 'fails a face whose download the document\'s stop() cancelled, a task later' do

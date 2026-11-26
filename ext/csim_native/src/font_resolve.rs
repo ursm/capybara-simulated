@@ -22,11 +22,13 @@ struct Host<'s> {
     subresources: v8::Local<'s, v8::Function>,
     settle: v8::Local<'s, v8::Function>,
     system: v8::Local<'s, v8::Function>,
-    // (…and whether this is a download's landing task, which settles what it asks about in it; and whether a stack's own
+    // (…and whether this is a download's landing task, which settles what it asks about in it; whether a stack's own
     // face may be taken tentatively — by a layout pass, whose wants are settled as it ends (`fontFacesWanted`): no
-    // canvas's text op, which measures before any pass may have asked, csim-bench rv `cache.rb`)
+    // canvas's text op nor the style engine's metrics, which ask before any pass may have, csim-bench rv `cache.rb`,
+    // `cache2.rb`; and whether what it resolves is the walk's too — the style engine's, whose faces the walk shares)
     landing: bool,
     tentative: bool,
+    shared: bool,
 }
 // What a face came to, as `settle` is told (font-metrics.js `settleFace`): its file failed, or loaded — there as it was
 // first asked for, which its load settles a task later (CSS Font Loading "load()": "when the load operation completes …
@@ -123,6 +125,10 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
                 realm(scope, cid).own_tentative.push(k);
             }
             declined = path.is_some() && !host.tentative;
+            // (…one the walk shares, a pass to be laid out again once a character asks for it: `fontFacesWanted`)
+            if declined && host.shared && !realm(scope, cid).own_declined.contains(&k) {
+                realm(scope, cid).own_declined.push(k);
+            }
             path.filter(|_| host.tentative).map(|path| (k, path))
         }
         _ => None,
@@ -222,15 +228,15 @@ fn stack_handle(list: (i32, u32), faces: &[crate::font_faces::FaceRecord], own: 
 // The functions of the page side's `Host`, from `args` at `at`, …
 fn host<'s>(args: &v8::FunctionCallbackArguments<'s>, at: i32) -> Option<Host<'s>> {
     let f = |k: i32| v8::Local::<v8::Function>::try_from(args.get(at + k)).ok();
-    Some(Host { subresources: f(0)?, settle: f(1)?, system: f(2)?, landing: false, tentative: false })
+    Some(Host { subresources: f(0)?, settle: f(1)?, system: f(2)?, landing: false, tentative: false, shared: false })
 }
 
-// __dom.fontFamilyFace(family, bucket, subresources, settle, system) -> `[handle, ascentOverride, descentOverride,
-// lineGapOverride]` of the face `family` takes at `bucket` (`family_face`), NaN for an override it has none of: a layout
-// pass's (or the style engine's), which may take a stack's own face tentatively.
+// __dom.fontFamilyFace(family, bucket, subresources, settle, system, inPass) -> `[handle, ascentOverride, descentOverride,
+// lineGapOverride]` of the face `family` takes at `bucket` (`family_face`), NaN for an override it has none of — `inPass`
+// a layout pass's, which may take a stack's own face tentatively, else the style engine's, which may not.
 fn font_family_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = host(&args, 2) else { return };
-    let host = Host { tentative: true, ..host };
+    let host = Host { tentative: args.get(5).is_true(), shared: true, ..host };
     let (family, bucket) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
     let Ok((handle, overrides)) = family_face(scope, cid, &family, &bucket, &host) else { return };
@@ -308,8 +314,9 @@ fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 // __dom.fontFacesWanted(subresources, settle, system) -> whether what was laid out is to be laid out again: the faces of the
 // realm's list a character measured has asked for since (font.rs `take_wanted`: a `unicode-range` face, loaded only once
 // text uses it) asked for now — its load begun (`indexed_file`) — and the faces each family stack takes made again of
-// them. Laid out again where one's file was there at once that was not measured with already, or a stack's own face taken
-// tentatively (`family_face`) no character asked for — refused from now: what the realm's faces read from moved (the
+// them. Laid out again where one's file was there at once that was not measured with already, a stack's own face taken
+// tentatively (`family_face`) no character asked for — refused from now — or one the style engine declined that a
+// character asked for: what the realm's faces read from moved (the
 // layout due again, as a landing does).
 fn font_faces_wanted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(false);
@@ -334,6 +341,11 @@ fn font_faces_wanted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
             there = true;
         }
     }
+    // (…and a stack's own face the style engine declined, which the walk measured with no face of, a character asking for
+    // it now)
+    let before = arena.own_declined.len();
+    arena.own_declined.retain(|k| !wanted.iter().any(|&(w, _)| w == *k));
+    there |= arena.own_declined.len() != before;
     arena.family_faces.clear();
     if there {
         arena.font_files.generation = arena.font_files.generation.wrapping_add(1);

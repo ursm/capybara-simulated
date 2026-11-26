@@ -540,6 +540,7 @@ fn font_faces_hand(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     arena.face_list_gen = arena.face_list_gen.wrapping_add(1);
     arena.own_tentative.clear();
     arena.own_refused.clear();
+    arena.own_declined.clear();
     arena.faces_handed = Some(key);
 }
 
