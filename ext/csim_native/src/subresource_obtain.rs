@@ -694,11 +694,17 @@ fn link_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::F
     Ok(ok)
 }
 
-// …a modulepreload's: a controlling service worker's answer (a script's request: `event.request.integrity` its
-// metadata), else the asset cache's (`[body, meta, bytes]`, judged by the response facts it kept — none for one cached
-// before they were — its body none of a response it refused), else the network's.
+// …a modulepreload's (HTML "fetch a modulepreload module script graph"): its document's module map's entry where it has
+// one of the URL and the module type its `as` names (one being fetched landed now), else fetched — a controlling service
+// worker's answer (a script's request: `event.request.integrity` its metadata), else the asset cache's (`[body, meta,
+// bytes]`, judged by the response facts it kept — none for one cached before they were — its body none of a response it
+// refused), else the network's — and, one that loads, made the map's module script (module_map.rs `preloaded`), which
+// a module graph of the URL takes.
 fn modulepreload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, module_destination: &str) -> Result<bool, Terminated> {
     use crate::subresource_judge::{facts_of, SRC_ASSET, SRC_SW_SYNC, S_NO_BODY};
+    if let Some(in_map) = crate::module_map::preload_entry(scope, r.cid, host, &r.url, module_destination)? {
+        return Ok(in_map);
+    }
     let mut args = request_args(scope, r).to_vec();
     let (binary, integrity) = (v8::Boolean::new(scope, false).into(), text(scope, &r.integrity));
     args.extend([binary, integrity]);
@@ -709,15 +715,18 @@ fn modulepreload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Funct
         let no_body = if obj.and_then(|a| member(scope, a, "body")).is_none() { S_NO_BODY } else { 0 };
         let facts = facts_of(scope, obj, r.kind & 0xff, SRC_SW_SYNC);
         let ok = link_verdict(scope, r, &facts, SRC_SW_SYNC | no_body, body, "no-cors", (module_destination, ""));
-        file(scope, host, r, Answered::Worker(answer))?;
+        file(scope, host, r, Answered::Worker(answer.clone()))?;
+        if ok {
+            let text = obj.and_then(|a| member(scope, a, "body"));
+            let base = obj.and_then(|a| member(scope, a, "url")).filter(|u| u.is_string()).map(|u| u.to_rust_string_lossy(scope));
+            return crate::module_map::preloaded(scope, r.cid, host, (&r.url, module_destination, r.plan), text, base);
+        }
         return Ok(ok);
     }
     if crate::fetch_rules::fetch_route(&r.url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
         return link_from_network(scope, host, r, module_destination);
     }
-    // (…its document's module map's entry, which a module script of the URL takes: browser.rb `asset_request`)
-    let mut args = request_args(scope, r).to_vec();
-    args.push(v8::Boolean::new(scope, true).into());
+    let args = request_args(scope, r);
     let got = call(scope, host, H_ASSET, &args)?.map(|g| v8::Local::new(scope, g));
     let got = got.and_then(|g| v8::Local::<v8::Array>::try_from(g).ok());
     let mut at = [None; 3];
@@ -732,7 +741,11 @@ fn modulepreload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Funct
     let no_body = if body.is_none() { S_NO_BODY } else { 0 };
     let ok = link_verdict(scope, r, &facts, SRC_ASSET | no_body, bytes.or(body), "no-cors", (module_destination, ""));
     file(scope, host, r, Answered::Network(meta.map(|m| v8::Global::new(scope, v8::Local::<v8::Value>::from(m)))))?;
-    Ok(ok)
+    if !ok {
+        return Ok(false);
+    }
+    let base = meta.and_then(|m| member(scope, m, "url")).filter(|u| u.is_string() && u.to_rust_string_lossy(scope) != "").map(|u| u.to_rust_string_lossy(scope));
+    crate::module_map::preloaded(scope, r.cid, host, (&r.url, module_destination, r.plan), body, base)
 }
 
 // A controlled prefetch's answer (`obtainResume`): its verdict and entry (`prefetch_verdict`), and its element's `load`
@@ -1214,8 +1227,7 @@ pub(crate) fn classic_script_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, ho
             let mut args = request_args(scope, &r).to_vec();
             if let (true, Some(began)) = (parser, dated) {
                 let since = (realm(scope, cid).event_loop.clock - began).max(0.0);
-                let (module, since): (v8::Local<v8::Value>, v8::Local<v8::Value>) = (v8::Boolean::new(scope, false).into(), v8::Number::new(scope, since).into());
-                args.extend([module, since]);
+                args.push(v8::Number::new(scope, since).into());
             }
             call(scope, host, if parser { H_ASSET } else { H_FETCH }, &args)?
         }

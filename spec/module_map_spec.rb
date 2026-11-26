@@ -46,6 +46,7 @@ RSpec.describe 'the module map' do
 
       headers = {'content-type' => query['ct'] || MODULE_MAP_TYPES.fetch(path.split('.').last, 'text/plain')}
       headers['cache-control'] = 'max-age=3600' if query.key?('fresh')
+      headers['cache-control'] = 'no-store' if query.key?('nostore')
       [200, headers, [files[path]]]
     })
   end
@@ -217,6 +218,22 @@ RSpec.describe 'the module map' do
         <script>import('/x.js?plain'); setTimeout(done, 300);</script>
       HTML
       expect(referers.slice('/x.js?classic', '/x.js?module', '/x.js?plain')).to eq('/x.js?classic' => nil, '/x.js?module' => nil, '/x.js?plain' => 'http://www.example.com/')
+    end
+
+    # HTML "fetch a modulepreload module script graph": the preload's module script is its document's module map's entry —
+    # a module script that imports it takes it, however uncacheable its response; a JSON one's by the type its `as` names.
+    it "takes the module a modulepreload put in the map" do
+      preloads = files.merge('/d.json' => '{"x": 1}')
+      expect(log_of(<<~HTML, preloads)).to eq('x-ran 1 n=1 n=1')
+        <link rel="modulepreload" href="/x.js?nostore">
+        <link rel="modulepreload" as="json" href="/d.json?nostore">
+        <script type="module">
+          import '/x.js?nostore';
+          import d from '/d.json?nostore' with { type: 'json' };
+          L.push(d.x);
+          fetch('/counts').then((r) => r.json()).then((c) => { L.push('n=' + c['/x.js?nostore'], 'n=' + c['/d.json?nostore']); done(); });
+        </script>
+      HTML
     end
 
     it "takes a redirected module's base URL from its response, keying it by its request's" do

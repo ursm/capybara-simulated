@@ -1871,7 +1871,7 @@ module Capybara
 
       # The host's steps of a realm's module scripts (subresource-host.js, bridge.entry.js), bound to it — nil the main
       # realm, whichever Ctx it is when they are called: a module's fetch landed and compiled (`H_MODULE_TAKE`), an inline
-      # one's source compiled (`H_MODULE_INLINE`), a module script's graph run.
+      # one's source compiled (`H_MODULE_INLINE`), a modulepreload's (`H_MODULE_COMPILE`), a module script's graph run.
       def attach_module_steps(c, realm = nil)
         c.attach('@moduleFetchTake', ->(id, type, now) {
           RuntimeShared.safe_call {
@@ -1880,6 +1880,7 @@ module Capybara
           }
         })
         c.attach('@moduleInline', ->(source, base) { RuntimeShared.safe_call { module_record(realm, source, base, 0, inline: true) } })
+        c.attach('@moduleCompile', ->(source, base, type) { RuntimeShared.safe_call { module_record(realm, source, base, type) } })
         c.attach('@evalModuleGraph', ->(result) { RuntimeShared.safe_call { eval_module_graph(realm, result) } })
       end
 

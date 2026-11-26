@@ -32,9 +32,12 @@ use crate::subresource_obtain::{call, next_slot, slept_ms, text};
 //                                     type no module of its type is, an integrity mismatch) — or how many milliseconds later
 //                                     it lands (a controlling worker let it through to a server that took time)
 //   H_MODULE_INLINE (source, base URL) an inline module script's source compiled, answered as `H_MODULE_TAKE` answers
+//   H_MODULE_COMPILE (source, base URL, type)
+//                                     a module a modulepreload fetched compiled, answered as `H_MODULE_TAKE` answers
 pub(crate) const H_MODULE_START: u32 = 34;
 pub(crate) const H_MODULE_TAKE: u32 = 35;
 pub(crate) const H_MODULE_INLINE: u32 = 36;
+pub(crate) const H_MODULE_COMPILE: u32 = 37;
 
 // A module type (HTML "module type from module request").
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -55,6 +58,16 @@ impl ModuleType {
             Some("css") if css => Some(ModuleType::Css),
             Some("text") => Some(ModuleType::Text),
             Some(_) => None,
+        }
+    }
+    // …a modulepreload's of the module preload destination its `as` names (HTML "fetch a modulepreload module script
+    // graph": `json`, `style`, `text`; a script-like one JavaScript).
+    fn of_destination(destination: &str) -> ModuleType {
+        match destination {
+            "json" => ModuleType::Json,
+            "style" => ModuleType::Css,
+            "text" => ModuleType::Text,
+            _ => ModuleType::JavaScript,
         }
     }
     fn of_code(code: u32) -> ModuleType {
@@ -825,6 +838,46 @@ pub(crate) fn drop_graph(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32) {
             return;
         }
     }
+}
+
+// ── a modulepreload's entry ──
+
+// What the module map has for a modulepreload of `url` and the module preload destination `destination`, before it
+// fetches (HTML "fetch a single module script": an entry the map has, or one being fetched, answers it): whether its
+// module script loads — a module script loaded, one being fetched landed now and judged as it comes in — None where the
+// map has none (one that failed is fetched again).
+pub(crate) fn preload_entry(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, url: &str, destination: &str) -> Result<Option<bool>, Terminated> {
+    keep_host(scope, cid, host);
+    let key = (url.to_owned(), ModuleType::of_destination(destination));
+    let Some(map) = map_of(scope, cid) else { return Ok(None) };
+    match map.entries.get(&key) {
+        Some(Entry::Ready(..)) => Ok(Some(true)),
+        Some(&Entry::Fetching { slot, due, plan }) => {
+            land(scope, cid, &key, slot, due, plan)?;
+            Ok(Some(matches!(map_of(scope, cid).and_then(|map| map.entries.get(&key)), Some(Entry::Ready(..)))))
+        }
+        _ => Ok(None),
+    }
+}
+// …and the response one fetched that loads (its `source`, its response's URL `base`), made the map's module script of
+// its URL and module type, its fetch options its link's `plan` — unless the map came to have one meanwhile: whether it
+// is one (a JSON one that is no JSON none, the link's `error`).
+pub(crate) fn preloaded(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, (url, destination, plan): (&str, &str, u32), source: Option<v8::Local<'_, v8::Value>>, base: Option<String>) -> Result<bool, Terminated> {
+    let ty = ModuleType::of_destination(destination);
+    let key = (url.to_owned(), ty);
+    if map_of(scope, cid).is_some_and(|map| matches!(map.entries.get(&key), Some(Entry::Ready(..)))) {
+        return Ok(true);
+    }
+    let Some(source) = source.filter(|s| s.is_string()) else { return Ok(false) };
+    let base = base.unwrap_or_else(|| url.to_owned());
+    let (base_value, ty_value) = (text(scope, &base), v8::Integer::new_from_unsigned(scope, ty as u32).into());
+    let answer = call(scope, host, H_MODULE_COMPILE, &[source, base_value, ty_value])?;
+    let Some(script) = script_of(scope, answer, ty, url, plan) else { return Ok(false) };
+    let at = realm(scope, cid).event_loop.clock;
+    if let Some(map) = map_of(scope, cid) {
+        map.entries.insert(key, Entry::Ready(script, at));
+    }
+    Ok(true)
 }
 
 // ── its result ──

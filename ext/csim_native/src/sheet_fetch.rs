@@ -714,8 +714,8 @@ pub(crate) fn asset(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<
     // (…a fetch of it under way joined for its answer, none of what is left of its server's time waited out: that is its
     // owner's load's to wait for, never the cascade's, which a sleep run on the event loop would let any task in under —
     // Chrome and Firefox `inl dcl a.js-ran t50 st load`, rv-r13-probe `s5_stylemedia`)
-    let (module, since, waits) = (v8::Boolean::new(scope, false).into(), v8::undefined(scope).into(), v8::Boolean::new(scope, false).into());
-    let args = [text_value(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), r, client, module, since, waits];
+    let (since, waits) = (v8::undefined(scope).into(), v8::Boolean::new(scope, false).into());
+    let args = [text_value(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), r, client, since, waits];
     let response = call(scope, host, H_ASSET, &args)?;
     if let Some(o) = owner {
         let failed = response.as_ref().map(|r| v8::Local::new(scope, r)).and_then(|r| v8::Local::<v8::Array>::try_from(r).ok()).is_none_or(|a| a.get_index(scope, 0).is_none_or(|b| b.is_null_or_undefined()));
