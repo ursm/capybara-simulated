@@ -212,13 +212,13 @@ module Capybara
       end
 
       def initialize(app, driver: nil, cookie_jar: nil, auth_cache: nil, local_storage: nil, session_partition: nil, sw_partition: nil, all_hosts_local: nil,
-                     external_frames: false, client_space: '', window_number: 0)
+                     external_network: false, client_space: '', window_number: 0)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
-        # Whether a frame's navigation may go to a host the app does not serve — off by default (the driver's
-        # `external_frames:`): `navigation_network_hop`.
-        @external_frames              = external_frames
+        # Whether a request of a host the app does not serve goes to the network — off by default, a network error (the
+        # driver's `external_network:`): `dispatched`.
+        @external_network             = external_network
         @browsing_context_group       = "g#{object_id}"
         # (…the thread the window's isolate is driven on: a worker's thread waiting on another worker touches nothing of
         # the window's — `await_worker_reply`)
@@ -4662,7 +4662,9 @@ module Capybara
         step, facts = plan&.begin_hop(nil, Process.clock_gettime(Process::CLOCK_MONOTONIC))
         # (…a request Fetch refuses a network error: the connection failed — WebSockets "establish a WebSocket
         # connection", its response a network error)
-        unless step == 'dispatch'
+        # (…nor goes one to a host the app does not serve, unless the session allows the network: `dispatched`'s rule — a
+        # connection of the app's own, its handshake the app's to answer, with the network allowed)
+        unless step == 'dispatch' && (@external_network || reaches_app?(facts[1]))
           queue << {id: id, type: '__error', message: 'websocket handshake refused'}
           return id
         end
@@ -7537,7 +7539,7 @@ module Capybara
           hop.document ||= take_rack_body(hop) if args[0] && hop.rack_body
           @runtime.realm_call(host.realm, 'navigationAwaited') == true
         when 'sw_fetch' then navigation_worker_hop(hop, *args)
-        when 'network' then navigation_network_hop(host, hop, *args)
+        when 'network' then navigation_network_hop(hop, *args)
         when 'read_body'
           hop.document ||= take_rack_body(hop)
         when 'coop_facts' then coop_facts(host.realm)
@@ -7578,17 +7580,11 @@ module Capybara
         hop.status, hop.headers, hop.document = (sw['status'] || 200).to_i, sw['header_list'] || sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
         [hop.status, hop.headers]
       end
-      # …and to the network (`network`): its response `[status, headers]`, its body held unread — nil a network error.
-      # A frame's hop to a host the app does not serve (`reaches_app?`: a browser's request of it would not reach the app's
-      # server) is a network error unless the session allows external frames (`external_frames:`) — an embed's document
-      # is no test's, and its request would go out to the network (a connect that stalls, a third party's script run
-      # in-process) or, refused there, to the app with a URL it never serves. The frame gets its error document and its
-      # container's `load` fires, as for any network error (HTML; Chrome 157, measured 2026-11-26 — Firefox 159 fires none).
-      # Its other subresources go on to `dispatch_rack_or_http` as they did.
-      private def navigation_network_hop(host, hop, target, method, headers, body, content_type, cookie_context)
+      # …and to the network (`network`): its response `[status, headers]`, its body held unread — nil a network error (a
+      # host the app does not serve one by default: `dispatched`).
+      private def navigation_network_hop(hop, target, method, headers, body, content_type, cookie_context)
         close_rack_body(hop.rack_body) if hop.rack_body
         hop.rack_body = hop.document = nil
-        return nil if !@external_frames && %i[container frame].include?(host.kind) && !reaches_app?(target)
         response = dispatch_navigation_hop(target, method, headers, body: body, content_type: content_type, cookie_context: cookie_context) or return nil
         hop.status, hop.headers, hop.rack_body = response
         [hop.status, hop.headers]
@@ -13572,15 +13568,22 @@ module Capybara
         # (…its Fetch Metadata sent to a potentially trustworthy URL alone — Fetch "append the Fetch metadata headers for a
         # request" — which the request's own verdicts read all the same: its SameSite cookies, already attached)
         env = env.reject {|k, _| k.start_with?('HTTP_SEC_FETCH_') } unless potentially_trustworthy_url?(url)
-        # External fetch: if the network is blocked (WebMock) or the
-        # host is unreachable, fall back to @app — Rails will 404 or
-        # otherwise handle it, matching the pre-cross-host behavior
-        # for tests that route through an external OAuth provider URL
-        # without intending the call to land.
-        remote = (transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)) unless reaches_app?(url)
-        return nil if remote == :network_error
+        # A request of a host the app does not serve (`reaches_app?`) is a network error — none goes out of the process —
+        # unless the session allows the network (`external_network:`): a test's page is the app's, and an outside host's
+        # response — an embed's, a CDN's, an API's — would make it depend on the network (a connect that stalls, a third
+        # party's script run in-process). Where it is allowed and the network is blocked (WebMock) or the host is
+        # unreachable, the request falls back to @app — Rails will 404 or otherwise handle it, for tests that route
+        # through an external OAuth provider URL without intending the call to land. Every kind of request comes here — a
+        # navigation's hop, a subresource's, a worker's, an event stream's (`transport`) — but a WebSocket's, which
+        # `ws_open` gates the same way.
+        own = reaches_app?(url)
+        unless own
+          return nil unless @external_network
 
-        response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?, own_host: reaches_app?(url))))
+          remote = transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)
+          return nil if remote == :network_error
+        end
+        response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?, own_host: own)))
         # (…the app's body the caller's own from here, which a cancel while it was framed left to the reader: app_call)
         Thread.current[:csim_event_stream_app_body] = nil if transport
         return nil unless response

@@ -9,7 +9,7 @@ require_relative 'support/every_host_local'
 # Measured 2026-11-26 (Chrome 157, Firefox 159; top on 127.0.0.1, child on localhost, grandchild on 127.0.0.1): both
 # request the child and the grandchild as the page loads; Chrome reports `child-ran,grand-ran,grand-load,top-load` and
 # reads the grandchild's title on the first access.
-Capybara.register_driver(:simulated_external_frames) {|app| Capybara::Simulated::Driver.new(app, external_frames: true) }
+Capybara.register_driver(:simulated_external_network) {|app| Capybara::Simulated::Driver.new(app, external_network: true) }
 
 RSpec.describe 'a cross-origin frame and its frames' do
   let(:requests) { [] }
@@ -60,7 +60,7 @@ RSpec.describe 'a cross-origin frame and its frames' do
     end
   end
 
-  # A frame of a host the app does not serve goes to no network by default (Browser#navigation_network_hop): a network
+  # A frame of a host the app does not serve goes to no network by default (Browser#dispatched): a network
   # error, its error document of no origin the page shares, its container's `load` fired — HTML, and Chrome 157
   # (measured 2026-11-26: `load`, `contentDocument` null, its `location` a SecurityError; Firefox 159 fires no `load`).
   context 'of a host the app does not serve' do
@@ -82,10 +82,10 @@ RSpec.describe 'a cross-origin frame and its frames' do
     end
   end
 
-  # …or to the network where the session allows it (`external_frames: true`): here refused there, so the app is asked, as
+  # …or to the network where the session allows it (`external_network: true`): here refused there, so the app is asked, as
   # for any other request of another host.
-  context 'with external frames allowed' do
-    let(:session) { simulated_session(app, mode: :simulated_external_frames) }
+  context 'with the network allowed' do
+    let(:session) { simulated_session(app, mode: :simulated_external_network) }
 
     it 'fetches it from the network' do
       fetched = []

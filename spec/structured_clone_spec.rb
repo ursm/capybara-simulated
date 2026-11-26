@@ -9,8 +9,8 @@ require_relative 'support/every_host_local'
 # [Serializable], a DataCloneError; a transfer list's ArrayBuffers and ports moved; and a FileList — the one
 # [Serializable] legacy platform object — made natively (legacy.rs), since V8's serializer takes no Proxy.
 # (…a cross-origin isolated page needs a secure context — the default host's loopback stand-in — whose frames of other
-# hosts the app serves only where frames may go to the network: `external_frames:`, the app answering what it refuses)
-Capybara.register_driver(:simulated_external_frames) {|app| Capybara::Simulated::Driver.new(app, external_frames: true) }
+# hosts the app serves only where requests may go to the network: `external_network:`, the app answering what it refuses)
+Capybara.register_driver(:simulated_external_network) {|app| Capybara::Simulated::Driver.new(app, external_network: true) }
 
 RSpec.describe 'Structured clone of platform objects' do
   let(:app) {
@@ -350,7 +350,7 @@ RSpec.describe 'Structured clone of platform objects' do
         HTML
       end
     end
-    s = simulated_session(coi_app, mode: :simulated_external_frames)
+    s = simulated_session(coi_app, mode: :simulated_external_network)
     s.visit '/'
     expect(s.evaluate_script('crossOriginIsolated')).to be(true)
     s.execute_script(<<~JS)
@@ -386,7 +386,7 @@ RSpec.describe 'Structured clone of platform objects' do
         HTML
       end
     end
-    s = simulated_session(coi_app, mode: :simulated_external_frames)
+    s = simulated_session(coi_app, mode: :simulated_external_network)
     s.visit '/'
     s.execute_script(<<~JS)
       window.sab = new SharedArrayBuffer(8);

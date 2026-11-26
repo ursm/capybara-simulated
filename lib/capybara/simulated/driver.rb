@@ -91,10 +91,10 @@ module Capybara
       # session whose pointer is a touchscreen, as Playwright's `hasTouch`
       # emulates a phone's: `(pointer: coarse)` and nothing hovers, in the
       # page's CSS and its `matchMedia` alike.
-      # `external_frames: true` lets a frame load a document of a host the app
-      # does not serve from the network; by default it is a network error
-      # (Browser#navigation_network_hop).
-      def initialize(app, viewport: nil, user_agent: nil, touch: false, external_frames: false)
+      # `external_network: true` lets a request of a host the app does not serve
+      # — any kind: a page, a frame, a subresource, a worker's, a WebSocket —
+      # go to the network; by default it is a network error (Browser#dispatched).
+      def initialize(app, viewport: nil, user_agent: nil, touch: false, external_network: false)
         # `Capybara.disable_animation` is delivered to the real drivers by a SERVER
         # middleware (session.rb adds AnimationDisabler to the Puma stack), which
         # injects `animation-duration: 0s !important` CSS into every HTML response.
@@ -136,8 +136,8 @@ module Capybara
         @viewport        = viewport
         @user_agent      = user_agent
         @touch           = touch
-        # …and whether its frames may load documents of hosts the app does not serve (Browser#navigation_network_hop).
-        @external_frames = external_frames
+        # …and whether its requests may go to hosts the app does not serve (Browser#dispatched).
+        @external_network = external_network
         # …and how many windows it has made: each mints its contexts' ids in a space of its own (Browser#client_space),
         # and is known by its number (Browser#window_number: what the engine's registries keep a realm of it by), each
         # window's Browser by its number as long as it is open (`browser_of_window`), and the number of the one with the
@@ -169,7 +169,7 @@ module Capybara
                     session_partition: @session_partition,
                     sw_partition:    @sw_partition,
                     all_hosts_local: @all_hosts_local,
-                    external_frames: @external_frames,
+                    external_network: @external_network,
                     client_space:    (@client_spaces += 1) == 1 ? '' : "w#{@client_spaces}-",
                     window_number:   @client_spaces - 1).tap do |b|
           @windows_by_number[b.window_number] = b

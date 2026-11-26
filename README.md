@@ -147,17 +147,20 @@ expect(File.read(File.join(Capybara.save_path, 'report.csv'))).to include('id,na
 
 ```ruby
 Capybara.register_driver :simulated_mobile do |app|
-  Capybara::Simulated::Driver.new(app, viewport: [390, 844], external_frames: true)
+  Capybara::Simulated::Driver.new(app, viewport: [390, 844], external_network: true)
 end
 ```
 
 - `viewport:` — `[width, height]` of every window, in CSS pixels (default 1024×768).
 - `user_agent:` — the `User-Agent` the session sends and `navigator.userAgent` reports.
 - `touch:` — `true` for a touchscreen pointer.
-- `external_frames:` — whether an `<iframe>` / `<frame>` may load a document from a host your app does not serve (a
-  video embed, a payment widget). Off by default: such a frame gets the error document a browser shows for a network
-  error, and its `load` fires. No request leaves the process, and nothing waits on a connection. Turn it on to fetch
-  those documents from the network, at that network's speed, and run their scripts.
+- `external_network:` — whether a request may go to a host your app does not serve (a CDN, a video embed, a payment
+  widget, an API). Off by default: nothing leaves the process. Such a request fails as a browser's does when the
+  network refuses it: a page or a frame gets the browser's network-error document (a frame's `load` still fires), an
+  image or a script its `error` event, a `fetch()` a rejected promise, a WebSocket or an `EventSource` its failure. A
+  host your app serves is its own (`Capybara.app_host`, or the server's), and any name of its site at its port. Turn it
+  on to fetch everything else from the network, at that network's speed; where the network refuses a request, the app
+  is asked for it.
 
 ## Trace
 
