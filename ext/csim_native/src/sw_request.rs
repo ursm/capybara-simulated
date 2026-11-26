@@ -209,6 +209,192 @@ pub(crate) fn sw_request_for_ruby(ruby: &Ruby, params: RHash) -> Result<String, 
     Ok(r.wire())
 }
 
+// A controlled client's request through its service worker, hop by hop (Fetch "HTTP fetch" over Handle Fetch, then
+// "HTTP-redirect fetch"): each hop's request the worker's `fetch` event's to answer, its mode and redirect mode deciding
+// what the answer does (fetch_rules.rs `intercepted_hop`) — a redirect it follows is the next hop, its method, body and
+// headers as "HTTP-redirect fetch" leaves them; a hop the worker falls through on goes to the network as the request
+// stands at it. What the chain keeps between hops: the request at the hop (`request`), its client's origin, how many
+// redirects it followed, whether it has been at another origin, its redirect-taint and the Sec-Fetch-Site it latched.
+// Kept by the realm that made it (`Chains`), by number, until it ends — an answer, an opaque redirect, a network error,
+// the network's — or its request is given up on.
+pub(crate) struct SwChain {
+    request: SwRequest,
+    origin: String,
+    hops: u32,
+    crossed: bool,
+    taint: crate::referrer::RedirectTaint,
+    site: Option<String>,
+}
+
+#[derive(Default)]
+pub(crate) struct Chains {
+    next: u32,
+    live: std::collections::HashMap<u32, SwChain>,
+}
+impl Chains {
+    // The chain of `request`, its client of origin `origin`: its number.
+    pub(crate) fn begin(&mut self, request: SwRequest, origin: String) -> u32 {
+        self.next += 1;
+        let chain = SwChain { request, origin, hops: 0, crossed: false, taint: Default::default(), site: None };
+        self.live.insert(self.next, chain);
+        self.next
+    }
+}
+
+// What the worker's answer to a hop does: answers the request (its `hops` and the hop's URL, which a response with no URL
+// list takes), an opaque redirect of the hop's URL, the next hop's request, or a network error, and why.
+#[derive(Debug, PartialEq)]
+pub(crate) enum ChainStep {
+    Answer(u32, String),
+    OpaqueRedirect(String),
+    Follow(String),
+    Fail(String),
+}
+impl SwChain {
+    // …the worker's `response` to the hop.
+    pub(crate) fn answer(&mut self, response: &crate::fetch_rules::WorkerResponse<'_>) -> ChainStep {
+        use crate::fetch_rules::{intercepted_hop, request_body_header, HopOutcome, InterceptedHop};
+        let r = &self.request;
+        let hop = InterceptedHop {
+            mode: &r.mode,
+            redirect_mode: &r.redirect,
+            url: &r.url,
+            method: r.method.as_bytes(),
+            request_origin: &self.origin,
+            crossed: self.crossed,
+            taint: self.taint,
+            hops: self.hops,
+        };
+        match intercepted_hop(&hop, response) {
+            HopOutcome::Answer => ChainStep::Answer(self.hops, r.url.clone()),
+            HopOutcome::OpaqueRedirect => ChainStep::OpaqueRedirect(r.url.clone()),
+            HopOutcome::Fail(why) => ChainStep::Fail(why),
+            HopOutcome::Follow(next, crossed) => {
+                // (…the Sec-Fetch-Site latch with this hop's URL in it, measured from the request's origin)
+                let site = crate::referrer::wider_site(self.site.as_deref(), crate::referrer::fetch_site(&self.origin, &self.request.url));
+                self.site = Some(site.to_owned());
+                let r = &mut self.request;
+                r.headers.retain(|(name, _)| {
+                    !(next.to_get && request_body_header(name.as_bytes()) || next.drop_authorization && name.eq_ignore_ascii_case("authorization"))
+                });
+                if next.to_get {
+                    "GET".clone_into(&mut r.method);
+                    r.body_b64.clear();
+                }
+                r.url = next.url;
+                self.hops += 1;
+                self.crossed = crossed;
+                self.taint = next.taint;
+                ChainStep::Follow(r.wire())
+            }
+        }
+    }
+}
+
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "swChainStart", chain_start_op, context_id);
+    crate::dom::register(scope, ns, "swChainAnswer", chain_answer_op, context_id);
+    crate::dom::register(scope, ns, "swChainFallthrough", chain_fallthrough_op, context_id);
+    crate::dom::register(scope, ns, "swChainDrop", chain_drop_op, context_id);
+}
+
+// The calling realm's chains, `f` asked of them.
+fn chains<T>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, f: impl FnOnce(&mut Chains) -> T) -> Option<T> {
+    let cid = crate::dom::realm_id(scope, args);
+    crate::dom::realm(scope, cid).realm_state_mut(cid).map(|s| f(&mut s.sw_chains))
+}
+fn string<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
+    v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
+
+// __dom.swChainStart(chain, bodyB64, clientId) -> the request of the chain's first hop as the worker's fetch event takes it
+// (the wire), its body `bodyB64` (none for a GET or a HEAD) and its client's id `clientId`; undefined for a chain gone.
+fn chain_start_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let body = args.get(1).to_rust_string_lossy(scope);
+    let client = args.get(2).to_rust_string_lossy(scope);
+    let wire = chains(scope, &args, |c| {
+        let r = &mut c.live.get_mut(&id)?.request;
+        if r.method != "GET" && r.method != "HEAD" {
+            r.body_b64 = body;
+        }
+        r.client_id = client;
+        Some(r.wire())
+    });
+    if let Some(Some(wire)) = wire {
+        rv.set(string(scope, &wire));
+    }
+}
+
+// __dom.swChainAnswer(chain, status, type, url, redirected, location) -> what the worker's response to the chain's hop
+// does (`SwChain::answer`; `location` its Location header, null for none): [0, hops, hop URL] it answers the request,
+// [1, hop URL] an opaque redirect of the hop's URL answers it, [2, wire] the request of the next hop, [3, why] a network
+// error. The chain ends but at a next hop; undefined for one gone.
+fn chain_answer_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let response_type = args.get(2).to_rust_string_lossy(scope);
+    let url = if args.get(3).is_null_or_undefined() { String::new() } else { args.get(3).to_rust_string_lossy(scope) };
+    let location = (!args.get(5).is_null_or_undefined()).then(|| args.get(5).to_rust_string_lossy(scope));
+    let response = crate::fetch_rules::WorkerResponse {
+        status: args.get(1).uint32_value(scope).unwrap_or(0),
+        response_type: if response_type.is_empty() { "default" } else { &response_type },
+        url: &url,
+        redirected: args.get(4).is_true(),
+        location: location.as_deref(),
+    };
+    let Some(Some(step)) = chains(scope, &args, |c| {
+        let step = c.live.get_mut(&id)?.answer(&response);
+        if !matches!(step, ChainStep::Follow(_)) {
+            c.live.remove(&id);
+        }
+        Some(step)
+    }) else {
+        return;
+    };
+    let items: Vec<v8::Local<v8::Value>> = match step {
+        ChainStep::Answer(hops, url) => vec![v8::Integer::new(scope, 0).into(), v8::Integer::new_from_unsigned(scope, hops).into(), string(scope, &url)],
+        ChainStep::OpaqueRedirect(url) => vec![v8::Integer::new(scope, 1).into(), string(scope, &url)],
+        ChainStep::Follow(wire) => vec![v8::Integer::new(scope, 2).into(), string(scope, &wire)],
+        ChainStep::Fail(why) => vec![v8::Integer::new(scope, 3).into(), string(scope, &why)],
+    };
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.swChainFallthrough(chain) -> the worker fell through on the chain's hop, which goes to the network: undefined at
+// its first hop — the request as it was made — else the request at the hop, [method, URL, headers (a map of byte
+// strings, of no prototype), its redirect-taint by name, the Sec-Fetch-Site its chain latched], which its network leg
+// carries on (fetch_plan.rs: its origin "null" past "same-origin", its cookies cross-site at "cross-site"). The chain ends.
+fn chain_fallthrough_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let Some(Some(chain)) = chains(scope, &args, |c| c.live.remove(&id)) else { return };
+    if chain.hops == 0 {
+        return;
+    }
+    let r = &chain.request;
+    let headers: Vec<(Vec<u8>, Vec<u8>)> = r.headers.iter().map(|(n, v)| (latin1(n), latin1(v))).collect();
+    let site = match &chain.site {
+        Some(site) => string(scope, site),
+        None => v8::null(scope).into(),
+    };
+    let items = [string(scope, &r.method), string(scope, &r.url), crate::fetch_request::header_record(scope, &headers), string(scope, chain.taint.name()), site];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.swChainDrop(chain): the chain's request given up on.
+fn chain_drop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    chains(scope, &args, |c| c.live.remove(&id));
+}
+
+// A byte string's bytes, its code points each one.
+pub(crate) fn latin1(s: &str) -> Vec<u8> {
+    s.chars().map(|c| c as u32 as u8).collect()
+}
+// …and the text a byte string is.
+pub(crate) fn byte_text(bytes: &[u8]) -> String {
+    bytes.iter().map(|&b| char::from(b)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,6 +416,35 @@ mod tests {
         let mut r = SwRequest { headers: vec![("accept".into(), "text/x".into())], ..SwRequest::default() };
         r.accept_default();
         assert_eq!(r.headers, [("accept".to_owned(), "text/x".to_owned())]);
+    }
+
+    #[test]
+    fn a_chain_follows_a_303_as_a_bodyless_get_and_fails_a_21st() {
+        let request = SwRequest {
+            method: "POST".into(),
+            url: "https://a.test/form".into(),
+            headers: vec![("Content-Type".into(), "text/plain".into()), ("X-Kept".into(), "1".into())],
+            body_b64: "Ym9keQ==".into(),
+            mode: "cors".into(),
+            redirect: "follow".into(),
+            ..SwRequest::default()
+        };
+        let mut chains = Chains::default();
+        let id = chains.begin(request, "https://a.test".into());
+        let chain = chains.live.get_mut(&id).unwrap();
+        let redirect = |location| crate::fetch_rules::WorkerResponse { status: 303, response_type: "default", url: "https://a.test/form", redirected: false, location };
+        let ChainStep::Follow(wire) = chain.answer(&redirect(Some("/next"))) else { panic!() };
+        let wire: Json = serde_json::from_str(&wire).unwrap();
+        assert_eq!((wire["method"].as_str(), wire["url"].as_str(), wire["body_b64"].as_str()), (Some("GET"), Some("https://a.test/next"), Some("")));
+        assert!(wire["headers"].get("Content-Type").is_none());
+        assert_eq!(wire["headers"]["X-Kept"], "1");
+        assert_eq!(chain.site.as_deref(), Some("same-origin"));
+        for _ in 1..20 {
+            assert!(matches!(chain.answer(&redirect(Some("/next"))), ChainStep::Follow(_)));
+        }
+        assert_eq!(chain.answer(&redirect(Some("/next"))), ChainStep::Fail("exceeded 20 redirects".into()));
+        let ok = crate::fetch_rules::WorkerResponse { status: 200, response_type: "default", url: "", redirected: false, location: None };
+        assert_eq!(chain.answer(&ok), ChainStep::Answer(20, "https://a.test/next".into()));
     }
 
     #[test]

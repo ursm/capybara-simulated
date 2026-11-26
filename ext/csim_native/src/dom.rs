@@ -1145,6 +1145,8 @@ pub(crate) struct RealmState {
     pub(crate) service_worker: Option<crate::service_worker::ServiceWorkerGlobal>,
     // …and who it is to the host: its client id, its window key, a worker's handle (realm_identity.rs).
     pub(crate) identity: crate::realm_identity::RealmIdentity,
+    // …the requests it made that its service worker answers hop by hop (sw_request.rs).
+    pub(crate) sw_chains: crate::sw_request::Chains,
     // …and its own of its sheets' fetches (sheet_fetch.rs).
     pub(crate) sheet_fetches: crate::sheet_fetch::RealmSheets,
     // Whether its document's load event is delayed — fired once nothing delays it — and, where it is, its container's
@@ -3465,6 +3467,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::declarative_refresh::install(scope, ns, context_id);
     crate::event_stream::install(scope, ns, context_id);
     crate::fetch_request::install(scope, ns, context_id);
+    crate::sw_request::install(scope, ns, context_id);
     crate::fetch_rules::install(scope, ns, context_id);
     crate::subresource_judge::install(scope, ns, context_id);
     crate::subresource_plan::install(scope, ns, context_id);
