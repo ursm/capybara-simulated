@@ -159,9 +159,9 @@ module Capybara
       SCREEN_SIZE = Native.screen_size.freeze
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
-      # How long a boot will park for the page's own <img> fetches before letting the window
-      # `load` defer to a later drain (see boot_response_into_ctx).
-      IMAGE_LOAD_BOOT_BUDGET_S = 0.25
+      # How long a boot or a step of the clock will park for the image fetches in flight before going on without them (see
+      # await_image_loads).
+      IMAGE_LOAD_WAIT_BUDGET_S = 0.25
       # How far a visit will step the virtual clock for its document's load (see await_document_load).
       VISIT_LOAD_BUDGET_MS = 10_000
       # …and how many steps of nothing due later it takes before it lets go — work due now that the event loop does not
@@ -3143,6 +3143,7 @@ module Capybara
           @last_tick_ts = now
           effective_step = step_ms || horizon_fast_forward_step
           if (step_ms || @timers_active || (!@workers.empty? && worker_next_timer_at)) && effective_step > 0
+            await_image_loads
             # When the page has work runnable NOW (a rAF chain / timer burst — set
             # by `horizon_fast_forward_step`), run the poll's worth of virtual time
             # in frame-sized chunks so the page renders at real-browser cadence
@@ -8845,6 +8846,10 @@ module Capybara
           @image_load_flights[flight] = group
           spawn_app_request_thread do
             r = nil
+            # (…its server's sleeps counted, as a script's fetch counts them — `SleepHook` — which the engine lands the
+            # result that far after the fetch began by: image_requests.rs `imageFetchLand`)
+            slept = {slept: 0.0}
+            Thread.current.thread_variable_set(:csim_server_slept, slept)
             begin
               r = begin
                 image_load_result(key, cors, credentials, client)
@@ -8865,7 +8870,7 @@ module Capybara
               @image_load_lock.synchronize do
                 @image_load_flights.delete(flight) if @image_load_flights[flight].equal?(group)
                 group.each do |m|
-                  @image_load_results[m] = {result: r} if @image_load_results[m] == :pending
+                  @image_load_results[m] = {result: r, slept: slept[:slept]} if @image_load_results[m] == :pending
                 end
               end
             end
@@ -9167,6 +9172,26 @@ module Capybara
         @image_load_pending.positive?
       end
 
+      # Give the image fetch threads in flight a short GVL-yielding window to finish, each result delivered as it does: what
+      # a response lands at is as far after its fetch began as its server took on the event loop's clock
+      # (image_requests.rs `imageFetchLand`), which must not have moved past that meanwhile — a visit's load, a step of the
+      # clock to a later timer, wait for them so (an image a server took 100 ms over loads before a 700 ms timer, as in a
+      # browser). Bounded — a genuinely slow endpoint lands at a later step instead of stalling this one.
+      # Delivery runs INSIDE the wait: `image_loads_pending?` counts undelivered results (it only falls at delivery,
+      # deliberately — the tick gates key on it), so a park that only sleeps until the deadline burns the whole budget even
+      # when every fetch landed in milliseconds — measured 248 ms on every image-bearing Avo boot.
+      def await_image_loads
+        return unless image_loads_pending?
+
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + IMAGE_LOAD_WAIT_BUDGET_S
+        loop do
+          deliver_image_loads
+          break unless image_loads_pending? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+
+          sleep 0.005
+        end
+      end
+
       # Hand every finished async image load to its realm: the one that began it, which the engine
       # keeps for the request (`imageFetchRealm`); an id no realm has (its page died) is
       # dropped. Returns the number delivered.
@@ -9182,6 +9207,7 @@ module Capybara
         n = 0
         finished.each do |id, slot|
           payload = image_result_payload(slot[:result])
+          payload = payload.merge('slept' => slot[:slept]) if payload.is_a?(Hash)
           consumed = begin
             rid = @runtime.call('imageFetchRealm', id).to_i
             if rid.zero? then @runtime.call('applyAsyncImage', id, payload) == true
@@ -9202,7 +9228,7 @@ module Capybara
         n
       end
 
-      # Shape a thread result into what `_applyImageResult` reads, stashing the bitmap for
+      # Shape a thread result into what `imageFetchLand` reads, stashing the bitmap for
       # transfer HERE, on the main thread, only for results that actually deliver.
       private def image_result_payload(r)
         return nil if r.nil?
@@ -9210,7 +9236,7 @@ module Capybara
         image_payload(r[:entry], r[:meta])
       end
 
-      # What an `<img>` applies of a decoded entry (`_applyImageResult`): its size, natural size and colour space, its
+      # What an `<img>` applies of a decoded entry (`imageFetchLand`): its size, natural size and colour space, its
       # bitmaps stashed for transfer — none for an image with no pixels, which loads with nothing to draw — and its
       # Resource Timing figures, and whether it taints a canvas it is drawn into: its response's (`meta`, none for a
       # `data:` image, which is basic).
@@ -9842,10 +9868,11 @@ module Capybara
       end
 
       # Fetch a media resource (http / relative URL) and return its bytes, so a `<video
-      # src>` pointing at a served file decodes the same way a blob: / data: source does.
+      # src>` pointing at a served file decodes the same way a blob: / data: source does — and an `<audio src>`'s
+      # container tells its duration — its destination its plan's (`video` or `audio`).
       # Returns {'bytes', 'tainted', 'meta'} — its Resource Timing facts — or {'meta'} when it fails (meta nil for a
       # network error).
-      def video_bytes(url, plan, realm: nil)
+      def media_bytes(url, plan, realm: nil)
         # A `crossorigin` element runs the CORS check (an ACAO refusal fails the
         # load); a plain one is a no-cors fetch whose bytes TAINT a canvas they're
         # drawn into where a hop left the fetching CLIENT's origin (a frame's own
@@ -9854,7 +9881,7 @@ module Capybara
         cors, credentials, client = planned_request(plan, realm)
         result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client[:url],
                             referrer: client[:referrer], referrer_policy: client[:policy], body_raw: true,
-                            ancestors: client[:ancestors], client_origin: client[:origin], dest: 'video')
+                            ancestors: client[:ancestors], client_origin: client[:origin], dest: request_of_plan(plan)[3])
         # (…and the response's facts, its Resource Timing entry's, whether its bytes load or not: none of a network error)
         meta = result && resource_timing_meta(result)
         bytes = result['body_raw'].to_s if resource_loaded?(result) && result['status'].to_i < 400
@@ -13209,23 +13236,11 @@ module Capybara
         end
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
         # Its DOMContentLoaded and its `load` are tasks "the end" of its parse queued (bridge.entry.js
-        # `realmHooks.taskOfTheEnd`), which the page's due tasks run below — delayed, where its images are still in flight, until they land. Give their
-        # fetch threads a short GVL-yielding window to land first: they overlap the boot's JS (rusty releases the GVL) and
-        # are usually done already, but one that is not would slip its page's `load` past the visit and leave what a
-        # post-visit read sees to thread timing. Bounded — a genuinely slow endpoint delays `load` to a later step
-        # instead of stalling the visit.
-        # Delivery runs INSIDE the wait: `image_loads_pending?` counts undelivered results (it
-        # only falls at delivery, deliberately — the tick gates key on it), so a park that only
-        # sleeps until the deadline burns the whole budget even when every fetch landed in
-        # milliseconds — measured 248 ms on every image-bearing Avo boot.
-        if image_loads_pending?
-          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + IMAGE_LOAD_BOOT_BUDGET_S
-          loop do
-            deliver_image_loads
-            break unless image_loads_pending? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
-            sleep 0.005
-          end
-        end
+        # `realmHooks.taskOfTheEnd`), which the page's due tasks run below — delayed, where its images are still in flight,
+        # until they land: their fetch threads overlap the boot's JS (rusty releases the GVL) and are usually done already,
+        # but one that is not would slip its page's `load` past the visit and leave what a post-visit read sees to thread
+        # timing (`await_image_loads`).
+        await_image_loads
         flush_page_init
         await_document_load
         @load_navigations_due = true

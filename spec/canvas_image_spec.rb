@@ -2449,20 +2449,25 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(r['pxBlue']).to eq([0, 0, 255, 255])
   end
 
+  # (…once it loads: a `data:` URL is no sooner an image than another — Chrome and Firefox read its size only as its
+  # `load` fires, csim-bench img13 `i1`)
   it 'decodes a data: URL <img> (no fetch) and draws it' do
     session = simulated_session(app)
     session.visit('/')
     data_url = 'data:image/png;base64,' + Base64.strict_encode64(png_bytes)
-    out = session.evaluate_script(<<~JS)
+    out = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
       const img = new Image();
       img.src = #{data_url.inspect};
+      img.onload = () => {
       const c = document.createElement('canvas'); c.width = 4; c.height = 3;
       const ctx = c.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      JSON.stringify({
+      done(JSON.stringify({
         w: img.naturalWidth, h: img.naturalHeight, complete: img.complete,
         pxRed: Array.from(ctx.getImageData(0, 0, 1, 1).data)
-      });
+      }));
+      };
     JS
     r = JSON.parse(out)
     expect(r['w']).to eq(4)
@@ -2709,7 +2714,8 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     # canvas, but the resource loaded): the <img> is complete, not broken, and reports
     # a zero-area intrinsic size. createPattern -> null and drawImage -> no-op, never a
     # broken-image throw.
-    out = session.evaluate_script(<<~JS)
+    out = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
       const svg = "data:image/svg+xml," + encodeURIComponent(
         "<svg xmlns='http://www.w3.org/2000/svg' width='0' height='100'>" +
         "<rect fill='red' width='100' height='100'/></svg>");
@@ -2717,12 +2723,12 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       img.src = svg;
       const err = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.name; } };
       const ctx = document.createElement('canvas').getContext('2d');
-      JSON.stringify({
+      img.onload = () => done(JSON.stringify({
         complete:  img.complete,
         nw:        img.naturalWidth,
         pattern:   ctx.createPattern(img, 'repeat'),          // null (available-but-empty, not broken)
         draw:      err(() => ctx.drawImage(img, 0, 0))        // no-op, no throw
-      });
+      }));
     JS
     r = JSON.parse(out)
     # Observable "loaded, zero-area, NOT broken": complete, zero intrinsic size, and a
@@ -2738,7 +2744,9 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     session.visit('/')
     # An SVG <image> fetches its href just like an <img> src, so createPattern can tell a
     # BROKEN href (throw InvalidStateError) from a usable bitmap (a real pattern).
-    out = session.evaluate_script(<<~JS)
+    out = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const settled = (im) => new Promise((r) => { im.onload = im.onerror = r; });
       const mk = (href, plain) => { const im = document.createElementNS('http://www.w3.org/2000/svg', 'image');
         if (plain) im.setAttribute('href', href); else im.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
         return im; };
@@ -2747,10 +2755,10 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       const broken = mk("data:image/png;base64,bm90LWEtcG5n", false);   // undecodable -> broken
       const ctx = document.createElement('canvas').getContext('2d');
       const err = (fn) => { try { return fn(); } catch (e) { return e.name; } };
-      JSON.stringify({
+      Promise.all([settled(good), settled(broken)]).then(() => done(JSON.stringify({
         good:   ctx.createPattern(good, 'repeat') instanceof CanvasPattern,
         broken: err(() => { ctx.createPattern(broken, 'repeat'); return 'no-throw'; })
-      });
+      })));
     JS
     r = JSON.parse(out)
     # A usable href yields a real pattern; a broken href throws InvalidStateError
@@ -2764,8 +2772,11 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   it 'reloads an SVG <image> on setAttributeNS(xlink) / removeAttribute; an empty href still wins' do
     session = simulated_session(app)
     session.visit('/')
-    out = session.evaluate_script(<<~JS)
+    out = session.evaluate_async_script(<<~JS)
+      (async (done) => {
       const XLINK = 'http://www.w3.org/1999/xlink';
+      const settled = (im) => new Promise((r) => { im.onload = im.onerror = r; });
+      const task = () => new Promise((r) => setTimeout(r, 0));
       const url = "data:image/svg+xml," + encodeURIComponent(
         "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><rect fill='red' width='8' height='8'/></svg>");
       const ctx = document.createElement('canvas').getContext('2d');
@@ -2773,6 +2784,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       const mk = () => document.createElementNS('http://www.w3.org/2000/svg', 'image');
       // Canonical xlink:href set fetches the resource.
       const ns = mk(); ns.setAttributeNS(XLINK, 'xlink:href', url);
+      await settled(ns);
       const nsLoaded = isPat(ns);
       // Removing the sourcing attribute discards the request.
       ns.removeAttribute('xlink:href');
@@ -2780,11 +2792,14 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
       const err = (fn) => { try { return fn(); } catch (e) { return e.name; } };
       // An empty href is the href: it does not defer to a valid XLink one.
       const fb = mk(); fb.setAttribute('href', ''); fb.setAttributeNS(XLINK, 'xlink:href', url);
+      await task();
       const emptyWins = err(() => isPat(fb));
       // …and an attribute merely NAMED `xlink:href` is no XLink href at all.
       const plain = mk(); plain.setAttribute('xlink:href', url);
+      await task();
       const plainNamed = ctx.createPattern(plain, 'repeat');
-      JSON.stringify({ nsLoaded, afterRemove, emptyWins, plainNamed });
+      done(JSON.stringify({ nsLoaded, afterRemove, emptyWins, plainNamed }));
+      })(arguments[0]);
     JS
     r = JSON.parse(out)
     expect(r['nsLoaded']).to be true

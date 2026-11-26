@@ -234,8 +234,8 @@ RSpec.describe 'Media element state' do
     expect(requests).to eq(['m.webm?e'])
     s.execute_script('v.play()')
     expect(s.evaluate_script('log.includes("loadedmetadata")')).to be true
-    expect(s.evaluate_script('[log.slice(0, 5).join(), v.networkState, v.readyState]')).to eq([
-      'loadstart,suspend,play,waiting,loadedmetadata', 1, 4
+    expect(s.evaluate_script('[log.join(), v.networkState, v.readyState]')).to eq([
+      'loadstart,suspend,play,waiting,suspend,loadedmetadata', 1, 4
     ])
     expect(requests).to eq(['m.webm?e', 'm.webm?c'])
   end

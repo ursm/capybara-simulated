@@ -13,6 +13,7 @@ mod agent_clock;
 mod agents;
 mod animation_ops;
 mod animations;
+mod audio;
 mod autofocus;
 mod av1;
 mod blob_data;

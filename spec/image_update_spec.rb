@@ -1,0 +1,130 @@
+# frozen_string_literal: true
+
+require 'capybara/simulated'
+require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
+
+# HTML "update the image data" (image_requests.rs): an image's `load` and `error` are element tasks — never a microtask
+# — its new request pending while the current one still shows, the list of available images taking a source it holds
+# at once, and the server's time a response took counted on the event loop's clock. Chrome and Firefox (csim-bench img13
+# `i1`–`i7`, 2026-11-27) where noted.
+RSpec.describe 'update the image data' do
+  include PollUntil
+
+  png    = File.binread(File.join(__dir__, 'wpt/images/anim-gr.png'))
+  small  = File.binread(File.join(__dir__, 'wpt/images/green-1x1.png'))
+
+  def image_session(png, small, requests = [])
+    app = lambda {|env|
+      path = env['PATH_INFO']
+      requests << path unless path == '/'
+      case path
+      when '/'       then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
+      when '/a.png'  then [200, {'content-type' => 'image/png', 'cache-control' => 'no-store'}, [png]]
+      when '/b.png'  then [200, {'content-type' => 'image/png', 'cache-control' => 'no-store'}, [small]]
+      when '/slow.png'
+        sleep 0.1
+        [200, {'content-type' => 'image/png', 'cache-control' => 'no-store'}, [small]]
+      else [404, {'content-type' => 'text/plain'}, ['']]
+      end
+    }
+    simulated_session(app).tap {|s| s.visit '/' }
+  end
+
+  # Chrome and Firefox both: `A:t0` before `A load` — a `data:` image's `load`, and a missing one's `error`, are tasks
+  # queued behind a timer set before the source was.
+  it 'fires load and error from element tasks, after a timer queued before them' do
+    s = image_session(png, small)
+    s.execute_script(<<~JS)
+      window.log = [];
+      const a = new Image(), b = new Image();
+      a.onload = () => log.push('a load');
+      b.onerror = () => log.push('b error');
+      setTimeout(() => log.push('t0'), 0);
+      a.src = 'data:image/png;base64,#{[small].pack('m0')}';
+      b.src = '/missing.png';
+      Promise.resolve().then(() => log.push('micro'));
+    JS
+    poll_until { s.evaluate_script('log.length') >= 4 }
+    expect(s.evaluate_script('log')).to eq(['micro', 't0', 'a load', 'b error'])
+  end
+
+  # A new request is pending while the current one is completely available: `complete` false at once, the current
+  # image's natural size and URL read until the new one's `load` (Firefox, HTML; Chrome drops them at once), and an
+  # empty `src` makes it complete with an `error` (both).
+  it 'keeps the current image while a new request is pending, and errs on an empty src' do
+    s = image_session(png, small)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const i = window.i = new Image();
+      const read = () => [i.complete, i.naturalWidth, i.currentSrc.split('/').pop()].join();
+      i.onload = () => {
+        if (log.length) { log.push('load ' + read()); i.onload = null; i.src = ''; log.push('empty ' + read()); return; }
+        log.push('first ' + read());
+        i.src = '/b.png';
+        log.push('sync ' + read());
+        Promise.resolve().then(() => log.push('micro ' + read()));
+      };
+      i.onerror = () => log.push('error ' + read());
+      i.src = '/a.png';
+    JS
+    poll_until { s.evaluate_script('log.length') >= 6 }
+    expect(s.evaluate_script('log')).to eq([
+      'first true,100,a.png', 'sync false,100,a.png', 'micro false,100,a.png', 'load true,1,b.png',
+      'empty true,0,', 'error true,0,'
+    ])
+  end
+
+  # The list of available images: a second image of a URL the first loaded is complete with its size at once — its
+  # response's `no-store` notwithstanding ("ignore higher-layer caching", Chrome) — and fires `load` as a task, nothing
+  # fetched again; an `src` set to the value it had fires `load` again (Chrome and Firefox).
+  it 'takes a source the list of available images holds at once' do
+    requests = []
+    s = image_session(png, small, requests)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const a = window.a = new Image();
+      a.onload = () => {
+        a.onload = () => log.push('again');
+        const b = new Image();
+        b.onload = () => log.push('b load');
+        b.src = '/a.png';
+        log.push('b ' + b.complete + ' ' + b.naturalWidth);
+        a.src = '/a.png';
+      };
+      a.src = '/a.png';
+    JS
+    poll_until { s.evaluate_script('log.length') >= 3 }
+    expect(s.evaluate_script('log')).to eq(['b true 100', 'b load', 'again'])
+    expect(requests).to eq(['/a.png'])
+  end
+
+  # A `decode()` of an image whose request turns out broken is rejected ahead of its `error` (Chrome and Firefox).
+  it 'rejects a decode of a broken image ahead of its error' do
+    s = image_session(png, small)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const j = new Image();
+      j.onerror = () => log.push('error');
+      j.src = '/missing.png';
+      j.decode().catch((e) => log.push('rejected ' + e.name));
+    JS
+    poll_until { s.evaluate_script('log.length') >= 2 }
+    expect(s.evaluate_script('log')).to eq(['rejected EncodingError', 'error'])
+  end
+
+  # The time its server took (an app's `sleep`) lands a response that far after its fetch began, on the event loop's
+  # clock: before a later timer, its `load` holding the document's.
+  it 'lands a response as far after its fetch began as its server took' do
+    s = image_session(png, small)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const i = new Image(), t = performance.now();
+      i.onload = () => log.push('load ' + (performance.now() - t >= 100));
+      i.src = '/slow.png';
+      setTimeout(() => log.push('t700'), 700);
+    JS
+    poll_until { s.evaluate_script('log.length') >= 2 }
+    expect(s.evaluate_script('log')).to eq(['load true', 't700'])
+  end
+end

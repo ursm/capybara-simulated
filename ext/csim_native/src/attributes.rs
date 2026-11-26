@@ -578,15 +578,17 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     let Some(n) = arena.get(id) else { return 0 };
     let changed = old != value;
     let mut steps = 0;
-    // (…of an HTML `<img>` or `<input>`, an SVG `<image>` — by its qualified name: its XLink `xlink:href` sources it too)
+    // (…of an HTML `<img>` or `<input>`, an SVG `<image>` — by its qualified name: its XLink `xlink:href` sources it too —
+    // and an `<img>`'s `src` set to the value it had as well, HTML's relevant mutation that restarts its animation: its
+    // `load` fired again, Chrome and Firefox, csim-bench img13 `i4`)
     let svg = n.ns == web_atoms::ns!(svg);
     let image = match tag {
-        "img" if n.is_html() => matches!(key, "src" | "srcset" | "crossorigin"),
-        "image" if svg => matches!(qualified(key), "href" | "xlink:href" | "crossorigin"),
-        "input" if n.is_html() => matches!(key, "src" | "type" | "crossorigin"),
+        "img" if n.is_html() => key == "src" && value.is_some() || changed && matches!(key, "src" | "srcset" | "crossorigin" | "referrerpolicy"),
+        "image" if svg => changed && matches!(qualified(key), "href" | "xlink:href" | "crossorigin"),
+        "input" if n.is_html() => changed && matches!(key, "src" | "type" | "crossorigin"),
         _ => false,
     };
-    if changed && image {
+    if image {
         steps |= STEP_IMAGE;
     }
     if !plain {

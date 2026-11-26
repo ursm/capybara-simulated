@@ -195,7 +195,7 @@ module Capybara
         # Zero-copy postMessage transfer-token bookkeeping (see Browser#drop_pending_transfers).
         'transferIssued'               => ->(b, *a) { b.transfer_token_issued(a[0]); nil },
         'moduleIssued'                 => ->(b, *a) { b.module_token_issued(a[0]); nil },
-        'videoBytes'                   => ->(b, *a) { b.video_bytes(a[0], a[2], realm: a[1]) }
+        'mediaBytes'                   => ->(b, *a) { b.media_bytes(a[0], a[2], realm: a[1]) }
       }.freeze
 
       def self.safe_call

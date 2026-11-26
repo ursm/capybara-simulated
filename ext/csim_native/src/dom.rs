@@ -939,8 +939,10 @@ pub(crate) struct RealmArena {
     pub(crate) dialog_return_values: std::collections::HashMap<NodeId, Vec<u16>>,
     // …and what a request to close it holds until it closes it (dialogs.rs `RequestClose`).
     pub(crate) dialog_requests: std::collections::HashMap<NodeId, crate::dialogs::RequestClose>,
-    // Each media element's state, from its first use (media.rs).
+    // Each media element's state, from its first use, and the resource its current load fetched, held for the media data
+    // processing tasks that apply it (media.rs).
     pub(crate) media: std::collections::HashMap<NodeId, crate::media::Media>,
+    pub(crate) media_arrived: std::collections::HashMap<NodeId, crate::media::MediaResource>,
     // Each document's map of preloaded resources, by preload key (preload_map.rs).
     pub(crate) preloads: std::collections::HashMap<crate::preload_map::Key, crate::preload_map::Preloaded>,
     // The requests the engine made whose service worker's `fetch` event is yet to answer, by the token it handed the
@@ -951,12 +953,12 @@ pub(crate) struct RealmArena {
     pub(crate) link_preloads: std::collections::HashMap<NodeId, crate::subresource_obtain::LinkPreload>,
     // Each style sheet owner's request of the sheet it obtains (sheet_fetch.rs).
     pub(crate) sheet_requests: std::collections::HashMap<NodeId, crate::sheet_fetch::SheetRequest>,
-    // Each image element's current request, from its first load (image_requests.rs).
+    // Each image element's requests, from its first update (image_requests.rs).
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
     // …the fetches of theirs the host makes on a thread of its own, by the id it numbers them with, until it hands the
-    // result back (image_requests.rs `HostFetch`), and the results whose server delay is yet to run out.
+    // result back (image_requests.rs `HostFetch`), and each document's list of available images (`AvailableImages`).
     pub(crate) image_fetches: std::collections::HashMap<u32, crate::image_requests::HostFetch>,
-    pub(crate) image_arrivals: Vec<(i32, NodeId, u32)>,
+    pub(crate) available_images: crate::image_requests::AvailableImages,
     // The video elements' decoded frames (media.rs `mediaFrame`): each one's first, which a canvas draws — none until a
     // video decodes, and none again once a load fails.
     pub(crate) video_frames: std::collections::HashMap<NodeId, crate::image_requests::Pixels>,
@@ -1545,6 +1547,7 @@ impl RealmArena {
         self.dialog_return_values.retain(|id, _| live(slots, id));
         self.dialog_requests.retain(|id, _| live(slots, id));
         self.media.retain(|id, _| live(slots, id));
+        self.media_arrived.retain(|id, _| live(slots, id));
         self.preloads.retain(|key, _| live(slots, &key.doc()));
         self.obtains.retain(|_, request| request.doc().is_none_or(|doc| live(slots, &doc)));
         self.link_preloads.retain(|id, _| live(slots, id));
@@ -1786,6 +1789,7 @@ impl RealmArena {
         }
         if !self.media.is_empty() {
             self.media.remove(&id);
+            self.media_arrived.remove(&id);
             self.video_frames.remove(&id);
         }
         if !self.form_past_names.is_empty() {
@@ -3519,7 +3523,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::close_watchers::install(scope, ns, context_id);
     crate::activation::install(scope, ns, context_id);
     crate::input_value::install(scope, ns, context_id);
-    crate::image_source::install(scope, ns, context_id);
     crate::image_decode::install(scope, ns, context_id);
     crate::image_encode::install(scope, ns, context_id);
     crate::serialize::install(scope, ns, context_id);
@@ -4215,8 +4218,8 @@ impl NaturalSize {
     }
 }
 
-// An `<img>`'s or a plugin's decoded image's natural size (`NaturalSize`: image_requests.rs `imageApply`,
-// `apply_decoded`; subresource_obtain.rs `processPlugin`) — or none: nothing decoded.
+// An `<img>`'s or a plugin's decoded image's natural size (`NaturalSize`: image_requests.rs, its current request's;
+// subresource_obtain.rs `processPlugin`) — or none: nothing decoded.
 impl RealmArena {
     // …element `id`'s, a dimension of no finite size none, nor a view box of no positive one.
     pub(crate) fn set_natural_size(&mut self, id: NodeId, natural: Option<NaturalSize>) {

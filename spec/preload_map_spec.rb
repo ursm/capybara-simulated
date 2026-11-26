@@ -222,7 +222,8 @@ RSpec.describe 'map of preloaded resources' do
   end
 
   # …one consumer alone: a request of another mode (a `crossorigin` image) takes none and fetches; the first that
-  # matches takes it; the next fetches again.
+  # matches takes it; the next takes the image the list of available images keeps of it, fetching nothing either (HTML
+  # "update the image data"), where one of another mode fetches again.
   it 'hands a preload to the first consumer that matches it alone' do
     page = '<!DOCTYPE html><meta charset=utf-8><link rel=preload as=image href="/i.png?pre"><body>'
     served = []
@@ -235,6 +236,9 @@ RSpec.describe 'map of preloaded resources' do
     expect(poll_until { s.evaluate_script('plain.complete') }).to be true
     s.execute_script("window.again = Object.assign(new Image(), { src: '/i.png?pre' })")
     expect(poll_until { s.evaluate_script('again.complete') }).to be true
+    expect(served).to eq(['i.png?pre', 'i.png?pre'])
+    s.execute_script("window.other = Object.assign(new Image(), { crossOrigin: 'use-credentials', src: '/i.png?pre' })")
+    expect(poll_until { s.evaluate_script('other.complete') }).to be true
     expect(served).to eq(['i.png?pre', 'i.png?pre', 'i.png?pre'])
   end
 

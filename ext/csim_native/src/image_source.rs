@@ -139,26 +139,6 @@ pub(crate) fn select(arena: &RealmArena, img: NodeId, media_matches: &dyn Fn(&st
     Some((chosen.url.to_owned(), chosen.density))
 }
 
-pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "imageSource", image_source, context_id);
-}
-
-// __dom.imageSource(nid) -> [the URL the `<img>` fetches, its pixel density] (`select`), a `media` judged on its realm's
-// viewport (viewport.rs); undefined where it names none.
-fn image_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let viewport = crate::viewport::of(scope, cid).map(|v| v as f32);
-    let d = crate::dom::dom(scope);
-    let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
-    let Some(arena) = d.arena.enter_known(cid) else { return };
-    let engine = d.styles.get(&cid);
-    let Some((url, density)) = select(arena, id, &|media| crate::style::media_matches(engine, arena, screen, media)) else { return };
-    let Some(url) = v8::String::new(scope, &url) else { return };
-    let density = v8::Number::new(scope, density);
-    rv.set(v8::Array::new_with_elements(scope, &[url.into(), density.into()]).into());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
