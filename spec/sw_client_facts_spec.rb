@@ -56,3 +56,34 @@ RSpec.describe 'a service-worker client, as the engine has it' do
     expect(got).to contain_exactly(['/', 'top-level'], ['/frame', 'nested'], ['/popup', 'auxiliary'])
   end
 end
+
+# clients.claim() (Service Workers §4.3.4) resolves once every client it claims has its active service worker set — the
+# host's application of the claim, at the window's next step — so a `matchAll()` after it finds them controlled.
+RSpec.describe 'clients.claim()' do
+  let(:app) {
+    lambda {|env|
+      case env['PATH_INFO']
+      when '/sw.js'
+        [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+          self.addEventListener('install', () => self.skipWaiting());
+          self.addEventListener('activate', e => e.waitUntil(self.clients.claim().then(async () => {
+            const controlled = await self.clients.matchAll();
+            (await self.clients.matchAll({includeUncontrolled: true})).forEach(c => c.postMessage(controlled.length));
+          })));
+        JS
+      else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
+      end
+    }
+  }
+
+  it 'resolves once the clients it claims are controlled' do
+    session = simulated_session(app)
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      navigator.serviceWorker.addEventListener('message', e => done([e.data, !!navigator.serviceWorker.controller]));
+      navigator.serviceWorker.register('/sw.js');
+    JS
+    expect(got).to eq([1, true])
+  end
+end

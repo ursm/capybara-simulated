@@ -8220,6 +8220,9 @@ module Capybara
         Native.sw_claim_order(@sw_partition, claims).each do |handle, scope|
           Native.sw_claim(@sw_partition, handle, scope).each {|key| sw_controller_told(key) }
         end
+        # (…and each claim's promise resolved in its worker — every client's active worker set first, as §4.3.4 has it — one
+        # that claimed nothing as well)
+        claims.each {|handle| @workers[handle.to_i]&.dig(:inbox)&.push({kind: 'sw_told', fn: 'swClaimed', args: []}) }
       end
 
       # A worker finished a lifecycle phase — its lifecycle parks its observable states on
