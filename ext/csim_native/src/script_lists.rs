@@ -203,7 +203,7 @@ const PHASE_IN_ORDER: u32 = 3;
 // What it says to do: nothing more; queue its task `arg` ms on — `QUEUE_GATED` under a load gate (late on purpose and
 // holding the load, `QUEUE_LATE`), `QUEUE_SPECULATIVE` in turn as of its parse's beginning, `QUEUE_TIMER` as a timer's
 // task rather than a response's; run the parser's script (bridge.entry.js `runOneScript`, "the end"'s list); fire its
-// `error`, where preparing it again comes to a script, its parser aborted (`STEP_FAILED`); run the landing `arg`
+// `error`, its parser aborted (`STEP_FAILED`); run the landing `arg`
 // (`scriptLandingTake`), and then, one of the list of scripts that will execute in order, go on with the list.
 const STEP_DONE: u32 = 0;
 const STEP_QUEUE: u32 = 1;
@@ -329,7 +329,9 @@ fn then(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_,
                 return Ok((STEP_RUN, 0.0));
             }
             crate::script_fetch::drop_fetch(scope, cid, fetch, host)?;
-            Ok(if moved || run { DONE } else { (STEP_FAILED, 0.0) })
+            // (…one whose parser was aborted its `error`, its fetch cancelled — what its end tag listed it as, taken)
+            let failed = !moved && !run && realm(scope, cid).take_listed(cid, el).is_some();
+            Ok(if failed { (STEP_FAILED, 0.0) } else { DONE })
         }
         // (…an inserted one's response taken now, its entry filed as its load completes — unless it moved to another
         // document since, which runs none of it: "execute the script element" step 2, "If el's preparation-time document is
@@ -597,8 +599,10 @@ struct Prepared {
     doc: NodeId,
     aborts: u32,
     generation: u32,
-    // A module script, run whole once its graph's entry has landed.
+    // A module script, run whole once its graph's entry has landed — from the URL its end tag parsed its `src` to (`Some(None)`
+    // none: one that did not parse), an inline one's none.
     module: bool,
+    url: Option<Option<String>>,
     // An inline one's source text as it was prepared.
     text: Option<Vec<u16>>,
     // Its fetch (script_fetch.rs, 0 for none): a parser-blocking one's begun as it was prepared, dated as its parse began
@@ -652,44 +656,49 @@ fn prepare(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (by, awaited,
     use crate::script::{BY_PARSER_LIST, PREPARE_CLASSIC, PREPARE_ERROR, PREPARE_IMPORT_MAP, PREPARE_MODULE};
     let node_doc = crate::node_handle::node_document_of(scope, el);
     let arena = realm(scope, cid);
-    let scripting = node_doc.is_some_and(|d| arena.document_states.has_browsing_context(d));
-    let module = match arena.prepare_script(el, scripting, by) {
-        PREPARE_ERROR => return Ok((PREPARED_ERROR, 0)),
-        PREPARE_IMPORT_MAP => return Ok((PREPARED_IMPORT_MAP, 0)),
-        PREPARE_MODULE => true,
-        PREPARE_CLASSIC => false,
-        _ => return Ok((PREPARED_NONE, 0)),
-    };
     let Some(doc) = arena.realm_document(cid) else { return Ok((PREPARED_NONE, 0)) };
+    // (…one out of the lists as its end tag decided it: `take_listed`; the parser's at its end tag as it is now)
+    let listed = if by == BY_PARSER_LIST {
+        let Some(listed) = arena.take_listed(cid, el) else { return Ok((PREPARED_NONE, 0)) };
+        Some(listed)
+    } else {
+        let scripting = node_doc.is_some_and(|d| arena.document_states.has_browsing_context(d));
+        match arena.prepare_script(el, scripting, by) {
+            PREPARE_ERROR => return Ok((PREPARED_ERROR, 0)),
+            PREPARE_IMPORT_MAP => return Ok((PREPARED_IMPORT_MAP, 0)),
+            PREPARE_MODULE | PREPARE_CLASSIC => None,
+            _ => return Ok((PREPARED_NONE, 0)),
+        }
+    };
+    let n = arena.get(el);
+    let module = listed.as_ref().map_or_else(|| n.is_some_and(|n| crate::script::script_type(n) == crate::script::MODULE), |l| l.module);
+    let src = n.and_then(|n| n.plain_attr("src")).filter(|s| !s.is_empty()).map(str::to_owned);
     let lc = arena.document_states.lifecycle(doc);
-    let src = arena.get(el).and_then(|n| n.plain_attr("src")).filter(|s| !s.is_empty()).map(str::to_owned);
-    let mut p = Prepared { id: 0, el, doc, aborts: lc.aborts(), generation: lc.generation(), module, text: None, fetch: 0, blocking: false, awaited, landed: None, mark: 0.0, wait: Wait::Begin };
+    let mut p = Prepared { id: 0, el, doc, aborts: lc.aborts(), generation: lc.generation(), module, url: None, text: None, fetch: 0, blocking: false, awaited, landed: None, mark: 0.0, wait: Wait::Begin };
     if module {
+        p.url = listed.and_then(|l| l.url);
         // (…its graph's entry's fetch, begun at its end tag — an inline one's none: the tasks queued before "the end"'s wait
         // run first)
         p.fetch = crate::script_fetch::fetch_of(scope, cid, el);
         if awaited && p.fetch == 0 {
             p.mark = realm(scope, cid).parser_waits(cid, false);
         }
+    } else if listed.is_some() {
+        // (…an `async` or a deferred one's the fetch its end tag began: "prepare the script element" fetched it there —
+        // none is a network error)
+        p.fetch = crate::script_fetch::fetch_of(scope, cid, el);
     } else if let Some(src) = src {
         // (…its `src` parsed against its node document's base URL as it is prepared, one that does not parse fetched as the
-        // attribute is)
+        // attribute is; the parser waiting on it, its `async` scripts landing with that — the tasks queued by now run
+        // first, or, none being, those a style sheet that blocks it does: script.rs `parser_waits`)
         let arena = realm(scope, cid);
-        if by == BY_PARSER_LIST {
-            // (…an `async` or a deferred one's the fetch its end tag began: "prepare the script element" fetched it there —
-            // none is a network error)
-            p.fetch = crate::script_fetch::fetch_of(scope, cid, el);
-        } else {
-            // (…the parser waiting on it, its `async` scripts landing with that — the tasks queued by now run first, or, none
-            // being, those a style sheet that blocks it does: script.rs `parser_waits`)
-            p.mark = Some(arena.parser_waits(cid, true)).filter(|&m| m != 0.0).unwrap_or(mark);
-            let url = node_doc.and_then(|d| arena.parse_document_url(d, &src)).map(|u| u.href().to_owned());
-            let scanned = crate::script_fetch::parser_input_scanned(scope, cid);
-            let mut request = crate::subresource_obtain::ClassicRequest::of_element(realm(scope, cid), el, doc, url, true);
-            request.blocking = true;
-            p.fetch = crate::script_fetch::begin_classic(scope, cid, host, request, scanned)?;
-            p.blocking = true;
-        }
+        p.mark = Some(arena.parser_waits(cid, true)).filter(|&m| m != 0.0).unwrap_or(mark);
+        let url = node_doc.and_then(|d| arena.parse_document_url(d, &src)).map(|u| u.href().to_owned());
+        let scanned = crate::script_fetch::parser_input_scanned(scope, cid);
+        let mut request = crate::subresource_obtain::ClassicRequest::of_element(realm(scope, cid), el, doc, url, true);
+        request.blocking = true;
+        p.fetch = crate::script_fetch::begin_classic(scope, cid, host, request, scanned)?;
+        p.blocking = true;
     } else {
         p.text = Some(realm(scope, cid).child_text(el));
         p.mark = mark;
@@ -835,7 +844,13 @@ fn run_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
             if p.fetch != 0 && crate::script_fetch::land(scope, cid, p.fetch, host).is_err() {
                 return;
             }
-            (RUN_PARSER_MODULE, v8::undefined(scope).into())
+            // (…from the URL its end tag parsed its `src` to — null one that did not parse — an inline one's none)
+            let url = match &p.url {
+                Some(Some(url)) => crate::subresource_obtain::text(scope, url),
+                Some(None) => v8::null(scope).into(),
+                None => v8::undefined(scope).into(),
+            };
+            (RUN_PARSER_MODULE, url)
         }
     } else {
         let (ok, body, inline) = match p.text {

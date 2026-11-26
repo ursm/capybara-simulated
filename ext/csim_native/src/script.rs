@@ -103,11 +103,9 @@ impl RealmArena {
     // map with any, there being no external import maps — and else runs, or registers its import map.
     // (…and, `scripting` false — its node document has no browsing context — or its document sandboxed against scripts,
     // "already started" and nothing more: step 19, "scripting is disabled")
-    // (…the parser's script — `by` it, not `BY_SCRIPT` — is "already started" here from its creation, as the insertion
-    // the parser makes prepares nothing, so what says it has been prepared is its having run; and one of the lists runs
-    // connected or not: the parser prepared it at its end tag, connected, and one an earlier script removed since is
-    // still in the list of scripts to execute after parsing, which "execute the script element" checks against its
-    // preparation-time document alone — where at its end tag one the parser put in a removed subtree is not connected)
+    // (…the parser's script at its end tag — `BY_PARSER`, not `BY_SCRIPT` — is "already started" here from its creation, as
+    // the insertion the parser makes prepares nothing, so what says it has been prepared is its having run; one it lists,
+    // `list_parser_script` prepares there, and "the end" takes what that decided: `take_listed`)
     pub(crate) fn prepare_script(&mut self, id: NodeId, scripting: bool, by: u32) -> u32 {
         if by == BY_PARSER {
             if let Some(n) = self.get_mut_quietly(id) {
@@ -123,7 +121,7 @@ impl RealmArena {
         if by == BY_SCRIPT && !self.script_lines.is_empty() {
             self.script_lines.remove(&id);
         }
-        if !self.ready_to_start(id, by) {
+        if !self.ready_to_start(id) {
             if by == BY_PARSER {
                 self.leave_preparable(id);
             }
@@ -153,19 +151,12 @@ impl RealmArena {
             n.script_flags &= !SCRIPT_ALREADY_STARTED;
         }
     }
-    // Whether preparing the script element `id` goes on to set it "already started": it has a `src` or child text (one
-    // out of the lists its text as its end tag found it), is connected — where it is not out of the lists — and its type
-    // runs as something here.
-    fn ready_to_start(&self, id: NodeId, by: u32) -> bool {
+    // Whether preparing the script element `id` goes on to set it "already started": it has a `src` or child text, is
+    // connected, and its type runs as something here.
+    fn ready_to_start(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id) else { return false };
-        let src = n.plain_attr("src").map(str::is_empty);
-        // (…one out of the lists its text as its end tag found it: HTML takes the source text there)
-        let listed = if by == BY_PARSER_LIST { self.realm_state(n.realm).and_then(|s| s.parser_sources.get(&id)) } else { None };
-        let has_text = match listed {
-            Some(text) => !text.is_empty(),
-            None => n.children.iter().any(|&c| self.get(c).is_some_and(|t| t.kind == NodeKind::Text && !t.data.is_empty())),
-        };
-        if (src.is_none() && !has_text) || (by != BY_PARSER_LIST && !self.is_connected(id)) {
+        let has_text = n.children.iter().any(|&c| self.get(c).is_some_and(|t| t.kind == NodeKind::Text && !t.data.is_empty()));
+        if (n.plain_attr("src").is_none() && !has_text) || !self.is_connected(id) {
             return false;
         }
         matches!(script_type(n), CLASSIC | MODULE | IMPORT_MAP)
@@ -185,22 +176,36 @@ pub(crate) fn blocks_parser_from_source(n: &crate::dom::NodeData) -> bool {
     n.plain_attr("src").is_some() && blocks_parser(n)
 }
 
+// What the parser's end tag decided a script it lists is (HTML "prepare the script element", run once, there): a module
+// script or a classic one, of the "set of scripts that will execute as soon as possible" (`async`) or the list of scripts
+// to execute after parsing, and — a module's — the URL its `src` parsed to then (`Some(None)` one that did not parse),
+// none for an inline one: what "the end" runs it as, whatever became of its attributes since (Chrome and Firefox: a
+// deferred script whose `src` an earlier script removed or emptied still runs the one fetched, rv-end-probe
+// `c01_defer_src_removed`, `c02_defer_src_emptied`, `c04_async_src_removed`).
+#[derive(Clone)]
+pub(crate) struct Listed {
+    pub(crate) module: bool,
+    pub(crate) is_async: bool,
+    pub(crate) url: Option<Option<String>>,
+}
+
 impl RealmArena {
     // The parser at the end tag of a script it does not run there — a deferred, async or module one, or one whose type
-    // runs nothing (`listParserScript`): one connected then goes on the list of scripts to execute after parsing — where
-    // "the end" finds it, whatever an earlier script did to it since (HTML §13.2.7: the lists are kept, not the tree
-    // walked again), an inline one with the source text it has now — and one in a subtree a script removed does not;
-    // one preparing returns from before it is "already started" is left preparable (`leave_preparable`). What its
-    // preparation fetches now — "prepare the script element" steps 26-27: an external one's `src`, `scripting` enabled for
-    // it — the fetch the bindings begin (script_fetch.rs): a classic one's not `nomodule` (`LISTED_CLASSIC`), a module
-    // script's graph's entry (`LISTED_MODULE`), else none (`LISTED`).
+    // runs nothing (`listParserScript`): HTML "prepare the script element" for it, once — "already started", "from an
+    // external file" where it has a `src`; a classic one marked `nomodule`, or one scripting is disabled for or its
+    // document's sandboxing blocks, nothing more (`LISTED`); one with an empty `src` its `error` queued, never listed
+    // (`LISTED_ERROR`); else on the list "the end" runs — where it is connected now, the lists kept, not the tree walked
+    // again (HTML §13.2.7) — with what was decided (`Listed`, an inline one's source text as it is now), its fetch begun by
+    // the bindings (script_fetch.rs): a classic one's (`LISTED_CLASSIC`), a module script's graph's entry (`LISTED_MODULE`),
+    // none for an inline module (`LISTED`). One preparing returns from before it is "already started" is left preparable
+    // (`leave_preparable`).
     pub(crate) fn list_parser_script(&mut self, cid: i32, id: NodeId, scripting: bool) -> u32 {
         let Some(n) = self.get_mut_quietly(id) else { return LISTED };
         n.script_flags |= SCRIPT_END_TAG;
         if n.script_flags & SCRIPT_RUN != 0 {
             return LISTED;
         }
-        if !self.ready_to_start(id, BY_PARSER) {
+        if !self.ready_to_start(id) {
             self.leave_preparable(id);
             return LISTED;
         }
@@ -209,21 +214,49 @@ impl RealmArena {
         if !matches!(ty, CLASSIC | MODULE) {
             return LISTED;
         }
-        let inline = n.plain_attr("src").is_none();
-        let fetches = match ty {
-            _ if !n.plain_attr("src").is_some_and(|src| !src.is_empty()) || !scripting || self.scripts_sandboxed(n.realm) => LISTED,
-            CLASSIC if n.plain_attr("nomodule").is_none() => LISTED_CLASSIC,
-            MODULE => LISTED_MODULE,
-            _ => LISTED,
+        let src = n.plain_attr("src").map(str::to_owned);
+        let is_async = src.is_some() && n.plain_attr("async").is_some();
+        let skipped = (ty == CLASSIC && n.plain_attr("nomodule").is_some()) || !scripting || self.scripts_sandboxed(n.realm);
+        if let Some(n) = self.get_mut_quietly(id) {
+            n.script_flags |= SCRIPT_ALREADY_STARTED | if src.is_some() { SCRIPT_FROM_EXTERNAL_FILE } else { 0 };
+            if skipped || src.as_deref() == Some("") {
+                n.script_flags |= SCRIPT_RUN;
+            }
+        }
+        if skipped {
+            return LISTED;
+        }
+        if src.as_deref() == Some("") {
+            return LISTED_ERROR;
+        }
+        let url = match (&src, ty) {
+            (Some(src), MODULE) => Some(self.parse_document_url(self.root_of(id), src).map(|u| u.href().to_owned())),
+            _ => None,
         };
-        let text = inline.then(|| self.child_text(id));
+        let text = src.is_none().then(|| self.child_text(id));
         if let Some(state) = self.realm_state_mut(cid) {
             state.parser_list.push(id);
+            state.parser_decided.insert(id, Listed { module: ty == MODULE, is_async, url });
             if let Some(text) = text {
                 state.parser_sources.insert(id, text);
             }
         }
-        fetches
+        match (src.is_some(), ty) {
+            (true, MODULE) => LISTED_MODULE,
+            (true, _) => LISTED_CLASSIC,
+            _ => LISTED,
+        }
+    }
+    // …and, prepared out of the list (`BY_PARSER_LIST`), what its end tag decided — taken — and it run by "the end"'s
+    // reckoning: none for one that was not listed, or that ran.
+    pub(crate) fn take_listed(&mut self, cid: i32, id: NodeId) -> Option<Listed> {
+        let listed = self.realm_state_mut(cid)?.parser_decided.remove(&id)?;
+        let n = self.get_mut_quietly(id)?;
+        if n.script_flags & SCRIPT_RUN != 0 {
+            return None;
+        }
+        n.script_flags |= SCRIPT_RUN;
+        Some(listed)
     }
     // The scripts of `root`'s tree (not a shadow tree's, nor a template's contents) its parser inserted and no end tag
     // decided — none of a parse that stopped at each (HTML's), every one of one that stopped at none (the XML parser's),
@@ -658,6 +691,7 @@ fn set_script_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 pub(crate) const LISTED: u32 = 0;
 const LISTED_CLASSIC: u32 = 1;
 const LISTED_MODULE: u32 = 2;
+const LISTED_ERROR: u32 = 3;
 fn list_parser_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(LISTED) };
     let scripting = args.get(1).is_true();
@@ -680,13 +714,15 @@ impl RealmArena {
     // The first of realm `cid`'s list of scripts to execute after parsing, in the order their end tags put them on it, taken
     // — none where none is left — of what its end tags listed, which leaves the `async` ones (`take_parser_async`).
     pub(crate) fn take_parser_next(&mut self, cid: i32) -> Option<NodeId> {
-        let at = self.realm_state(cid)?.parser_list.iter().position(|&id| !listed_async(self, id))?;
+        let state = self.realm_state(cid)?;
+        let at = state.parser_list.iter().position(|id| !listed_async(state, *id))?;
         Some(self.realm_state_mut(cid)?.parser_list.remove(at))
     }
     // None of realm `cid`'s listed scripts runs: its parser aborted (HTML "abort a parser").
     pub(crate) fn forget_parser_scripts(&mut self, cid: i32) {
         if let Some(state) = self.realm_state_mut(cid) {
             state.parser_list.clear();
+            state.parser_decided.clear();
         }
     }
 }
@@ -702,7 +738,7 @@ pub(crate) fn take_parser_async(scope: &mut v8::PinScope<'_, '_>, cid: i32, wait
     let arena = crate::dom::realm(scope, cid);
     let Some(state) = arena.realm_state(cid).filter(|state| !waited || state.parser_waited) else { return Vec::new() };
     let listed = state.parser_list.clone();
-    let candidates: Vec<NodeId> = listed.into_iter().filter(|&id| listed_async(arena, id)).collect();
+    let candidates: Vec<NodeId> = listed.into_iter().filter(|id| listed_async(state, *id)).collect();
     let mut taken = Vec::with_capacity(candidates.len());
     for id in candidates {
         if !waited || crate::script_fetch::due_now(scope, cid, id) {
@@ -714,9 +750,9 @@ pub(crate) fn take_parser_async(scope: &mut v8::PinScope<'_, '_>, cid: i32, wait
     }
     taken
 }
-// …whether a listed script is an `async` external one.
-fn listed_async(arena: &crate::dom::RealmArena, id: NodeId) -> bool {
-    arena.get(id).is_some_and(|n| n.plain_attr("async").is_some() && n.plain_attr("src").is_some())
+// …whether a listed script is an `async` external one, as its end tag decided.
+fn listed_async(state: &crate::dom::RealmState, id: NodeId) -> bool {
+    state.parser_decided.get(&id).is_some_and(|l| l.is_async)
 }
 impl RealmArena {
     // The mark the realm's parser spins the event loop by as it waits on a fetch — a pending parsing-blocking script's, a

@@ -1170,6 +1170,8 @@ pub(crate) struct RealmState {
     // Whether the parser has waited on a fetch (script.rs `parser_waits`).
     pub(crate) parser_waited: bool,
     pub(crate) parser_sources: std::collections::HashMap<NodeId, Vec<u16>>,
+    // …and what its end tag decided each listed one is, until it is prepared out of the list (script.rs `Listed`).
+    pub(crate) parser_decided: std::collections::HashMap<NodeId, crate::script::Listed>,
     // The script fetches its document's elements began — a classic script's, a module graph's entry's (script_fetch.rs) —
     // and the places in the event loop's
     // sequence its document's parse kept for their responses as it began (`parserBegins`).
@@ -1863,6 +1865,7 @@ impl RealmArena {
         self.parser_list.clear();
         self.parser_waited = false;
         self.parser_sources.clear();
+        self.parser_decided.clear();
         // (…nor its script fetches, which land in no document now (the host's slots left to the session's end) — its parse's
         // speculative places its own, `parserBegins`, which the new parse takes before this runs)
         self.script_fetches = Default::default();
