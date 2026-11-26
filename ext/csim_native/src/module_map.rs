@@ -542,43 +542,86 @@ fn module_requests(scope: &mut v8::PinScope<'_, '_>, source: v8::Local<'_, v8::S
 
 // The graph `gid` gone on with — as far as the event loop's clock has come (`sync`: every fetch it waits on taken now,
 // whatever its server's time: a dynamic import's, which a script waits inside) — how long until it next goes on, 0 for
-// a graph whose every module is in; None for none.
+// a graph whose every module is in; None for none. The entries it waits on are come to in the order of the times they
+// come in (each fetch's landing; one in already, as the graph reached it), so a module's imports are requested in that
+// order — the host's slots, its server's view, the cookies its responses set — however many land by now.
 fn advance(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, sync: bool) -> Result<Option<f64>, Terminated> {
-    loop {
-        let now = realm(scope, cid).event_loop.clock;
+    let now = realm(scope, cid).event_loop.clock;
+    let Some(map) = map_of(scope, cid) else { return Ok(None) };
+    let Some(graph) = map.graphs.iter_mut().find(|g| g.id == gid) else { return Ok(None) };
+    let plan = graph.plan;
+    let mut queue = Queue::default();
+    let waiting = std::mem::take(&mut graph.waiting);
+    queue.add(&map.entries, waiting);
+    let mut next = None;
+    while let Some((at, key, reached)) = queue.pop() {
+        if !sync && at > now + 1e-6 {
+            next = Some(at);
+            queue.put_back(at, key, reached);
+            break;
+        }
+        if let Some(&Entry::Fetching { slot, due }) = map_of(scope, cid).and_then(|map| map.entries.get(&key)) {
+            land(scope, cid, &key, slot, due, plan)?;
+        }
+        walk(scope, cid, gid, Some(&key), reached)?;
         let Some(map) = map_of(scope, cid) else { return Ok(None) };
-        let Some(graph) = map.graphs.iter().find(|g| g.id == gid) else { return Ok(None) };
-        // (…the one of its entries whose fetch lands first, where that is by now: landed — its descendants begun as it lands)
-        let due = graph
-            .waiting
-            .iter()
-            .filter_map(|(key, _)| match map.entries.get(key) {
-                Some(&Entry::Fetching { slot, due }) => Some((key.clone(), slot, due)),
-                _ => None,
-            })
-            .min_by(|a, b| a.2.total_cmp(&b.2));
-        if let Some((key, slot, due)) = due.as_ref().filter(|d| sync || d.2 <= now + 1e-6).cloned() {
-            land(scope, cid, &key, slot, due)?;
-            continue;
-        }
-        // (…then each one it waits on that is in — or failed: the graph's result null — its descendants come to)
-        let settled = graph.waiting.iter().position(|(key, _)| !matches!(map.entries.get(key), Some(Entry::Fetching { .. })));
-        if let Some(at) = settled {
-            let graph = map.graphs.iter_mut().find(|g| g.id == gid).unwrap();
-            let (key, reached) = graph.waiting.remove(at);
-            walk(scope, cid, gid, Some(&key), reached)?;
-            continue;
-        }
-        return Ok(Some(due.map_or(0.0, |d| (d.2 - now).max(1e-3))));
+        let Some(graph) = map.graphs.iter_mut().find(|g| g.id == gid) else { return Ok(None) };
+        let reached = std::mem::take(&mut graph.waiting);
+        queue.add(&map.entries, reached);
+    }
+    let Some(map) = map_of(scope, cid) else { return Ok(None) };
+    if let Some(graph) = map.graphs.iter_mut().find(|g| g.id == gid) {
+        graph.waiting = queue.into_waiting();
+    }
+    Ok(Some(next.map_or(0.0, |at| (at - now).max(1e-3))))
+}
+// The entries a graph waits on, by the time each comes in: its fetch's landing, or — one in already, or failed — the
+// time the graph reached it.
+#[derive(Default)]
+struct Queue {
+    heap: std::collections::BinaryHeap<std::cmp::Reverse<(At, u64)>>,
+    items: Vec<Option<(Key, f64)>>,
+}
+#[derive(PartialEq, PartialOrd)]
+struct At(f64);
+impl Eq for At {}
+impl Ord for At {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
     }
 }
-// The entry `key`'s fetch, slot `slot`, landed at `due`: taken, compiled — a module script, or none.
-fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, slot: u32, due: f64) -> Result<(), Terminated> {
+impl Queue {
+    fn add(&mut self, entries: &HashMap<Key, Entry>, waiting: Vec<(Key, f64)>) {
+        for (key, reached) in waiting {
+            let at = match entries.get(&key) {
+                Some(&Entry::Fetching { due, .. }) => due,
+                _ => reached,
+            };
+            self.put_back(at, key, reached);
+        }
+    }
+    fn put_back(&mut self, at: f64, key: Key, reached: f64) {
+        self.heap.push(std::cmp::Reverse((At(at), self.items.len() as u64)));
+        self.items.push(Some((key, reached)));
+    }
+    fn pop(&mut self) -> Option<(f64, Key, f64)> {
+        let std::cmp::Reverse((At(at), i)) = self.heap.pop()?;
+        let (key, reached) = self.items[i as usize].take()?;
+        Some((at, key, reached))
+    }
+    fn into_waiting(self) -> Vec<(Key, f64)> {
+        let mut order: Vec<_> = self.heap.into_iter().map(|std::cmp::Reverse((_, i))| i).collect();
+        order.sort_unstable();
+        let mut items = self.items;
+        order.into_iter().filter_map(|i| items[i as usize].take()).collect()
+    }
+}
+// The entry `key`'s fetch, slot `slot`, landed at `due`: taken, compiled — a module script of the fetch options `plan`
+// (its graph's), or none.
+fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, slot: u32, due: f64, plan: u32) -> Result<(), Terminated> {
     let Some(host) = host_of(scope, cid) else { return Ok(()) };
     let (id, ty) = (v8::Integer::new_from_unsigned(scope, slot).into(), v8::Integer::new_from_unsigned(scope, key.1 as u32).into());
     let answer = call(scope, host, H_MODULE_TAKE, &[id, ty])?;
-    // (…its descendants fetched with the fetch options of the graph whose fetch of it this was)
-    let plan = map_of(scope, cid).and_then(|map| map.graphs.iter().find(|g| g.waiting.iter().any(|(k, _)| k == key)).map(|g| g.plan)).unwrap_or(0);
     let entry = match script_of(scope, answer, key.1, &key.0, plan) {
         Some(script) => Entry::Ready(script, due),
         None => Entry::Failed,
