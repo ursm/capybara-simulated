@@ -8947,6 +8947,18 @@ module Capybara
         @runtime.call('agentExcuse', slot[:slept]) if excuse && slot[:slept].positive?
         slot[:slept]
       end
+      # …and a font's download (CSS Font Loading "load()", font_files.rs): made now — a slot as a script's, its server's
+      # sleeps counted in it — and taken as it lands, the face's file `{path, meta, ok}` (`web_font_fetch`); answered at
+      # once, no slot, where the font cache has the file (another visit fetched it) or this session found none there.
+      def font_fetch_start(url, realm, referrer, policy, id)
+        known = font_file_known(url, realm, referrer, policy)
+        return web_font_answer(*known) if known
+
+        slot = {began: 0.0, slept: 0.0, cookies: nil, request: nil, realm: realm, font: [url, realm, referrer, policy]}
+        script_fetch_make(slot)
+        @script_fetches[id.to_i] = slot
+        slot[:slept]
+      end
       # …the request made, its server's sleeps counted in the slot (`SleepHook`), the cookies its responses set kept in it
       # for its landing (`store_set_cookies`).
       private def script_fetch_make(slot)
@@ -8955,7 +8967,13 @@ module Capybara
         Thread.current.thread_variable_set(:csim_server_slept, slot)
         Thread.current[:csim_script_fetch] = slot
         begin
-          slot[:result] = slot[:request] ? asset_fetch(slot[:request]) : script_fetch_network(slot)
+          slot[:result] = if slot[:font]
+                            web_font_fetch(*slot[:font])
+                          elsif slot[:request]
+                            asset_fetch(slot[:request])
+                          else
+                            script_fetch_network(slot)
+                          end
         rescue StandardError
           slot[:result] = nil
         ensure
@@ -8971,7 +8989,8 @@ module Capybara
                                                                                    client_url: client[:url], dest: dest, client_origin: client[:origin], client_realm: client[:realm])
       end
       # …and its answer, taken as it lands (the slot let go of), the cookies its responses set stored now: the network's
-      # response, or the asset cache's answer — kept by the memos it is kept by — nil for a network error.
+      # response (a font's file, `web_font_fetch`), or the asset cache's answer — kept by the memos it is kept by — nil for
+      # a network error.
       # (…a module's Resource Timing entry timed as a classic script's is, on the page's clock: from as its fetch began,
       # `started`, to as it lands, `now` — `take_module_rt`)
       def script_fetch_take(id, now)
@@ -9309,18 +9328,10 @@ module Capybara
         return [nil, nil] unless key.is_a?(String)
 
         client = client_for(realm, policy, referrer: referrer)
-        # (…its file kept by the origin of the client it was fetched as, whose CORS check it passed or failed: another
-        # origin's request of it is a fetch of its own — CSS Fonts 4 §4.9.1)
-        cached = [client_origin_of(client).to_s, key]
-        @@font_file_lock.synchronize do
-          if !network_refused?(key) && @@font_file_cache.key?(cached)
-            path, meta = @@font_file_cache[cached]
-            return [path, meta && meta.merge('cached' => 'cache')]
-          end
-        end
-        if (failed = (@font_file_failed ||= {})[cached])
-          return [nil, failed]
-        end
+        cached = font_cache_key(client, key)
+        known = font_file_cached(key, cached)
+        return known if known
+
         Thread.current[:csim_font_meta] = nil
         path = build_font_file(key, client)
         meta = Thread.current[:csim_font_meta]
@@ -9330,6 +9341,30 @@ module Capybara
           @font_file_failed[cached] = meta          # remembered for THIS session only
         end
         [path, meta]
+      end
+
+      # …what the font cache has of it, `[path, meta]` — nil where it has nothing: a file another visit fetched, or none this
+      # session found there.
+      def font_file_known(url, realm = 0, referrer = nil, policy = nil)
+        key = resolve_against_current(url.to_s)
+        return [nil, nil] unless key.is_a?(String)
+
+        font_file_cached(key, font_cache_key(client_for(realm, policy, referrer: referrer), key))
+      end
+      # (…its file kept by the origin of the client it was fetched as, whose CORS check it passed or failed: another origin's
+      # request of it is a fetch of its own — CSS Fonts 4 §4.9.1)
+      private def font_cache_key(client, key)
+        [client_origin_of(client).to_s, key]
+      end
+      private def font_file_cached(key, cached)
+        @@font_file_lock.synchronize do
+          if !network_refused?(key) && @@font_file_cache.key?(cached)
+            path, meta = @@font_file_cache[cached]
+            return [path, meta && meta.merge('cached' => 'cache')]
+          end
+        end
+        failed = (@font_file_failed ||= {})[cached]
+        failed && [nil, failed]
       end
 
       private def build_font_file(key, client)
@@ -9381,7 +9416,9 @@ module Capybara
       # (…fetched, where no cache has it, as the document of realm `realm` requests it — referred by `referrer` where its
       # face has one: `font_file_and_meta_for`)
       def web_font_fetch(url, realm = 0, referrer = nil, policy = nil)
-        file, meta = font_file_and_meta_for(url, realm, referrer, policy)
+        web_font_answer(*font_file_and_meta_for(url, realm, referrer, policy))
+      end
+      private def web_font_answer(file, meta)
         {'path' => file, 'meta' => meta, 'ok' => !file.nil? || (meta && meta['status'].to_i.between?(200, 399)) == true}
       end
 

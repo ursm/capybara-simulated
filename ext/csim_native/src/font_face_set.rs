@@ -3,9 +3,11 @@
 // added to it, in the order they were — its set entries after the CSS-connected ones — each as its FontFace's object and
 // its state's (font_face_state.rs); and the generation of what script made it hold, which moves as a face is added or
 // deleted or one of its descriptors is rewritten: what a document's face list keys on — on a handle the bindings'
-// object wraps (`__dom.FontFaceSetStateBase`) — and its loading cycle: the faces whose fetch it is waiting on, each with
-// whether it gave a file, and whether the cycle's task is queued, which make it `loading`. The cycle's tasks, its events
-// and its promises are the bindings'; the face's own link to the sets that hold it, font_face_state.rs's.
+// object wraps (`__dom.FontFaceSetStateBase`) — and its loading cycle (§2.4, "switch the FontFaceSet to loading" /
+// "… to loaded"): its [[LoadingFonts]], [[LoadedFonts]] and [[FailedFonts]], its `status`, which [[ReadyPromise]] it has
+// and whether it is fulfilled, whether it is pending on its document's loading and stuck on it, and the tasks it owes. The
+// tasks themselves, the events they fire and the promises are the bindings' (font-face.js `setStepped`); the face's own
+// link to the sets that hold it, font_face_state.rs's.
 
 use std::cell::{Cell, RefCell, UnsafeCell};
 
@@ -103,11 +105,25 @@ pub(crate) struct SetHandle {
     // The faces script added.
     added: Pairs,
     generation: Cell<u32>,
-    // Its loading cycle's faces, and whether each gave a file, by place.
-    pending: Pairs,
-    pending_ok: RefCell<Vec<bool>>,
-    cycle_queued: Cell<bool>,
+    // Its loading cycle: [[LoadingFonts]], [[LoadedFonts]], [[FailedFonts]]; its `status` (`loading` or not); its
+    // [[ReadyPromise]] — which one, by a number that moves as a fulfilled one is replaced, and whether it is fulfilled;
+    // whether it is pending on the environment (§2.4: its document still loading — not yet completely loaded, Chrome
+    // `f2`: `loading` at the window's `load`, `ready` after it, `f13`) and stuck on it; and the tasks it owes (`OWE_*`).
+    loading: Pairs,
+    loaded: List,
+    failed: List,
+    status_loading: Cell<bool>,
+    ready: Cell<(u32, bool)>,
+    environment: Cell<bool>,
+    stuck: Cell<bool>,
+    owed: Cell<u32>,
 }
+// What a set owes its bindings (`fsOwed`): the task that fires `loading` — making its status `loading` first, where a load
+// the user agent began switched it (`OWE_SHOW_LOADING`: Chrome and Firefox show `loaded` until a task later, csim-bench
+// font7 `f1`, `f6`) — and the task that fires `loadingdone` and `loadingerror`.
+const OWE_LOADING_EVENT: u32 = 1;
+const OWE_SHOW_LOADING: u32 = 2;
+const OWE_DONE_EVENTS: u32 = 4;
 const NO_RULES: u64 = u64::MAX;
 
 unsafe impl GarbageCollected for SetHandle {
@@ -115,7 +131,9 @@ unsafe impl GarbageCollected for SetHandle {
         self.owner.trace(visitor);
         self.css.trace(visitor);
         self.added.trace(visitor);
-        self.pending.trace(visitor);
+        self.loading.trace(visitor);
+        self.loaded.trace(visitor);
+        self.failed.trace(visitor);
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"FontFaceSetHandle"
@@ -130,9 +148,47 @@ impl SetHandle {
     fn touch(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
     }
+    // "Switch the FontFaceSet to loading": its status `loading` — now, or as its `loading` task runs (`now` false) — its
+    // fulfilled [[ReadyPromise]] replaced by a pending one, and the task that fires `loading` owed.
+    fn switch_to_loading(&self, now: bool) {
+        self.status_loading.set(now || self.status_loading.get());
+        let (epoch, fulfilled) = self.ready.get();
+        if fulfilled {
+            self.ready.set((epoch.wrapping_add(1), false));
+        }
+        self.owe(OWE_LOADING_EVENT | if now { 0 } else { OWE_SHOW_LOADING });
+    }
+    // "Switch the FontFaceSet to loaded": stuck where it is pending on the environment, else its status `loaded`, its
+    // [[ReadyPromise]] fulfilled and the task that fires `loadingdone` / `loadingerror` owed.
+    fn switch_to_loaded(&self) {
+        if self.environment.get() {
+            self.stuck.set(true);
+            return;
+        }
+        self.status_loading.set(false);
+        self.ready.set((self.ready.get().0, true));
+        self.owe(OWE_DONE_EVENTS);
+    }
+    fn owe(&self, what: u32) {
+        self.owed.set(self.owed.get() | what);
+    }
+    // …a face out of [[LoadingFonts]] (`face` a FontFace), the set switched to loaded where it was the last one there.
+    fn not_loading(&self, scope: &mut v8::PinScope<'_, '_>, face: v8::Local<'_, v8::Object>) {
+        let loading = self.loading.map(scope);
+        if loading.delete(scope, face.into()) == Some(true) && loading.size() == 0 {
+            self.switch_to_loaded();
+        }
+    }
+    // Whether it holds the FontFace `face`: one of its CSS-connected faces, or one script added.
+    fn holds(&self, scope: &mut v8::PinScope<'_, '_>, face: v8::Local<'_, v8::Object>) -> bool {
+        self.added.map(scope).has(scope, face.into()) == Some(true) || faces_of(&self.css.get(scope)).iter().any(|f| f.strict_equals(face.into()))
+    }
 }
 
-// `new __dom.FontFaceSetStateBase(owner)`: the state of the FontFaceSet `owner`, holding nothing.
+// `new __dom.FontFaceSetStateBase(owner, environment)`: the state of the FontFaceSet `owner`, holding nothing — pending on
+// the environment where `environment` (its document is still loading): its [[ReadyPromise]] pending until it is not,
+// stuck on it from the first (§2.4 has it a fresh pending promise; Chrome fulfils it as the document completes, `f13`),
+// fulfilled from the first where it is not (a worker's, a document's completely loaded).
 fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if args.new_target().is_undefined() {
         return;
@@ -140,6 +196,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
+    let environment = args.get(1).is_true();
     let handle = SetHandle {
         owner: List::new(),
         css: List::new(),
@@ -148,9 +205,14 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         connecting: Cell::new(false),
         added: Pairs::new(),
         generation: Cell::new(0),
-        pending: Pairs::new(),
-        pending_ok: RefCell::new(Vec::new()),
-        cycle_queued: Cell::new(false),
+        loading: Pairs::new(),
+        loaded: List::new(),
+        failed: List::new(),
+        status_loading: Cell::new(false),
+        ready: Cell::new((0, !environment)),
+        environment: Cell::new(environment),
+        stuck: Cell::new(environment),
+        owed: Cell::new(0),
     };
     if let Ok(owner) = v8::Local::<v8::Object>::try_from(args.get(0)) {
         handle.owner.set(scope, &[owner]);
@@ -187,7 +249,8 @@ pub(crate) fn added_records(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'
 }
 
 // __dom.fsAdd(set, face, state) -> whether the face of FontFace `face`, its state `state`, was added: script's own (a
-// CSS-connected face is in the set already, font_face_state.rs `connected`), and once.
+// CSS-connected face is in the set already, font_face_state.rs `connected`), and once — one `loading` in the set's
+// [[LoadingFonts]] with it.
 fn add_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(false);
     let (Some(s), Ok(me), Ok(face)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1))) else { return };
@@ -199,6 +262,15 @@ fn add_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     added.set(scope, face.into(), state.into());
     s.touch();
     crate::font_face_state::link(scope, state.into(), me, true);
+    // (…one `loading` already in its [[LoadingFonts]], the set switched to loading where it is the first)
+    if crate::font_face_state::status(scope, state.into()) == Some(crate::font_face_state::LOADING) {
+        let loading = s.loading.map(scope);
+        let first = loading.size() == 0;
+        loading.set(scope, face.into(), state.into());
+        if first {
+            s.switch_to_loading(true);
+        }
+    }
     rv.set_bool(true);
 }
 
@@ -211,6 +283,7 @@ fn delete_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     added.delete(scope, face.into());
     s.touch();
     crate::font_face_state::link(scope, state, me, false);
+    s.not_loading(scope, face);
     rv.set_bool(true);
 }
 
@@ -225,6 +298,14 @@ fn clear_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     }
     for state in states {
         crate::font_face_state::link(scope, state.into(), me, false);
+    }
+    // (…clear(): "If the FontFaceSet's [[LoadingFonts]] list is non-empty, remove all items from it, then switch the
+    // FontFaceSet to loaded" — its CSS-connected faces' loads too; what it removes of [[LoadedFonts]] / [[FailedFonts]] its
+    // `loadingdone` task leaves out, as it holds them no more: `fsTakeDone`)
+    let loading = s.loading.map(scope);
+    if loading.size() > 0 {
+        loading.clear();
+        s.switch_to_loaded();
     }
     rv.set(v8::Array::new_with_elements(scope, &values(faces)).into());
 }
@@ -322,53 +403,81 @@ fn css_face_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.fsFetched(set, face, state, ok) -> the face of FontFace `face` (its state `state`) fetched — `ok` whether it gave a
-// file — in the set's loading cycle: 0 where it settled already (nothing to wait for), else 1 — or 2 where this begins a
-// cycle, whose task the bindings queue (`loading`, then the settling of what it waited on). A face is waited on once
-// per cycle (the document's face list handed over anew asks for its file again).
-fn fetched_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_uint32(0);
-    let (Some(s), Ok(face)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1))) else { return };
-    let Ok(state) = v8::Local::<v8::Object>::try_from(args.get(2)) else { return };
-    if crate::font_face_state::status(scope, state.into()).is_none_or(crate::font_face_state::settled) {
+// __dom.fsFaceLoading(set, face, state, now): the FontFace `face` (its state `state`) is `loading`, for the set: appended to
+// its [[LoadingFonts]], where it is not there already — the set switched to loading where it was the first (`now`: its
+// status with it, a script's `load()`; else as its `loading` task runs, a load the user agent began).
+fn face_loading_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(s), Ok(face), Ok(state)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1)), v8::Local::<v8::Object>::try_from(args.get(2))) else { return };
+    let loading = s.loading.map(scope);
+    if loading.has(scope, face.into()) == Some(true) {
         return;
     }
-    let pending = s.pending.map(scope);
-    let begins = pending.size() == 0 && !s.cycle_queued.get();
-    if begins {
-        s.cycle_queued.set(true);
+    let first = loading.size() == 0;
+    loading.set(scope, face.into(), state.into());
+    if first {
+        s.switch_to_loading(args.get(3).is_true());
     }
-    if pending.has(scope, face.into()) != Some(true) {
-        pending.set(scope, face.into(), state.into());
-        s.pending_ok.borrow_mut().push(args.get(3).is_true());
-    }
-    rv.set_uint32(if begins { 2 } else { 1 });
 }
 
-// __dom.fsCycleBegun(set): its cycle's task ran (`loading` fired). __dom.fsCycleTake(set) -> [face, ok, …]: what the
-// cycle waited on, in the order it was fetched, now waited on no more.
-fn cycle_begun_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    if let Some(s) = set(scope, args.get(0)) {
-        s.cycle_queued.set(false);
-    }
+// __dom.fsFaceSettled(set, face, ok): the FontFace `face` is `loaded` (`ok`) or `error`, for the set: added to its
+// [[LoadedFonts]] or [[FailedFonts]], out of its [[LoadingFonts]] — the set switched to loaded where it was the last
+// one there.
+fn face_settled_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(s), Ok(face)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1))) else { return };
+    let list = if args.get(2).is_true() { &s.loaded } else { &s.failed };
+    let mut faces = list.get(scope);
+    faces.push(face);
+    list.set(scope, &faces);
+    s.not_loading(scope, face);
 }
-fn cycle_take_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+
+// __dom.fsEnvironmentSettled(set): its document completely loaded — the set pending on the environment no more, switched to
+// loaded where it was stuck on it with nothing loading.
+fn environment_settled_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(s) = set(scope, args.get(0)) else { return };
-    let faces = s.pending.column(scope, false);
-    s.pending.map(scope).clear();
-    let oks = s.pending_ok.take();
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
-    for (face, ok) in faces.into_iter().zip(oks) {
-        items.push(face.into());
-        items.push(v8::Boolean::new(scope, ok).into());
+    s.environment.set(false);
+    if s.stuck.replace(false) && s.loading.len(scope) == 0 {
+        s.switch_to_loaded();
     }
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.fsLoading(set) -> whether it is `loading`: a cycle queued, or faces it waits on.
+// __dom.fsOwed(set) -> the tasks the set owes its bindings now (`OWE_*`), owed no more.
+fn owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(set(scope, args.get(0)).map_or(0, |s| s.owed.replace(0)));
+}
+
+// __dom.fsShowLoading(set): its `loading` task runs — its status `loading`, where faces are loading still.
+fn show_loading_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(s) = set(scope, args.get(0)) else { return };
+    if s.loading.len(scope) > 0 {
+        s.status_loading.set(true);
+    }
+}
+
+// __dom.fsTakeDone(set) -> [loaded, failed]: its `loadingdone` task's [[LoadedFonts]] and [[FailedFonts]], those it holds
+// of them ("fire a font load event": filtered to the faces the target contains), the lists reset.
+fn take_done_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(s) = set(scope, args.get(0)) else { return };
+    let mut lists: Vec<v8::Local<v8::Value>> = Vec::with_capacity(2);
+    for list in [&s.loaded, &s.failed] {
+        let faces = list.get(scope);
+        list.set(scope, &[]);
+        let held: Vec<v8::Local<v8::Value>> = faces.into_iter().filter(|&f| s.holds(scope, f)).map(Into::into).collect();
+        lists.push(v8::Array::new_with_elements(scope, &held).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &lists).into());
+}
+
+// __dom.fsReady(set) -> which [[ReadyPromise]] it has, and whether it is fulfilled: `2 × number + fulfilled`.
+fn ready_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(s) = set(scope, args.get(0)) else { return };
+    let (epoch, fulfilled) = s.ready.get();
+    rv.set_double(f64::from(epoch) * 2.0 + f64::from(u8::from(fulfilled)));
+}
+
+// __dom.fsLoading(set) -> whether its status is `loading`.
 fn loading_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(s) = set(scope, args.get(0)) else { return rv.set_bool(false) };
-    rv.set_bool(s.cycle_queued.get() || s.pending.len(scope) > 0);
+    rv.set_bool(set(scope, args.get(0)).is_some_and(|s| s.status_loading.get()));
 }
 
 // __dom.ffSets(state) -> the FontFaceSets that hold the face of state `state`, of whichever realm.
@@ -383,11 +492,8 @@ fn face_sets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(v8::Array::new_with_elements(scope, &owners).into());
 }
 
-// __dom.fsGeneration(set) -> the generation of what it holds; __dom.fsTouch(set) moves it (a descriptor of a face it holds
-// rewritten).
-fn generation_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_uint32(set(scope, args.get(0)).map_or(0, |s| s.generation.get()));
-}
+// __dom.fsTouch(set) — the generation of what it holds moved (a descriptor of a face it holds rewritten): what the realm's
+// faces resolve by, font_resolve.rs `fontGeneration`.
 fn touch_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if let Some(s) = set(scope, args.get(0)) {
         s.touch();
@@ -422,11 +528,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "fsAdded", added_op, context_id);
     crate::dom::register(scope, ns, "fsConnect", connect_op, context_id);
     crate::dom::register(scope, ns, "fsCssFace", css_face_op, context_id);
-    crate::dom::register(scope, ns, "fsFetched", fetched_op, context_id);
-    crate::dom::register(scope, ns, "fsCycleBegun", cycle_begun_op, context_id);
-    crate::dom::register(scope, ns, "fsCycleTake", cycle_take_op, context_id);
+    crate::dom::register(scope, ns, "fsFaceLoading", face_loading_op, context_id);
+    crate::dom::register(scope, ns, "fsFaceSettled", face_settled_op, context_id);
+    crate::dom::register(scope, ns, "fsEnvironmentSettled", environment_settled_op, context_id);
+    crate::dom::register(scope, ns, "fsOwed", owed_op, context_id);
+    crate::dom::register(scope, ns, "fsShowLoading", show_loading_op, context_id);
+    crate::dom::register(scope, ns, "fsTakeDone", take_done_op, context_id);
+    crate::dom::register(scope, ns, "fsReady", ready_op, context_id);
     crate::dom::register(scope, ns, "fsLoading", loading_op, context_id);
     crate::dom::register(scope, ns, "ffSets", face_sets_op, context_id);
-    crate::dom::register(scope, ns, "fsGeneration", generation_op, context_id);
     crate::dom::register(scope, ns, "fsTouch", touch_op, context_id);
 }

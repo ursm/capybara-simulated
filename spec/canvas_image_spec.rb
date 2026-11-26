@@ -1192,6 +1192,8 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     }
     session = simulated_session(face_app)
     session.visit('/')
+    # (…the face loaded first: a canvas measures with the fallback while its download is under way, as Chrome's does)
+    session.evaluate_async_script("document.fonts.load('50px CanvasTest').then(() => arguments[0]())")
     out = session.evaluate_script(<<~JS)
       const ctx = document.getElementById('c').getContext('2d');
       ctx.font = '50px CanvasTest';
@@ -1946,6 +1948,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     }.to_app
     session = simulated_session(app)
     session.visit('/')
+    session.evaluate_async_script("document.fonts.load('50px CanvasTest').then(() => arguments[0]())")
     out = session.evaluate_script(<<~JS)
       const ctx = document.getElementById('c').getContext('2d');
       ctx.font = '50px CanvasTest';

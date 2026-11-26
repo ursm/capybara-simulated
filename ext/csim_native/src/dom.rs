@@ -1303,9 +1303,10 @@ pub(crate) struct RealmState {
     // …and what the document's face list was last made of (font_faces.rs `fontFacesHand`): the rules' generation (none for
     // a document no engine styles), its FontFaceSet (by its handle) and that set's generation.
     pub(crate) faces_handed: Option<(Option<u32>, usize, u32)>,
-    // What a face of that list is read from, once asked (font_resolve.rs `indexed_file`), and the face each family stack
-    // takes at a bucket (`family_face`) — both forgotten when the list moves.
-    pub(crate) face_files: Vec<Option<Option<String>>>,
+    // What a face of that list came to, once asked (font_resolve.rs `indexed_file`) — its download under way, or the file
+    // it is read from — and the face each family stack takes at a bucket (`family_face`): both forgotten when the list
+    // moves, or a download lands.
+    pub(crate) face_files: Vec<Option<crate::font_files::FaceFile>>,
     pub(crate) family_faces: std::collections::HashMap<String, std::collections::HashMap<String, crate::font_resolve::Resolved>>,
     // Its performance timeline's entry buffers, ids and registered observers (perf_timeline.rs).
     pub(crate) perf_timeline: crate::perf_timeline::PerfTimeline,

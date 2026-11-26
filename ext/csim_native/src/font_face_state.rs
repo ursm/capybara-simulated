@@ -18,7 +18,7 @@ static BRAND: u8 = 0;
 
 // Its status (FontFaceLoadStatus), by number: font-face.js names them.
 const UNLOADED: u32 = 0;
-const LOADING: u32 = 1;
+pub(crate) const LOADING: u32 = 1;
 const LOADED: u32 = 2;
 const ERROR: u32 = 3;
 
@@ -190,9 +190,6 @@ pub(crate) fn sets<'s>(scope: &mut v8::PinScope<'s, '_>, value: v8::Local<'_, v8
 pub(crate) fn status(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<u32> {
     face(scope, value).map(|f| f.borrow().status)
 }
-pub(crate) fn settled(status: u32) -> bool {
-    status == LOADED || status == ERROR
-}
 
 // What makes the CSS-connected face of state `value` the face it is (`Face::identity`) — none for a script's face.
 pub(crate) fn identity(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<String> {
@@ -244,7 +241,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "ffSetFile", set_file_op, context_id);
     crate::dom::register(scope, ns, "ffStart", start_op, context_id);
     crate::dom::register(scope, ns, "ffSettle", settle_op, context_id);
-    crate::dom::register(scope, ns, "ffSources", sources_op, context_id);
     crate::dom::register(scope, ns, "ffFile", file_op, context_id);
     crate::dom::register(scope, ns, "ffFetchedStatus", fetched_status_op, context_id);
 }
@@ -354,32 +350,30 @@ pub(crate) fn connect(scope: &mut v8::PinScope<'_, '_>, state: v8::Local<'_, v8:
     }
 }
 
-// __dom.ffSources(state) -> the face's sources a browser would try, in order, flat `[kind, value, …]` (`url` / `local`),
-// each `url()` resolved against its base — none for a buffer's face.
-fn sources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(face) = face(scope, args.get(0)) else { return };
-    let sources = face.borrow().sources.clone().unwrap_or_default();
-    let list = crate::font_faces::sources_array(scope, &sources);
-    rv.set(list.into());
+// What `load()` loads a face from: its buffer's file, its sources, the weight / style its `local()` names are looked up
+// under, and the referrer its downloads are requested with.
+pub(crate) fn load_inputs(scope: &mut v8::PinScope<'_, '_>, state: v8::Local<'_, v8::Value>) -> Option<(Option<String>, Vec<FaceSource>, &'static str, Option<String>)> {
+    let face = face(scope, state)?;
+    let mut f = face.borrow_mut();
+    let bucket = f.record().local_style();
+    Some((f.file.clone(), f.sources.clone().unwrap_or_default(), bucket, f.referrer.clone()))
 }
 
-// __dom.ffFile(state, subresources) -> the file the face is read from, or null where it has none native reads: a buffer face's
-// own, else the first of its sources, in order, that gives one (font_files.rs `face_file`) — what `load()` loads.
+// __dom.ffFile(state, subresources, face) -> the file the face of state `state` (the FontFace `face`) is read from, null where
+// it has none native reads: a buffer face's own, else the first of its sources, in order, that gives one (font_files.rs
+// `face_file`) — what `load()` loads; undefined while the download it waits for is under way, which hands `face` back as
+// it lands (font_resolve.rs `fontFetchLand`).
 fn file_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(face), Ok(subresources)) = (face(scope, args.get(0)), v8::Local::<v8::Function>::try_from(args.get(1))) else { return rv.set_null() };
-    let (file, sources, bucket, referrer) = {
-        let mut f = face.borrow_mut();
-        let bucket = f.record().local_style();
-        (f.file.clone(), f.sources.clone().unwrap_or_default(), bucket, f.referrer.clone())
-    };
+    let (Ok(state), Ok(subresources), Ok(owner)) = (v8::Local::<v8::Object>::try_from(args.get(0)), v8::Local::<v8::Function>::try_from(args.get(1)), v8::Local::<v8::Object>::try_from(args.get(2))) else { return rv.set_null() };
+    let Some((file, sources, bucket, referrer)) = load_inputs(scope, state.into()) else { return rv.set_null() };
     let cid = crate::dom::realm_id(scope, &args);
-    let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, referrer.as_deref(), subresources);
+    let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, referrer.as_deref(), f64::INFINITY, subresources, Some((owner, state)));
     crate::font_files::answer_file(scope, &mut rv, file);
 }
 
 // __dom.ffFetchedStatus(state) -> what the face's downloads already went through, as a status: `loaded` where one of them
-// came as a font native reads, `error` where every one came and none did, else `unloaded` (font_files.rs
-// `source_tried`) — what a CSS-connected face whose file layout already fetched starts as.
+// came as a font native reads, `loading` where one is under way, `error` where every one came and none did, else
+// `unloaded` (font_files.rs `source_tried`) — what a CSS-connected face whose file layout already asked for starts as.
 fn fetched_status_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(face) = face(scope, args.get(0)) else { return };
     let urls: Vec<String> = face.borrow().sources.iter().flatten().filter_map(|s| match s {
@@ -388,9 +382,11 @@ fn fetched_status_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     }).collect();
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let tried: Vec<Option<bool>> = urls.iter().map(|u| crate::font_files::source_tried(arena, crate::font_files::URL, u)).collect();
-    rv.set_uint32(if tried.contains(&Some(true)) {
+    let tried: Vec<Option<Option<bool>>> = urls.iter().map(|u| crate::font_files::source_tried(arena, u)).collect();
+    rv.set_uint32(if tried.contains(&Some(Some(true))) {
         LOADED
+    } else if tried.contains(&Some(None)) {
+        LOADING
     } else if !tried.is_empty() && tried.iter().all(Option::is_some) {
         ERROR
     } else {

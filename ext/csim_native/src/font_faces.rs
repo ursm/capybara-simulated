@@ -33,6 +33,10 @@ pub(crate) struct FaceRecord {
     // resource": a font is a `cors` fetch, referred by its sheet's location, or by the base URL of the document an inline
     // sheet is in: style.rs `font_faces`); none for a script's face, which its client refers.
     pub(crate) referrer: Option<String>,
+    // How long after its load began its file may still come in and be used (CSS Fonts 4 §4.9, `font-display`: its block
+    // period and its swap period together), in ms: past it the face is in its failure period, and text is laid out with
+    // the fallback for the document's lifetime, loaded or not.
+    pub(crate) usable_for: f64,
 }
 
 // How far a face is from a style, each of §5.2's steps in turn: stretch, slant, weight — compared in that order.
@@ -65,7 +69,7 @@ impl Default for FaceRecord {
 impl FaceRecord {
     // A face of `family` with every descriptor at its initial value.
     fn of(family: String) -> FaceRecord {
-        FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3], file: None, referrer: None }
+        FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3], file: None, referrer: None, usable_for: f64::INFINITY }
     }
     // The weight / style its `local()` names are looked up under: the bucket of the low end of its weight and its slant.
     pub(crate) fn local_style(&self) -> &'static str {
@@ -129,8 +133,22 @@ pub(crate) fn record(d: &style::properties::font_face::Descriptors, referrer: Op
         size_adjust,
         overrides: [over(&d.ascent_override), over(&d.descent_override), over(&d.line_gap_override)],
         referrer: referrer.map(str::to_owned),
+        usable_for: usable_for(d.font_display),
         ..FaceRecord::of(family)
     })
+}
+// How long a face's file may take to come in and still be used, by its `font-display` (CSS Fonts 4 §4.9.2): `auto` and
+// `block` a short block period (3 s) and an infinite swap period, `swap` an infinite swap period, `fallback` an extremely
+// small block period (100 ms) and a short swap period (3 s), `optional` the extremely small block period alone. What a
+// face lays out with until then is the fallback's, as Chrome and Firefox both measure it whichever the value (csim-bench
+// font7 `f3*`, `g_*`): the block period's text is invisible, not unmeasured.
+fn usable_for(display: Option<style::font_face::FontDisplay>) -> f64 {
+    use style::font_face::FontDisplay;
+    match display {
+        Some(FontDisplay::Fallback) => 3100.0,
+        Some(FontDisplay::Optional) => 100.0,
+        _ => f64::INFINITY,
+    }
 }
 // The sources of a parsed `src` a browser would try, in order.
 fn source_list(src: Option<&style::font_face::SourceList>) -> Vec<FaceSource> {
@@ -504,20 +522,6 @@ fn font_faces_matching(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         Some(picked) => rv.set(crate::dom::f64_array(scope, &picked.into_iter().map(|i| i as f64).collect::<Vec<_>>()).into()),
         None => rv.set_null(),
     }
-}
-
-pub(crate) fn sources_array<'s>(scope: &mut v8::PinScope<'s, '_>, list: &[FaceSource]) -> v8::Local<'s, v8::Array> {
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
-    for source in list {
-        let (kind, value) = match source {
-            FaceSource::Url(u) => ("url", u.as_str()),
-            FaceSource::Local(n) => ("local", n.as_str()),
-        };
-        let (Some(kind), Some(value)) = (v8::String::new(scope, kind), v8::String::new(scope, value)) else { continue };
-        items.push(kind.into());
-        items.push(value.into());
-    }
-    v8::Array::new_with_elements(scope, &items)
 }
 
 // The sources a `src` value names that a browser would try, in order, each `url()` resolved against `base` — the value

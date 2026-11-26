@@ -212,7 +212,9 @@ RSpec.describe 'web fonts', engine_global: true do
     expect(s.evaluate_script("Array.from(document.fonts).filter(function (f) { return f.family === 'Gone'; })[0].status")).to eq('error')
   end
 
-  it 'runs a loading cycle with loadingdone and loadingerror events and settles ready after it' do
+  # (…`ready` fulfilled as the set switches to loaded, its `loadingdone` / `loadingerror` a task queued then: CSS Font
+  # Loading "switch the FontFaceSet to loaded", steps 4-5 — Chrome and Firefox fire `loadingdone` first)
+  it 'runs a loading cycle with loadingdone and loadingerror events, ready fulfilled as it ends' do
     s = session
     s.execute_script(<<~JS)
       window.__ev = []; window.__err = [];
@@ -222,10 +224,7 @@ RSpec.describe 'web fonts', engine_global: true do
       var el = document.createElement('span'); el.style.fontFamily = 'Gone'; el.textContent = 'x'; document.body.appendChild(el);
       document.fonts.ready.then(function (set) { __ev.push('ready:' + set.status); });
     JS
-    ev = s.evaluate_script('__ev')
-    expect(ev.first).to eq('loading')                                    # a fetch opens a cycle
-    expect(ev).to include('done')                                        # and closes it
-    expect(ev.last).to eq('ready:loaded')                                # ready settles after
+    expect(s.evaluate_script('__ev')).to eq(%w[loading ready:loaded done])  # a fetch opens a cycle, and closes it
     expect(s.evaluate_script('__err')).to eq(['Gone'])                   # the 404 face errors
     faces = s.evaluate_script("Array.from(document.fonts).filter(function (f) { return ['MyAhem', 'WoffAhem', 'TwoSrc'].indexOf(f.family) !== -1; }).map(function (f) { return f.status; })")
     expect(faces).to eq(%w[loaded loaded loaded])                        # the working faces are in
@@ -531,9 +530,9 @@ RSpec.describe 'web fonts', engine_global: true do
     expect(width(s, 'late')).to eq(80)
   end
 
-  # …but a face layout fetched itself is one the fetching pass already measures with: nothing laid out has to be measured
-  # again, and the rule set did not move. Refreshing the cascade for it threw every kept subtree away — a whole relayout
-  # per page load on a Redmine page for its Noto Sans.
+  # …but a face layout asks for itself is no change of the rule set: asking — its download begun, or its file there at
+  # once — keeps the layout epoch. Refreshing the cascade for it threw every kept subtree away — a whole relayout per page
+  # load on a Redmine page for its Noto Sans.
   it 'keeps the layout epoch when layout fetches a face' do
     s = simulated_session(app)
     s.visit 'http://www.example.com/'
@@ -543,12 +542,12 @@ RSpec.describe 'web fonts', engine_global: true do
         el.style.fontFamily = 'OnlyWoff2'; el.textContent = 'abcd';           // a face nothing has used yet
         document.body.appendChild(el);
         const epoch = RustyRacer.steps.layoutEpoch();
-        const w = el.getBoundingClientRect().width;
+        el.getBoundingClientRect();
         document.body.getBoundingClientRect();
-        return [w, RustyRacer.steps.layoutEpoch() === epoch, document.fonts.check('12px OnlyWoff2')];
+        return RustyRacer.steps.layoutEpoch() === epoch;
       })()
     JS
-    expect(got).to eq([80, true, true])
+    expect(got).to be(true)
   end
 
   # A sheet's faces are read from the cascade's own parse — its `@import`s' first, each against its own URL — and not

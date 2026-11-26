@@ -43,6 +43,8 @@ const H_IMAGE_BLOB: u32 = 26;
 pub(crate) const H_SCRIPT_START: u32 = 27;
 pub(crate) const H_SCRIPT_TAKE: u32 = 29;
 pub(crate) const H_SCRIPT_FORGET: u32 = 30;
+const H_FONT_START: u32 = 31;
+pub(crate) const H_FONT_LAND: u32 = 32;
 
 // What a link's fetch came to (`linkObtain`, `linkPreloadRun`): its resource loads or not — or it has no preload planned
 // (`linkPreloadRun`), or it is a controlling service worker's to answer, the engine's then to fire its event
@@ -439,7 +441,22 @@ fn process_plugin(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: N
 // else a controlling service worker's answer, else a `blob:` URL's bytes, else the network's; the answer's bytes the
 // file where they are a font's (`judge`: a network error, an empty body none) — the host's decoding of them — and the
 // entry of what answered filed, initiator `css`, as Chrome files a font a stylesheet pulled in (none for a preload's).
-pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, referrer: Option<&str>, host: v8::Local<'_, v8::Function>) -> Result<Option<String>, Terminated> {
+// The network's is a download begun in parallel (CSS Font Loading "load()": "continue executing the rest of this
+// algorithm asynchronously"): the host's slot (browser.rb `font_fetch_start`), its server's sleeps counted as it is made,
+// which lands as a task that much later (`font_fetch_land`) — or the host's answer at once, a file its cache has. One the
+// host cannot land as a task (a worker's, which has no load to hold) is made where it is asked, as the others are.
+pub(crate) enum FontFetch {
+    Done(Option<String>),
+    Flight(FontFlight),
+}
+// …a download under way: the host's slot, how many ms after it began its response comes in, and its request, which its
+// entry is filed of as it lands.
+pub(crate) struct FontFlight {
+    pub(crate) slot: u32,
+    pub(crate) due: f64,
+    request: Request,
+}
+pub(crate) fn font_fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, referrer: Option<&str>, host: v8::Local<'_, v8::Function>) -> Result<FontFetch, Terminated> {
     use crate::subresource_judge::{facts_of, judge, Consumer, J_FONT, SRC_NETWORK, SRC_SW_SYNC, S_EMPTY, V_OK};
     let consumer = Consumer { kind: J_FONT, obtains: 0, module_destination: "", preload_destination: "", integrity: "", body: b"", mode: "cors", quirks: false };
     let empty = |bytes: &[u8]| if bytes.is_empty() { S_EMPTY } else { 0 };
@@ -448,13 +465,13 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
     let doc = call(scope, host, H_DOCUMENT, &[])?.and_then(|d| v8::Local::new(scope, d).integer_value(scope)).and_then(NodeId::from_i64);
     let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), integrity: String::new(), preload: None, load: 0, holds: None, initiator: "css", started };
     if let Some(preloaded) = preloaded(scope, host, &r)? {
-        let Some(response) = preloaded else { return Ok(None) };
+        let Some(response) = preloaded else { return Ok(FontFetch::Done(None)) };
         let facts = response.facts();
         let body = response.into_body();
         if judge(&consumer, SRC_NETWORK | empty(&body), &facts) & V_OK == 0 {
-            return Ok(None);
+            return Ok(FontFetch::Done(None));
         }
-        return file_of_bytes(scope, host, body);
+        return file_of_bytes(scope, host, body).map(FontFetch::Done);
     }
     let args = request_args(scope, &r);
     if let Some(answer) = call(scope, host, H_SW_ANSWER, &args)? {
@@ -465,23 +482,67 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
         let ok = judge(&consumer, SRC_SW_SYNC | bytes.as_deref().map_or(S_EMPTY, empty), &facts) & V_OK != 0;
         file(scope, host, &r, Answered::Worker(answer))?;
         return match bytes.filter(|_| ok) {
-            Some(bytes) => file_of_bytes(scope, host, bytes),
-            None => Ok(None),
+            Some(bytes) => file_of_bytes(scope, host, bytes).map(FontFetch::Done),
+            None => Ok(FontFetch::Done(None)),
         };
     }
-    if crate::fetch_rules::fetch_route(url, 0, "") == crate::fetch_rules::ROUTE_BLOB {
-        return match scheme_response(scope, host, url)? {
-            Some((bytes, _)) => file_of_bytes(scope, host, bytes),
-            None => Ok(None),
-        };
+    match crate::fetch_rules::fetch_route(url, 0, "") {
+        crate::fetch_rules::ROUTE_BLOB => {
+            return match scheme_response(scope, host, url)? {
+                Some((bytes, _)) => file_of_bytes(scope, host, bytes).map(FontFetch::Done),
+                None => Ok(FontFetch::Done(None)),
+            };
+        }
+        // (…a `data:` URL's decoded where it is asked, as Chrome loads one: no network to wait for)
+        crate::fetch_rules::ROUTE_NETWORK => {
+            let slot = next_slot();
+            let mut start = args.to_vec();
+            start.push(v8::Integer::new_from_unsigned(scope, slot).into());
+            match call(scope, host, H_FONT_START, &start)?.map(|g| v8::Local::new(scope, g)) {
+                Some(slept) if slept.is_number() => {
+                    let due = slept_ms(scope, slept);
+                    return Ok(FontFetch::Flight(FontFlight { slot, due, request: r }));
+                }
+                Some(answer) if answer.is_object() => return font_answered(scope, host, &r, answer).map(FontFetch::Done),
+                _ => {}
+            }
+        }
+        _ => {}
     }
-    // (…the network's: the host decodes the file it fetched — `{path, meta}` — and gives its response's facts for the
-    // entry)
+    // (…the network's, where it is asked: the host decodes the file it fetched — `{path, meta}` — and gives its
+    // response's facts for the entry)
     let got = call(scope, host, H_FONT_NETWORK, &args)?.map(|g| v8::Local::new(scope, g));
-    let got = got.and_then(|g| v8::Local::<v8::Object>::try_from(g).ok());
+    match got {
+        Some(got) => font_answered(scope, host, &r, got).map(FontFetch::Done),
+        None => {
+            file(scope, host, &r, Answered::Network(None))?;
+            Ok(FontFetch::Done(None))
+        }
+    }
+}
+// …a download's response as it lands, its slot taken (its cookies stored), the file it gave — none where it gave none —
+// and its entry filed, timed from as it began to now.
+pub(crate) fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, flight: &FontFlight) -> Result<Option<String>, Terminated> {
+    let slot = v8::Integer::new_from_unsigned(scope, flight.slot).into();
+    match call(scope, host, H_SCRIPT_TAKE, &[slot])?.map(|g| v8::Local::new(scope, g)) {
+        Some(answer) => font_answered(scope, host, &flight.request, answer),
+        None => {
+            file(scope, host, &flight.request, Answered::Network(None))?;
+            Ok(None)
+        }
+    }
+}
+// …or let go of, unanswered.
+pub(crate) fn font_fetch_drop(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, flight: &FontFlight) -> Result<(), Terminated> {
+    let slot = v8::Integer::new_from_unsigned(scope, flight.slot).into();
+    call(scope, host, H_SCRIPT_FORGET, &[slot]).map(drop)
+}
+// …the host's answer to a font's request, `{path, meta}`: the file it decoded, and its response's facts for the entry.
+fn font_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, got: v8::Local<'_, v8::Value>) -> Result<Option<String>, Terminated> {
+    let got = v8::Local::<v8::Object>::try_from(got).ok();
     let path = got.and_then(|g| member(scope, g, "path")).filter(|p| p.is_string()).map(|p| p.to_rust_string_lossy(scope));
     let meta = got.and_then(|g| member(scope, g, "meta")).filter(|m| !m.is_null()).map(|m| v8::Global::new(scope, m));
-    file(scope, host, &r, Answered::Network(meta))?;
+    file(scope, host, r, Answered::Network(meta))?;
     Ok(path)
 }
 // …the file a font's bytes are, as the host decodes them: none where they are no font.

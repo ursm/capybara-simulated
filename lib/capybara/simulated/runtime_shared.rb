@@ -161,6 +161,7 @@ module Capybara
         # entry; the face installed under a `local()` name; a FontFace's own bytes — nil where there is none.
         'fontFile'                     => ->(b, *a) { b.font_file(a[0], a[1]) },
         'webFontFetch'                 => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i, a[2], a[3]) },
+        'fontFetchStart'               => ->(b, *a) { b.font_fetch_start(a[0], a[1].to_i, a[2], a[3], a[4]) },
         'localFontFile'                => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
         'resourceTimingFetch'          => ->(b, *a) { b.resource_timing_fetch(a[0], a[1].to_i, a[2], a[3]) },
         'takeModuleRt'                 => ->(b, *a) { b.take_module_rt },

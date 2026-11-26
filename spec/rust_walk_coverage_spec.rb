@@ -563,6 +563,7 @@ RSpec.describe 'Rust walk coverage', engine_global: true do
     })
     s.visit '/'
     s.execute_script("document.fonts.add(new FontFace('custom-font', 'url(/Ahem.ttf)')); document.getElementById('t').style.color = 'red';")
+    s.evaluate_async_script('document.fonts.ready.then(() => arguments[0]())')
     expect(s.evaluate_script("document.getElementById('t').getBoundingClientRect().width")).to eq(60)
     expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end
