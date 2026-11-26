@@ -187,6 +187,35 @@ RSpec.describe 'Structured clone of platform objects' do
     expect(out).to eq('buffers' => ['DataCloneError', true, true], 'port' => %w[DataCloneError DataCloneError])
   end
 
+  # (…a listed transferable is moved whatever its prototype was set to, and an exception's stack is read as its own:
+  # no getter of a page's runs in its serialization steps)
+  it 'transfers what the list holds whatever its prototype, and reads no page getter of an exception' do
+    session.visit '/'
+    out = probe(<<~JS)
+      const c = new MessageChannel();
+      Object.setPrototypeOf(c.port1, null);
+      const moved = structuredClone({ p: c.port1 }, { transfer: [c.port1] }).p;
+      const e = new DOMException('m', 'DataError');
+      let read = 0;
+      Object.defineProperty(e, 'stack', { get() { read++; return e; } });
+      const copy = structuredClone(e);
+      return { port: Object.getPrototypeOf(moved) === MessagePort.prototype, exception: [copy.name, copy.message], read };
+    JS
+    expect(out).to eq('port' => true, 'exception' => %w[DataError m], 'read' => 0)
+  end
+
+  # (…a broadcast's serialization goes in its wire, which nothing need hold for the channels it reaches)
+  it 'holds nothing for a broadcast once its channels have read it' do
+    session.visit '/'
+    held = Capybara::Simulated::Native.structured_exports_held
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], a = new BroadcastChannel('c'), b = new BroadcastChannel('c');
+      b.onmessage = (e) => done(e.data.n);
+      a.postMessage({ n: 7 });
+    JS
+    expect([got, Capybara::Simulated::Native.structured_exports_held]).to eq([7, held])
+  end
+
   it "keeps a FileList's files the Files the value holds, and builds its descriptors as data" do
     session.visit '/'
     out = probe(<<~JS)
