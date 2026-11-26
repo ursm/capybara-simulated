@@ -1,5 +1,4 @@
 require 'capybara/simulated'
-require 'rusty_racer'
 require_relative 'support/session_teardown'
 
 # Full multi-window: each window/tab is its own Browser + JS VM (own DOM,
@@ -183,7 +182,7 @@ RSpec.describe 'multi-window' do
 
   # Zero-copy transfer across windows: a buffer in the transfer list moves its
   # backing store by token (no copy), detaching the source; the target rebuilds
-  # it (the transfer registry is a rusty_racer feature).
+  # it (the engine's registry of messages between isolates: clone.rs `structuredExport`).
   it 'transfers a buffer zero-copy to another window' do
     win = session.window_opened_by { session.find(:css, '#open').click }
     src_len_after = session.evaluate_script('window.transferBufferToPopup()')
@@ -191,7 +190,7 @@ RSpec.describe 'multi-window' do
     session.within_window(win) do
       expect(session).to have_title('POPUP_BUF:20/4')    # bytes arrived intact
     end
-    expect(RustyRacer.pending_transfer_count).to eq(0)   # imported → no parked store
+    expect(Capybara::Simulated::Native.structured_exports_held).to eq(0)   # imported → no parked store
   end
 
   # Structured-clone fidelity: a Map crosses the window boundary as a live Map

@@ -192,9 +192,6 @@ module Capybara
         'asyncIoPending'               => ->(b, *_a) { b.async_io_pending? },
         'transferStash'                => ->(b, *a) { b.transfer_buffer_stash(a[0]) },
         'transferFetch'                => ->(b, *a) { b.transfer_buffer_fetch(a[0]) },
-        # Zero-copy postMessage transfer-token bookkeeping (see Browser#drop_pending_transfers).
-        'transferIssued'               => ->(b, *a) { b.transfer_token_issued(a[0]); nil },
-        'moduleIssued'                 => ->(b, *a) { b.module_token_issued(a[0]); nil },
         'mediaBytes'                   => ->(b, *a) { b.media_bytes(a[0], a[2], realm: a[1]) }
       }.freeze
 

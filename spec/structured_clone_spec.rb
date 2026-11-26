@@ -171,6 +171,22 @@ RSpec.describe 'Structured clone of platform objects' do
     )
   end
 
+  # (…each moved as the transfer reaches it, in the list's order: HTML StructuredSerializeWithTransfer checks a
+  # transferable again and moves it before it checks the next, so one a getter detached halts it with those before it
+  # moved — Firefox 161 the same; Chrome 158 checks the whole list again first, and moves none)
+  it 'moves the transfer list in order, those before a transferable detached since moved' do
+    session.visit '/'
+    out = probe(<<~JS)
+      const detaching = (b) => ({ get x() { structuredClone(b, { transfer: [b] }); return 1; } });
+      const a = new ArrayBuffer(4), b = new ArrayBuffer(4), d = new ArrayBuffer(4), c = new MessageChannel();
+      return {
+        buffers: [err(() => structuredClone(detaching(b), { transfer: [a, b] })), a.detached, b.detached],
+        port:    [err(() => structuredClone(detaching(d), { transfer: [c.port1, d] })), err(() => structuredClone(null, { transfer: [c.port1] }))]
+      };
+    JS
+    expect(out).to eq('buffers' => ['DataCloneError', true, true], 'port' => %w[DataCloneError DataCloneError])
+  end
+
   it "keeps a FileList's files the Files the value holds, and builds its descriptors as data" do
     session.visit '/'
     out = probe(<<~JS)
@@ -483,7 +499,7 @@ RSpec.describe 'Structured clone of platform objects' do
     expect(s.evaluate_script('got').sort).to eq(['port message true', 'port messageerror null', 'port ready', 'port ready'])
   end
 
-  # …and to another isolate by its compiled module's token (clone.rs `MODULES`): a dedicated worker, of its owner's
+  # …and to another isolate with its compiled module (clone.rs `structuredExport`): a dedicated worker, of its owner's
   # agent cluster, reads it back and posts it home; a shared worker, an agent cluster of its own, gets a `messageerror`
   # (WPT wasm/serialization/module window-sharedworker-failure).
   it 'carries a WebAssembly.Module to a dedicated worker and back, and not to a shared one' do

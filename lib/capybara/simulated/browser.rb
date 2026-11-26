@@ -525,9 +525,8 @@ module Capybara
         # its workers' isolates, which see none of the page isolate's store (blob_urls.rs) — made resolve to, each
         # revoked as the context that made it goes; and the copies of a blob: document's booted here.
         @blob_window = Native.blob_window_new(@session_partition)
-        # Postmessage transferable-buffer store. Large Uint8Array /
-        # ArrayBuffer payloads cross isolates as a Ruby-side byte ID
-        # rather than a JSON base64 string, so peak JS heap stays flat.
+        # The byte store between the host and the page: a decoded image's bitmaps and a painted canvas's file cross as a
+        # Ruby-side byte ID rather than a JSON base64 string, so peak JS heap stays flat.
         @transfer_buffer_lock = Mutex.new
         @transfer_buffers     = {}
         @transfer_buffer_seq  = 0
@@ -537,18 +536,6 @@ module Capybara
         @font_files           = {}
         @fc_strong_lock       = Mutex.new
         @fc_strong_families   = {}
-        # Zero-copy postMessage transfer tokens (rusty_racer
-        # `RustyRacer.transferOut`): a buffer in a `postMessage` transfer list
-        # crosses isolates by token (no byte copy), its source detached. A token
-        # parked but never imported pins its backing store PROCESS-WIDE, so we
-        # record every issued token (reported from JS, possibly on a worker
-        # thread — hence the lock) and `transferDrop` the lot on `reset!`
-        # (idempotent: an already-imported token no-ops).
-        @transfer_tokens      = []
-        # (…and the tokens of the compiled WebAssembly modules a message carried out of its isolate: clone.rs `MODULES`,
-        # process-wide too, read by every import that names one — a broadcast's — and dropped the same way)
-        @module_tokens        = []
-        @transfer_tokens_lock = Mutex.new
         # Cross-window BroadcastChannel posts from OTHER windows and workers, delivered to this window's matching
         # channels on settle, and whether the isolate's BroadcastChannel queue may hold a delivery (`broadcast_queued`) —
         # the engine's (broadcast_channels.rs `BroadcastInbox`).
@@ -607,7 +594,7 @@ module Capybara
       # a due timer, which the poll loop then continues to advance.
       WORKER_QUIESCE_MAX_ROUNDS = 256
       # Per-frame GVL yield (run_event_loop_frame) while a worker thread is alive, so it gets a clean
-      # slice for cross-isolate work (transferIn / message replies) instead of being starved by the
+      # slice for cross-isolate work (message replies) instead of being starved by the
       # phase-1 spin. 0.3ms is the empirical floor for a deterministic cross-isolate transfer reply;
       # 0.5ms adds margin for machine variance while staying cheap (only paid on worker/SW files).
       WORKER_GVL_YIELD         = 0.0005
@@ -3283,10 +3270,8 @@ module Capybara
         turns = 0
         # Give any live worker/SW thread a clean GVL slice before the phase-1 quiescence loop
         # monopolises it. That loop spins `run_loop_step(0)` holding the GVL, which STARVES a
-        # worker mid-flight — in particular a CROSS-ISOLATE zero-copy transfer (`RustyRacer.
-        # transferIn` over a SendBackingStore) that a `worker.postMessage(view, [view.buffer])`
-        # reply must complete on the worker thread. Under starvation transferIn fails, the SW's
-        # message handler throws on the null result, and no reply is posted → the client's
+        # worker mid-flight — in particular a CROSS-ISOLATE reply (a `worker.postMessage(view,
+        # [view.buffer])`) that must complete on the worker thread: no reply is posted → the client's
         # `onmessage` never fires and the drain force-timeouts it (postmessage.https transferable
         # subtests; the whole SW→client message reply cluster). A brief `sleep` releases the GVL
         # so the worker runs (Thread.pass does NOT hand it over); gated on a live worker so
@@ -3330,7 +3315,7 @@ module Capybara
 
         # Same interlude for a pending SW message swack / broadcast ack — but WITHOUT holding
         # the clock. Its reply is the same kind of cross-isolate transfer completed on the worker
-        # thread (a `worker.postMessage(view, [view.buffer])` reply zero-copies via transferIn),
+        # thread (a `worker.postMessage(view, [view.buffer])` reply),
         # so we block briefly on the outbox to give a loaded runner's worker real GVL time to post
         # it, then fall through to phase 2 — a message reply is delivered at the current instant by
         # the drain below and the lifecycle-step / nav tasks its test then waits on advance
@@ -3857,9 +3842,6 @@ module Capybara
         (@sw_deferred_navigations + @sw_navigations_due).each {|navigation, _| navigation.close }
         @sw_deferred_navigations.clear
         @sw_navigations_due.clear
-        # Free any zero-copy transfer backing stores that went unimported
-        # (worker killed before draining its inbox, etc.) before the rebuild.
-        drop_pending_transfers
         Native.blob_registry_clear(@blob_window)
         # Drop volatile entries from the class-level HTTP asset cache
         # so test-local DB state (TranslationOverride, etc.) reaches
@@ -3890,12 +3872,10 @@ module Capybara
       # Tear down an auxiliary window's Browser when its window closes (the
       # Driver calls this on close_window / reset!). Releases what a bare GC of
       # the isolate would NOT: live background threads (worker / SSE / hijacked-
-      # fetch / WebSocket readers) and any parked zero-copy transfer backing
-      # stores this window issued (the transfer registry is process-wide). Runs
-      # while the runtime is still alive so the transferDrop call lands.
+      # fetch / WebSocket readers). Runs while the runtime is still alive.
       def dispose
         # (…its traversable closed — no window's familiarity goes through it after — and its blob URL registry first,
-        # process-global as the transfers are — blob_registry.rs — so a teardown step that raises leaves no entry another
+        # process-global as a message carried out of its isolate is — blob_registry.rs — so a teardown step that raises leaves no entry another
         # window of the session would find)
         @session_history.close!
         Native.blob_window_dispose(@blob_window)
@@ -3906,8 +3886,6 @@ module Capybara
         # reset, so without this they'd cross into the next test untouched).
         drain_app_request_threads
         reset_workers
-        # (…after its workers stopped, so none issues a token past it)
-        drop_pending_transfers
         reset_event_sources
         reset_hijacked_fetches
         reset_websockets
@@ -9839,31 +9817,6 @@ module Capybara
 
       def transfer_buffer_fetch(id)
         @transfer_buffer_lock.synchronize { @transfer_buffers.delete(id.to_i) }
-      end
-
-      # JS reports each zero-copy transfer token it mints (`RustyRacer.transferOut`)
-      # so we can release any that go unimported. Callable from a worker thread.
-      def transfer_token_issued(token)
-        t = token.to_i
-        @transfer_tokens_lock.synchronize { @transfer_tokens << t } if t > 0
-        nil
-      end
-      def module_token_issued(token)
-        t = token.to_i
-        @transfer_tokens_lock.synchronize { @module_tokens << t } if t > 0
-        nil
-      end
-
-      # Release every outstanding transfer token's backing store. The transfer
-      # registry is process-wide (it bridges isolates) and survives isolate
-      # teardown, so an unimported token would leak across the whole run; drop
-      # them on `reset!` via the (still-live) main context — `transferDrop` is
-      # idempotent, so dropping already-imported tokens is a harmless no-op.
-      def drop_pending_transfers
-        toks, modules = @transfer_tokens_lock.synchronize { ts = [@transfer_tokens, @module_tokens]; @transfer_tokens = []; @module_tokens = []; ts }
-        Native.wasm_modules_drop(modules) unless modules.empty?
-        return if toks.empty?
-        @runtime.call('transferDropAll', toks) rescue nil
       end
 
       # Fetch a media resource (http / relative URL) and return its bytes, so a `<video

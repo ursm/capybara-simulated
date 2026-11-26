@@ -346,7 +346,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("keepalive_release", magnus::function!(keepalive::release, 1))?;
     native.define_module_function("keepalive_retire", magnus::function!(keepalive::retire, 2))?;
     native.define_module_function("keepalive_clear", magnus::function!(keepalive::clear, 1))?;
-    native.define_module_function("wasm_modules_drop", magnus::function!(clone::drop_modules_for_ruby, 1))?;
+    native.define_module_function("structured_exports_held", magnus::function!(clone::exports_held_for_ruby, 0))?;
     // …and its HTTP authentication entries (http_auth.rs).
     native.define_module_function("http_auth_new", magnus::function!(http_auth::new_for_ruby, 0))?;
     native.define_module_function("http_auth_clear", magnus::function!(http_auth::clear_for_ruby, 1))?;
@@ -503,8 +503,8 @@ fn session_partition_new() -> u64 {
     static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     LAST.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
-// …and its IndexedDB databases, its caches, its lock managers, its clipboard, its emulated position and its virtual
-// authenticators deleted.
+// …and its IndexedDB databases, its caches, its lock managers, its clipboard, its emulated position, its virtual
+// authenticators and the messages its isolates carried out and none brought in deleted.
 fn session_partition_clear(partition: u64) {
     idb_databases::clear(partition);
     cache_storage::clear(partition);
@@ -512,4 +512,5 @@ fn session_partition_clear(partition: u64) {
     system_clipboard::clear(partition);
     geolocation::clear(partition);
     webauthn::clear(partition);
+    clone::clear(partition);
 }

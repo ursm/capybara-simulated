@@ -139,6 +139,11 @@ impl RealmLocation {
             self.document_origin = Some("null".to_owned());
         }
     }
+    // Whether its browsing context group is cross-origin isolated (`setCrossOriginIsolation`): a structured clone within
+    // its agent shares its SharedArrayBuffers (clone.rs).
+    pub(crate) fn cross_origin_isolated(&self) -> bool {
+        self.cross_origin_isolated
+    }
     // Whether its document's origin is a new opaque one its sandboxing made.
     pub(crate) fn sandboxed_origin(&self) -> bool {
         self.sandbox & crate::sandbox::ORIGIN != 0
