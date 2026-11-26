@@ -118,12 +118,10 @@ pub(crate) struct SetHandle {
     stuck: Cell<bool>,
     owed: Cell<u32>,
 }
-// What a set owes its bindings (`fsOwed`): the task that fires `loading` — making its status `loading` first, where a load
-// the user agent began switched it (`OWE_SHOW_LOADING`: Chrome and Firefox show `loaded` until a task later, csim-bench
-// font7 `f1`, `f6`) — and the task that fires `loadingdone` and `loadingerror`.
+// What a set owes its bindings (`fsOwed`): the task that fires `loading`, and the task that fires `loadingdone` and
+// `loadingerror`.
 const OWE_LOADING_EVENT: u32 = 1;
-const OWE_SHOW_LOADING: u32 = 2;
-const OWE_DONE_EVENTS: u32 = 4;
+const OWE_DONE_EVENTS: u32 = 2;
 const NO_RULES: u64 = u64::MAX;
 
 unsafe impl GarbageCollected for SetHandle {
@@ -148,15 +146,16 @@ impl SetHandle {
     fn touch(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
     }
-    // "Switch the FontFaceSet to loading": its status `loading` — now, or as its `loading` task runs (`now` false) — its
-    // fulfilled [[ReadyPromise]] replaced by a pending one, and the task that fires `loading` owed.
-    fn switch_to_loading(&self, now: bool) {
-        self.status_loading.set(now || self.status_loading.get());
+    // "Switch the FontFaceSet to loading": its status `loading` at once — whoever began the load, the layout or a script
+    // (Chrome and Firefox, csim-bench rv `r12`, `r13`, `u1`) — its fulfilled [[ReadyPromise]] replaced by a pending one,
+    // and the task that fires `loading` owed.
+    fn switch_to_loading(&self) {
+        self.status_loading.set(true);
         let (epoch, fulfilled) = self.ready.get();
         if fulfilled {
             self.ready.set((epoch.wrapping_add(1), false));
         }
-        self.owe(OWE_LOADING_EVENT | if now { 0 } else { OWE_SHOW_LOADING });
+        self.owe(OWE_LOADING_EVENT);
     }
     // "Switch the FontFaceSet to loaded": stuck where it is pending on the environment, else its status `loaded`, its
     // [[ReadyPromise]] fulfilled and the task that fires `loadingdone` / `loadingerror` owed.
@@ -268,7 +267,7 @@ fn add_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
         let first = loading.size() == 0;
         loading.set(scope, face.into(), state.into());
         if first {
-            s.switch_to_loading(true);
+            s.switch_to_loading();
         }
     }
     rv.set_bool(true);
@@ -403,9 +402,8 @@ fn css_face_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.fsFaceLoading(set, face, state, now): the FontFace `face` (its state `state`) is `loading`, for the set: appended to
-// its [[LoadingFonts]], where it is not there already — the set switched to loading where it was the first (`now`: its
-// status with it, a script's `load()`; else as its `loading` task runs, a load the user agent began).
+// __dom.fsFaceLoading(set, face, state): the FontFace `face` (its state `state`) is `loading`, for the set: appended to its
+// [[LoadingFonts]], where it is not there already — the set switched to loading where it was the first.
 fn face_loading_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(s), Ok(face), Ok(state)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1)), v8::Local::<v8::Object>::try_from(args.get(2))) else { return };
     let loading = s.loading.map(scope);
@@ -415,7 +413,7 @@ fn face_loading_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let first = loading.size() == 0;
     loading.set(scope, face.into(), state.into());
     if first {
-        s.switch_to_loading(args.get(3).is_true());
+        s.switch_to_loading();
     }
 }
 
@@ -444,14 +442,6 @@ fn environment_settled_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 // __dom.fsOwed(set) -> the tasks the set owes its bindings now (`OWE_*`), owed no more.
 fn owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_uint32(set(scope, args.get(0)).map_or(0, |s| s.owed.replace(0)));
-}
-
-// __dom.fsShowLoading(set): its `loading` task runs — its status `loading`, where faces are loading still.
-fn show_loading_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(s) = set(scope, args.get(0)) else { return };
-    if s.loading.len(scope) > 0 {
-        s.status_loading.set(true);
-    }
 }
 
 // __dom.fsTakeDone(set) -> [loaded, failed]: its `loadingdone` task's [[LoadedFonts]] and [[FailedFonts]], those it holds
@@ -532,7 +522,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "fsFaceSettled", face_settled_op, context_id);
     crate::dom::register(scope, ns, "fsEnvironmentSettled", environment_settled_op, context_id);
     crate::dom::register(scope, ns, "fsOwed", owed_op, context_id);
-    crate::dom::register(scope, ns, "fsShowLoading", show_loading_op, context_id);
     crate::dom::register(scope, ns, "fsTakeDone", take_done_op, context_id);
     crate::dom::register(scope, ns, "fsReady", ready_op, context_id);
     crate::dom::register(scope, ns, "fsLoading", loading_op, context_id);

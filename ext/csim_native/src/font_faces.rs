@@ -500,9 +500,14 @@ fn font_faces_hand(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let added = crate::font_face_set::added_records(scope, args.get(1));
     let arena: &mut RealmArena = crate::dom::realm(scope, cid);
     let ruled = if styled { arena.rule_faces.clone() } else { Vec::new() };
-    arena.font_faces = ruled.into_iter().chain(added).collect();
-    arena.face_files.clear();
+    let faces: Vec<FaceRecord> = ruled.into_iter().chain(added).collect();
+    // (…what a face of the list as it was came to, kept for the same face in it now: a download under way lands for it
+    // still, `fontFetchLand`)
+    let (was, came) = (std::mem::take(&mut arena.font_faces), std::mem::take(&mut arena.face_files));
+    arena.face_files = faces.iter().map(|f| was.iter().position(|w| w == f).and_then(|j| came.get(j).cloned().flatten())).collect();
+    arena.font_faces = faces;
     arena.family_faces.clear();
+    arena.face_list_gen = arena.face_list_gen.wrapping_add(1);
     arena.faces_handed = Some(key);
 }
 

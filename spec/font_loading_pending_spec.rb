@@ -8,8 +8,8 @@ require_relative 'support/session_teardown'
 # made in parallel — its server's time on the virtual clock — and landing as a task. Until then the text is laid out with
 # the fallback (CSS Fonts 4 §4.9: whatever the `font-display`, a block period's text is invisible, not unmeasured), after
 # it with the face — where it came within the face's block and swap periods. The document's `load` waits for it, and
-# the FontFaceSet goes through its cycle: `loading` a task after layout began the load, `ready` pending until the
-# document is completely loaded and nothing loads. Every figure here is Chrome's and Firefox's (csim-bench font7 probes).
+# the FontFaceSet goes through its cycle: `loading` as layout begins the load, `ready` pending until the document is
+# completely loaded and nothing loads. Every figure here is Chrome's and Firefox's (csim-bench font7 probes).
 RSpec.describe 'web fonts loading in parallel' do
 
   # (…Ahem's every glyph is one em wide: `abcd` at 20px is 80px with the face, something else with the fallback)
@@ -56,8 +56,10 @@ RSpec.describe 'web fonts loading in parallel' do
   end
 
   def pages
+    shared = font(300)
     {
-      # A script reads the text as it is parsed: the fallback, the face's download begun; the set `loading` a task later.
+      # A script reads the text as it is parsed: the fallback, the face's download begun, the set `loading` with it (Chrome
+      # and Firefox, csim-bench rv `r12`).
       '/read.html' => head + face(300) + <<~HTML,
         <script>
           L.push('inline:' + w() + ':' + document.fonts.status + ':' + Array.from(document.fonts)[0].status + ':' + document.fonts.check('20px A'));
@@ -102,13 +104,48 @@ RSpec.describe 'web fonts loading in parallel' do
       # A `fallback` face whose first source fails after 2 s and whose second comes 1.5 s later: past 3.1 s of the face's
       # load, though its own download took 1.5 s.
       '/second.html' => head + %(<style>@font-face { font-family: A; src: url(#{font(2000, 'missing')}), url(#{font(1500)}); font-display: fallback }</style><span id="s" style="font: 20px A, monospace">abcd</span>),
-      # Two families whose faces name one URL, the text using one: the download is the other face's too (CSS Font Loading
-      # leaves faces of one URL to the fetch; Chrome and Firefox both load the unused one with it, csim-bench font7 `sh1`).
+      # Two families whose faces name one URL, the text using one: the other face is no load of its own, `unloaded` (Chrome
+      # and Firefox, csim-bench rv `sh1nob`) — until text uses it, which the one download answers (`sh1txt`).
       '/shared.html' => head + <<~HTML,
         <style>@font-face { font-family: A; src: url(/slow/300/ahem.ttf?shared) } @font-face { font-family: B; src: url(/slow/300/ahem.ttf?shared) }</style>
         <span id="s" style="font: 20px A, monospace">abcd</span>
         <script>document.fonts.onloadingdone = function (e) { L.push('loadingdone:' + e.fontfaces.length); };</script>
       HTML
+      # A face nothing uses whose fallback source is the used face's URL: not loaded as that download lands, and the load
+      # waits for none of its own (Chrome and Firefox, csim-bench rv `r1`).
+      '/unused-source.html' => head + %(<style>@font-face { font-family: A; src: url(#{shared}) } @font-face { font-family: B; src: url(#{font(1500, 'missing')}), url(#{shared}) }</style><span id="s" style="font: 20px A, monospace">abcd</span>),
+      # A face whose download `stop()` cancelled, and a FontFace of its URL later: a download of its own, which loads
+      # (Chrome and Firefox, csim-bench rv `r18`).
+      '/stop-again.html' => head + <<~HTML,
+        <title>stopping</title><style>@font-face { font-family: A; src: url(#{shared}) }</style><span id="s" style="font: 20px A, monospace">abcd</span>
+        <script>
+          w();
+          window.stop();
+          setTimeout(function () {
+            var done = function (what) { L.push('later:' + what); document.title = 'done'; };
+            new FontFace('N', 'url(#{shared})').load().then(function (f) { done(f.status); }, function (e) { done(e.name); });
+          }, 800);
+        </script>
+      HTML
+      # A canvas measuring a character a `unicode-range` face covers begins that face's load (Firefox, csim-bench rv `u2c`).
+      '/canvas.html' => head + <<~HTML,
+        <style>@font-face { font-family: U; src: url(#{font(300, 'han')}); unicode-range: U+4E00-4FFF }</style><span id="s">abcd</span>
+        <script>
+          var c = document.createElement('canvas').getContext('2d');
+          c.font = '20px U';
+          L.push('before:' + Array.from(document.fonts)[0].status);
+          c.measureText('\u4e00');
+          L.push('measured:' + Array.from(document.fonts)[0].status);
+        </script>
+      HTML
+      # A page whose `pagehide` measures a `unicode-range` face's character, and the next page's unused face: no load of
+      # the first page's asks reaches the second's list (csim-bench rv `wanted.rb`).
+      '/leaving.html' => <<~HTML,
+        <!DOCTYPE html><meta charset="utf-8"><style>@font-face { font-family: U; src: url(#{font(0)}); unicode-range: U+0-FF } @font-face { font-family: U; src: url(#{font(0)}); unicode-range: U+400-4FF }</style>
+        <span style="font-family: U">ii</span><a href="/arriving.html">go</a>
+        <script>addEventListener('pagehide', function () { var c = document.createElement('canvas').getContext('2d'); c.font = '20px U'; c.measureText('\u0434'); });</script>
+      HTML
+      '/arriving.html' => head + %(<style>@font-face { font-family: A; src: url(#{font(0)}) } @font-face { font-family: Q; src: url(#{font(1500)}) }</style><span id="s" style="font: 20px A, monospace">abcd</span>),
       # A preloaded face: the preload's response taken, the face's load completes as a task all the same.
       '/preload.html' => head + <<~HTML,
         <link rel="preload" as="font" crossorigin href="/slow/0/ahem.ttf?p"><style>@font-face { font-family: A; src: url(/slow/0/ahem.ttf?p) }</style>
@@ -151,7 +188,7 @@ RSpec.describe 'web fonts loading in parallel' do
   it 'lays text out with the fallback while the face downloads, and with the face once it is in' do
     s = visit('/read.html')
     inline, task = log(s).values_at(0, 2)
-    expect(inline).to match(/\Ainline:(\d+):loaded:loading:false\z/)
+    expect(inline).to match(/\Ainline:(\d+):loading:loading:false\z/)
     expect(inline[/\d+/].to_i).not_to eq(80)
     expect(task).to eq('task:loading')
     expect(log(s)).to include(at('load', 300, 80), at('ready', 300, 80), 'loadingdone:1')
@@ -197,11 +234,40 @@ RSpec.describe 'web fonts loading in parallel' do
     expect(log(visit('/second.html')).last).to match(at('load', 3500, :fallback))
   end
 
-  it 'loads a face that names the URL another face downloaded with it' do
+  it 'loads no face that names the URL another face downloaded until text uses it' do
     s = visit('/shared.html')
-    expect(log(s)).to include('loadingdone:2')
-    expect(s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.status; })")).to eq(%w[loaded loaded])
+    statuses = "Array.from(document.fonts).map(function (f) { return f.status; })"
+    expect(log(s)).to include('loadingdone:1')
+    expect(s.evaluate_script(statuses)).to eq(%w[loaded unloaded])
+    expect(s.evaluate_script("document.fonts.check('20px B')")).to be(false)
+    s.execute_script("var b = document.createElement('span'); b.style.font = '20px B'; b.textContent = 'x'; document.body.appendChild(b); b.offsetWidth;")
+    s.evaluate_async_script('document.fonts.ready.then(function () { arguments[0](); }.bind(null, arguments[0]))')
+    expect(s.evaluate_script(statuses)).to eq(%w[loaded loaded])
     expect(requested).to eq(['ahem'])
+  end
+
+  it 'starts no download of an unused face as another face\'s download of its URL lands' do
+    s = visit('/unused-source.html')
+    expect(log(s).last).to match(at('load', 300, 80))
+    expect(s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.status; })")).to eq(%w[loaded unloaded])
+    expect(requested).to eq(['ahem'])
+  end
+
+  it 'downloads a URL a stop() cancelled again for a later load' do
+    s = visit('/stop-again.html')
+    expect(s).to have_title('done')
+    expect(log(s)).to include('later:loaded')
+  end
+
+  it 'begins a unicode-range face\'s load as a canvas measures a character it covers' do
+    expect(log(visit('/canvas.html'))).to start_with('before:unloaded', 'measured:loading')
+  end
+
+  it 'loads none of the faces a page that went asked for in the next page\'s list' do
+    s = visit('/leaving.html')
+    s.click_link 'go'
+    expect(log(s).last).to match(at('load', 0, '80'))
+    expect(s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.status; })")).to eq(%w[loaded unloaded])
   end
 
   it 'completes a preloaded face\'s load as a task' do

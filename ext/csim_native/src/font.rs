@@ -44,7 +44,7 @@ pub(crate) struct FontMetrics {
 
 // One face of a `unicode-range` split: its registered handle, the ranges it covers (None: every code point), and its
 // vertical metrics in ems — None where its table carries none. Or a face no character has asked for yet (`wanted`: its
-// realm and its place in that realm's face list), whose file is not loaded until one does (CSS Fonts 4 §4.5: a face
+// realm, the generation of that realm's face list and its place in it), whose file is not loaded until one does (CSS Fonts 4 §4.5: a face
 // whose range covers none of the text is not downloaded): a character it covers is measured past it, by the next member
 // that covers it, and asks for it (`take_wanted`).
 #[derive(Clone, Debug, PartialEq)]
@@ -52,8 +52,9 @@ pub(crate) struct StackMember {
     pub(crate) ranges: Option<Vec<(u32, u32)>>,
     pub(crate) handle: i32,
     pub(crate) vertical: Option<VerticalMetrics>,
-    pub(crate) wanted: Option<(i32, usize)>,
+    pub(crate) wanted: Option<Wanted>,
 }
+pub(crate) type Wanted = (i32, u32, usize);
 
 // A face's ascent, descent and line gap, in ems.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -377,17 +378,22 @@ thread_local! {
     static FONTS: RefCell<Vec<Option<FontMetrics>>> = const { RefCell::new(Vec::new()) };
     static FONT_IDX: RefCell<HashMap<String, i32>> = RefCell::new(HashMap::new());
     // The faces of a split a character asked for that no one has asked to load yet (`StackMember::wanted`).
-    static WANTED: RefCell<Vec<(i32, usize)>> = const { RefCell::new(Vec::new()) };
+    static WANTED: RefCell<Vec<Wanted>> = const { RefCell::new(Vec::new()) };
 }
 
-// The faces of realm `cid`'s list a character measured has asked for, by their places, asked no more.
-pub(crate) fn take_wanted(cid: i32) -> Vec<usize> {
+// The faces of realm `cid`'s list — the list of generation `list` — a character measured has asked for, by their places,
+// asked no more; and those of the realm's earlier lists let go of (a stack kept from one measured since).
+pub(crate) fn take_wanted(cid: i32, list: u32) -> Vec<usize> {
     WANTED.with(|w| {
         let mut w = w.borrow_mut();
-        let (mine, others): (Vec<_>, Vec<_>) = w.drain(..).partition(|&(realm, _)| realm == cid);
+        let (mine, others): (Vec<_>, Vec<_>) = w.drain(..).partition(|&(realm, _, _)| realm == cid);
         *w = others;
-        mine.into_iter().map(|(_, k)| k).collect()
+        mine.into_iter().filter(|&(_, at, _)| at == list).map(|(_, _, k)| k).collect()
     })
+}
+// …or all of them let go of: a new document begins in the realm.
+pub(crate) fn forget_wanted(cid: i32) {
+    WANTED.with(|w| w.borrow_mut().retain(|&(realm, _, _)| realm != cid));
 }
 
 // The SFNT a font file holds: a WOFF 1.0 container's tables inflated, a WOFF 2.0 one's Brotli stream decompressed

@@ -17,10 +17,10 @@ const TAG: u16 = 19;
 static BRAND: u8 = 0;
 
 // Its status (FontFaceLoadStatus), by number: font-face.js names them.
-const UNLOADED: u32 = 0;
+pub(crate) const UNLOADED: u32 = 0;
 pub(crate) const LOADING: u32 = 1;
-const LOADED: u32 = 2;
-const ERROR: u32 = 3;
+pub(crate) const LOADED: u32 = 2;
+pub(crate) const ERROR: u32 = 3;
 
 struct Face {
     // Its family as its descriptor serializes it, and each attribute's descriptor (`FACE_ATTRIBUTE_DESCRIPTORS`' order).
@@ -242,7 +242,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "ffStart", start_op, context_id);
     crate::dom::register(scope, ns, "ffSettle", settle_op, context_id);
     crate::dom::register(scope, ns, "ffFile", file_op, context_id);
-    crate::dom::register(scope, ns, "ffFetchedStatus", fetched_status_op, context_id);
 }
 
 // The fields `ffField` reads, by number (font-face.js names them): 0..10 the attributes' descriptors, then these.
@@ -369,27 +368,4 @@ fn file_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let cid = crate::dom::realm_id(scope, &args);
     let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, referrer.as_deref(), f64::INFINITY, subresources, Some((owner, state)));
     crate::font_files::answer_file(scope, &mut rv, file);
-}
-
-// __dom.ffFetchedStatus(state) -> what the face's downloads already went through, as a status: `loaded` where one of them
-// came as a font native reads, `loading` where one is under way, `error` where every one came and none did, else
-// `unloaded` (font_files.rs `source_tried`) — what a CSS-connected face whose file layout already asked for starts as.
-fn fetched_status_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(face) = face(scope, args.get(0)) else { return };
-    let urls: Vec<String> = face.borrow().sources.iter().flatten().filter_map(|s| match s {
-        FaceSource::Url(u) => Some(u.clone()),
-        FaceSource::Local(_) => None,
-    }).collect();
-    let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let tried: Vec<Option<Option<bool>>> = urls.iter().map(|u| crate::font_files::source_tried(arena, u)).collect();
-    rv.set_uint32(if tried.contains(&Some(Some(true))) {
-        LOADED
-    } else if tried.contains(&Some(None)) {
-        LOADING
-    } else if !tried.is_empty() && tried.iter().all(Option::is_some) {
-        ERROR
-    } else {
-        UNLOADED
-    });
 }

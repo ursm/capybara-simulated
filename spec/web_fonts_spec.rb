@@ -300,7 +300,8 @@ RSpec.describe 'web fonts', engine_global: true do
   end
 
   # A CSS-connected face whose file layout already fetched starts loaded in its own realm's set — read through another
-  # realm's FontFaceSet methods too, which settle it by what ITS document's sources gave.
+  # realm's FontFaceSet methods too, which settle it by what ITS document's text asked for: a face nothing used is
+  # `unloaded`, though another face downloaded its URL (Chrome and Firefox, csim-bench rv `sh1nob`).
   it "starts a CSS-connected face loaded by its own realm's fetches, whichever realm reads the set" do
     s = session('/outer.html')
     got = s.evaluate_script(<<~JS)
@@ -314,7 +315,7 @@ RSpec.describe 'web fonts', engine_global: true do
         return seen;
       })()
     JS
-    expect(got).to eq(%w[A:loaded C:loaded])
+    expect(got).to eq(%w[A:loaded C:unloaded])
   end
 
   # load() tries a face's sources in order: an installed `local()` font ahead of a download that fails loads the face.

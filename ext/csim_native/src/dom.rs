@@ -1303,6 +1303,9 @@ pub(crate) struct RealmState {
     // …and what the document's face list was last made of (font_faces.rs `fontFacesHand`): the rules' generation (none for
     // a document no engine styles), its FontFaceSet (by its handle) and that set's generation.
     pub(crate) faces_handed: Option<(Option<u32>, usize, u32)>,
+    // …and the generation of that list, which moves as it is made again: what a face's place in it is good for
+    // (font.rs `StackMember::wanted`).
+    pub(crate) face_list_gen: u32,
     // What a face of that list came to, once asked (font_resolve.rs `indexed_file`) — its download under way, or the file
     // it is read from — and the face each family stack takes at a bucket (`family_face`): both forgotten when the list
     // moves, or a download lands.

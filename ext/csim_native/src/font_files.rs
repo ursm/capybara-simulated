@@ -21,8 +21,9 @@ pub(crate) struct FontFiles {
     // …and how long each that came in took, past its beginning, in ms — none for a file there at once: what a face's
     // `font-display` periods are held against (`FaceRecord::usable_for`), with the time of the sources it tried before.
     took: HashMap<String, f64>,
-    // …and those its document's abort cancelled: a face reading from one failed, none of its other sources tried.
-    cancelled: std::collections::HashSet<String>,
+    // …and the one its document's abort cancelled, as it lands: a face whose load waited for it failed, none of its other
+    // sources tried — a later ask of its URL a download of its own (Chrome and Firefox, csim-bench rv `r18`).
+    cancelled: Option<String>,
     // The generation of what the realm's faces are read from, which moves as a download lands: what the faces a family
     // resolves to are keyed on beside the rules and the FontFaceSet (font-metrics.js `natFontGen`).
     pub(crate) generation: u32,
@@ -81,7 +82,7 @@ fn source_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: &FaceSource, 
     if kind == URL && files.flights.contains_key(value) {
         return Ok(Got::Pending);
     }
-    if kind == URL && files.cancelled.contains(value) {
+    if kind == URL && files.cancelled.as_deref() == Some(value) {
         return Ok(Got::Cancelled);
     }
     let path = match files.files.get(&key).cloned() {
@@ -172,13 +173,17 @@ pub(crate) fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8
     let took = arena.event_loop.clock - flight.began;
     let files = &mut arena.font_files;
     if cancelled {
-        files.cancelled.insert(url.clone());
+        files.cancelled = Some(url.clone());
     } else {
         files.files.insert((URL, url.clone()), path);
         files.took.insert(url.clone(), took);
     }
     files.generation = files.generation.wrapping_add(1);
     Ok(Some(Landed { url, waiters: flight.waiters }))
+}
+// …the landing's faces asked about: a cancelled download's URL one to download again from now.
+pub(crate) fn landed(scope: &mut v8::PinScope<'_, '_>, cid: i32) {
+    realm(scope, cid).font_files.cancelled = None;
 }
 // …and every download under way let go of: a new document begins in the realm, whose faces are its own to load
 // (`cancel` false: nothing lands them) — or its document's abort cancels them (`cancel`: each lands as a network error,
@@ -191,11 +196,8 @@ pub(crate) fn drop_flights(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8:
         crate::subresource_obtain::font_fetch_drop(scope, host, &mut flight.fetch, cancel)?;
         ids.push(flight.fetch.id);
     }
-    let files = &mut realm(scope, cid).font_files;
     if cancel {
-        files.flights.extend(flights);
-    } else {
-        files.cancelled.clear();
+        realm(scope, cid).font_files.flights.extend(flights);
     }
     Ok(ids)
 }
@@ -211,13 +213,4 @@ pub(crate) fn answer_file(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnV
         Ok(FaceFile::Pending) => rv.set_undefined(),
         Err(Terminated) => {}
     }
-}
-// …what a `url()` source came to so far: its download under way (`Some(None)`), one that came and gave none
-// (`Some(Some(false))`), one that gave a file native reads (`Some(Some(true))`) — or it was never asked (None).
-pub(crate) fn source_tried(arena: &crate::dom::RealmArena, value: &str) -> Option<Option<bool>> {
-    if arena.font_files.flights.contains_key(value) {
-        return Some(None);
-    }
-    let path = arena.font_files.files.get(&(URL, value.to_owned()))?;
-    Some(Some(path.as_deref().is_some_and(|p| crate::font::register_path(p) >= 0)))
 }

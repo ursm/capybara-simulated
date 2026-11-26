@@ -17,14 +17,11 @@ pub(crate) type Resolved = (i32, [Option<f64>; 3]);
 
 // What the page side does for the engine: `subresources(step, …)` a source's file fetched or looked up (font_files.rs,
 // subresource-host.js), `settle(index, what)` the document's face `index` as it comes to something (`FACE_*`),
-// `system(family, bucket)` the file fontconfig resolves a family's system face to (null for none) — and whether a script
-// asked (`by_script`: FontFaceSet `load()`), which makes the face's set `loading` as it asks, where a load the layout
-// begins makes it so a task later (Chrome and Firefox, csim-bench font7 `f1`, `f7`).
+// `system(family, bucket)` the file fontconfig resolves a family's system face to (null for none).
 struct Host<'s> {
     subresources: v8::Local<'s, v8::Function>,
     settle: v8::Local<'s, v8::Function>,
     system: v8::Local<'s, v8::Function>,
-    by_script: bool,
     // (…and whether this is a download's landing task, which settles what it asks about in it)
     landing: bool,
 }
@@ -34,7 +31,6 @@ struct Host<'s> {
 const FACE_ERROR: u32 = 0;
 const FACE_LOADED: u32 = 1;
 const FACE_LOADING: u32 = 2;
-const FACE_LOADING_BY_SCRIPT: u32 = 3;
 const FACE_LANDED: u32 = 4;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -43,6 +39,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "fontFaceFile", font_face_file, context_id);
     register(scope, ns, "fontFetchLand", font_fetch_land, context_id);
     register(scope, ns, "fontFacesWanted", font_faces_wanted, context_id);
+    register(scope, ns, "fontFaceStatus", font_face_status, context_id);
     register(scope, ns, "fontFetchesForget", font_fetches_forget, context_id);
     register(scope, ns, "fontFetchesAbort", font_fetches_abort, context_id);
     register(scope, ns, "fontGeneration", font_generation, context_id);
@@ -64,7 +61,6 @@ fn indexed_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, index: usize, host: 
     }
     files[index] = Some(got.clone());
     let what = match got {
-        FaceFile::Pending if host.by_script => FACE_LOADING_BY_SCRIPT,
         FaceFile::Pending => FACE_LOADING,
         FaceFile::Settled { loaded, .. } => (if loaded { FACE_LOADED } else { FACE_ERROR }) | if host.landing { FACE_LANDED } else { 0 },
     };
@@ -128,7 +124,8 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
             if let Some(path) = system_file(scope, host, family, bucket)?.filter(|p| crate::font::register_path(p) >= 0) {
                 candidates.push((None, Some(path)));
             }
-            handle = Some(stack_handle(cid, &faces, own.as_ref().map(|&(k, _)| k), &candidates));
+            let wanted = (cid, realm(scope, cid).face_list_gen);
+            handle = Some(stack_handle(wanted, &faces, own.as_ref().map(|&(k, _)| k), &candidates));
         }
     }
     let handle = match handle {
@@ -152,15 +149,16 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
 // characters select it on, font.rs `run_vmax`) and its ranges. The stack's own face is the stack's primary — what a
 // character no candidate covers is measured by, and what a `ch` is (style_fonts.rs) — or the system face, the candidate
 // of no face, where it has none. -1 where any candidate has no file native reads, or none is the stack's own. A candidate
-// of no file (`None`) is one no character has asked for: a member that asks as one does (`StackMember::wanted`).
-fn stack_handle(cid: i32, faces: &[crate::font_faces::FaceRecord], own: Option<usize>, candidates: &[(Option<usize>, Option<String>)]) -> i32 {
+// of no file (`None`) is one no character has asked for: a member that asks as one does (`StackMember::wanted`, of the
+// realm and the generation of its face list `list`).
+fn stack_handle(list: (i32, u32), faces: &[crate::font_faces::FaceRecord], own: Option<usize>, candidates: &[(Option<usize>, Option<String>)]) -> i32 {
     let mut primary = -1;
     let mut members = Vec::new();
     for (k, path) in candidates {
         let face = k.map(|k| &faces[k]);
         let ranges = face.and_then(|f| f.ranges.clone());
         let Some(path) = path else {
-            members.push(crate::font::StackMember { ranges, handle: -1, vertical: None, wanted: k.map(|k| (cid, k)) });
+            members.push(crate::font::StackMember { ranges, handle: -1, vertical: None, wanted: k.map(|k| (list.0, list.1, k)) });
             continue;
         };
         let h = crate::font::register_scaled(crate::font::register_path(path), face.map_or(1.0, |f| f.size_adjust));
@@ -180,7 +178,7 @@ fn stack_handle(cid: i32, faces: &[crate::font_faces::FaceRecord], own: Option<u
 // The functions of the page side's `Host`, from `args` at `at`, …
 fn host<'s>(args: &v8::FunctionCallbackArguments<'s>, at: i32) -> Option<Host<'s>> {
     let f = |k: i32| v8::Local::<v8::Function>::try_from(args.get(at + k)).ok();
-    Some(Host { subresources: f(0)?, settle: f(1)?, system: f(2)?, by_script: false, landing: false })
+    Some(Host { subresources: f(0)?, settle: f(1)?, system: f(2)?, landing: false })
 }
 
 // __dom.fontFamilyFace(family, bucket, subresources, settle, system) -> `[handle, ascentOverride, descentOverride,
@@ -211,7 +209,6 @@ fn font_family_handle(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // (FontFaceSet `load()`).
 fn font_face_file(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = host(&args, 1) else { return rv.set_null() };
-    let host = Host { by_script: true, ..host };
     let index = args.get(0).uint32_value(scope).unwrap_or(u32::MAX) as usize;
     let cid = realm_id(scope, &args);
     let file = indexed_file(scope, cid, index, &host);
@@ -223,8 +220,10 @@ fn font_face_file(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // task, the document's load waiting for it (bridge.entry.js `queueFontLand`). Its file kept (font_files.rs `land`), what the
 // realm's faces read from moved: the faces each family stack takes forgotten, the layout due again (`GEN_DIRTY`) — text
 // laid out with the fallback measured with the face now, where it came within its `font-display` periods — and every face
-// of the document's list that reads from it asked about again, its set told what it came to (`indexed_file`: loaded or
-// not, or the next of its sources begun); and each FontFace whose own `load()` waited asked again in turn.
+// of the document's list whose load was waiting for it asked about again, its set told what it came to (`indexed_file`:
+// loaded or not, or the next of its sources begun) — none that never asked, of the same URL though it is (Chrome and
+// Firefox leave it `unloaded`, csim-bench rv `r1`, `sh1nob`); and each FontFace whose own `load()` waited asked again in
+// turn.
 fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = host(&args, 1) else { return };
     let host = Host { landing: true, ..host };
@@ -233,10 +232,12 @@ fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let Ok(Some(landed)) = crate::font_files::land(scope, cid, id, host.subresources) else { return };
     let arena = realm(scope, cid);
     let reading: Vec<usize> = (0..arena.font_faces.len())
+        .filter(|&k| matches!(arena.face_files.get(k), Some(Some(FaceFile::Pending))))
         .filter(|&k| arena.font_faces[k].sources.iter().any(|s| matches!(s, crate::font_faces::FaceSource::Url(u) if *u == landed.url)))
-        .filter(|&k| !matches!(arena.face_files.get(k), Some(Some(FaceFile::Settled { .. }))))
         .collect();
-    arena.face_files.clear();
+    for &k in &reading {
+        arena.face_files[k] = None;
+    }
     arena.family_faces.clear();
     arena.generations.bump(crate::dom::GEN_DIRTY);
     for k in reading {
@@ -254,6 +255,7 @@ fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
             settled.push(v8::Boolean::new(scope, loaded).into());
         }
     }
+    crate::font_files::landed(scope, cid);
     rv.set(v8::Array::new_with_elements(scope, &settled).into());
 }
 
@@ -265,7 +267,7 @@ fn font_faces_wanted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(false);
     let Some(host) = host(&args, 0) else { return };
     let cid = realm_id(scope, &args);
-    let wanted = crate::font::take_wanted(cid);
+    let wanted = crate::font::take_wanted(cid, realm(scope, cid).face_list_gen);
     if wanted.is_empty() {
         return;
     }
@@ -285,10 +287,27 @@ fn font_faces_wanted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(there);
 }
 
+// __dom.fontFaceStatus(index) -> what the document's face `index` came to as text or a script asked for it, as its
+// FontFace's status: `unloaded` where nothing asked (a face naming the URL another face downloaded included: Chrome and
+// Firefox, csim-bench rv `sh1nob`), `loading` while its download is under way, else `loaded` or `error` — what a
+// CSS-connected face made after starts as (font-face.js `connectedFaces`).
+fn font_face_status(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let index = args.get(0).uint32_value(scope).unwrap_or(u32::MAX) as usize;
+    let cid = realm_id(scope, &args);
+    use crate::font_face_state::{ERROR, LOADED, LOADING, UNLOADED};
+    rv.set_uint32(match realm(scope, cid).face_files.get(index) {
+        Some(Some(FaceFile::Pending)) => LOADING,
+        Some(Some(FaceFile::Settled { loaded: true, .. })) => LOADED,
+        Some(Some(FaceFile::Settled { loaded: false, .. })) => ERROR,
+        _ => UNLOADED,
+    });
+}
+
 // __dom.fontFetchesForget(subresources) — the realm's downloads under way let go of: a new document begins in it.
 fn font_fetches_forget(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
     let cid = realm_id(scope, &args);
+    crate::font::forget_wanted(cid);
     let _ = crate::font_files::drop_flights(scope, cid, host, false);
 }
 // __dom.fontFetchesAbort(subresources) -> the numbers of the realm's downloads under way, cancelled by its document's abort
