@@ -4190,10 +4190,21 @@ module Capybara
       # `referrer` where it names one of its own (an `@import`'s, its importing sheet's location) — answered as
       # `external_asset_response` answers it.
       # (…a module's — a modulepreload's, `module` — its document's module map's: `asset_request`)
-      def planned_external_asset(url, document, realm, plan, referrer = nil, module_map: false)
+      # (…`since`, a parser-blocking script's a controlling service worker let through: how long ago, in virtual ms, its
+      # fetch is dated to have begun — its server's sleeps counted as the request is made, none of their real time the page's
+      # script time, and only what is left of them past that date run on the event loop, as its network slot's would be)
+      def planned_external_asset(url, document, realm, plan, referrer = nil, module_map: false, since: nil)
         mode, credentials, policy, dest = request_of_plan(plan)
         referrer = nil if referrer.to_s.empty?
-        external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
+        return external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map) unless since
+
+        answer, slept = server_timed_sleeps {
+          external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
+        }
+        @runtime.call('agentExcuse', slept) if slept.positive?
+        left = slept - since.to_f
+        server_slept_ms(left) if left.positive?
+        answer
       end
       # …answered as [its text, nil where the load failed; the facts of the response it came from (`resource_timing_meta`,
       # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of

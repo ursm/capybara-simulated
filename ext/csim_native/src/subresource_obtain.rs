@@ -949,7 +949,9 @@ pub(crate) struct ClassicFetch {
 // resolves to none).
 pub(crate) enum Leg {
     Answered(Landed),
-    Worker,
+    // (…a parser-blocking one's dated: the clock it is dated to have begun at, which a request the worker lets through to
+    // the network is dated by, as the network's slot is — `since`)
+    Worker(Option<f64>),
     Slot(u32, f64),
     Host(Option<v8::Global<v8::Value>>),
 }
@@ -1018,7 +1020,7 @@ pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, h
         return Ok(ClassicFetch { request: r, parser, leg: Leg::Answered(landed) });
     }
     if controlled(scope, host)? {
-        return Ok(ClassicFetch { request: r, parser, leg: Leg::Worker });
+        return Ok(ClassicFetch { request: r, parser, leg: Leg::Worker(blocking.then_some(clock - since.unwrap_or(0.0))) });
     }
     // (…the parser's from the cross-visit asset cache, an inserted one's from the network: the host's slot's, or its
     // memory's answer at once)
@@ -1079,7 +1081,7 @@ pub(crate) fn classic_script_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, ho
             let id = v8::Integer::new_from_unsigned(scope, id).into();
             call(scope, host, H_SCRIPT_TAKE, &[id])?
         }
-        Leg::Worker => {
+        Leg::Worker(dated) => {
             let mut sw_args = request_args(scope, &r).to_vec();
             let (binary, integrity_value) = (v8::Boolean::new(scope, true).into(), text(scope, &r.integrity));
             sw_args.extend([binary, integrity_value]);
@@ -1097,7 +1099,15 @@ pub(crate) fn classic_script_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, ho
                 let content_type = header_of(scope, sw_obj, "content-type");
                 return classic_answer(scope, cid, host, &r, (v, content_type, Some(Answered::Worker(answer))), (true, Some(bytes), None));
             }
-            let args = request_args(scope, &r);
+            // (…let through to the network: a parser-blocking one's dated as its slot would have been, its server's sleeps
+            // counted as the request is made and only what is left of them past its date run on the event loop — its
+            // parser waiting at nesting level zero, as the worker was asked: Browser#planned_external_asset)
+            let mut args = request_args(scope, &r).to_vec();
+            if let (true, Some(began)) = (parser, dated) {
+                let since = (realm(scope, cid).event_loop.clock - began).max(0.0);
+                let (module, since): (v8::Local<v8::Value>, v8::Local<v8::Value>) = (v8::Boolean::new(scope, false).into(), v8::Number::new(scope, since).into());
+                args.extend([module, since]);
+            }
             call(scope, host, if parser { H_ASSET } else { H_FETCH }, &args)?
         }
     };
