@@ -747,13 +747,18 @@ fn listed_async(arena: &crate::dom::RealmArena, id: NodeId) -> bool {
 // async scripts land (`ASYNC_WAITED`).
 fn parser_waits_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    if args.get(0).is_true() {
-        if let Some(state) = arena.realm_state_mut(cid) {
-            state.parser_waited = true;
+    let lands = args.get(0).is_true();
+    rv.set_double(crate::dom::realm(scope, cid).parser_waits(cid, lands));
+}
+impl RealmArena {
+    pub(crate) fn parser_waits(&mut self, cid: i32, lands: bool) -> f64 {
+        if lands {
+            if let Some(state) = self.realm_state_mut(cid) {
+                state.parser_waited = true;
+            }
         }
+        self.spin_mark().map_or(0.0, |mark| mark as f64)
     }
-    rv.set_double(arena.spin_mark().map_or(0.0, |mark| mark as f64));
 }
 
 // __dom.scriptBlocksParser(nid) -> whether the script element blocks the parser (`blocks_parser`).

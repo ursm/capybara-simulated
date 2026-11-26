@@ -392,6 +392,19 @@ pub(crate) fn nid_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::
     unsafe { ptr.as_ref() }.nid()
 }
 
+// The node document of the node object `value` (its handle's), none for one of no handle.
+pub(crate) fn document_nid(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
+    handle_of(scope, value)
+        // SAFETY: the handle lives while its object, the caller's, does.
+        .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
+        .and_then(|d| nid_of(scope, d.into()))
+}
+// …of the node `id`, as its object keeps it: the document it is in now.
+pub(crate) fn node_document_of(scope: &mut v8::PinScope<'_, '_>, id: NodeId) -> Option<NodeId> {
+    let object = crate::dom::node_value(scope, Some(id));
+    document_nid(scope, object)
+}
+
 // Bind the node `value` is the object of to slot `nid` — a no-op for an object that is no node's.
 pub(crate) fn bind(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, nid: NodeId) {
     let Some(ptr) = handle_of(scope, value) else { return };

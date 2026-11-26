@@ -176,6 +176,7 @@ mod reflect_keywords;
 mod rendered;
 mod script;
 mod script_fetch;
+mod script_lists;
 mod resize_observation;
 mod resize_observers;
 mod resource_timing;

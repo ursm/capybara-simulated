@@ -1174,6 +1174,8 @@ pub(crate) struct RealmState {
     // and the places in the event loop's
     // sequence its document's parse kept for their responses as it began (`parserBegins`).
     pub(crate) script_fetches: crate::script_fetch::ScriptFetches,
+    // …and the lists its scripts land on, and the style sheets that block them (script_lists.rs).
+    pub(crate) script_lists: crate::script_lists::ScriptLists,
     pub(crate) speculative: Option<std::ops::Range<u64>>,
     // …and the event loop's clock as it began, which those fetches began at.
     pub(crate) parse_began_at: f64,
@@ -1861,6 +1863,7 @@ impl RealmArena {
         // (…nor its script fetches, which land in no document now (the host's slots left to the session's end) — its parse's
         // speculative places its own, `parserBegins`, which the new parse takes before this runs)
         self.script_fetches = Default::default();
+        self.script_lists.reset();
         // (…nor what the old page planned for its navigable, which the host took or let go — and the form it held with it)
         self.navigation_plan = Default::default();
         self.laid_out_at = None;
@@ -3408,6 +3411,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::adopt::install(scope, ns, context_id);
     crate::script::install(scope, ns, context_id);
     crate::script_fetch::install(scope, ns, context_id);
+    crate::script_lists::install(scope, ns, context_id);
     crate::dialogs::install(scope, ns, context_id);
     crate::connection_steps::install(scope, ns, context_id);
     crate::text_selection::install(scope, ns, context_id);

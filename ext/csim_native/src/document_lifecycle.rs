@@ -74,6 +74,10 @@ impl Lifecycle {
     pub(crate) fn began(self) -> u32 {
         self.began
     }
+    // How many aborts have come to it (`docAborts`).
+    pub(crate) fn aborts(self) -> u32 {
+        self.aborts
+    }
     // A document begins to load into the Document object (HTML "create and initialize a Document object", the parse
     // that follows), numbered `generation`: loading, nothing of "the end" done for it.
     pub(crate) fn begin(&mut self, generation: u32) {

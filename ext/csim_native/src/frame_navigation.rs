@@ -968,7 +968,7 @@ fn frame_attributes_navigate(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     };
     let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return answer(scope, rv, ATTR_NAV_NO_ENTRY, "") };
-    let doc = node_document(scope, args.get(0));
+    let doc = crate::node_handle::document_nid(scope, args.get(0));
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let Some(realm) = arena.frame_realm(container) else { return answer(scope, rv, ATTR_NAV_NO_ENTRY, "") };
@@ -1598,7 +1598,7 @@ fn frame_load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let initial = args.get(1).is_true();
     let now = args.get(2).number_value(scope).unwrap_or(0.0);
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(3)) else { return answer(scope, rv, LOAD_NONE, 0.0, 0) };
-    let doc = node_document(scope, args.get(0));
+    let doc = crate::node_handle::document_nid(scope, args.get(0));
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     if arena.frame_nav_has(container, LOAD_FIRED) {
@@ -1940,13 +1940,6 @@ impl RealmArena {
     }
 }
 
-// The node document of a node object (its handle's), none for one of no handle.
-fn node_document(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>) -> Option<NodeId> {
-    crate::node_handle::handle_of(scope, node)
-        // SAFETY: the handle lives while the object, an argument, does.
-        .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
-        .and_then(|d| crate::node_handle::nid_of(scope, d.into()))
-}
 
 impl RealmArena {
     // Whether a frame container's document is built as it connects — as its document parses, whatever origin either is

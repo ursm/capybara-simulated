@@ -144,7 +144,7 @@ pub(crate) fn flush(scope: &mut v8::PinScope<'_, '_>, cid: i32, run: v8::Local<'
         };
         candidates.sort_unstable_by_key(|&(order, id, _)| (order, id));
         let candidates = candidates.into_iter().map(|(_, id, el)| (id, el));
-        let due: Vec<u32> = candidates.into_iter().filter(|&(_, el)| el.is_none_or(|el| node_document(scope, el) == document)).map(|(id, _)| id).collect();
+        let due: Vec<u32> = candidates.into_iter().filter(|&(_, el)| el.is_none_or(|el| crate::node_handle::node_document_of(scope, el) == document)).map(|(id, _)| id).collect();
         if due.is_empty() {
             break;
         }
@@ -162,14 +162,6 @@ pub(crate) fn flush(scope: &mut v8::PinScope<'_, '_>, cid: i32, run: v8::Local<'
     }
 }
 
-// The document a node is in now — its node document, which its object keeps.
-fn node_document(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> Option<NodeId> {
-    let object = crate::dom::node_value(scope, Some(el));
-    crate::node_handle::handle_of(scope, object)
-        // SAFETY: the handle lives while the object, a local here, does.
-        .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
-        .and_then(|d| crate::node_handle::nid_of(scope, d.into()))
-}
 
 // __dom.loadGatesForget() — the calling realm's gates let go of: a new document begins in it, and the elements the old
 // one's were for belong to a document being replaced (left in, they would pile up one dead gate per navigation).
