@@ -2598,7 +2598,7 @@ fn line_layout(
                 // The unit is the run and never more: a `<b>` inside the span is a second run with a second
                 // decision. Under a PRESERVING mode the unit is the first newline-SEGMENT — a newline after it
                 // breaks the line regardless.
-                let space_w = measure_word(run, &[0x20])?;
+                let space_w = crate::font::probing(|| measure_word(run, &[0x20]))?;
                 // A run of collapsible white space that is not a `pre-line` newline's: ONE space where it collapses
                 // into content, nothing (but its break opportunity) where it does not.
                 macro_rules! collapse_space {
@@ -8029,7 +8029,7 @@ fn text_intrinsic(runs: &[Run], run_texts: &[RunText], ws_mode: u8, indent: (f64
                 // …whose units are glued by break-all's rules, except under `anywhere`, whose emergency breaks
                 // min-content counts between grapheme clusters (Chrome: `ab.` is 9.6 under break-all + anywhere).
                 let grapheme = matches!(run.metric as u8, 3 | 5);
-                let space_w = measure_word(run, &[0x20])?;
+                let space_w = crate::font::probing(|| measure_word(run, &[0x20]))?;
                 // (`measure_word` only, so the tab pair it carries is never read — a word holds no tab.)
                 let run_has_wide = text.iter().any(|&u| is_wide_unit(u)); // once per run, as in the flow arm
                 let run_has_hyphen = text.iter().any(|&u| is_hyphen_unit(u));

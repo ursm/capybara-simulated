@@ -88,12 +88,13 @@ impl FontMetrics {
                 continue;
             }
             match m.wanted {
-                Some(face) => WANTED.with(|w| {
+                Some(face) if !PROBING.get() => WANTED.with(|w| {
                     let mut w = w.borrow_mut();
                     if !w.contains(&face) {
                         w.push(face);
                     }
                 }),
+                Some(_) => {}
                 None => return Some(m),
             }
         }
@@ -379,6 +380,17 @@ thread_local! {
     static FONT_IDX: RefCell<HashMap<String, i32>> = RefCell::new(HashMap::new());
     // The faces of a split a character asked for that no one has asked to load yet (`StackMember::wanted`).
     static WANTED: RefCell<Vec<Wanted>> = const { RefCell::new(Vec::new()) };
+    // Whether what is measured is a probe of the layout's own (`probing`), which asks for no face.
+    static PROBING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+// `f` run as a probe of the layout's own — a space's width asked of every run, which may hold none — whose characters ask
+// for no face of a split (CSS Fonts 4 §4.5: a face is downloaded for the text's characters alone, Chrome `g1`).
+pub(crate) fn probing<R>(f: impl FnOnce() -> R) -> R {
+    let was = PROBING.replace(true);
+    let r = f();
+    PROBING.set(was);
+    r
 }
 
 // The faces of realm `cid`'s list — the list of generation `list` — a character measured has asked for, by their places,

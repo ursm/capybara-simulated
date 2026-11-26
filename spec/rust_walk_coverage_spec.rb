@@ -632,8 +632,11 @@ RSpec.describe 'Rust walk coverage', engine_global: true do
 
   # …asked of each text node of its data as WRITTEN (a preserved CR, a soft hyphen under `hyphens:
   # none` — characters the line never lays out — still select their face), and never of white space that collapses to a
-  # gap between two boxes (one space on the owner's own line box). The `ch` of a stack whose own face is a `local()` one
-  # with a metric descriptor is that face's.
+  # gap between two boxes (one space on the owner's own line box). A stack none of whose faces covers U+0020 has no
+  # first available font among them (CSS Fonts 4 §5.2): its lines are the next family's, `sans-serif`, raised to the
+  # Lato its letters select — 25, as Chrome lays it out (csim-bench font7 `sp1`: 25 there, 23 for `sans-serif` alone, 24
+  # for Lato; Firefox 27, its own sans). The `ch` of a stack whose own face is a `local()` one with a metric descriptor
+  # is that face's.
   it 'asks a split for the line box of each text node as written', :aggregate_failures do
     dir = File.join(__dir__, 'wpt/fonts')
     files = {'/Ahem.ttf' => File.binread("#{dir}/Ahem.ttf"), '/Lato.ttf' => File.binread("#{dir}/Lato-Medium.ttf")}
@@ -656,7 +659,7 @@ RSpec.describe 'Rust walk coverage', engine_global: true do
     s.visit '/'
     s.execute_script("document.body.style.color = 'red'")
     sizes = s.evaluate_script("[...document.body.children].map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width * 100) / 100, r.height]; })")
-    expect(sizes.map(&:last)[0, 3]).to eq([24, 60, 48])
+    expect(sizes.map(&:last)[0, 3]).to eq([25, 60, 48])
     expect(sizes.last.first).to eq(150)
     expect(s.evaluate_script('JSON.stringify(RustyRacer.steps.nativeLayoutStats().rustFellBack)')).to eq('{}')
   end

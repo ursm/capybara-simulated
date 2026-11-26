@@ -89,6 +89,16 @@ RSpec.describe 'web fonts loading in parallel' do
           @font-face { font-family: A; src: url(#{font(300, 'han')}); unicode-range: U+4E00-4FFF }
         </style><span id="s" style="font: 20px A, monospace">abcd</span>
       HTML
+      # A split whose first available font — the face covering U+0020 — no character of the text selects: not downloaded,
+      # as no other face of the split is (CSS Fonts 4 §4.5; Chrome csim-bench rv `g1`, `g3`); nor a face scoped to letters
+      # the text does not hold, though it is the family's only face.
+      '/first-available.html' => head + <<~HTML,
+        <style>
+          @font-face { font-family: A; src: url(#{font(300)}); unicode-range: U+0-FF }
+          @font-face { font-family: A; src: url(#{font(300, 'han')}); unicode-range: U+4E00-4FFF }
+          @font-face { font-family: C; src: url(#{font(300, 'caps')}); unicode-range: U+41-5A }
+        </style><span id="s" style="font: 20px A, monospace">一一</span><span style="font: 20px C, monospace">abcd</span>
+      HTML
       # `stop()` while the face downloads: its download cancelled, the face failed a task later, the set loaded.
       '/stop.html' => head + face(1000) + <<~HTML,
         <script>
@@ -221,6 +231,12 @@ RSpec.describe 'web fonts loading in parallel' do
     expect(log(s).last).to match(at('load', 300, 80))
     expect(s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.status; })")).to eq(%w[loaded unloaded])
     expect(requested).to eq(['ahem'])
+  end
+
+  it 'downloads no first available font, nor a lone scoped face, that no character of the text selects' do
+    s = visit('/first-available.html')
+    expect(s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.status; })")).to eq(%w[unloaded error unloaded])
+    expect(requested).to eq(['han'])
   end
 
   it 'fails a face whose download the document\'s stop() cancelled, a task later' do

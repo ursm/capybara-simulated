@@ -97,11 +97,13 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
     // CSS Fonts 4 §4.5, "if the unicode-range of a font face does not cover any of the characters … it is not
     // downloaded", Chrome and Firefox csim-bench font7 `f10`, `u2` — a member of the split that asks as it is measured)
     let unasked = |arena: &crate::dom::RealmArena, k: usize| faces[k].ranges.is_some() && arena.face_files.get(k).is_none_or(Option::is_none);
-    // (…the stack's own face, its first available font — loaded, as what its lines are laid out by, whatever its range —
-    // where it has a file)
+    // (…the stack's own face, its first available font where that is one of its faces and has a file — one scoped by a
+    // range loaded only as a character asks for it, as the split's other faces are: §4.5, "must not download or use the
+    // font for codepoints outside this set", Chrome `g1`, `g3`; Firefox loads it as the line's font. Until then the
+    // stack's lines are laid out by its system face.)
     let own = match crate::font_faces::pick(&faces, family, bucket, false).first() {
-        Some(&k) => indexed_file(scope, cid, k, host)?.file().map(|path| (k, path)),
-        None => None,
+        Some(&k) if !unasked(realm(scope, cid), k) => indexed_file(scope, cid, k, host)?.file().map(|path| (k, path)),
+        _ => None,
     };
     let overrides = own.as_ref().map_or([None; 3], |&(k, _)| faces[k].overrides);
     let mut handle = None;
