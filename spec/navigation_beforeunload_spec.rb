@@ -76,8 +76,9 @@ RSpec.describe 'a navigation, a close and beforeunload' do
       session.dismiss_confirm { session.click_on('closeme') }
       expect(session).to have_button('closeme')
     end
-    # (…the system focus the pop-up's still, as Chrome keeps it — the close's move of it to the page taken back)
-    expect(focused.call).to eq([false, true])
+    # (…the pop-up kept open — and the system focus the window the driver switched to last, as a WebDriver switch
+    # activates it: the page's as `within_window` returned to it, the pop-up's as `focused` looked into it)
+    expect(focused.call).to eq([true, true])
     expect(session.windows.size).to eq(2)
     expect(session.evaluate_script('w.closed')).to be(false)
     session.within_window(popup) { session.accept_confirm { session.click_on('closeme') } }

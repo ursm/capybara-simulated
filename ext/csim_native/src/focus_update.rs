@@ -551,6 +551,7 @@ pub(crate) fn window_takes_system_focus(scope: &mut v8::PinScope<'_, '_>, top: i
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "focusingSteps", focusing_steps_op, context_id);
     crate::dom::register(scope, ns, "focusMethod", focus_method_op, context_id);
+    crate::dom::register(scope, ns, "focusCentred", focus_centred_op, context_id);
     crate::dom::register(scope, ns, "unfocusingSteps", unfocusing_steps_op, context_id);
     crate::dom::register(scope, ns, "focusViewport", focus_viewport_op, context_id);
     crate::dom::register(scope, ns, "pressFocus", press_focus_op, context_id);
@@ -560,6 +561,25 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "flushAutofocus", flush_autofocus_op, context_id);
     crate::dom::register(scope, ns, "holdsFocus", holds_focus_op, context_id);
     crate::dom::register(scope, ns, "windowOpened", window_opened_op, context_id);
+    crate::dom::register(scope, ns, "systemFocusHere", system_focus_here_op, context_id);
+    crate::dom::register(scope, ns, "systemFocusAway", system_focus_away_op, context_id);
+}
+
+// __dom.systemFocusHere() — the window manager's focus given to this realm's window, as the driver switches to it (a
+// WebDriver "switch to window" activates it): its Windows their `focus` and what its documents kept theirs, the window
+// that had the system focus in this isolate its Windows blurred (`window_takes_system_focus`) — nothing where it has it.
+fn system_focus_here_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    if crate::dom::dom(scope).arena.focus_chain().first() != Some(&cid) {
+        window_takes_system_focus(scope, cid);
+    }
+}
+// __dom.systemFocusAway() — …and taken from this isolate's windows for a window of another browsing context group (a
+// `noopener` pop-up's isolate): what has the focus blurred, its Windows with it, each document keeping its area
+// (`lose_system_focus`), so only one window's documents have focus.
+fn system_focus_away_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    lose_system_focus(scope, cid);
 }
 
 // __dom.windowOpened(realm, activated): a new window `window.open` made — realm `realm`'s — the system focus's where the
@@ -595,8 +615,18 @@ fn focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(fixup_owed(scope, area));
 }
 
-// __dom.focusMethod(nid, focusVisible) -> whether a rendering update is owed the focus fixup, or undefined where the
-// allow focus steps refused: HTMLOrSVGElement's `focus(options)` — "If the allow focus steps given this's node document return
+// What `focusMethod` answers, where the allow focus steps did not refuse: the focus moved (or focused nothing), the
+// fixup owed a frame for it, or the element is focused, and centred, already — what its scroll into view would leave as it
+// is: nothing moved since `focus()` last scrolled it (`focusCentred`), the plan skipped.
+const FOCUS_MOVED: u32 = 0;
+const FOCUS_FIXUP_OWED: u32 = 1;
+const FOCUS_CENTRED: u32 = 2;
+// The generations a scroll into view depends on: the layout's and the tree's, the style state's, the scroll's.
+fn centring_generations(arena: &RealmArena) -> [u32; 8] {
+    std::array::from_fn(|i| arena.generations.get(i))
+}
+
+// __dom.focusMethod(nid, focusVisible) -> `FOCUS_*`, or undefined where the allow focus steps refused: HTMLOrSVGElement's `focus(options)` — "If the allow focus steps given this's node document return
 // false, then return. Run the focusing steps for this. If options["focusVisible"] is true, or does not exist but in an
 // implementation-defined way the user agent determines it would be best to do so, then indicate focus" (`focusVisible`:
 // 1 true, 0 false, -1 absent, the ring then latched as the focus moved). The bindings scroll this into view after, unless
@@ -609,15 +639,27 @@ fn focus_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     if !crate::focus::allow_focus_steps(arena, realm) {
         return;
     }
+    let before = arena.realm_state(realm).and_then(|st| st.focus);
     let Some(area) = focusing_steps(scope, Target::Element(el), By::Script) else { return };
-    let Some(area) = area else { return rv.set_bool(false) };
+    let Some(area) = area else { return rv.set_uint32(FOCUS_MOVED) };
+    let arena = crate::dom::dom(scope).arena.enter(realm);
+    if before.map(Entry::Element) == Some(area) && arena.focus_centred == Some((el, centring_generations(arena))) {
+        return rv.set_uint32(FOCUS_CENTRED);
+    }
     if let (Entry::Element(focused), true) = (area, visible >= 0) {
         let arena = &mut crate::dom::dom(scope).arena;
         if let Some(realm) = arena.document_realm_of(focused).filter(|_| crate::focus::document_focus(arena, focused) == Some(focused)) {
             arena.enter(realm).set_focus_ring(if visible == 0 { crate::dom::RING_HIDDEN } else { crate::dom::RING_SHOWN });
         }
     }
-    rv.set_bool(fixup_owed(scope, Some(area)));
+    rv.set_uint32(if fixup_owed(scope, Some(area)) { FOCUS_FIXUP_OWED } else { FOCUS_MOVED });
+}
+// __dom.focusCentred(nid) — `focus()` scrolled the element of this realm into view just now (`focusMethod`).
+fn focus_centred_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    arena.focus_centred = Some((el, centring_generations(arena)));
 }
 
 // __dom.unfocusingSteps(nid): HTMLOrSVGElement's `blur()` (`unfocusing_steps`).

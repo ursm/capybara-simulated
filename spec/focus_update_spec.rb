@@ -156,4 +156,26 @@ RSpec.describe 'Focus update steps' do
     seen = slow.evaluate_script('seen')
     expect(seen).not_to include('INPUT:0')
   end
+
+  # The driver's switch to a window is WebDriver's: it activates it — the system focus its, its Windows focused — so the
+  # page's document has the focus back as `within_window` returns to it. A `noopener` pop-up a click opens, a window of
+  # its own isolate, takes it from the page as one of the page's isolate does.
+  it "gives the system focus to the window the driver switches to, and to a noopener pop-up a click opens" do
+    session.execute_script(<<~JS)
+      window.addEventListener('focus', (e) => { if (e.target === window) L('win:focus'); });
+      for (const [id, features] of [['o1', ''], ['o2', 'noopener']]) {
+        const o = document.createElement('button'); o.id = id; o.textContent = id;
+        o.onclick = () => { window.open('/popup', id, features); };
+        document.body.append(o);
+      }
+    JS
+    w = session.window_opened_by { session.click_button('o1') }
+    expect(session.evaluate_script('document.hasFocus()')).to be(false)
+    session.within_window(w) { expect(session.evaluate_script('document.hasFocus()')).to be(true) }
+    expect(session.evaluate_script('[document.hasFocus(), log.join()]')).to eq([true, 'win:blur,win:focus'])
+    w2 = session.window_opened_by { session.click_button('o2') }
+    expect(session.evaluate_script('document.hasFocus()')).to be(false)
+    session.within_window(w2) { expect(session.evaluate_script('document.hasFocus()')).to be(true) }
+    expect(session.evaluate_script('document.hasFocus()')).to be(true)
+  end
 end

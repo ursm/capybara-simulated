@@ -676,6 +676,14 @@ module Capybara
         # document its initiator either way. (…an about:blank one's none: the initial document at its URL — HTML's "URL
         # and history update steps" in its place)
         aux.open_initial_document(about_blank && !url.to_s.empty? ? url.to_s : 'about:blank')
+        # (…and the window manager's focus: the new window's where a user's gesture opened it, the other isolates' windows
+        # losing it — else it stays where it was, the new window's documents without it; focus_update.rs `windowOpened`
+        # decides it so for a window of the opener's isolate)
+        if activated
+          window_browsers.map {|b| host_of(b) }.uniq.each {|b| b.lose_system_focus unless b.equal?(aux) }
+        else
+          aux.lose_system_focus
+        end
         unless about_blank
           plan = {
             source:          source,
@@ -781,8 +789,8 @@ module Capybara
           planned:          true
         )
         window = window_browser(handle)
-        # (…its content area the size its features asked for)
-        window.set_viewport(size[0], size[1]) if size && window
+        # (…its content area the size its features asked for, the default's for a dimension they left at 0)
+        window.set_viewport(size[0] || window.viewport_width, size[1] || window.viewport_height) if size && window
         window.realm if window.is_a?(RealmWindow)
       end
 
@@ -1008,9 +1016,18 @@ module Capybara
 
       def switch_to_window(h)
         reap_closed_windows
-        window_browser!(h)   # unknown / already-closed handle → WindowError
+        target = window_browser!(h)   # unknown / already-closed handle → WindowError
         @active_handle = (h == PRIMARY_HANDLE ? nil : h)
+        activate_window(target)
         sw_window_activated
+      end
+      # The system focus the window switched to's, as WebDriver's "switch to window" activates it: its isolate's engine
+      # gives it to it (its Windows focused, the one that had it blurred), and every other isolate's windows lose it — only
+      # one window's documents have focus (`document.hasFocus()`).
+      private def activate_window(target)
+        here = host_of(target)
+        window_browsers.map {|b| host_of(b) }.uniq.each {|b| b.lose_system_focus unless b.equal?(here) }
+        target.take_system_focus
       end
       def resize_window_to(handle, w, h) = window_browser!(handle).set_viewport(w, h)
       # Forem's ahoy-tracking spec calls `driver.resize(w, h)` directly

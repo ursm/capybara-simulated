@@ -8279,7 +8279,7 @@ module Capybara
       # open_window_from_js). The URL is resolved against THIS document so a relative `window.open('/x')` targets the
       # right origin/path. Its navigation's referrer the calling document — none for `noreferrer` (the features'), which
       # implies `noopener`: a window with no opener.
-      # (…`size` the [width, height] its features ask its content area to be, nil for the default: navigables.rs
+      # (…`size` the [width, height] its features ask its content area to be, each nil for the default: navigables.rs
       # `open_size`)
       def open_child_window(url, name, opener_realm_id = 0, about_base = nil, noopener = false, noreferrer = false, size = nil)
         return nil unless @driver.respond_to?(:open_window_from_js)
@@ -8385,6 +8385,10 @@ module Capybara
       def window_realm_viewport(realm) = @runtime.realm_call(realm, 'viewportSize').map(&:to_i)
       # …and the response its document was made of, `[status, headers]` — one no response made, 200.
       def window_realm_response(realm) = @runtime.window_realm_meta.dig(realm, :response) || ABOUT_BLANK_RESPONSE
+      # The window manager's focus: given to the window of realm `realm` (nil: the page's) as the driver switches to it,
+      # or taken from this isolate's windows for one of another (focus_update.rs `systemFocusHere` / `systemFocusAway`).
+      def take_system_focus(realm = nil) = @runtime.realm_call(realm, 'systemFocusHere')
+      def lose_system_focus              = @runtime.realm_call(nil, 'systemFocusAway')
       def set_window_realm_viewport(realm, w, h)
         invalidate_find_cache
         @runtime.realm_call(realm, 'setViewport', w.to_i, h.to_i)

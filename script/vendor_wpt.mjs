@@ -441,11 +441,11 @@ async function resolveSha(ref) {
   return (await res.text()).trim();
 }
 
-// Trees vendored in part: the files a predicate keeps, and their `support/` files whole. `css/selectors` is a thousand
-// files of every selector; the ones the focus model decides are vendored with it (html/interaction/focus), the rest a
-// backlog to vendor deliberately.
+// Trees vendored in part: the files a predicate keeps — the tree's own tests it names, and its top-level `support/`.
+// `css/selectors` is a thousand files of every selector; the ones the focus model decides are vendored with it
+// (html/interaction/focus), the rest a backlog to vendor deliberately.
 const SELECTED_FILES = {
-  'css/selectors': (path) => /\/(focus-visible|focus-within)[^/]*$/.test(path) || path.split('/').includes('support')
+  'css/selectors': (path) => /^css\/selectors\/(focus-visible|focus-within)[^/]*$/.test(path) || path.startsWith('css/selectors/support/')
 };
 
 // Parts of a vendored tree left out for now, with what brings them back. html/cross-origin-opener-policy/reporting/ is

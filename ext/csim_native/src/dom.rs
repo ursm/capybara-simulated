@@ -1234,6 +1234,9 @@ pub(crate) struct RealmState {
     // target a fragment navigation scrolled to, or where such a node was in the tree as it was removed (focus.rs
     // `StartingPoint`).
     pub(crate) focus_start: Option<crate::focus::StartingPoint>,
+    // The element `focus()` last scrolled into view, and the generations it did so at — the layout's, the tree's, the
+    // style state's, the scroll's (focus_update.rs `focus_method_op`).
+    pub(crate) focus_centred: Option<(NodeId, [u32; 8])>,
     // The modal dialogs, in the order they were shown — the top layer's: the last blocks the document (`is_inert`).
     pub(crate) modals: Vec<NodeId>,
     // Whether a shadow root of the realm's trees has had a host — its tree and attribute writes run the slot steps only

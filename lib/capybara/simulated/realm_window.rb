@@ -68,6 +68,7 @@ module Capybara
       def set_viewport(w, h)
         host.set_window_realm_viewport(realm!, w, h)
       end
+      def take_system_focus = host.take_system_focus(realm!)
       # The response its document was made of, as the page's (Browser#status_code, #response_headers).
       def status_code      = host.window_realm_response(realm!)[0].to_i
       def response_headers = Browser.capitalized_headers(host.window_realm_response(realm!)[1])
