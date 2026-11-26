@@ -257,11 +257,12 @@ fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(v8::Array::new_with_elements(scope, &settled).into());
 }
 
-// __dom.fontFacesWanted(subresources, settle, system): the faces of the realm's list a character measured has asked for since
-// (font.rs `take_wanted`: a `unicode-range` face, loaded only once text uses it) asked for now — its load begun
-// (`indexed_file`) — and the faces each family stack takes made again of them; one whose file was there at once moves
-// what the realm's faces read from (the layout due again, as a landing does).
-fn font_faces_wanted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.fontFacesWanted(subresources, settle, system) -> whether a face's file was there at once: the faces of the realm's
+// list a character measured has asked for since (font.rs `take_wanted`: a `unicode-range` face, loaded only once text
+// uses it) asked for now — its load begun (`indexed_file`) — and the faces each family stack takes made again of them;
+// one whose file was there at once moves what the realm's faces read from (the layout due again, as a landing does).
+fn font_faces_wanted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(false);
     let Some(host) = host(&args, 0) else { return };
     let cid = realm_id(scope, &args);
     let wanted = crate::font::take_wanted(cid);
@@ -281,6 +282,7 @@ fn font_faces_wanted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         arena.font_files.generation = arena.font_files.generation.wrapping_add(1);
         arena.generations.bump(crate::dom::GEN_DIRTY);
     }
+    rv.set_bool(there);
 }
 
 // __dom.fontFetchesForget(subresources) — the realm's downloads under way let go of: a new document begins in it.
