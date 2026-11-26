@@ -1562,10 +1562,8 @@ module Capybara
           # window's (`create_window_realm`).
           retarget_window_proxies(retarget_from, realm.id) if retarget_from >= 0
         end
-        # This document, loaded, refreshes the service-worker client record it made as it began loading
-        # (bridge.entry.js loadDocument) — an UNCONTROLLED context is still a client of its origin
-        # and must show up in `matchAll({includeUncontrolled: true})`.
-        V8Runtime.engine_call(realm, 'swReportClient') rescue nil
+        # (…its service-worker client record made as it was created — bridge.entry.js `initializeDocument` — a navigation's
+        # reserved one let go of where it made none)
         @browser.sw_document_loaded(realm.id)
         # A `javascript:` URL frame: the initial empty document is now loaded and
         # parent/top are wired, so evaluate the URL's script in the realm (global
@@ -1613,8 +1611,6 @@ module Capybara
         V8Runtime.engine_call(realm, 'setTimeTravel', @browser.window_travel_offset_ms)
         adopt_client_id(realm, client_id)
         load_document(realm, body, init) { V8Runtime.engine_call(realm, 'seedTopLevelDocument', init['url'], init['csp'], init['origin'], init['locationOrigin']) }
-        # As in create_frame_realm: an auxiliary window is a client of its origin too.
-        V8Runtime.engine_call(realm, 'swReportClient') rescue nil
         @browser.sw_document_loaded(realm.id)
       end
       # …and either's — a frame's too — made of `init` in realm `realm`, its origins seeded by the block first: its base
@@ -1730,8 +1726,6 @@ module Capybara
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
         if initial
           walks_guarded { V8Runtime.engine_call(realm, 'loadDocument', body.to_s, content_type.to_s) }
-          # As in create_frame_realm: an auxiliary window is a client of its origin too.
-          V8Runtime.engine_call(realm, 'swReportClient') rescue nil
           # (…a new window's initial about:blank completely loaded as it is made, firing no load: bridge.entry.js
           # `completeInitialDocument`)
           V8Runtime.engine_call(realm, 'completeInitialDocument') rescue nil

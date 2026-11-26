@@ -439,6 +439,18 @@ impl RealmArena {
     pub(crate) fn top_level_realm(&self, realm: i32) -> i32 {
         self.navigables.tops.get(&realm).copied().unwrap_or(realm)
     }
+    // The frame type of realm `realm`'s environment as a service-worker client (Service Workers `Client.frameType`):
+    // "nested" a child navigable's, "auxiliary" a top-level one a window opened (its opener now, none once disowned),
+    // else "top-level".
+    pub(crate) fn client_frame_type(&self, realm: i32) -> &'static str {
+        if self.top_level_realm(realm) != realm {
+            "nested"
+        } else if self.window_opener(self.window_key(realm)).is_some() {
+            "auxiliary"
+        } else {
+            "top-level"
+        }
+    }
     // …none for a realm the tree does not know: no frame's (or one dropped), nor the page's, nor a window's.
     pub(crate) fn known_top_level_realm(&self, realm: i32) -> Option<i32> {
         let nav = &self.navigables;

@@ -13048,9 +13048,8 @@ module Capybara
           break if @runtime.call('pendingExternalScriptCount').to_i.zero?
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
         end
-        # The document, loaded, refreshes its service-worker client record (its URL may have moved since it reported
-        # itself as it began loading), as a frame's does (V8Runtime).
-        @runtime.call('swReportClient')
+        # (…its service-worker client record made as it was created — bridge.entry.js `initializeDocument` — a navigation's
+        # reserved one let go of where it made none)
         sw_document_loaded(0)
         # (…a new window's initial about:blank completely loaded as it is made, which no parse made and whose `load` never
         # fires: `open_initial_document`)

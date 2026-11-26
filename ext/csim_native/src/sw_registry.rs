@@ -490,7 +490,8 @@ pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: Stri
     lock().existing(partition).is_some_and(|p| p.set_state(handle, &state))
 }
 // ── The clients ──
-// A client noted: its record, made — or, one with its id, refreshed in its place (a client keeps its creation order). Its
+// A client noted: its record, made — or, one with its id, refreshed in its place (a client keeps its creation order, and
+// its URL: its creation URL, which a document's `history.pushState` leaves — Chrome 158 measured). Its
 // controller — the environment's active service worker (Service Workers §2.5) — is the one it was created with
 // (`controller`, 0 none: HTML "create and initialize a Document object", a worker's "run a worker" — whose main script's
 // fetch may end at another worker's), and from then on the registry's alone to change (a claim, Activate's replacement); a
@@ -516,6 +517,9 @@ pub(crate) fn note_client_for_ruby(
             let kept = if c.ready && controller.is_none() { c.controller } else { None };
             let was = std::mem::replace(c, client);
             c.controller = c.controller.or(kept);
+            if was.ready {
+                c.url = was.url;
+            }
             !was.ready
         }
         None => {
@@ -538,6 +542,26 @@ pub(crate) fn client_controller_of(partition: u64, id: &str) -> Option<(u32, boo
 static ANY_WORKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "swController", controller_op, context_id);
+    crate::dom::register(scope, ns, "swClientFacts", client_facts_op, context_id);
+}
+// __dom.swClientFacts() -> what the calling realm's environment is as a service-worker client, the engine's: `[creation
+// URL, frame type, origin, top-level site of its storage key]` — its document's URL as it stands (HTML: the creation URL,
+// which history.pushState leaves), its navigable's frame type (navigables.rs `client_frame_type`), its document's origin,
+// its partition — null for an opaque origin's, which is no client (Service Workers: a client of an opaque origin has no
+// storage key a registration is of).
+fn client_facts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let origin = arena.location.origin().to_owned();
+    if origin == "null" {
+        return rv.set_null();
+    }
+    let url = arena.location.href().to_owned();
+    let frame_type = arena.client_frame_type(cid);
+    let site = crate::blob_rules::partition_site(arena, cid);
+    let items: Vec<v8::Local<v8::Value>> =
+        [url.as_str(), frame_type, origin.as_str(), site.as_str()].iter().filter_map(|s| v8::String::new(scope, s).map(Into::into)).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.swController(routing) -> the handle of the worker that controls the calling realm's client — its
 // `navigator.serviceWorker.controller`, the controller a worker it makes inherits — 0 for none; `routing`, of one that
@@ -2095,9 +2119,10 @@ mod tests {
         part(p, |q| q.clients.iter_mut().find(|c| c.id == "f").expect("a client").controller = Some(5));
         assert_eq!(client_for_ruby(p, 5, "https://a.test".into(), "f".into()).map(|c| (c.4, c.5)), Some((true, true)));
         assert_eq!(client_controller_of(p, "f"), Some((5, true)));
-        // Refreshed in place, its controller kept where the refresh carries none, gone when forgotten.
+        // Refreshed in place, its controller kept where the refresh carries none, its creation URL kept, gone when
+        // forgotten.
         note_client_for_ruby(p, "w".into(), 0, String::new(), "https://a.test/2".into(), "window".into(), "top-level".into(), a(), None);
-        assert_eq!(clients_for_ruby(p)[0], ("w".into(), "https://a.test/2".into(), Some(5), String::new()));
+        assert_eq!(clients_for_ruby(p)[0], ("w".into(), "https://a.test/".into(), Some(5), String::new()));
         assert!(forget_client_for_ruby(p, "w".into()));
         assert!(!forget_client_for_ruby(p, "w".into()));
         clear_for_ruby(p);
