@@ -8126,8 +8126,12 @@ module Capybara
         # main realm, which fans out to frame realms.
         parent = ->(e) { e[:parent_worker] || @worker_host.worker_parent(e[:handle].to_i) }
         nested, direct = msgs.partition(&parent)
+        # (…taken at the time they were posted at, as a window's post to a worker is: the parent asked, the window's step
+        # waiting on it — `worker_post_to_worker` — not as late as the window's next poll of real time, rvmod `p_wrelT`)
         nested.group_by(&parent).each do |pw, evs|
-          @workers.dig(pw, :inbox)&.push({kind: 'nested_worker_msgs', events: evs})
+          inbox = @workers.dig(pw, :inbox) or next
+          inbox.push({kind: 'nested_worker_msgs', events: evs})
+          @worker_host.worker_asked(pw.to_i)
         end
         # Each worker→parent message fires from its OWN task, its checkpoint before the next (HTML: the message event is
         # fired from a queued task) — the delivery's own, workers.js `deliverWorkerEvent`, the batch handed over at once.

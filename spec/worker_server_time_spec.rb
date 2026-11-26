@@ -40,6 +40,18 @@ RSpec.describe "a worker's server time" do
     HTML
   end
 
+  # A nested worker's message its parent relays reaches the page at the time it was posted: the parent taking it as a
+  # message the window posts it is taken, its window's step waiting on it (Chrome `306@314`, rvmod `p_wrelT`).
+  it "relays a nested worker's message as it was posted" do
+    files = {'/child.js' => "setTimeout(() => postMessage('ready'), 300);",
+             '/parent.js' => "new Worker('/child.js').onmessage = () => postMessage(String(performance.now() < 380));"}
+    expect(log_of(<<~HTML, files)).to eq('t100 t300 true:true')
+      <script>
+        new Worker('/parent.js').onmessage = (e) => { L.push(e.data + ':' + (performance.now() < 380)); setTimeout(done, 300); };
+      </script>
+    HTML
+  end
+
   # A worker's script is fetched in parallel, its creator going on meanwhile; the worker runs it that much later — and
   # the messages posted to it meanwhile reach it after, in order.
   it "runs a worker's script as late as its server took" do
