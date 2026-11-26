@@ -489,11 +489,12 @@ pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: Stri
     lock().existing(partition).is_some_and(|p| p.set_state(handle, &state))
 }
 // ── The clients ──
-// A client noted: its record, made — or, one with its id, refreshed in its place (a client keeps its creation order).
-// Within one document a controller is only ever gained (a claim, a registration's next version), never detached: a report
-// at its URL carrying none is a stale racer (a load-time report overtaking the claim's install — the activation.https
-// flake), the recorded one kept while its worker lives. Whether that made a navigation's reserved client execution ready:
-// what `Clients.get` of it waits for.
+// A client noted: its record, made — or, one with its id, refreshed in its place (a client keeps its creation order). Its
+// controller — the environment's active service worker (Service Workers §2.5) — is the one it was created with
+// (`controller`, 0 none: HTML "create and initialize a Document object", a worker's "run a worker" — whose main script's
+// fetch may end at another worker's), and from then on the registry's alone to change (a claim, Activate's replacement); a
+// refresh carries none (nil) and keeps it. Whether that made a navigation's reserved client execution ready: what
+// `Clients.get` of it waits for.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn note_client_for_ruby(
     partition: u64,
@@ -507,18 +508,43 @@ pub(crate) fn note_client_for_ruby(
     controller: Option<u32>,
 ) -> bool {
     let mut reg = lock();
-    let p = reg.partition(partition);
-    let kept = p.clients.iter().find(|c| c.id == id && c.ready && c.url == url).and_then(|c| c.controller);
-    let controller = controller.or(kept.filter(|h| p.workers.get(h).is_some_and(|w| !w.life.ended())));
-    let clients = &mut p.clients;
-    let client = Client { id, ready: true, owner, site, url, kind, frame_type, origin, controller };
+    let clients = &mut reg.partition(partition).clients;
+    let client = Client { id, ready: true, owner, site, url, kind, frame_type, origin, controller: controller.filter(|&h| h != 0) };
     match clients.iter_mut().find(|c| c.id == client.id) {
-        Some(c) => !std::mem::replace(c, client).ready,
+        Some(c) => {
+            let kept = if c.ready && controller.is_none() { c.controller } else { None };
+            let was = std::mem::replace(c, client);
+            c.controller = c.controller.or(kept);
+            !was.ready
+        }
         None => {
             clients.push(client);
             false
         }
     }
+}
+// The controller of the client `id` — the worker, and whether it intercepts its requests (it has a `fetch` listener or
+// router rules: `Worker::intercepts`) — none for none, or for a client that is none.
+pub(crate) fn client_controller_of(partition: u64, id: &str) -> Option<(u32, bool)> {
+    let mut reg = lock();
+    let p = reg.existing(partition)?;
+    let handle = p.clients.iter().find(|c| c.id == id && c.ready)?.controller?;
+    Some((handle, p.workers.get(&handle).is_some_and(Worker::intercepts)))
+}
+// ── For the bindings ──
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "swController", controller_op, context_id);
+}
+// __dom.swController(routing) -> the handle of the worker that controls the calling realm's client — its
+// `navigator.serviceWorker.controller`, the controller a worker it makes inherits — 0 for none; `routing`, of one that
+// intercepts its requests alone (a controller with no `fetch` listener and no router rules answers none: Handle Fetch
+// skips it), what a request of its goes to. The registry's (`client_controller_of`), read as it is asked.
+fn controller_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let routing = args.get(0).is_true();
+    let cid = crate::dom::realm_id(scope, &args);
+    let state = crate::dom::realm(scope, cid).realm_state(cid);
+    let controller = state.and_then(|s| s.identity.sw_client()).and_then(|(partition, id)| client_controller_of(partition, id));
+    rv.set_uint32(controller.filter(|c| c.1 || !routing).map_or(0, |c| c.0));
 }
 // A navigation's reserved client (Service Workers "Handle Fetch": the request's reserved client, an environment whose
 // execution ready flag is unset) noted as its request reaches a service worker: a record of its id, its URL, its
@@ -533,11 +559,12 @@ pub(crate) fn reserve_client_for_ruby(partition: u64, id: String, site: String, 
     }
 }
 // clients.claim() of the worker `handle` at `scope` (Service Workers §4.3.4): each client of its storage key whose longest
-// matching registration is that one controlled by it — of every registration whose lifecycle has an active worker, active
-// or still activating (a claim is valid from "activating": comparing against the active ones alone lets a shorter scope's
-// claim seize a client a longer one matches, claim-not-using-registration), as the registry knows them, so Try Activate
-// and `matchAll` never wait on a realm's report. Those scopes, which each realm then asks of its own document.
-pub(crate) fn claim_for_ruby(partition: u64, handle: u32, scope: String) -> Vec<String> {
+// matching registration is that one — of every registration whose lifecycle has an active worker, active or still
+// activating (a claim is valid from "activating": comparing against the active ones alone lets a shorter scope's claim
+// seize a client a longer one matches, claim-not-using-registration), as the registry knows them — controlled by it,
+// "Match Service Worker Registration given storage key and client's creation URL". The realms of those whose controller
+// that changed (by their session number), each to be told (Notify Controller Change).
+pub(crate) fn claim_for_ruby(partition: u64, handle: u32, scope: String) -> Vec<i64> {
     let mut reg = lock();
     let Some(p) = reg.existing(partition) else { return Vec::new() };
     let Some(site) = p.worker_site(handle).map(str::to_owned) else { return Vec::new() };
@@ -546,19 +573,14 @@ pub(crate) fn claim_for_ruby(partition: u64, handle: u32, scope: String) -> Vec<
     if !scopes.contains(&scope) {
         scopes.push(scope.clone());
     }
+    let mut told = Vec::new();
     for c in p.clients.iter_mut().filter(|c| c.ready && c.site == site) {
-        if crate::service_worker::claims(&c.url, &scope, &scopes) {
+        if c.controller != Some(handle) && crate::service_worker::claims(&c.url, &scope, &scopes) {
             c.controller = Some(handle);
+            told.push(c.owner);
         }
     }
-    scopes
-}
-// …its controller set (a claim, a controller its worker adopted), where it is a client: whether it is.
-pub(crate) fn set_client_controller_for_ruby(partition: u64, id: String, controller: Option<u32>) -> bool {
-    let mut reg = lock();
-    let Some(c) = reg.existing(partition).and_then(|p| p.clients.iter_mut().find(|c| c.id == id)) else { return false };
-    c.controller = controller;
-    true
+    told
 }
 // …a navigation's reserved client discarded, the navigation having committed no document of it (a download, a 204, a
 // failure, a redirect to another origin's): whether there was one, not execution ready — what `Clients.get` of it waits
@@ -1073,17 +1095,16 @@ pub(crate) fn note_phase_for_ruby(partition: u64, handle: u32, phase: String, ok
         }
     }
 }
-// The claims `clients.claim()` made (each `[worker, whether it handles fetches]`), in the order they are applied — each with
-// the scope of the registration its worker serves or activates for, one whose registration left the map since claiming
-// nothing — the LONGEST scope first: where nested-scope workers claim in the same drain, the deeper registration is in
-// place before the shallower one runs, or a client the shallow claim transiently seized would see a spurious extra
-// `controllerchange`.
-pub(crate) fn claim_order_for_ruby(partition: u64, claims: Vec<(u32, bool)>) -> Vec<(u32, bool, String)> {
+// The claims `clients.claim()` made (each its worker), in the order they are applied — each with the scope of the
+// registration its worker serves or activates for, one whose registration left the map since claiming nothing — the
+// LONGEST scope first: where nested-scope workers claim in the same drain, the deeper registration is in place before the
+// shallower one runs, or a client the shallow claim transiently seized would see a spurious extra `controllerchange`.
+pub(crate) fn claim_order_for_ruby(partition: u64, claims: Vec<u32>) -> Vec<(u32, String)> {
     let mut reg = lock();
     let Some(p) = reg.existing(partition) else { return Vec::new() };
     let scope_of = |h: u32| p.registrations.iter().find(|r| r.mapped && (r.serving == Some(h) || r.activating == Some(h))).map(|r| r.scope.clone());
-    let mut ordered: Vec<(u32, bool, String)> = claims.into_iter().filter_map(|(h, fetch)| scope_of(h).map(|scope| (h, fetch, scope))).collect();
-    ordered.sort_by_key(|(_, _, scope)| std::cmp::Reverse(scope.len()));
+    let mut ordered: Vec<(u32, String)> = claims.into_iter().filter_map(|h| scope_of(h).map(|scope| (h, scope))).collect();
+    ordered.sort_by_key(|(_, scope)| std::cmp::Reverse(scope.len()));
     ordered
 }
 
@@ -1345,12 +1366,6 @@ pub(crate) fn controller_for_ruby(partition: u64, handle: u32, live: bool) -> Op
     let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map_or_else(String::new, |r| r.scope.clone());
     Some((handle, w.intercepts(), w.script_url.clone(), scope))
 }
-// …and the controller client `id` has now, in that shape — an about:blank or a `blob:` document's creator's, which a
-// document of its origin it makes takes (document_init.rs `controller`): none of a worker gone.
-pub(crate) fn client_controller(partition: u64, id: &str) -> Option<(u32, bool, String, String)> {
-    let handle = lock().existing(partition)?.clients.iter().find(|c| c.id == id)?.controller?;
-    controller_for_ruby(partition, handle, true)
-}
 // ── What the host does ──
 // What a job's or a lifecycle's step makes the host do, in order — the registry's state committed first, each a Ruby
 // array `[kind, *arguments]`.
@@ -1368,9 +1383,8 @@ pub(crate) enum Cmd {
     // The worker activating (Update Worker State, as `State`) and its activate event fired, its own global told that
     // first — and, ahead of anything a client sends it once told it is activating, that event.
     Activate(u32),
-    // A client — the realm it is, by its session number — controlled by the worker now, Notify Controller Change: the
-    // worker, whether it intercepts, its script URL.
-    Controller(i64, u32, bool, String),
+    // A client — the realm it is, by its session number — controlled by another worker now: Notify Controller Change.
+    Controller(i64),
     // The worker's next step queued as a task of the window's.
     QueueStep(u32),
     // The rest of the worker's step taken, once what came before it was done.
@@ -1399,7 +1413,7 @@ impl IntoValue for Cmd {
             Cmd::Terminate(handle) => ("terminate", handle).into_value_with(ruby),
             Cmd::UpdateFound(id, handle) => ("update_found", id, handle).into_value_with(ruby),
             Cmd::Activate(handle) => ("activate", handle).into_value_with(ruby),
-            Cmd::Controller(owner, handle, intercepts, script_url) => ("controller", owner, handle, intercepts, script_url).into_value_with(ruby),
+            Cmd::Controller(owner) => ("controller", owner).into_value_with(ruby),
             Cmd::QueueStep(handle) => ("queue_step", handle).into_value_with(ruby),
             Cmd::Continue(handle) => ("continue", handle).into_value_with(ruby),
             Cmd::TryClear => ("try_clear",).into_value_with(ruby),
@@ -1558,12 +1572,14 @@ impl Partition {
     // Activate's "for each client using registration": each one an earlier version of the registration `id` controls, not
     // one merely in its scope, controlled by the worker `handle` now.
     fn controllers_replaced(&mut self, id: u32, handle: u32, out: &mut Vec<Cmd>) {
-        let Some((script_url, intercepts)) = self.workers.get(&handle).map(|w| (w.script_url.clone(), w.intercepts())) else { return };
+        if !self.workers.contains_key(&handle) {
+            return;
+        }
         let workers = &self.workers;
         for c in self.clients.iter_mut().filter(|c| c.ready) {
             if c.controller.is_some_and(|h| h != handle && workers.get(&h).is_some_and(|w| w.registration == id)) {
                 c.controller = Some(handle);
-                out.push(Cmd::Controller(c.owner, handle, intercepts, script_url.clone()));
+                out.push(Cmd::Controller(c.owner));
             }
         }
     }
@@ -1810,14 +1826,14 @@ mod tests {
         assert_eq!(versions_for_ruby(p, id), (None, Some(2), Some(1)));
         assert_eq!(
             continue_for_ruby(p, 2),
-            [Cmd::Activate(2), Cmd::Controller(5, 2, true, "https://a.test/sw.js".into()), Cmd::QueueStep(2)]
+            [Cmd::Activate(2), Cmd::Controller(5), Cmd::QueueStep(2)]
         );
         assert_eq!(versions_for_ruby(p, id), (None, None, Some(2)));
         assert_eq!(queued_steps_for_ruby(p), [2]);
-        // (…a report at its URL carrying no controller a stale one, at another URL a new document's)
+        // (…a refresh carrying none keeps it, one carrying 0 makes it none)
         note("using", 5, None);
         assert!(part(p, |q| q.clients.iter().any(|c| c.id == "using" && c.controller == Some(2))));
-        note_client_for_ruby(p, "using".into(), 5, String::new(), "https://a.test/y".into(), "window".into(), "top-level".into(), None, None);
+        note("using", 5, Some(0));
         assert!(part(p, |q| q.clients.iter().any(|c| c.id == "using" && c.controller.is_none())));
         clear_for_ruby(p);
     }
@@ -1887,8 +1903,10 @@ mod tests {
         note("deep", "https://a.test/x/p", "");
         note("elsewhere", "https://a.test/p", "other");
         reserve_client_for_ruby(p, "reserved".into(), String::new(), "https://a.test/q".into(), None, "top-level".into());
-        let scopes = claim_for_ruby(p, 1, "https://a.test/".into());
-        assert_eq!(scopes, ["https://a.test/", "https://a.test/x/"]);
+        part(p, |q| q.clients.iter_mut().find(|c| c.id == "top").expect("a client").owner = 4);
+        assert_eq!(claim_for_ruby(p, 1, "https://a.test/".into()), [4]);
+        // (…a client it controls already none to tell again)
+        assert!(claim_for_ruby(p, 1, "https://a.test/".into()).is_empty());
         let controller = |id: &str| part(p, |q| q.clients.iter().find(|c| c.id == id).and_then(|c| c.controller));
         assert_eq!(controller("top"), Some(1));
         assert_eq!(controller("deep"), None);
@@ -2076,10 +2094,11 @@ mod tests {
         set_focus_for_ruby(p, 0, vec![7]);
         assert_eq!(ids(match_clients_for_ruby(p, 5, "https://a.test".into(), true, "window".into())), ["f", "w"]);
         assert!(client_for_ruby(p, 5, "https://a.test".into(), "x".into()).is_none());
-        assert!(set_client_controller_for_ruby(p, "f".into(), Some(5)));
+        part(p, |q| q.clients.iter_mut().find(|c| c.id == "f").expect("a client").controller = Some(5));
         assert_eq!(client_for_ruby(p, 5, "https://a.test".into(), "f".into()).map(|c| (c.4, c.5)), Some((true, true)));
-        // Refreshed in place, gone when forgotten.
-        note_client_for_ruby(p, "w".into(), 0, String::new(), "https://a.test/2".into(), "window".into(), "top-level".into(), a(), Some(5));
+        assert_eq!(client_controller_of(p, "f"), Some((5, true)));
+        // Refreshed in place, its controller kept where the refresh carries none, gone when forgotten.
+        note_client_for_ruby(p, "w".into(), 0, String::new(), "https://a.test/2".into(), "window".into(), "top-level".into(), a(), None);
         assert_eq!(clients_for_ruby(p)[0], ("w".into(), "https://a.test/2".into(), Some(5), String::new()));
         assert!(forget_client_for_ruby(p, "w".into()));
         assert!(!forget_client_for_ruby(p, "w".into()));

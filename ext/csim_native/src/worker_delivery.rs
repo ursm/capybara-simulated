@@ -242,8 +242,8 @@ pub(crate) fn delivery_plan(kinds: Vec<String>) -> Vec<(&'static str, Vec<(usize
     plan
 }
 
-// A claim held — its worker and whether it handles fetches — and a lifecycle phase — its worker, the phase, and its outcome.
-type Claims = Vec<(u32, bool)>;
+// A claim held — its worker — and a lifecycle phase — its worker, the phase, and its outcome.
+type Claims = Vec<u32>;
 type Phases = Vec<(u32, String, bool)>;
 
 #[derive(Default)]
@@ -339,11 +339,11 @@ mod tests {
         let host = WorkerHost::new();
         assert_eq!(host.changes_hold(vec![], vec![(1, "install".into(), true)]), vec![(1, "install".to_owned(), true)]);
         assert!(!host.changes_held());
-        assert!(host.changes_hold(vec![(1, true)], vec![]).is_empty());
+        assert!(host.changes_hold(vec![1], vec![]).is_empty());
         // (…a phase after a claim held rides behind it, though it came in a drain of its own)
         assert!(host.changes_hold(vec![], vec![(1, "activated".into(), true)]).is_empty());
         assert!(host.changes_held());
-        assert_eq!(host.changes_take(), vec![(vec![(1, true)], vec![]), (vec![], vec![(1, "activated".to_owned(), true)])]);
+        assert_eq!(host.changes_take(), vec![(vec![1], vec![]), (vec![], vec![(1, "activated".to_owned(), true)])]);
         assert!(!host.changes_held());
     }
 }

@@ -617,7 +617,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "swGlobalInit", global_init_op, context_id);
     crate::dom::register(scope, ns, "swGlobal", global_op, context_id);
     crate::dom::register(scope, ns, "swInstalled", installed_op, context_id);
-    crate::dom::register(scope, ns, "swClaims", claims_op, context_id);
     crate::dom::register(scope, ns, "swReserving", reserving_op, context_id);
     crate::dom::register(scope, ns, "swReservingOver", reserving_over_op, context_id);
     crate::dom::register(scope, ns, "swReservingWaited", reserving_waited_op, context_id);
@@ -786,23 +785,3 @@ fn exposed_headers_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.swClaims(href, scope, scopes, site) -> whether the calling realm's document, at `href`, is claimed by the claim of the
-// registration at `scope`, of a storage key whose top-level site is `site`: `claims`, none of another key's clients.
-fn claims_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let site = args.get(3).to_rust_string_lossy(scope);
-    if crate::blob_rules::partition_site(crate::dom::realm(scope, cid), cid) != site {
-        return rv.set_bool(false);
-    }
-    let href = args.get(0).to_rust_string_lossy(scope);
-    let claiming = args.get(1).to_rust_string_lossy(scope);
-    let mut scopes = Vec::new();
-    if let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(2)) {
-        for i in 0..list.length() {
-            if let Some(s) = list.get_index(scope, i) {
-                scopes.push(s.to_rust_string_lossy(scope));
-            }
-        }
-    }
-    rv.set_bool(claims(&href, &claiming, &scopes));
-}

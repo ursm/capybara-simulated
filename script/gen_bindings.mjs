@@ -488,7 +488,7 @@ const INTERFACES = [
       PushManagerAttribute: 'pushManager: the Push API is not implemented'
     }
   }],
-  ['service-workers', 'ServiceWorkerContainer', { install: true, slots: ['controller'] }],
+  ['service-workers', 'ServiceWorkerContainer', { install: true }],
   ['service-workers', 'NavigationPreloadManager', { install: true }],
   ['html', 'Worker', { install: true }],
   ['html', 'SharedWorker', { install: true, slots: ['port'] }],

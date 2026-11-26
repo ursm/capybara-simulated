@@ -420,7 +420,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_realm_key", magnus::function!(sw_registry::realm_key_for_ruby, 2))?;
     native.define_module_function("sw_realm_owner", magnus::function!(sw_registry::realm_owner_for_ruby, 1))?;
     native.define_module_function("sw_set_active_window", magnus::function!(sw_registry::set_active_window_for_ruby, 2))?;
-    native.define_module_function("sw_set_client_controller", magnus::function!(sw_registry::set_client_controller_for_ruby, 3))?;
     native.define_module_function("sw_client_reserved", magnus::function!(sw_registry::client_reserved_for_ruby, 2))?;
     native.define_module_function("sw_discard_reserved_client", magnus::function!(sw_registry::discard_reserved_client_for_ruby, 2))?;
     native.define_module_function("sw_forget_client", magnus::function!(sw_registry::forget_client_for_ruby, 2))?;

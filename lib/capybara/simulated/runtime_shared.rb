@@ -118,10 +118,7 @@ module Capybara
         # This realm is a service-worker client: reported at document load and again whenever
         # control is installed, by the realm, because only it knows its own URL, frame type and
         # controller. `a[3]` is the controlling worker's handle, 0 when uncontrolled.
-        'noteClient'                   => ->(b, *a) { b.sw_note_client(a[0], a[1], a[2], a[3], a[4], site: a[5].to_s); nil },
-        # A worker client's controller changed (claim adoption inside the worker isolate) —
-        # update the HOST-owned record (a worker must not take the realm-style report path).
-        'workerNoteController'         => ->(b, *a) { b.sw_note_worker_controller(a[0], a[1]); nil },
+        'noteClient'                   => ->(b, *a) { b.sw_note_client(a[0], a[1], a[2], a[3], a[4], site: a[5].to_s) },
         # A controlled worker's importScripts, through its SW's fetch event (synchronous
         # on the calling worker's thread — sw_import_script_fetch).
         'swImportFetch'                => ->(b, *a) { b.sw_import_script_fetch(a[0], a[1], a[2]) },

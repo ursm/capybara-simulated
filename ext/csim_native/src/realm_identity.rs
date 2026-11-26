@@ -1,12 +1,14 @@
 // Who a realm is to the host, as the host told it (`realmIdentify`): the service-worker client id its document adopted
 // (a navigation's reserved one — its environment's id, told again for each document a reused realm holds, the page's —
-// or a dedicated or shared worker's), the window key of a window `window.open` made — the
+// or a dedicated or shared worker's), the session whose service-worker registry holds it as a client (sw_registry.rs:
+// none for a realm no client — an opaque origin's, a discarded one's), the window key of a window `window.open` made — the
 // realm of its first document, which the documents it navigates to keep — and a worker's handle, its agent's owner token
 // and whether it is a module worker. Kept in the realm's state (`RealmState::identity`), for its context's lifetime.
 
 #[derive(Default)]
 pub(crate) struct RealmIdentity {
     client_id: Option<String>,
+    sw_partition: u64,
     window_key: Option<u32>,
     worker_handle: u32,
     agent_owner: u64,
@@ -16,6 +18,10 @@ pub(crate) struct RealmIdentity {
     partition: Option<String>,
 }
 impl RealmIdentity {
+    // (…the registry's client it is — its session's partition and its id — none for a realm no client)
+    pub(crate) fn sw_client(&self) -> Option<(u64, &str)> {
+        Some((self.sw_partition, self.client_id.as_deref()?)).filter(|(p, _)| *p != 0)
+    }
     // (…a worker's storage partition, none for a window's realm)
     pub(crate) fn partition(&self) -> Option<&str> {
         self.partition.as_deref()
@@ -48,7 +54,7 @@ fn of<T>(scope: &mut v8::PinScope<'_, '_>, cid: i32, f: impl FnOnce(&RealmIdenti
 }
 
 // __dom.realmIdentify(field, value): the host's telling of the calling realm's `field` — 'clientId', 'partition'
-// (strings), 'windowKey', 'workerHandle', 'agentOwner' (numbers), 'moduleWorker' (true).
+// (strings), 'windowKey', 'workerHandle', 'agentOwner', 'swPartition' (numbers: 0 for none), 'moduleWorker' (true).
 fn identify_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let field = args.get(0).to_rust_string_lossy(scope);
     let value = args.get(1);
@@ -61,6 +67,7 @@ fn identify_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         "windowKey" => identity.window_key = Some(number as u32),
         "workerHandle" => identity.worker_handle = number as u32,
         "agentOwner" => identity.agent_owner = number as u64,
+        "swPartition" => identity.sw_partition = number as u64,
         "moduleWorker" => identity.module_worker = flag,
         "partition" => identity.partition = Some(text),
         _ => {}

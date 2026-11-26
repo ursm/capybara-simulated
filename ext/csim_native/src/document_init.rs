@@ -82,15 +82,17 @@ pub(crate) enum Control<'a> {
     Fetched { site: &'a str },
     Created { creator: Option<(&'a str, &'a str)> },
 }
-pub(crate) type Controller = (u32, bool, String, String);
-fn controller(partition: u64, url: &str, origin: Option<&str>, control: Control<'_>) -> Option<Controller> {
+fn controller(partition: u64, url: &str, origin: Option<&str>, control: Control<'_>) -> Option<u32> {
     let origin = origin?;
     match control {
         Control::Fetched { site } => {
             let found = crate::sw_registry::match_worker_for_ruby(partition, site.to_owned(), url.to_owned(), "client".to_owned())?;
-            (!found.1 || crate::sw_registry::worker_activated_for_ruby(partition, found.0)).then_some(found)
+            (!found.1 || crate::sw_registry::worker_activated_for_ruby(partition, found.0)).then_some(found.0)
         }
-        Control::Created { creator: Some((client, creator_origin)) } if creator_origin == origin => crate::sw_registry::client_controller(partition, client),
+        // (…none of a worker gone)
+        Control::Created { creator: Some((client, creator_origin)) } if creator_origin == origin => {
+            crate::sw_registry::client_controller_of(partition, client).map(|c| c.0).filter(|&h| crate::sw_registry::worker_live_for_ruby(partition, h))
+        }
         Control::Created { .. } => None,
     }
 }
@@ -126,8 +128,8 @@ pub(crate) fn keeps_window(initial: bool, own: &str, domain_set: bool, origin: O
 // Native.initialize_document(params) -> what the document a navigation commits is made of, keyed as the bindings read it
 // (bridge.entry.js `initializeDocument`): 'url', 'contentType', 'csp', 'referrer', 'referrerPolicy', 'refresh',
 // 'originAgentCluster', 'origin' (where its URL does not say it: 'null' a new opaque one), 'locationOrigin', 'aboutBase',
-// 'controller', 'historyPolicyContainer' (`[referrer policy, csp]` its entry keeps, none where its URL needs none), and,
-// for the host's commit of its opener policy (session_history.rs `opener_policy_verdict`), 'openerPolicy' and
+// 'controller' (the handle of the worker that controls it), 'historyPolicyContainer' (`[referrer policy, csp]` its entry
+// keeps, none where its URL needs none), and, for the host's commit of its opener policy (session_history.rs `opener_policy_verdict`), 'openerPolicy' and
 // 'responseOrigin'.
 // `params` (symbol keys):
 // - `url`; `headers` its response's (nil none: a document of no response), or `fields` in their place,

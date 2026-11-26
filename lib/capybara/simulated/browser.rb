@@ -5369,6 +5369,11 @@ module Capybara
             # (…its bytes the first of its script resource map, which an update is byte-checked against: sw_registry.rs)
             Native.sw_worker_new(@sw_partition, handle, site.to_s, target, worker_type(script_type), body.to_s, sw_registration.to_i, @worker_host) if service
             workers_store(handle, record)
+            # A dedicated / shared worker is a client of its ORIGIN — type 'worker' / 'sharedworker', frameType 'none' —
+            # whether or not a service worker's scope covers its script; only the `controlled` flag turns on that scope
+            # match, exactly as it does for a browsing context — a client before its thread runs a script that reads its
+            # controller. A service worker is not itself a client of anything.
+            sw_note_worker_client(handle, target, shared, ctrl) unless service
             record[:thread] = Thread.new do
               Thread.current.report_on_exception = false
               # (…its own thread the interruptible one it would have been made outside the mask above: the session boundary's
@@ -5411,16 +5416,10 @@ module Capybara
             # for failed by its caller: `sw_fetch_job`)
             workers_drop(handle)
             @worker_host.worker_unmade(handle)
+            unregister_client(sw_worker_client_id(handle)) unless service
             sw_run(Native.sw_worker_unmade(@sw_partition, handle, nil)) if service
             @worker_host.release(WorkerHost::BOOTING, 1) if owed
           end
-        end
-        # A dedicated / shared worker is a client of its ORIGIN — type 'worker' / 'sharedworker',
-        # frameType 'none' — whether or not a service worker's scope covers its script; only the
-        # `controlled` flag turns on that scope match, exactly as it does for a browsing context.
-        # A service worker is not itself a client of anything.
-        unless service
-          sw_note_worker_client(handle, target, shared, ctrl)
         end
         handle
       end
@@ -6374,16 +6373,17 @@ module Capybara
         sw_run(Native.sw_job_spawned(@sw_partition, id, (handle if handle.positive?)))
       end
 
-      # The client that realm `key` is controlled by the worker `handle` now (sw_registry.rs `controllers_replaced`): a
-      # worker client's a task of its own event loop.
-      private def sw_controller_told(key, handle, intercepts, script_url)
+      # The client realm `key` is (by its session number) controlled by another worker now, the registry's (a claim, Activate's
+      # replacement: sw_registry.rs) — Notify Controller Change: its `controllerchange`, a worker client's a task of its own
+      # event loop.
+      private def sw_controller_told(key)
         browser, realm = sw_window_realm(key)
-        sw_with_realms { browser&.sw_controller_changed(realm, handle, intercepts, script_url) }
+        sw_with_realms { browser&.sw_controller_changed(realm) }
       end
-      def sw_controller_changed(realm, *controller)
-        return realm_told(realm, 'swSetControllerDirect', *controller) unless realm.negative?
+      def sw_controller_changed(realm)
+        return realm_told(realm, 'swControllerChanged') unless realm.negative?
 
-        @workers[-realm]&.dig(:inbox)&.push({kind: 'sw_told', fn: 'swSetControllerDirect', args: controller})
+        @workers[-realm]&.dig(:inbox)&.push({kind: 'sw_told', fn: 'swControllerChanged', args: []})
       end
 
       # The realm the host knows as `realm` (0: its window) announced as a client, where it is still alive.
@@ -6740,40 +6740,6 @@ module Capybara
         nil
       end
 
-      # Deliver a clients.claim() to EVERY in-scope client: broadcast to the main realm AND every
-      # frame realm; each self-checks whether its own document is in the claiming registration's
-      # scope (swClaimClient) so no realm→URL map is needed here. has_fetch = the SW's
-      # install-time fetch-listener snapshot, so a claimed client routes its fetches.
-      private def broadcast_claim(handle, has_fetch, scope)
-        # The claim's has_fetch snapshot predates install — a router-rules-only SW
-        # (no fetch handler; addRoutes during install) must still make its claimed
-        # clients route, so the worker-side router can serve its sources: whether it
-        # intercepts as the registry knows it now (sw_registry.rs `intercepts`).
-        _, intercepts, script_url, = sw_controller(handle, live: false)
-        has_fetch ||= intercepts == true
-        script_url = script_url.to_s
-        # The claim IS the controller assignment: recorded by the registry for every client whose matched registration
-        # this is, its rivals what each realm and worker client then asks of its own document.
-        candidate_scopes = Native.sw_claim(@sw_partition, handle.to_i, scope.to_s)
-        # (…of the claiming registration's storage key alone, its top-level site the worker's: sw_registry.rs)
-        site = @worker_host.worker_partition(handle.to_i).to_s
-        claim = {handle: handle, has_fetch: has_fetch, script_url: script_url, scope: scope, all_scopes: candidate_scopes, site: site}
-        sw_browsers.each {|b| b.sw_claim_told(claim) }
-        nil
-      end
-      # …told this window's realms, each self-checking whether its document is in the claiming registration's scope, and
-      # its worker CLIENTS (a dedicated/shared worker whose script URL is in scope adopts the claiming SW): the same
-      # self-check, run in the worker's isolate via its inbox.
-      def sw_claim_told(claim)
-        broadcast_to_realms('swClaimClient', *claim.values_at(:handle, :has_fetch, :script_url, :scope, :all_scopes, :site))
-        # Snapshot: a live worker thread can insert into @workers (a nested spawn) mid-walk.
-        @workers.to_a.each do |h, w|
-          next if !w[:thread]&.alive? || @worker_host.worker_partition(h).to_s != claim[:site] || service_worker?(h)
-
-          w[:inbox] << claim.merge(kind: 'claim_client')
-        end
-        nil
-      end
       # Navigation Preload state of the registration at `scope`. Returns the spec default
       # {enabled:false, headerValue:'true'} when never set. Read by the client- and worker-side
       # NavigationPreloadManager (getState) and at navigation time (nav_preload_enabled?).
@@ -6938,16 +6904,16 @@ module Capybara
       end
 
 
-      # A browsing context as a service-worker client, in the registry every service worker's
-      # Clients read. `controller_handle` is the worker that CONTROLS it, or nil for an
-      # uncontrolled context — a client belongs to its ORIGIN, not to one registration, so
-      # `matchAll({includeUncontrolled: true})` sees it either way. Reported by the realm itself
-      # (js/src/sw-client.js) at document load and whenever control is installed, because only the
-      # realm knows its own URL and frame type. The client id is realm-scoped and stable for the
-      # realm's life.
+      # A browsing context as a service-worker client, in the registry every service worker's Clients read and its own
+      # `navigator.serviceWorker` asks its controller of (sw_registry.rs) — a client of its ORIGIN, not of one registration,
+      # so `matchAll({includeUncontrolled: true})` sees it either way. Reported by the realm itself (js/src/sw-client.js) as
+      # its document is created — `controller_handle` the worker HTML "create and initialize a Document object" gave it (0
+      # none) — and again once it has loaded (nil: its controller kept), as only the realm knows its URL and frame type.
+      # The registry's partition, which the realm then asks its controller in.
       # (…`site` the top-level site of its storage key: its top-level traversable's)
       def sw_note_client(realm_id, url, frame_type, controller_handle = nil, origin = nil, site: '')
         note_client(sw_client_id(realm_id), realm_id.to_i, url, 'window', frame_type, controller_handle, origin, site)
+        @sw_partition
       end
 
       # A dedicated / shared WORKER that a service worker controls is a client too — with no
@@ -6955,6 +6921,7 @@ module Capybara
       # URL. Keyed by worker handle, which outlives nothing else and is unique per worker.
       # (…its origin its script URL's — a blob: worker's its creator's, the blob URL entry's environment's: the creator's
       # origin key, which an opaque origin's is none a service worker sees)
+      # (…`controller_handle` the worker that controls it, 0 none: its creator's, or the one its main script's fetch ended at)
       def sw_note_worker_client(handle, url, shared, controller_handle)
         origin =
           if url.to_s.start_with?('blob:')
@@ -6963,23 +6930,14 @@ module Capybara
           else
             url_origin(url)
           end
-        note_client(sw_worker_client_id(handle), -handle.to_i, url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, origin, @worker_host.worker_partition(handle).to_s)
-      end
-
-      # A worker CLIENT's controller changed (a clients.claim() the worker isolate adopted): its
-      # record's, the worker-shaped counterpart of a realm's reportAsClient. Called from the WORKER's
-      # thread (host fn) — the registry is the engine's, behind its lock.
-      def sw_note_worker_controller(worker_handle, controller_handle)
-        Native.sw_set_client_controller(@sw_partition, sw_worker_client_id(worker_handle), controller_handle.to_i.nonzero?)
-        nil
+        note_client(sw_worker_client_id(handle), -handle.to_i, url, shared ? 'sharedworker' : 'worker', 'none', controller_handle.to_i, origin, @worker_host.worker_partition(handle).to_s)
       end
 
       # (…`origin` the client's own — a window's its document's, which an about:blank one inherits — what a service worker
       # filters the clients it sees by; `realm` the realm it is, a worker client's the negative of its handle, which the
       # registry keeps by the session's number for it: what a worker's message to it is delivered by)
       private def note_client(client_id, realm, url, type, frame_type, controller_handle, origin, site)
-        ctrl = controller_handle.to_i.nonzero?
-        settled = Native.sw_note_client(@sw_partition, client_id.to_s, sw_realm_key(realm), site.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
+        settled = Native.sw_note_client(@sw_partition, client_id.to_s, sw_realm_key(realm), site.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, controller_handle&.to_i)
         # (…a navigation's reserved client execution ready now, its document committed: what `clients.get` of it waits on)
         sw_host.sw_client_settled(client_id) if settled
         # (…and, a window's, its window's focus chain as it stands: a new realm may be on it)
@@ -8146,8 +8104,8 @@ module Capybara
       # appending a `<video>` whose fetch the claim would route — would find its client controlled or not as the thread
       # scheduler had it. Held, the command's script runs first, at the time it was issued, and the claim takes effect
       # with the window's next step: what a page reads of its control (its realm's `navigator.serviceWorker.controller`)
-      # and what routes its fetches (the registry's record of its client's controller, which `broadcast_claim` writes
-      # with it) move together, at a time of the window's. The spec allows either order against what the window does
+      # and what routes its fetches — the registry's record of its client's controller, both — move, at a time of the
+      # window's. The spec allows either order against what the window does
       # meanwhile — the claim's controller change is a task queued from the worker's parallel steps — and this is the one
       # no machine's load can change. It does not against what the WORKER does after it: `clients.claim()` resolves only
       # once every client's active worker is set, so a message the worker posts to a client after it is causally later,
@@ -8158,7 +8116,7 @@ module Capybara
       # (…held by the engine, which says what is applied at once: worker_delivery.rs `changes_hold`)
       private def hold_controller_changes(claims, phases)
         now = @worker_host.changes_hold(
-          claims.map {|e| [e[:handle].to_i, e[:has_fetch] == true] },
+          claims.map {|e| e[:handle].to_i },
           phases.map {|e| [e[:handle].to_i, e[:phase].to_s, !e.key?(:ok) || e[:ok] == true] }
         )
         apply_sw_phases(now)
@@ -8182,7 +8140,7 @@ module Capybara
       private def controller_changes_held? = @worker_host.changes_held?
 
       # clients.claim(): the claiming worker takes control of EVERY in-scope client — including
-      # ones that never register()'d (an iframe built before the SW existed). See broadcast_claim.
+      # ones that never register()'d (an iframe built before the SW existed).
       # Processed BEFORE the phase markers below: the worker emits its activate-handler claim
       # ahead of its 'sw_phase', and the phase marker is what resumes the client-side
       # 'activated' step — a claim handled after it would let `wait_for_state(..., 'activated')`
@@ -8201,9 +8159,14 @@ module Capybara
       # An ACTIVATING worker's claim applies immediately too (claim is valid from state
       # 'activating'; fetch-waits-for-activate claims mid-activate and expects the client
       # controlled — its fetches then park on the activation, not the claim).
-      # (…`claims` each `[worker, has_fetch]`, ordered and scoped by the engine: sw_registry.rs `claim_order`)
+      # The claim IS the controller assignment, the registry's: each client whose matched registration this is controlled by
+      # the claiming worker, each one whose controller that changed told (sw_registry.rs `claim`) — a window's realm, a
+      # worker client through its inbox.
+      # (…`claims` each its worker, ordered and scoped by the engine: sw_registry.rs `claim_order`)
       private def apply_sw_claims(claims)
-        Native.sw_claim_order(@sw_partition, claims).each {|handle, has_fetch, scope| broadcast_claim(handle, has_fetch, scope) }
+        Native.sw_claim_order(@sw_partition, claims).each do |handle, scope|
+          Native.sw_claim(@sw_partition, handle, scope).each {|key| sw_controller_told(key) }
+        end
       end
 
       # A worker finished a lifecycle phase — its lifecycle parks its observable states on
@@ -9804,7 +9767,7 @@ module Capybara
           claim:          ->                  {
             next false unless Native.sw_may_claim(@sw_partition, handle)
 
-            outbox << {handle: handle, kind: 'sw_claim', has_fetch: sw_has_fetch}
+            outbox << {handle: handle, kind: 'sw_claim'}
             true
           },
           # Its Clients: the registry's clients of its origin as it sees them (sw_registry.rs — behind its lock, so read
@@ -9927,17 +9890,14 @@ module Capybara
         # same, its id its own (what its lock requests are held by: web_locks.rs) — never the realm-numbered
         # key of the window space, which would name the page's realm 0 (`sw_client_realm`).
         rt.call('realmIdentify', 'clientId', sw_worker_client_id(handle))
+        # …the registry's client it is, its controller the one it was made with (`sw_note_worker_client`) — what its
+        # `navigator.serviceWorker.controller` reads and its fetch()/XHR route by (sw_registry.rs `swController`) — a
+        # service worker none.
+        rt.call('realmIdentify', 'swPartition', @sw_partition) unless service
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
         # (importScripts throws a TypeError); its script evaluates as a real module graph
         # below (eval_module_graph).
         rt.call('realmIdentify', 'moduleWorker', true) if module_worker
-        # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
-        # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
-        # route through the SW (controllerHandle > 0) — the same pre-load wiring a
-        # controlled frame realm gets (create_frame_realm).
-        if !service && controller.to_i.positive? && (cw = sw_controller(controller))
-          rt.call('swSetControllerDirect', *cw)
-        end
         # Set the worker's `self.location.href` so webpack /
         # rollup public-path derivation + `new URL(rel, import.meta.url)`
         # resolve chunks against the worker's own origin rather than
@@ -10001,14 +9961,9 @@ module Capybara
               @worker_host.worker_url_set(handle, url)
               rt.call('updateLocation', url)
             end
-            if final_ctrl != controller.to_i
-              controller = final_ctrl
-              if controller.positive? && (cw = sw_controller(controller))
-                rt.call('swSetControllerDirect', *cw)
-              end
-            end
-            # Refresh the registry's client record (URL + controller) — called from this worker's
-            # thread, as sw_note_worker_controller is.
+            controller = final_ctrl
+            # Refresh the registry's client record (URL + controller) — called from this worker's thread, the registry
+            # behind its lock.
             sw_note_worker_client(handle, url, shared, controller)
           end
         end
@@ -10317,11 +10272,6 @@ module Capybara
               # (…each a task of its own, as the window-side delivery's: workers.js `deliverWorkerEvent`)
               rt.call('deliverWorkerMessages', msg[:events])
               drive_worker_to_quiescence(rt, stopping)
-            elsif msg.is_a?(Hash) && msg[:kind] == 'claim_client'
-              # clients.claim() reaches worker clients too: adopt the claiming SW as this
-              # isolate's controller when this worker's script URL is in scope (the same
-              # self-check pages run — swClaimClient compares against location).
-              rt.call('swClaimClient', msg[:handle], msg[:has_fetch], msg[:script_url], msg[:scope], msg[:all_scopes], msg[:site])
             elsif msg.is_a?(Hash) && msg[:kind] == 'fetch_cancel'
               # The client cancelled this streaming respondWith body — cancel the reader
               # streamDeliver is draining, firing the SW source stream's `cancel()`. Fire-and-forget:
