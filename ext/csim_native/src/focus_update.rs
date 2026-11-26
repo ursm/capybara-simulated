@@ -398,8 +398,9 @@ fn focus_fixup(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()> {
 // document is fully active, of its traversable, with no document of a navigable up from it at a fragment, and which is
 // a focusable area or stands for one (HTML "get the focusable area": a delegating shadow host's — no label's control,
 // which only `focus()` forwards to), focused — its autofocus processed then; the ones before it dropped. The element
-// focused (None: a script was terminated). (A candidate whose document has script-blocking style sheets is not kept for
-// the next flush, as HTML has it: there are none here to wait for.)
+// focused (None: a script was terminated). A candidate whose document has a style sheet blocking scripts is put back,
+// the flush ending ("If doc's script-blocking style sheet set is not empty, then return": the currently-best candidate,
+// whose document is not ready for autofocusing, tried again next time — script_lists.rs `blocks_scripts`).
 fn flush_autofocus_candidates(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<Option<NodeId>> {
     let arena = &mut crate::dom::dom(scope).arena;
     let Some(top) = arena.realm_document(realm) else { return Some(None) };
@@ -413,7 +414,14 @@ fn flush_autofocus_candidates(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> O
         let Some(own) = arena.document_realm_of(el) else { continue };
         let fully_active = arena.realm_document(own).is_some_and(|d| arena.document_fully_active(d));
         let at_fragment = std::iter::once(own).chain(arena.ancestor_realms(own)).any(|r| arena.realm_document(r).is_some_and(|d| arena.at_fragment(d)));
-        if !fully_active || arena.top_level_realm(own) != realm || at_fragment {
+        if !fully_active || arena.top_level_realm(own) != realm {
+            continue;
+        }
+        if arena.realm_state(own).is_some_and(|st| st.script_lists.blocks_scripts()) {
+            arena.autofocus_put_back(top, el);
+            return Some(None);
+        }
+        if at_fragment {
             continue;
         }
         let Some(target) = crate::focus::focusable_area_of(scope, el)? else { continue };

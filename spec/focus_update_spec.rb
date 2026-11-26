@@ -135,4 +135,25 @@ RSpec.describe 'Focus update steps' do
     session.execute_script('w.close()')
     expect(session.evaluate_script('[document.hasFocus(), log.join()]')).to eq([true, 'win:blur,win:focus'])
   end
+
+  # "Flush autofocus candidates": "If doc's script-blocking style sheet set is not empty, then return" — the candidate
+  # waits for the style sheet and takes the focus at the first rendering update after it.
+  it 'holds an autofocus candidate while a style sheet blocks scripts' do
+    slow = simulated_session(lambda {|env|
+      if env['PATH_INFO'] == '/slow.css'
+        sleep 0.5
+        [200, {'content-type' => 'text/css'}, ['p { color: green }']]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><meta charset="utf-8"><input id="f" autofocus>
+          <script>var seen = []; (function frame() { seen.push(document.activeElement.tagName + ':' + document.styleSheets.length); if (seen.length < 3) requestAnimationFrame(frame); })();</script>
+          <link rel="stylesheet" href="/slow.css"><script>seen.push('ran')</script>
+        HTML
+      end
+    })
+    slow.visit '/'
+    expect(slow.evaluate_script('document.activeElement.id')).to eq('f')
+    seen = slow.evaluate_script('seen')
+    expect(seen).not_to include('INPUT:0')
+  end
 end

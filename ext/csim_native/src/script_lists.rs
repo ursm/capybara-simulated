@@ -166,6 +166,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "theEndOver", the_end_over_op, context_id);
 }
 
+impl ScriptLists {
+    // Whether its document has a style sheet that is blocking scripts (HTML: its script-blocking style sheet set is not
+    // empty).
+    pub(crate) fn blocks_scripts(&self) -> bool {
+        !self.sheets.is_empty()
+    }
+}
+
 fn lists_of(arena: &mut RealmArena, cid: i32) -> Option<&mut ScriptLists> {
     arena.realm_state_mut(cid).map(|s| &mut s.script_lists)
 }

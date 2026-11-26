@@ -101,6 +101,14 @@ impl RealmArena {
         }
     }
 
+    // …and `id`, taken off `top`'s candidates, put back at their head, its turn to come again at the next flush.
+    pub(crate) fn autofocus_put_back(&mut self, top: NodeId, id: NodeId) {
+        if let Some((list, false)) = self.autofocus.docs.get_mut(&top) {
+            list.insert(0, id);
+            self.autofocus.pending.insert(top);
+        }
+    }
+
     // Whether the document `doc` is at a fragment: its realm's `:target` has an element (§7.4.6.4 its indicated part).
     pub(crate) fn at_fragment(&self, doc: NodeId) -> bool {
         self.get(doc).filter(|d| d.kind == NodeKind::Document).is_some_and(|d| self.target_element_of(d.realm, doc).is_some())
