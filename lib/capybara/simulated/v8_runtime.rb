@@ -1454,11 +1454,13 @@ module Capybara
       # its realm has, renewed (dom-nodes.js `renewDocument`) and parsed again — the gap CLAUDE.md lists for a
       # window's. Its id, or nil where the realm is gone.
       def reuse_frame_realm(id, url, body, content_type, parent_id, **made)
-        realm = frame_realms.delete(id) or return nil
-        loading_frame_realms[id] = realm
-        # (…the initial about:blank a service-worker client no more, as a window's: `reuse_window_realm`)
+        realm = frame_realms[id] or return nil
+        # (…the initial about:blank a service-worker client no more, as a window's: `reuse_window_realm` — while the realm
+        # is still among the frame realms, which a state the unregister's Try Activate tells reaches)
         V8Runtime.engine_call(realm, 'swClientDiscarded')
         @browser.sw_unregister_client(id)
+        frame_realms.delete(id)
+        loading_frame_realms[id] = realm
         V8Runtime.engine_call(realm, 'renewDocument')
         load_frame_document(realm, url, body, content_type, parent_id, reused: true, **made)
         id
