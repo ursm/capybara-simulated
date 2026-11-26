@@ -215,10 +215,41 @@ module Capybara
         s.valid_encoding? ? s : s.scrub
       end
 
-      # The TypeError's text for a module specifier that resolves to none (HTML "resolve a module specifier": a bare one
-      # no import map maps) — Chrome's, a window's module graph and a worker's alike.
-      def self.unresolved_specifier(specifier)
-        "Failed to resolve module specifier \"#{specifier}\". Relative references must start with either \"/\", \"./\", or \"../\"."
+      # A module graph the engine's module map handed over (module_map.rs `moduleGraphResult`: `[root, base, [specifier,
+      # record, …], …]`) taken into a realm's `table` — its records by number, the links of each module by its base URL —
+      # and its root's record returned linked: each module's requests resolved to the records the map handed over for them,
+      # in the order V8 asks — its module requests' (the map read them off the same compile) — none where one is missing.
+      class ModuleLinkFailed < StandardError; end
+      # A module's parse error (HTML "module script"'s), or its graph's link error to rethrow, of V8's message for a failure
+      # of the module at `url` (`SyntaxError: Unexpected token ';' at http://…/m.js:1`): `[name, message, filename, lineno]` —
+      # its kind, its text, and the location the host appended to it (that URL, which may hold spaces — a `data:` one's —
+      # and a line; none for a failure the host names no location of: a link's) — which the bridge reports at its global,
+      # making the error anew (the value V8 threw is its once, and only as it is thrown).
+      def self.module_error(text, url = nil)
+        text = text.to_s
+        at   = url && text.match(/ at #{Regexp.escape(url.to_s)}(?::(\d+))?\z/)
+        text = text[0, at.begin(0)] if at
+        name, message = text.split(': ', 2)
+        name, message = 'SyntaxError', name.to_s unless message
+        [name, message, at && url.to_s, at&.[](1)&.to_i]
+      end
+      def self.linked_module(table, result)
+        root, *links = result
+        links.each_slice(2) {|base, pairs| table[:links][base.to_s] = pairs.each_slice(2).to_a }
+        m = table[:records][root.to_i] or return nil
+        return m unless m.status == :uninstantiated
+
+        asked = Hash.new(0)
+        m.instantiate do |specifier, referrer|
+          requests = table[:links][referrer.to_s] || []
+          at = asked[referrer]
+          at = requests.index {|s, _| s == specifier } unless requests[at]&.first == specifier
+          raise ModuleLinkFailed, "module not found: #{specifier}" unless at
+
+          asked[referrer] = at + 1
+          table[:records][requests[at][1].to_i] or raise ModuleLinkFailed, "module not found: #{specifier}"
+        end
+        m
       end
     end
   end

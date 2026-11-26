@@ -10200,7 +10200,7 @@ module Capybara
               # responses are consumed first (the fetch-once script resource map — a
               # changed import the probe saw must be the bytes this version runs,
               # update-bytecheck's time-varying imports).
-              sw_import_fetch = lambda do |abs|
+              sw_import_fetch = lambda do |abs, _type = 0|
                 rec  = sw_imports_map && sw_imports_map[abs]
                 if rec
                   raise "module import failed: #{abs} (#{rec['status']})" unless (200..299).cover?(rec['status'].to_i)
@@ -10216,13 +10216,10 @@ module Capybara
                   ct    = response_field(r, 'content-type')
                   body2 = r['body'].to_s
                 end
-                # Strict (unlike classic importScripts' `reaches_app?`-gated check, the
-                # Mastodon-Tesseract concession): Chrome enforces JS MIME for module
-                # scripts unconditionally.
-                raise "module import has an unsupported MIME type: #{abs}" unless js_mime_type?(ct)
-
+                # (…its MIME type its module type's, held to it as the graph takes it: WorkerRuntime — strict, unlike classic
+                # importScripts' `reaches_app?`-gated check, the Mastodon-Tesseract concession)
                 sw_note_import(handle, abs, body2)
-                body2
+                [body2, abs, ct.to_s]
               end
               rt.eval_module_graph(body, url, sw_import_fetch)
             else
@@ -10238,7 +10235,7 @@ module Capybara
         else
           # (…a module worker's graph of the worker's destination — HTML's fetch of its module worker script graph —
           # an `import()` of a script's, whatever script it is in)
-          rt.accept_dynamic_imports(url.to_s, worker_module_fetch(handle, controller.to_i, url.to_s, 'script'))
+          rt.accept_dynamic_imports(worker_module_fetch(handle, controller.to_i, url.to_s, 'script'))
           if module_worker
             run_worker_module(rt, body, url.to_s, handle, outbox, worker_module_fetch(handle, controller.to_i, url.to_s, shared ? 'sharedworker' : 'worker'))
           else
@@ -10608,7 +10605,7 @@ module Capybara
       # evaluation throws is reported as a classic script's is (`eval_module_graph`).
       private def run_worker_module(rt, body, url, handle, outbox, module_fetch)
         rt.eval_module_graph(body, url, module_fetch, service: false)
-      rescue ModuleScriptUnavailable, RustyRacer::ParseError, RustyRacer::RuntimeError => e
+      rescue WorkerRuntime::ModuleGraphFailed, RustyRacer::ParseError, RustyRacer::RuntimeError => e
         outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
       end
       # …the fetch of a module worker `handle` (of `worker_url`) imports, statically or by `import()` — HTML "fetch a single
@@ -10618,18 +10615,20 @@ module Capybara
       # type, or none at all. Its source and its URL — the response's, a redirect's end, which its own imports resolve
       # against and its `import.meta.url` reports.
       private def worker_module_fetch(handle, controller, worker_url, dest)
-        lambda do |abs|
+        lambda do |abs, type = 0|
+          # (…a JSON, CSS or text module's of its type's destination: HTML "fetch destination from module type")
+          dest = MODULE_DESTINATIONS[type] if type.positive?
           if abs.start_with?('blob:')
-            bytes, = worker_blob(abs, worker_url)
+            bytes, blob_type = worker_blob(abs, worker_url)
             raise ModuleScriptUnavailable, abs unless bytes
 
-            next [bytes, abs]
+            next [bytes, abs, blob_type.to_s]
           end
           if abs.start_with?('data:')
             mime, bytes = Native.data_url(abs)
-            raise ModuleScriptUnavailable, abs unless bytes && js_mime_type?(mime)
+            raise ModuleScriptUnavailable, abs unless bytes
 
-            next [bytes, abs]
+            next [bytes, abs, mime.to_s]
           end
           if controller.positive? && http_url?(abs)
             req = Native.sw_request(kind: 'module', url: abs, destination: dest, client_id: sw_worker_client_id(handle))
@@ -10644,12 +10643,12 @@ module Capybara
             raise ModuleScriptUnavailable, abs unless resource_loaded?(r)
           end
           ct = r['headers'].find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
-          raise ModuleScriptUnavailable, abs unless (200..299).cover?(r['status'].to_i) && js_mime_type?(ct)
+          raise ModuleScriptUnavailable, abs unless (200..299).cover?(r['status'].to_i)
 
-          [r['body'].to_s, r['url'].to_s.empty? ? abs : r['url'].to_s]
+          [r['body'].to_s, r['url'].to_s.empty? ? abs : r['url'].to_s, ct.to_s]
         end
       end
-      # (…a module script the graph cannot have: unfetched, failed, or of no JavaScript MIME type)
+      # (…a module script the graph cannot have: unfetched or failed)
       class ModuleScriptUnavailable < StandardError; end
 
       # A worker's script, of `url`: an http(s) one fetched in mode 'same-origin' against its creator's URL `client_url` —

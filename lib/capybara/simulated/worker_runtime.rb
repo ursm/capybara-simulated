@@ -29,29 +29,26 @@ module Capybara
       # terminated call; the worker's own loop then unwinds and disposes.
       def terminate = (@ctx.terminate rescue nil)
 
-      # Native ES-module evaluation of a worker MAIN script + its static import
-      # graph (a `{type: 'module'}` worker), via V8's native module API
-      # (the same surface a window's module scripts are run with). The whole graph
-      # resolves through the root's instantiate callback (V8 calls it per
-      # unresolved edge, transitively). `fetch_import` is called on the worker's
-      # own thread for each resolved static import URL and returns the script
-      # source (raising fails the evaluation — an import that 404s or has a
-      # non-JS MIME type fails the module script). Specifier resolution is PLAIN
-      # URL resolution — a worker has no document, so the page's importmap does
-      # not apply, and a bare specifier is a resolution failure per the spec.
+      # A module worker's script (a `{type: 'module'}` worker's, a module service worker's) run as a module graph: the
+      # engine's module map fetches it (module_map.rs — the worker's map: the empty import map, a `type` its import names
+      # the module type, CSS none in a worker), its script `src` of `url` already in hand, its imports through
+      # `fetch_import` (`module_steps`), each fetched as the map asks — the worker's thread waits on each, none of its
+      # server's time on the worker's clock (KNOWN GAP: a window's graph lands as late as its servers took) — and the
+      # graph linked and evaluated here. One that could not be fetched, or that has an error to rethrow, raises
+      # `ModuleGraphFailed`.
       #
-      # A SERVICE worker's graph may not await at its top level ("Run Service
-      # Worker" fails the script; Chrome rejects the registration) — V8's
-      # IsGraphAsync (Module#graph_async?) answers it for the WHOLE instantiated
-      # graph, TLA hiding in an imported module included — and what its
-      # evaluation throws fails the job its caller runs. Any other worker's may,
-      # and what its evaluation throws — now, or as an awaited module settles — is
-      # reported in the worker's global as a classic script's exception is (HTML
-      # "run a module script").
+      # A SERVICE worker's graph may not await at its top level ("Run Service Worker" fails the script; Chrome rejects the
+      # registration) — V8's IsGraphAsync (Module#graph_async?) answers it for the WHOLE instantiated graph, TLA hiding in
+      # an imported module included — and what its evaluation throws fails the job its caller runs. Any other worker's may,
+      # and what its evaluation throws — now, or as an awaited module settles — is reported in the worker's global as a
+      # classic script's exception is (HTML "run a module script").
       def eval_module_graph(src, url, fetch_import, service: true)
-        root = @ctx.compile_module(RuntimeShared.utf8_text(src.to_s.dup), filename: url.to_s)
-        (@modules ||= {})[url.to_s] = root
-        link(root, url.to_s, fetch_import)
+        module_steps(fetch_import, url.to_s => [src, url.to_s, 'text/javascript'])
+        result = call('moduleWorkerGraph', url.to_s)
+        raise ModuleGraphFailed, "module script failed: #{url}" unless result.is_a?(Array)
+        raise ModuleGraphFailed, result[0].first(2).join(': ') if result[0].is_a?(Array)
+
+        root = RuntimeShared.linked_module(@modules, result) or raise ModuleGraphFailed, "module script failed: #{url}"
         if service
           raise 'Top-level await is disallowed in a service worker' if root.graph_async?
 
@@ -60,50 +57,62 @@ module Capybara
           root.evaluate(report: '@steps.reportError')
         end
         nil
+      ensure
+        # (…its `import()`s' fetches the script's again, its graph's of the worker's destination over)
+        module_steps(@dynamic_fetch) if @dynamic_fetch
       end
+      # …what a module graph of the worker's could not come to: a module none could fetch, or its error to rethrow.
+      class ModuleGraphFailed < StandardError; end
 
-      # A dedicated or shared worker's `import()`, from a classic script (of `url`) or a module: the module its specifier
-      # names, fetched by `fetch_import` and linked as a static import's is — each one module however often it is
-      # imported — whose evaluation the engine finishes before it settles the import's promise. (…`fetch_import` its own,
-      # not the graph's: an imported module's descendants are fetched as it is, HTML's ContinueDynamicImport loading
-      # them with no load state of the graph's)
-      def accept_dynamic_imports(url, fetch_import)
+      # A dedicated or shared worker's `import()`, from a classic script or a module: its graph the map's
+      # (bridge.entry.js `moduleImport`), its modules fetched by `fetch_import`, whose evaluation the engine finishes before
+      # it settles the import's promise.
+      # (…the import's rejection the engine's Error, of no kind — rusty_racer)
+      def accept_dynamic_imports(fetch_import)
+        module_steps(@dynamic_fetch = fetch_import)
         @ctx.dynamic_import_resolver = lambda do |specifier, referrer, _initiating|
-          # (…a classic script's referrer no URL — none, or the name it was evaluated under: `<eval>` — the worker's own its
-          # base, the URL its script was run from)
-          ref  = referrer.to_s
-          base = ref.match?(/\A[a-z][a-z0-9+.-]*:/i) ? ref : url
-          resolved = resolve_specifier(specifier.to_s, base)
-          module_for(resolved, fetch_import).tap {|m| link(m, resolved, fetch_import) if m.status == :uninstantiated }
+          result = call('moduleImport', specifier.to_s, referrer.to_s)
+          raise ModuleGraphFailed, "module not found: #{specifier}" unless result.is_a?(Array)
+          raise ModuleGraphFailed, result[0][1].to_s if result[0].is_a?(Array)
+
+          RuntimeShared.linked_module(@modules, result) or raise ModuleGraphFailed, "module not found: #{specifier}"
         end
       end
 
       private
 
-      def link(root, url, fetch_import)
-        root.instantiate do |spec, ref|
-          module_for(resolve_specifier(spec.to_s, (ref || url).to_s), fetch_import)
-        end
-      end
-      # (…the module `resolved` names, one however often it is imported: its source and its URL — the response's, a
-      # redirect's end, which a fetch answering a pair gives and the module's own imports resolve against — fetched once,
-      # by `fetch_import`)
-      def module_for(resolved, fetch_import)
-        @modules ||= {}
-        @modules[resolved] ||= begin
-          src, final = fetch_import.call(resolved)
-          final = final.to_s.empty? ? resolved : final.to_s
-          @modules[final] ||= @ctx.compile_module(RuntimeShared.utf8_text(src.to_s.dup), filename: final)
-        end
-      end
-      # (…a URL, or a path-relative specifier parsed against the importing module's URL — none where that is no base, a
-      # blob: or data: one's — any other a resolution failure)
-      def resolve_specifier(spec, base)
-        resolved =
-          if spec.match?(%r{\A[a-z][a-z0-9+.-]*:}i) then spec
-          elsif spec.start_with?('/', './', '../') then Native.url_parts(spec, base)&.first
+      # The host steps of the worker's module map (subresource-host.js `H_MODULE_START` / `H_MODULE_TAKE`): a module's
+      # fetch made at once by `fetch_import` (`[source, response URL, content type]`; raising for none) — `seeded` the
+      # ones already in hand — and what came in compiled into a record of the worker's (`@modules`), held to its module
+      # type's MIME type: `[record, body, base URL]`, its parse error `[name, message, filename, lineno]`, nil for none.
+      def module_steps(fetch_import, seeded = {})
+        @modules ||= {records: {}, links: {}}
+        @module_seq ||= 0
+        @fetched ||= {}
+        @ctx.attach('@moduleFetchStart', ->(url, *rest) {
+          id = rest[7].to_i
+          @fetched[id] = seeded.delete(url.to_s) || begin
+            fetch_import.call(url.to_s, rest[5].to_i)
+          rescue StandardError
+            nil
           end
-        resolved or raise RuntimeShared.unresolved_specifier(spec)
+          @fetched[id] && 0.0
+        })
+        @ctx.attach('@moduleFetchTake', ->(id, type, _now) {
+          source, base, content_type = @fetched.delete(id.to_i)
+          next nil unless source && Native.module_content(content_type.to_s, type.to_i)
+
+          module_record(source, base, type.to_i)
+        })
+      end
+      def module_record(source, base, type)
+        body = Native.module_body(RuntimeShared.utf8_text(source.to_s.dup), type) or return ['SyntaxError', 'JSON module is not valid JSON', base, nil]
+        m = @ctx.compile_module(body, filename: base.to_s)
+        id = (@module_seq += 1)
+        @modules[:records][id] = m
+        [id, type.zero? ? body : nil, base.to_s]
+      rescue RustyRacer::ParseError => e
+        RuntimeShared.module_error(e.message, base)
       end
     end
   end

@@ -309,6 +309,24 @@ RSpec.describe 'the module map' do
     end
   end
 
+  # A module worker's graph is the worker's module map's: its imports' module types their `type` attributes' (CSS none — a
+  # worker has no CSSStyleSheet: the graph fails, the Worker's `error`), its `import()`s through the same map (Chrome and
+  # Firefox `json:1 error dyn:1`, csim-bench mod8 `w_mod`).
+  describe "a module worker's graph" do
+    it 'takes the module types its imports name' do
+      files = {'/d.json' => '{"x": 1}', '/s.css' => 'p { color: red }', '/z.js' => 'export const z = 1;',
+               '/wjson.js' => "import d from '/d.json' with { type: 'json' }; import '/slow/100/z.js'; postMessage('json:' + d.x);",
+               '/wcss.js' => "import s from '/s.css' with { type: 'css' }; postMessage('css-ran');",
+               '/wdyn.js' => "import('/d.json', { with: { type: 'json' } }).then((m) => postMessage('dyn:' + m.default.x), (e) => postMessage('dynfail:' + e.name));"}
+      expect(log_of(<<~HTML, files)).to eq('json:1 error dyn:1')
+        <script>
+          const run = (u) => new Promise((r) => { const w = new Worker(u, { type: 'module' }); w.onmessage = (e) => r(e.data); w.onerror = (e) => { e.preventDefault(); r('error'); }; });
+          Promise.all(['/wjson.js', '/wcss.js', '/wdyn.js'].map(run)).then((xs) => { L.push(...xs); done(); });
+        </script>
+      HTML
+    end
+  end
+
   # HTML "merge existing and new import maps": a map registered after a specifier resolved keeps that resolution, its
   # other rules merged (Chrome `a1 a1 b b`; Firefox registers no map once a module has loaded: `b!TypeError c!TypeError`
   # — the spec's merge is explicit, csim-bench mod8 `im_late`).

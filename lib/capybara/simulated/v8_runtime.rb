@@ -1770,62 +1770,26 @@ module Capybara
         module_table(target)[:records][id] = m
         [id, type.to_i.zero? ? body : nil, base]
       rescue RustyRacer::ParseError => e
-        module_error(e.message, base).to_a
+        RuntimeShared.module_error(e.message, base)
       end
 
       # A module script's graph run (bridge.entry.js `runModuleScript`), as the map handed it over (`moduleGraphResult`):
       # its links taken — `[root, base, [specifier, record, …], …]` — its root linked and evaluated: true where it ran (a
       # throw in it, or its top-level await's rejection, reported at its window, `error` event and all, as HTML "run a
       # module script" reports it: the realm's own `reportError` step), or its link's error to rethrow (an export none of
-      # its modules has), `ModuleError#to_a`.
+      # its modules has), `RuntimeShared.module_error`'s.
       def eval_module_graph(target, result)
         m = linked_module(target || ctx, result) or return false
         m.evaluate(report: '@steps.reportError')
         true
       rescue RustyRacer::ParseError, RustyRacer::RuntimeError => e
         # (ScriptTerminatedError deliberately propagates: a watchdog terminate must escalate)
-        module_error(e.message).to_a
+        RuntimeShared.module_error(e.message)
       end
-      # …its root's record, linked: each module's requests resolved to the records the map handed over for them, in the
-      # order V8 asks — its module requests' (the map read them off the same compile) — none where one is missing.
-      def linked_module(target, result)
-        table = module_table(target)
-        root, *links = result
-        links.each_slice(2) {|base, pairs| table[:links][base.to_s] = pairs.each_slice(2).to_a }
-        m = table[:records][root.to_i] or return nil
-        return m unless m.status == :uninstantiated
+      # …its root's record, linked (RuntimeShared.linked_module).
+      def linked_module(target, result) = RuntimeShared.linked_module(module_table(target), result)
 
-        asked = Hash.new(0)
-        m.instantiate do |specifier, referrer|
-          requests = table[:links][referrer.to_s] || []
-          at = asked[referrer]
-          at = requests.index {|s, _| s == specifier } unless requests[at]&.first == specifier
-          raise ModuleLinkFailed, "module not found: #{specifier}" unless at
-
-          asked[referrer] = at + 1
-          table[:records][requests[at][1].to_i] or raise ModuleLinkFailed, "module not found: #{specifier}"
-        end
-        m
-      end
-
-      # A module's parse error (HTML "module script"'s), or its graph's link error to rethrow (`[name, message, filename,
-      # lineno]`: the value V8 threw is its once, and only as it is thrown) — reported by the bridge at its window
-      # (`reportModuleError`), by its kind, its message and where V8 found it (none for a link's: the document's).
-      ModuleError = Data.define(:name, :message, :filename, :lineno) do
-        def to_a = [name, message, filename, lineno]
-      end
-      class ModuleLinkFailed < StandardError; end
-      # …of V8's message for a failure of the module at `url` (`SyntaxError: Unexpected token ';' at http://…/m.js:1`): its
-      # kind, its text, and the location the host appended to it — that URL, which may hold spaces (a `data:` one's), and
-      # a line; none for a failure the host names no location of (a link's).
-      def module_error(text, url = nil)
-        text = text.to_s
-        at   = url && text.match(/ at #{Regexp.escape(url.to_s)}(?::(\d+))?\z/)
-        text = text[0, at.begin(0)] if at
-        name, message = text.split(': ', 2)
-        name, message = 'SyntaxError', name.to_s unless message
-        ModuleError.new(name, message, at && url.to_s, at&.[](1)&.to_i)
-      end
+      ModuleLinkFailed = RuntimeShared::ModuleLinkFailed
 
       # A fetched module's body compiled under its URL. No-cd warm path: once this isolate has compiled a URL, its in-memory
       # compilation cache holds the bytecode keyed by source — skip `cached_data` so V8 hits that cache directly (~0.04

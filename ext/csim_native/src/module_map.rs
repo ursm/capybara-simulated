@@ -369,6 +369,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "moduleGraphResult", module_graph_result_op, context_id);
     register(scope, ns, "moduleImport", module_import_op, context_id);
     register(scope, ns, "noteReferringScript", note_referring_script_op, context_id);
+    register(scope, ns, "moduleGraphBegin", module_graph_begin_op, context_id);
 }
 
 fn map_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut ModuleMap> {
@@ -478,6 +479,21 @@ pub(crate) fn begin_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: crate
     };
     Ok(gid.map_or(0, |gid| crate::script_fetch::file_module(scope, cid, el, began, gid)))
 }
+// __dom.moduleGraphBegin(url, host) -> the number of a graph of the realm's begun from `url`, of no element: a worker's
+// (HTML "fetch a module worker script graph"), its fetch options the defaults; 0 for none.
+fn module_graph_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(0);
+    let url = args.get(0).to_rust_string_lossy(scope);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
+    let cid = realm_id(scope, &args);
+    keep_host(scope, cid, host);
+    let arena = realm(scope, cid);
+    let plan = crate::subresource_plan::plan_in(arena, crate::subresource_plan::J_MODULE_SCRIPT, None, None, None);
+    let began = arena.event_loop.clock;
+    if let Ok(Some(gid)) = begin_external(scope, cid, url, plan, None, began) {
+        rv.set_uint32(gid);
+    }
+}
 fn keep_host(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>) {
     let kept = map_of(scope, cid).is_some_and(|map| map.host.is_some());
     if !kept {
@@ -534,7 +550,7 @@ fn begin_inline(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: String, base
     let Some(host) = host_of(scope, cid) else { return Ok(None) };
     let (source_value, base_value) = (text(scope, &source), text(scope, &base));
     let answer = call(scope, host, H_MODULE_INLINE, &[source_value, base_value])?;
-    let Some(script) = script_of(scope, answer, ModuleType::JavaScript, &base, plan) else { return Ok(None) };
+    let Some(script) = script_of(scope, cid, answer, ModuleType::JavaScript, &base, plan) else { return Ok(None) };
     if let Some(map) = map_of(scope, cid) {
         map.note_referring(&base, plan);
     }
@@ -576,7 +592,7 @@ fn ensure_fetch(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, plan: u32
 
 // A module script of what the host answered compiling one of `ty` (`H_MODULE_TAKE`) — its parse error where that is what
 // it answered, its requests read off a JavaScript one's source — None for none.
-fn script_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Global<v8::Value>>, ty: ModuleType, url: &str, plan: u32) -> Option<Script> {
+fn script_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, answer: Option<v8::Global<v8::Value>>, ty: ModuleType, url: &str, plan: u32) -> Option<Script> {
     let answer = answer.map(|a| v8::Local::new(scope, a))?;
     let answer = v8::Local::<v8::Array>::try_from(answer).ok()?;
     let first = answer.get_index(scope, 0)?;
@@ -591,7 +607,11 @@ fn script_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Global<v8::Val
     let record = first.uint32_value(scope).unwrap_or(0);
     let base = answer.get_index(scope, 2).filter(|b| b.is_string()).map_or_else(|| url.to_owned(), |b| b.to_rust_string_lossy(scope));
     let requests = match answer.get_index(scope, 1).and_then(|s| v8::Local::<v8::String>::try_from(s).ok()) {
-        Some(source) if ty == ModuleType::JavaScript => module_requests(scope, source, &base),
+        // (…a CSS module's type allowed where the realm has CSSStyleSheet: a window's, no worker's)
+        Some(source) if ty == ModuleType::JavaScript => {
+            let css = realm(scope, cid).realm_document(cid).is_some();
+            module_requests(scope, source, &base, css)
+        }
         _ => Vec::new(),
     };
     Some(script(record, None, base, requests))
@@ -600,7 +620,7 @@ fn script_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Global<v8::Val
 // A JavaScript module's requests, compiled from its `source` under its name `name` as the host compiled it — the
 // isolate's compilation cache answers — each its specifier and the module type its import attributes name: V8 has
 // refused, as a SyntaxError of the host's compile, any attribute but `type` (HTML HostGetSupportedImportAttributes).
-fn module_requests(scope: &mut v8::PinScope<'_, '_>, source: v8::Local<'_, v8::String>, name: &str) -> Vec<(String, Option<ModuleType>)> {
+fn module_requests(scope: &mut v8::PinScope<'_, '_>, source: v8::Local<'_, v8::String>, name: &str, css: bool) -> Vec<(String, Option<ModuleType>)> {
     let Some(name) = v8::String::new(scope, name) else { return Vec::new() };
     let origin = v8::ScriptOrigin::new(scope, name.into(), 0, 0, false, -1, None, false, false, true, None);
     let mut compiled = v8::script_compiler::Source::new(source, Some(&origin));
@@ -619,7 +639,7 @@ fn module_requests(scope: &mut v8::PinScope<'_, '_>, source: v8::Local<'_, v8::S
                 type_attribute = attributes.get(tc, at + 1).and_then(|v| v8::Local::<v8::String>::try_from(v).ok()).map(|v| v.to_rust_string_lossy(tc));
             }
         }
-        out.push((specifier, ModuleType::of_request(type_attribute.as_deref(), true)));
+        out.push((specifier, ModuleType::of_request(type_attribute.as_deref(), css)));
     }
     out
 }
@@ -734,7 +754,7 @@ fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, slot: u32, due: f
         }
         return Ok(());
     }
-    let entry = match script_of(scope, answer, key.1, &key.0, plan) {
+    let entry = match script_of(scope, cid, answer, key.1, &key.0, plan) {
         Some(script) => Entry::Ready(script, due),
         None => Entry::Failed,
     };
@@ -872,7 +892,7 @@ pub(crate) fn preloaded(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Lo
     let base = base.unwrap_or_else(|| url.to_owned());
     let (base_value, ty_value) = (text(scope, &base), v8::Integer::new_from_unsigned(scope, ty as u32).into());
     let answer = call(scope, host, H_MODULE_COMPILE, &[source, base_value, ty_value])?;
-    let Some(script) = script_of(scope, answer, ty, url, plan) else { return Ok(false) };
+    let Some(script) = script_of(scope, cid, answer, ty, url, plan) else { return Ok(false) };
     let at = realm(scope, cid).event_loop.clock;
     if let Some(map) = map_of(scope, cid) {
         map.entries.insert(key, Entry::Ready(script, at));
