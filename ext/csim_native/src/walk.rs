@@ -2496,22 +2496,21 @@ impl<'a> Walk<'a> {
     }
     // …what its content gives it, before its `aspect-ratio` — none of it under size containment (CSS Contain 2 §3.2.1: a
     // replaced element's natural size its `contain-intrinsic-size`, 0 where it names none, and no natural ratio — the UA
-    // sheet's for an `<img sizes=auto>`, 300x150).
+    // sheet's for an `<img sizes=auto>`, 300x150; a form control's likewise).
     fn natural_intrinsic(&mut self, id: NodeId) -> Result<Option<Intrinsic>, &'static str> {
+        let Some(content) = self.content_intrinsic(id)? else { return Ok(None) };
+        use style::values::computed::Contain;
+        use style::values::generics::box_::ContainIntrinsicSize as Cis;
+        let Some(style) = crate::style::primary_style(self.arena, id).filter(|s| s.get_box().contain.contains(Contain::SIZE)) else { return Ok(Some(content)) };
+        let px = |c: &style::values::computed::ContainIntrinsicSize| match c {
+            Cis::Length(l) | Cis::AutoLength(l) => f64::from(l.px()),
+            Cis::None | Cis::AutoNone => 0.0,
+        };
+        let p = style.get_position();
+        Ok(Some(Intrinsic { w: px(&p.contain_intrinsic_width), h: px(&p.contain_intrinsic_height), ratio: false, ratio_only: false }))
+    }
+    fn content_intrinsic(&mut self, id: NodeId) -> Result<Option<Intrinsic>, &'static str> {
         let sized = |w: f64, h: f64| Intrinsic { w, h, ratio: false, ratio_only: false };
-        {
-            use style::values::computed::Contain;
-            use style::values::generics::box_::ContainIntrinsicSize as Cis;
-            let style = self.style(id)?;
-            if style.get_box().contain.contains(Contain::SIZE) {
-                let px = |c: &style::values::computed::ContainIntrinsicSize| match c {
-                    Cis::Length(l) | Cis::AutoLength(l) => f64::from(l.px()),
-                    Cis::None | Cis::AutoNone => 0.0,
-                };
-                let p = style.get_position();
-                return Ok(Some(sized(px(&p.contain_intrinsic_width), px(&p.contain_intrinsic_height))));
-            }
-        }
         let node = self.node(id);
         Ok(Some(match node.rendering_tag() {
             "iframe" | "frame" | "video" => sized(300.0, 150.0),

@@ -66954,18 +66954,6 @@ html/rendering/replaced-elements/embedded-content/video-controls-vertical-writin
   (both renderings blank)"
 ? html/rendering/replaced-elements/images/abs-pos-transferred-max-width-from-percentage-max-height-in-auto-height-containing-block.html
 : - "== css/support/60x60-green.png"
-html/rendering/replaced-elements/images/img-sizes-auto.html:
-- <img sizes="AuTo"> - contain
-- <img sizes="AuTo"> - contain-intrinsic-size
-- <img sizes="AuTo,xyz"> - contain
-- <img sizes="AuTo,xyz"> - contain-intrinsic-size
-- <img sizes="auto" class="test-important"> - contain
-- <img sizes="auto" width="10" height="20"> - contain
-- <img sizes="auto" width="10" height="20"> - contain-intrinsic-size
-- <img sizes="auto"> - contain
-- <img sizes="auto"> - contain-intrinsic-size
-- <img sizes="auto,xyz"> - contain
-- <img sizes="auto,xyz"> - contain-intrinsic-size
 html/rendering/replaced-elements/images/input-image-content.html:
 - "== html/rendering/replaced-elements/images/input-image-content-ref.html"
 html/rendering/replaced-elements/the-option-element/option-label-whitespace-2.html:
@@ -67089,8 +67077,6 @@ html/rendering/widgets/field-sizing-input-text.html:
 - 'url: Text caret is shorter than the placeholder'
 - 'url: Text caret is taller than the placeholder'
 - 'url: Update field-sizing property dynamically'
-html/rendering/widgets/field-sizing-select-contain-size.html:
-- 'listbox: The width should not depend on content when contain:size is set'
 html/rendering/widgets/field-sizing-select.html:
 - 'dropdown: Change the field-sizing value dynamically'
 - 'dropdown: The width should depend on the selected OPTION'

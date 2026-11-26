@@ -3060,10 +3060,12 @@ module Capybara
       # so this only short-circuits genuinely idle loops.
       def polling?
         # Background-thread work (workers, EventSource, MessageBus long-poll) keeps the settle loop alive even when settle_gen
-        # is otherwise idle.
+        # is otherwise idle — and, where a window `window.open` made in this isolate is open, an image a document's load
+        # waits for: a pop-up's, whose `w.onload` a wait of its opener's is for (the page's own load its visit waits out).
         # (…a worker's work under way, not a message posted to one that may never answer: a worker that only listens kept every
         # failing matcher waiting out its wait)
         return true if worker_drive_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || window_tasks_takeable? || websocket_pending?
+        return true if image_fetches_pending? && !@runtime.window_realm_meta.empty?
         # …and a worker whose own timers are still to fire counts as the page's own do: it runs on its own thread and
         # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
         # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
@@ -3138,7 +3140,8 @@ module Capybara
           @last_tick_ts = now
           effective_step = step_ms || horizon_fast_forward_step
           if (step_ms || @timers_active || (!@workers.empty? && worker_next_timer_at)) && effective_step > 0
-            pace_image_fetches(effective_step)
+            # (…an explicit step — a `sleep`'s, a server's — is real time spent already: none of it paced again)
+            pace_image_fetches(step_ms ? 0 : effective_step)
             # When the page has work runnable NOW (a rAF chain / timer burst — set
             # by `horizon_fast_forward_step`), run the poll's worth of virtual time
             # in frame-sized chunks so the page renders at real-browser cadence
@@ -8914,15 +8917,20 @@ module Capybara
         end
         deliver_image_fetches
       end
-      # Keep the virtual clock from outrunning the image fetches in flight: before it moves `ms` on, wait — at most `ms` of
-      # real time, as a browser's clock would take — for their threads, each result delivered as it is done, landing at
-      # its own time on the clock (an image its server takes 100 ms over loads before a 700 ms timer, as in a browser). No
-      # wait with none in flight; the visit's wait for the ones its load waits on is whole (`await_document_load`).
+      # Keep the virtual clock from outrunning the image fetches in flight: before it moves `ms` on, wait for their threads
+      # — each result delivered as it is done, landing at its own time on the clock (an image its server takes 100 ms over
+      # loads before a 700 ms timer, as in a browser) — for whatever of those `ms` real time has not passed since the clock
+      # last moved: a test's `sleep` or a polling matcher's wait spent it already, and pays none of it twice. No wait with
+      # none in flight; the visit's wait for the ones its load waits on is whole (`await_document_load`).
       def pace_image_fetches(ms)
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        since = @clock_moved_at ? now - @clock_moved_at : 0.0
+        @clock_moved_at = now
         return unless image_fetches_pending?
 
-        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + (ms / 1000.0)
+        deadline = now + [(ms / 1000.0) - since, 0.0].max
         await_image_fetch(deadline) while image_fetches_pending? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+        @clock_moved_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       end
       # Shape a thread result into what `imageFetchLand` reads, stashing the bitmap for transfer HERE, on the main thread,
       # only for results that actually deliver.

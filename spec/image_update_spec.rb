@@ -214,4 +214,21 @@ RSpec.describe 'update the image data' do
     poll_until { s.evaluate_script('log.length') >= 1 }
     expect(requests).to include('/b.png')
   end
+
+  # A test's `sleep` while an image is in flight costs its own time once: the clock it moves already waited that long in
+  # real time for the image (rv `hang`; f218cf265 paced it again, twice the time).
+  it "pays a test's sleep once while an image is in flight" do
+    app = lambda {|env|
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] if env['PATH_INFO'] == '/'
+
+      sleep 2
+      [200, {'content-type' => 'image/png'}, [File.binread(File.join(__dir__, 'wpt/images/green-1x1.png'))]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script("window.i = new Image(); i.src = '/slow.png'; setTimeout(() => {}, 5000)")
+    t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    sleep 1
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).to be < 1.5
+  end
 end
