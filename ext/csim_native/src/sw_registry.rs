@@ -163,8 +163,8 @@ enum Step {
 
 // A Register, Update or Unregister job (Service Workers §8 "Create Job"), queued at its scope until the jobs before it
 // there have finished: what it asks — the script (an Update job's: its registration's newest worker's, as update() found
-// it), the updateViaCache mode (none for an Update job's) and the worker type — and, for the host running it, the client
-// realm that asked (0: the window; a worker's: the negative of its handle) and its origin key. As it runs: its run's place among the
+// it), the updateViaCache mode (none for an Update job's) and the worker type — and, for the host running it, the origin
+// key of the client that asked. As it runs: its run's place among the
 // tasks queued (none where it is not queued), the registration Update found (0 for none yet), what it waits for, the
 // worker its script is byte-checked against, and whether its promises settled.
 pub(crate) struct Job {
@@ -176,7 +176,6 @@ pub(crate) struct Job {
     update_via_cache: Option<String>,
     script_type: String,
     registration: u32,
-    realm: i64,
     creator_key: String,
     queued: Option<u32>,
     waits: Option<JobWait>,
@@ -876,7 +875,7 @@ impl Registry {
     fn job_fetched(&mut self, partition: u64, id: u32, error: Option<&str>, changed: bool, checked: Option<f64>, out: &mut Vec<Cmd>) -> Option<u32> {
         let p = self.existing(partition)?;
         let j = p.job(id)?;
-        let (site, scope, mode, registration, realm) = (j.site.clone(), j.scope.clone(), j.update_via_cache.clone(), j.registration, j.realm);
+        let (site, scope, mode, registration) = (j.site.clone(), j.scope.clone(), j.update_via_cache.clone(), j.registration);
         if error.is_none() && checked.is_some() {
             self.at(partition, &site, &scope).last_update_check = checked;
         }
@@ -891,12 +890,7 @@ impl Registry {
                 }
                 self.partition(partition).conclude(id, Outcome { registration, ..Outcome::default() }, out);
             }
-            None => {
-                if realm >= 0 {
-                    out.push(Cmd::ReportClient(realm));
-                }
-                return Some(self.at(partition, &site, &scope).id);
-            }
+            None => return Some(self.at(partition, &site, &scope).id),
         }
         None
     }
@@ -976,7 +970,6 @@ pub(crate) fn schedule_job_for_ruby(
         update_via_cache,
         script_type,
         registration: 0,
-        realm,
         creator_key,
         queued: None,
         waits: None,
@@ -1421,8 +1414,6 @@ pub(crate) enum Cmd {
     QueueJob(u32),
     // The job's script fetched.
     Fetch(u32),
-    // The realm that asked for the job (0: the window) announced as a client, before its worker evaluates.
-    ReportClient(i64),
     // Every realm's promises waiting on the job settled: the registration, its scope, the error's name and message,
     // whether an Unregister job unregistered one.
     Settled(u32, u32, String, Option<&'static str>, Option<String>, bool),
@@ -1443,7 +1434,6 @@ impl IntoValue for Cmd {
             Cmd::RetryNavs => ("retry_navs",).into_value_with(ruby),
             Cmd::QueueJob(id) => ("queue_job", id).into_value_with(ruby),
             Cmd::Fetch(id) => ("fetch", id).into_value_with(ruby),
-            Cmd::ReportClient(realm) => ("report_client", realm).into_value_with(ruby),
             Cmd::Settled(id, registration, scope, error, message, unregistered) => {
                 ("settled", id, registration, scope, error, message, unregistered).into_value_with(ruby)
             }
@@ -2147,12 +2137,12 @@ mod tests {
         // (…an Unregister job at a scope the map holds nothing at answers false; the next job at its scope, none, queued)
         assert_eq!(run_job_for_ruby(p, c), [Cmd::Settled(c, 0, "t/".into(), None, None, false)]);
         assert!(job_for_ruby(p, c).is_none());
-        // (…a Register job fetches its script, a changed one announcing its client and spawning its worker, which it waits on)
+        // (…a Register job fetches its script, a changed one spawning its worker, which it waits on)
         assert_eq!(run_job_for_ruby(p, a), [Cmd::Fetch(a)]);
         assert_eq!(job_for_ruby(p, a), Some(("s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), String::new(), String::new())));
         let (made, cmds) = job_fetched_for_ruby(p, a, None, true, None);
         assert!(made.is_some_and(|id| id != 0));
-        assert_eq!(cmds, [Cmd::ReportClient(0)]);
+        assert!(cmds.is_empty());
         worker_new(p, 4, String::new(), "s/a.js".into(), "classic".into(), Vec::new(), 0);
         assert!(job_spawned_for_ruby(p, a, Some(4)).is_empty());
         assert_eq!(registered_at_for_ruby(p, String::new(), "s/".into()), 0);

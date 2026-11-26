@@ -6442,12 +6442,6 @@ module Capybara
         @workers[-realm]&.dig(:inbox)&.push({kind: 'sw_told', fn: 'swControllerChanged', args: []})
       end
 
-      # The realm the host knows as `realm` (0: its window) announced as a client, where it is still alive.
-      private def sw_report_client(realm)
-        browser, realm = sw_window_realm(realm)
-        browser&.realm_told(realm, 'swReportClient')
-      end
-
       # The job's worker `handle` evaluated its script, `ok` or not (`message`).
       private def sw_job_evaluated(handle, ok, message) = sw_run(Native.sw_job_evaluated(@sw_partition, handle.to_i, !!ok, message.to_s))
 
@@ -6480,7 +6474,6 @@ module Capybara
             sw_tell_realms('swRegistrationUpdateFound', n)
           when 'activate'      then sw_update_worker_state(n, 'activating') { @workers[n]&.dig(:inbox)&.push({kind: 'sw_activate'}) }
           when 'controller'    then sw_controller_told(n, *args)
-          when 'report_client' then sw_report_client(n)
           when 'queue_step'    then @runtime.call('swQueueStep', n)
           when 'continue'      then sw_run(Native.sw_continue(@sw_partition, n))
           when 'try_clear'     then try_clear_uninstalls
@@ -9843,7 +9836,7 @@ module Capybara
           # The install handler registered Static Routing API rules (addRoutes) — the
           # rules themselves live in the worker isolate (evaluated at its dispatch
           # point); the host records only their EXISTENCE, which keeps a router SW
-          # with no fetch handler dispatchable (the has_fetch gates all consult it).
+          # with no fetch handler dispatchable (sw_registry.rs `Worker::intercepts` consults it).
           # Recorded on the worker's own thread at post time, like skip_waiting.
           router:         ->                  { Native.sw_set_worker_flag(@sw_partition, handle, 'router', true) },
           # …a Soft Update of its registration, come due (`sw_soft_update_later`).
