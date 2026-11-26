@@ -16,6 +16,7 @@ RSpec.describe 'web fonts loading in parallel' do
   def app
     ->(env) {
       if (m = env['PATH_INFO'].match(%r{\A/slow/(\d+)/(\w+)\.ttf\z}))
+        requested << m[2]
         sleep(m[1].to_i / 1000.0)
         next m[2] == 'ahem' ? [200, {'content-type' => 'font/ttf'}, [ahem]] : [404, {}, ['no']]
       end
@@ -25,6 +26,11 @@ RSpec.describe 'web fonts loading in parallel' do
 
   def ahem
     @ahem ||= File.binread(File.expand_path('wpt/fonts/Ahem.ttf', __dir__))
+  end
+
+  # (…the fonts the server was asked for, by name)
+  def requested
+    @requested ||= []
   end
 
   def head
@@ -73,6 +79,44 @@ RSpec.describe 'web fonts loading in parallel' do
       # `ready` is pending while the document loads, whether or not a face does.
       '/ready.html' => head + <<~HTML,
         <span id="s">abcd</span><script>document.fonts.ready.then(function () { L.push('ready'); });</script>
+      HTML
+      # Two faces of one family split by `unicode-range`: the one covering none of the text is never downloaded.
+      '/ranges.html' => head + <<~HTML,
+        <style>
+          @font-face { font-family: A; src: url(#{font(300)}); unicode-range: U+0-7F }
+          @font-face { font-family: A; src: url(#{font(300, 'han')}); unicode-range: U+4E00-4FFF }
+        </style><span id="s" style="font: 20px A, monospace">abcd</span>
+      HTML
+      # `stop()` while the face downloads: its download cancelled, the face failed a task later, the set loaded.
+      '/stop.html' => head + face(1000) + <<~HTML,
+        <script>
+          w();
+          document.fonts.ready.then(function () { L.push('ready:' + Array.from(document.fonts)[0].status); });
+          document.fonts.onloadingerror = function (e) { L.push('loadingerror:' + e.fontfaces.length); };
+          setTimeout(function () {
+            window.stop();
+            L.push('stopped:' + Array.from(document.fonts)[0].status);
+          }, 100);
+        </script>
+      HTML
+      # A `fallback` face whose first source fails after 2 s and whose second comes 1.5 s later: past 3.1 s of the face's
+      # load, though its own download took 1.5 s.
+      '/second.html' => head + %(<style>@font-face { font-family: A; src: url(#{font(2000, 'missing')}), url(#{font(1500)}); font-display: fallback }</style><span id="s" style="font: 20px A, monospace">abcd</span>),
+      # Two families whose faces name one URL, the text using one: the download is the other face's too (CSS Font Loading
+      # leaves faces of one URL to the fetch; Chrome and Firefox both load the unused one with it, csim-bench font7 `sh1`).
+      '/shared.html' => head + <<~HTML,
+        <style>@font-face { font-family: A; src: url(/slow/300/ahem.ttf?shared) } @font-face { font-family: B; src: url(/slow/300/ahem.ttf?shared) }</style>
+        <span id="s" style="font: 20px A, monospace">abcd</span>
+        <script>document.fonts.onloadingdone = function (e) { L.push('loadingdone:' + e.fontfaces.length); };</script>
+      HTML
+      # A preloaded face: the preload's response taken, the face's load completes as a task all the same.
+      '/preload.html' => head + <<~HTML,
+        <link rel="preload" as="font" crossorigin href="/slow/0/ahem.ttf?p"><style>@font-face { font-family: A; src: url(/slow/0/ahem.ttf?p) }</style>
+        <span id="s" style="font: 20px A, monospace">abcd</span>
+        <script>
+          L.push('inline:' + Array.from(document.fonts)[0].status);
+          setTimeout(function () { L.push('task:' + w() + ':' + Array.from(document.fonts)[0].status); }, 50);
+        </script>
       HTML
       # A script's FontFace `load()`: `loading` until its download lands.
       '/script.html' => head + <<~HTML
@@ -133,6 +177,35 @@ RSpec.describe 'web fonts loading in parallel' do
 
   it 'holds ready pending until the document is completely loaded' do
     expect(log(visit('/ready.html'))).to match(['dcl@0', end_with(':loaded'), 'ready'])
+  end
+
+  it 'downloads no face whose unicode-range covers none of the text' do
+    s = visit('/ranges.html')
+    expect(log(s).last).to match(at('load', 300, 80))
+    expect(s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.status; })")).to eq(%w[loaded unloaded])
+    expect(requested).to eq(['ahem'])
+  end
+
+  it 'fails a face whose download the document\'s stop() cancelled, a task later' do
+    s = visit('/stop.html')
+    expect(log(s)).to include('stopped:loading', 'ready:error', 'loadingerror:1')
+    expect(s.evaluate_script("document.fonts.status")).to eq('loaded')
+    expect(s.evaluate_script('w()')).not_to eq(80)
+  end
+
+  it 'times a face\'s font-display periods from its load\'s beginning, its earlier sources\' downloads counted in' do
+    expect(log(visit('/second.html')).last).to match(at('load', 3500, :fallback))
+  end
+
+  it 'loads a face that names the URL another face downloaded with it' do
+    s = visit('/shared.html')
+    expect(log(s)).to include('loadingdone:2')
+    expect(s.evaluate_script("Array.from(document.fonts).map(function (f) { return f.status; })")).to eq(%w[loaded loaded])
+    expect(requested).to eq(['ahem'])
+  end
+
+  it 'completes a preloaded face\'s load as a task' do
+    expect(log(visit('/preload.html'))).to include('inline:loading', 'task:80:loaded')
   end
 
   it 'keeps a script face loading until its download lands' do

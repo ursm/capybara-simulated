@@ -441,20 +441,37 @@ fn process_plugin(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: N
 // else a controlling service worker's answer, else a `blob:` URL's bytes, else the network's; the answer's bytes the
 // file where they are a font's (`judge`: a network error, an empty body none) — the host's decoding of them — and the
 // entry of what answered filed, initiator `css`, as Chrome files a font a stylesheet pulled in (none for a preload's).
-// The network's is a download begun in parallel (CSS Font Loading "load()": "continue executing the rest of this
-// algorithm asynchronously"): the host's slot (browser.rb `font_fetch_start`), its server's sleeps counted as it is made,
-// which lands as a task that much later (`font_fetch_land`) — or the host's answer at once, a file its cache has. One the
-// host cannot land as a task (a worker's, which has no load to hold) is made where it is asked, as the others are.
+// Each lands as a task (CSS Font Loading "load()": "continue executing the rest of this algorithm asynchronously … when
+// the load operation completes … queue a task", `font_fetch_land`): the network's a download begun in parallel — the
+// host's slot (browser.rb `font_fetch_start`), its server's sleeps counted as it is made, landing that much later — a
+// preload's and a controlling service worker's answered now, landing at once. At once, as Chrome loads them: a `data:` or
+// `blob:` URL's, and a file the host's font cache has; and the network's where the host makes no slot.
 pub(crate) enum FontFetch {
     Done(Option<String>),
     Flight(FontFlight),
 }
-// …a download under way: the host's slot, how many ms after it began its response comes in, and its request, which its
-// entry is filed of as it lands.
+// …one under way: its number (the host's slot's, where it has one), how many ms after it began it comes in, what it is
+// — a slot, a file already answered, one its document's abort cancelled — and its request, which a slot's entry is filed
+// of as it lands.
 pub(crate) struct FontFlight {
-    pub(crate) slot: u32,
+    pub(crate) id: u32,
     pub(crate) due: f64,
+    leg: FontLeg,
     request: Request,
+}
+enum FontLeg {
+    Slot,
+    Answered(Option<String>),
+    Cancelled,
+}
+impl FontFlight {
+    fn answered(file: Option<String>, request: Request) -> FontFetch {
+        FontFetch::Flight(FontFlight { id: next_slot(), due: 0.0, leg: FontLeg::Answered(file), request })
+    }
+    // Whether its document's abort cancelled it: its face's load failed, none of its other sources tried.
+    pub(crate) fn cancelled(&self) -> bool {
+        matches!(self.leg, FontLeg::Cancelled)
+    }
 }
 pub(crate) fn font_fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, referrer: Option<&str>, host: v8::Local<'_, v8::Function>) -> Result<FontFetch, Terminated> {
     use crate::subresource_judge::{facts_of, judge, Consumer, J_FONT, SRC_NETWORK, SRC_SW_SYNC, S_EMPTY, V_OK};
@@ -465,13 +482,14 @@ pub(crate) fn font_fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: 
     let doc = call(scope, host, H_DOCUMENT, &[])?.and_then(|d| v8::Local::new(scope, d).integer_value(scope)).and_then(NodeId::from_i64);
     let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), integrity: String::new(), preload: None, load: 0, holds: None, initiator: "css", started };
     if let Some(preloaded) = preloaded(scope, host, &r)? {
-        let Some(response) = preloaded else { return Ok(FontFetch::Done(None)) };
+        let Some(response) = preloaded else { return Ok(FontFlight::answered(None, r)) };
         let facts = response.facts();
         let body = response.into_body();
         if judge(&consumer, SRC_NETWORK | empty(&body), &facts) & V_OK == 0 {
-            return Ok(FontFetch::Done(None));
+            return Ok(FontFlight::answered(None, r));
         }
-        return file_of_bytes(scope, host, body).map(FontFetch::Done);
+        let file = file_of_bytes(scope, host, body)?;
+        return Ok(FontFlight::answered(file, r));
     }
     let args = request_args(scope, &r);
     if let Some(answer) = call(scope, host, H_SW_ANSWER, &args)? {
@@ -481,10 +499,11 @@ pub(crate) fn font_fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: 
         let facts = facts_of(scope, answer_obj, J_FONT, SRC_SW_SYNC);
         let ok = judge(&consumer, SRC_SW_SYNC | bytes.as_deref().map_or(S_EMPTY, empty), &facts) & V_OK != 0;
         file(scope, host, &r, Answered::Worker(answer))?;
-        return match bytes.filter(|_| ok) {
-            Some(bytes) => file_of_bytes(scope, host, bytes).map(FontFetch::Done),
-            None => Ok(FontFetch::Done(None)),
+        let file = match bytes.filter(|_| ok) {
+            Some(bytes) => file_of_bytes(scope, host, bytes)?,
+            None => None,
         };
+        return Ok(FontFlight::answered(file, r));
     }
     match crate::fetch_rules::fetch_route(url, 0, "") {
         crate::fetch_rules::ROUTE_BLOB => {
@@ -501,7 +520,7 @@ pub(crate) fn font_fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: 
             match call(scope, host, H_FONT_START, &start)?.map(|g| v8::Local::new(scope, g)) {
                 Some(slept) if slept.is_number() => {
                     let due = slept_ms(scope, slept);
-                    return Ok(FontFetch::Flight(FontFlight { slot, due, request: r }));
+                    return Ok(FontFetch::Flight(FontFlight { id: slot, due, leg: FontLeg::Slot, request: r }));
                 }
                 Some(answer) if answer.is_object() => return font_answered(scope, host, &r, answer).map(FontFetch::Done),
                 _ => {}
@@ -520,21 +539,29 @@ pub(crate) fn font_fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: 
         }
     }
 }
-// …a download's response as it lands, its slot taken (its cookies stored), the file it gave — none where it gave none —
-// and its entry filed, timed from as it began to now.
-pub(crate) fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, flight: &FontFlight) -> Result<Option<String>, Terminated> {
-    let slot = v8::Integer::new_from_unsigned(scope, flight.slot).into();
-    match call(scope, host, H_SCRIPT_TAKE, &[slot])?.map(|g| v8::Local::new(scope, g)) {
-        Some(answer) => font_answered(scope, host, &flight.request, answer),
-        None => {
-            file(scope, host, &flight.request, Answered::Network(None))?;
-            Ok(None)
+// …its file as it lands, none where it gave none: a slot's response taken (its cookies stored) and its entry filed, timed
+// from as it began to now — one cancelled filed as a network error.
+pub(crate) fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, flight: FontFlight) -> Result<Option<String>, Terminated> {
+    match flight.leg {
+        FontLeg::Answered(file) => Ok(file),
+        FontLeg::Cancelled => file(scope, host, &flight.request, Answered::Network(None)).map(|()| None),
+        FontLeg::Slot => {
+            let slot = v8::Integer::new_from_unsigned(scope, flight.id).into();
+            match call(scope, host, H_SCRIPT_TAKE, &[slot])?.map(|g| v8::Local::new(scope, g)) {
+                Some(answer) => font_answered(scope, host, &flight.request, answer),
+                None => file(scope, host, &flight.request, Answered::Network(None)).map(|()| None),
+            }
         }
     }
 }
-// …or let go of, unanswered.
-pub(crate) fn font_fetch_drop(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, flight: &FontFlight) -> Result<(), Terminated> {
-    let slot = v8::Integer::new_from_unsigned(scope, flight.slot).into();
+// …or let go of, unanswered (`cancel`: its document's abort — HTML "abort a document": "cancel any instances of the fetch
+// algorithm" — which lands it as a network error; else its document gone, nothing to land it).
+pub(crate) fn font_fetch_drop(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, flight: &mut FontFlight, cancel: bool) -> Result<(), Terminated> {
+    let leg = std::mem::replace(&mut flight.leg, if cancel { FontLeg::Cancelled } else { FontLeg::Answered(None) });
+    if !matches!(leg, FontLeg::Slot) {
+        return Ok(());
+    }
+    let slot = v8::Integer::new_from_unsigned(scope, flight.id).into();
     call(scope, host, H_SCRIPT_FORGET, &[slot]).map(drop)
 }
 // …the host's answer to a font's request, `{path, meta}`: the file it decoded, and its response's facts for the entry.

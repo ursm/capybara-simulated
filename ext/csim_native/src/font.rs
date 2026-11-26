@@ -43,12 +43,16 @@ pub(crate) struct FontMetrics {
 }
 
 // One face of a `unicode-range` split: its registered handle, the ranges it covers (None: every code point), and its
-// vertical metrics in ems — None where its table carries none.
+// vertical metrics in ems — None where its table carries none. Or a face no character has asked for yet (`wanted`: its
+// realm and its place in that realm's face list), whose file is not loaded until one does (CSS Fonts 4 §4.5: a face
+// whose range covers none of the text is not downloaded): a character it covers is measured past it, by the next member
+// that covers it, and asks for it (`take_wanted`).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StackMember {
     pub(crate) ranges: Option<Vec<(u32, u32)>>,
     pub(crate) handle: i32,
     pub(crate) vertical: Option<VerticalMetrics>,
+    pub(crate) wanted: Option<(i32, usize)>,
 }
 
 // A face's ascent, descent and line gap, in ems.
@@ -78,7 +82,21 @@ impl FontMetrics {
     // The face of a split that a character takes — the first member covering it — or None, where it takes this face's
     // own (no split, or no member covers it).
     fn member_for(&self, cp: u32) -> Option<&StackMember> {
-        self.split.as_ref()?.iter().find(|m| m.covers(cp))
+        for m in self.split.as_ref()? {
+            if !m.covers(cp) {
+                continue;
+            }
+            match m.wanted {
+                Some(face) => WANTED.with(|w| {
+                    let mut w = w.borrow_mut();
+                    if !w.contains(&face) {
+                        w.push(face);
+                    }
+                }),
+                None => return Some(m),
+            }
+        }
+        None
     }
     // The registered face a character takes in a split — its covering member's handle — or None for this face's own.
     pub(crate) fn member_handle(&self, cp: u32) -> Option<i32> {
@@ -358,6 +376,18 @@ fn joined(cp: u32, prev: i64) -> bool {
 thread_local! {
     static FONTS: RefCell<Vec<Option<FontMetrics>>> = const { RefCell::new(Vec::new()) };
     static FONT_IDX: RefCell<HashMap<String, i32>> = RefCell::new(HashMap::new());
+    // The faces of a split a character asked for that no one has asked to load yet (`StackMember::wanted`).
+    static WANTED: RefCell<Vec<(i32, usize)>> = const { RefCell::new(Vec::new()) };
+}
+
+// The faces of realm `cid`'s list a character measured has asked for, by their places, asked no more.
+pub(crate) fn take_wanted(cid: i32) -> Vec<usize> {
+    WANTED.with(|w| {
+        let mut w = w.borrow_mut();
+        let (mine, others): (Vec<_>, Vec<_>) = w.drain(..).partition(|&(realm, _)| realm == cid);
+        *w = others;
+        mine.into_iter().map(|(_, k)| k).collect()
+    })
 }
 
 // The SFNT a font file holds: a WOFF 1.0 container's tables inflated, a WOFF 2.0 one's Brotli stream decompressed

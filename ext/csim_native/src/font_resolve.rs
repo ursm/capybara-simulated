@@ -42,7 +42,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "fontFamilyHandle", font_family_handle, context_id);
     register(scope, ns, "fontFaceFile", font_face_file, context_id);
     register(scope, ns, "fontFetchLand", font_fetch_land, context_id);
+    register(scope, ns, "fontFacesWanted", font_faces_wanted, context_id);
     register(scope, ns, "fontFetchesForget", font_fetches_forget, context_id);
+    register(scope, ns, "fontFetchesAbort", font_fetches_abort, context_id);
     register(scope, ns, "fontGeneration", font_generation, context_id);
 }
 
@@ -95,10 +97,14 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
         return Ok(known);
     }
     let faces = realm(scope, cid).font_faces.clone();
+    // (…a face whose `unicode-range` restricts it, which no character has asked for yet: loaded only once one does —
+    // CSS Fonts 4 §4.5, "if the unicode-range of a font face does not cover any of the characters … it is not
+    // downloaded", Chrome and Firefox csim-bench font7 `f10`, `u2` — a member of the split that asks as it is measured)
+    let unasked = |arena: &crate::dom::RealmArena, k: usize| faces[k].ranges.is_some() && arena.face_files.get(k).is_none_or(Option::is_none);
     // (…the stack's own face: the one face of the first family that has any, where it has a file)
     let own = match crate::font_faces::pick(&faces, family, bucket, false).first() {
-        Some(&k) => indexed_file(scope, cid, k, host)?.file().map(|path| (k, path)),
-        None => None,
+        Some(&k) if !unasked(realm(scope, cid), k) => indexed_file(scope, cid, k, host)?.file().map(|path| (k, path)),
+        _ => None,
     };
     let overrides = own.as_ref().map_or([None; 3], |&(k, _)| faces[k].overrides);
     let mut handle = None;
@@ -106,18 +112,23 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
         // The candidates a run's characters pick from — each character the FIRST whose range covers it, so a
         // `size-adjust` face scoped to A–Z reshapes only those glyphs — in pick order, the family's SYSTEM face the last
         // resort: Chrome never renders a code point through a face that excludes it.
-        let mut candidates: Vec<(Option<usize>, String)> = Vec::new();
+        let mut candidates: Vec<(Option<usize>, Option<String>)> = Vec::new();
         let mut restricted = false;
         for k in crate::font_faces::pick(&faces, family, bucket, true) {
+            if unasked(realm(scope, cid), k) {
+                restricted = true;
+                candidates.push((Some(k), None));
+                continue;
+            }
             let Some(path) = indexed_file(scope, cid, k, host)?.file() else { continue };
             restricted |= faces[k].ranges.is_some();
-            candidates.push((Some(k), path));
+            candidates.push((Some(k), Some(path)));
         }
         if restricted {
             if let Some(path) = system_file(scope, host, family, bucket)?.filter(|p| crate::font::register_path(p) >= 0) {
-                candidates.push((None, path));
+                candidates.push((None, Some(path)));
             }
-            handle = Some(stack_handle(&faces, own.as_ref().map(|&(k, _)| k), &candidates));
+            handle = Some(stack_handle(cid, &faces, own.as_ref().map(|&(k, _)| k), &candidates));
         }
     }
     let handle = match handle {
@@ -140,12 +151,18 @@ fn family_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: &str, bucket:
 // `size-adjust` — in pick order with its `@font-face` metric overrides (its vertical metrics raise the line a run's
 // characters select it on, font.rs `run_vmax`) and its ranges. The stack's own face is the stack's primary — what a
 // character no candidate covers is measured by, and what a `ch` is (style_fonts.rs) — or the system face, the candidate
-// of no face, where it has none. -1 where any candidate has no file native reads, or none is the stack's own.
-fn stack_handle(faces: &[crate::font_faces::FaceRecord], own: Option<usize>, candidates: &[(Option<usize>, String)]) -> i32 {
+// of no face, where it has none. -1 where any candidate has no file native reads, or none is the stack's own. A candidate
+// of no file (`None`) is one no character has asked for: a member that asks as one does (`StackMember::wanted`).
+fn stack_handle(cid: i32, faces: &[crate::font_faces::FaceRecord], own: Option<usize>, candidates: &[(Option<usize>, Option<String>)]) -> i32 {
     let mut primary = -1;
     let mut members = Vec::new();
     for (k, path) in candidates {
         let face = k.map(|k| &faces[k]);
+        let ranges = face.and_then(|f| f.ranges.clone());
+        let Some(path) = path else {
+            members.push(crate::font::StackMember { ranges, handle: -1, vertical: None, wanted: k.map(|k| (cid, k)) });
+            continue;
+        };
         let h = crate::font::register_scaled(crate::font::register_path(path), face.map_or(1.0, |f| f.size_adjust));
         if h < 0 {
             return -1;
@@ -155,7 +172,7 @@ fn stack_handle(faces: &[crate::font_faces::FaceRecord], own: Option<usize>, can
         }
         let overrides = face.map_or([None; 3], |f| f.overrides);
         let vertical = crate::font::with_font(h, |fm| fm.face(overrides).map(|(v, _, _)| v)).flatten();
-        members.push(crate::font::StackMember { ranges: face.and_then(|f| f.ranges.clone()), handle: h, vertical });
+        members.push(crate::font::StackMember { ranges, handle: h, vertical, wanted: None });
     }
     crate::font::register_stack(primary, members)
 }
@@ -201,8 +218,8 @@ fn font_face_file(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     crate::font_files::answer_file(scope, &mut rv, file);
 }
 
-// __dom.fontFetchLand(slot, subresources, settle, system) -> the FontFaces whose `load()` the download of the host's slot
-// `slot` settles, `[face, loaded, …]`: CSS Font Loading "load()", "when the load operation completes … queue a task" — this
+// __dom.fontFetchLand(id, subresources, settle, system) -> the FontFaces whose `load()` the download `id` (font_files.rs; a
+// host slot's number, where it has one) settles, `[face, loaded, …]`: CSS Font Loading "load()", "when the load operation completes … queue a task" — this
 // task, the document's load waiting for it (bridge.entry.js `queueFontLand`). Its file kept (font_files.rs `land`), what the
 // realm's faces read from moved: the faces each family stack takes forgotten, the layout due again (`GEN_DIRTY`) — text
 // laid out with the fallback measured with the face now, where it came within its `font-display` periods — and every face
@@ -211,9 +228,9 @@ fn font_face_file(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = host(&args, 1) else { return };
     let host = Host { landing: true, ..host };
-    let slot = args.get(0).uint32_value(scope).unwrap_or(0);
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    let Ok(Some(landed)) = crate::font_files::land(scope, cid, slot, host.subresources) else { return };
+    let Ok(Some(landed)) = crate::font_files::land(scope, cid, id, host.subresources) else { return };
     let arena = realm(scope, cid);
     let reading: Vec<usize> = (0..arena.font_faces.len())
         .filter(|&k| arena.font_faces[k].sources.iter().any(|s| matches!(s, crate::font_faces::FaceSource::Url(u) if *u == landed.url)))
@@ -240,11 +257,47 @@ fn font_fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(v8::Array::new_with_elements(scope, &settled).into());
 }
 
+// __dom.fontFacesWanted(subresources, settle, system): the faces of the realm's list a character measured has asked for since
+// (font.rs `take_wanted`: a `unicode-range` face, loaded only once text uses it) asked for now — its load begun
+// (`indexed_file`) — and the faces each family stack takes made again of them; one whose file was there at once moves
+// what the realm's faces read from (the layout due again, as a landing does).
+fn font_faces_wanted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(host) = host(&args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let wanted = crate::font::take_wanted(cid);
+    if wanted.is_empty() {
+        return;
+    }
+    let mut there = false;
+    for k in wanted {
+        match indexed_file(scope, cid, k, &host) {
+            Ok(got) => there |= got.file().is_some(),
+            Err(Terminated) => return,
+        }
+    }
+    let arena = realm(scope, cid);
+    arena.family_faces.clear();
+    if there {
+        arena.font_files.generation = arena.font_files.generation.wrapping_add(1);
+        arena.generations.bump(crate::dom::GEN_DIRTY);
+    }
+}
+
 // __dom.fontFetchesForget(subresources) — the realm's downloads under way let go of: a new document begins in it.
 fn font_fetches_forget(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
     let cid = realm_id(scope, &args);
-    let _ = crate::font_files::forget_flights(scope, cid, host);
+    let _ = crate::font_files::drop_flights(scope, cid, host, false);
+}
+// __dom.fontFetchesAbort(subresources) -> the numbers of the realm's downloads under way, cancelled by its document's abort
+// (HTML "abort a document": "cancel any instances of the fetch algorithm"): each to land at once as a network error, its
+// faces failed — in a task, as their load's completion is (Firefox `st1`: `loading` after `stop()`, `error` a task later;
+// Chrome errors them as it stops) — bridge.entry.js `wakeFontLands`.
+fn font_fetches_abort(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let Ok(ids) = crate::font_files::drop_flights(scope, cid, host, true) else { return };
+    rv.set(crate::dom::f64_array(scope, &ids.into_iter().map(f64::from).collect::<Vec<_>>()).into());
 }
 
 // __dom.fontGeneration(set) -> the generation of what the realm's faces resolve by beside its rules: what its FontFaceSet

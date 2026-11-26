@@ -18,9 +18,11 @@ pub(crate) struct FontFiles {
     // The downloads under way, by URL: each its flight, when it began on the clock, and the FontFaces whose `load()` waits
     // for it — `[face, state]`, script's faces (`ffFile`).
     flights: HashMap<String, Flight>,
-    // …and how long each that came in took, past its beginning, in ms: what a face's `font-display` periods are held
-    // against (`FaceRecord::usable_for`) — none for a file there at once.
+    // …and how long each that came in took, past its beginning, in ms — none for a file there at once: what a face's
+    // `font-display` periods are held against (`FaceRecord::usable_for`), with the time of the sources it tried before.
     took: HashMap<String, f64>,
+    // …and those its document's abort cancelled: a face reading from one failed, none of its other sources tried.
+    cancelled: std::collections::HashSet<String>,
     // The generation of what the realm's faces are read from, which moves as a download lands: what the faces a family
     // resolves to are keyed on beside the rules and the FontFaceSet (font-metrics.js `natFontGen`).
     pub(crate) generation: u32,
@@ -55,11 +57,13 @@ impl FaceFile {
     }
 }
 
-// …and one source's: a file (with how long its download took, 0 for one there at once), none, or its download under way.
+// …and one source's: a file, or none, each with how long its download took (0 for one there at once); its download under
+// way; or cancelled by its document's abort.
 enum Got {
     File(String, f64),
-    None,
+    None(f64),
     Pending,
+    Cancelled,
 }
 
 // The file a source gives that native reads (`font::register_path`, which keeps what it parsed), or none — a download
@@ -77,6 +81,9 @@ fn source_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: &FaceSource, 
     if kind == URL && files.flights.contains_key(value) {
         return Ok(Got::Pending);
     }
+    if kind == URL && files.cancelled.contains(value) {
+        return Ok(Got::Cancelled);
+    }
     let path = match files.files.get(&key).cloned() {
         Some(path) => path,
         None => {
@@ -85,15 +92,15 @@ fn source_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: &FaceSource, 
                     FontFetch::Done(path) => path,
                     FontFetch::Flight(fetch) => {
                         let arena = realm(scope, cid);
-                        let (slot, due, began) = (fetch.slot, fetch.due, arena.event_loop.clock);
+                        let (id, due, began) = (fetch.id, fetch.due, arena.event_loop.clock);
                         arena.font_files.flights.insert(url.clone(), Flight { fetch, began, waiters: Vec::new() });
-                        let args = [v8::Integer::new_from_unsigned(scope, slot).into(), v8::Number::new(scope, due).into()];
+                        let args = [v8::Integer::new_from_unsigned(scope, id).into(), v8::Number::new(scope, due).into()];
                         crate::subresource_obtain::call(scope, host, crate::subresource_obtain::H_FONT_LAND, &args)?;
                         return Ok(Got::Pending);
                     }
                 },
                 FaceSource::Local(name) => {
-                    let (Some(v), Some(b)) = (v8::String::new(scope, name), v8::String::new(scope, bucket)) else { return Ok(Got::None) };
+                    let (Some(v), Some(b)) = (v8::String::new(scope, name), v8::String::new(scope, bucket)) else { return Ok(Got::None(0.0)) };
                     let got = crate::subresource_obtain::call(scope, host, crate::subresource_obtain::H_LOCAL_FONT, &[v.into(), b.into()])?;
                     crate::subresource_obtain::text_of(scope, got)
                 }
@@ -103,13 +110,16 @@ fn source_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: &FaceSource, 
         }
     };
     let took = if kind == URL { realm(scope, cid).font_files.took.get(value).copied().unwrap_or(0.0) } else { 0.0 };
-    Ok(path.filter(|p| crate::font::register_path(p) >= 0).map_or(Got::None, |p| Got::File(p, took)))
+    Ok(path.filter(|p| crate::font::register_path(p) >= 0).map_or(Got::None(took), |p| Got::File(p, took)))
 }
 // …and what a face's sources come to: a buffer face's own `file`, else the first of its `sources` that gives one — a
 // browser tries each in turn: a `src` listing woff2, then woff, then ttf takes the first that comes; a `local()` name
 // looked up at the weight / style `bucket` its descriptors name — the face read from it where it came within `usable_for`
-// ms of its download's beginning (its `font-display` periods). Under way where the first source not yet known is a
-// download under way — the FontFace `waiter` (`[face, state]`), where given, waiting for it.
+// ms of the face's load beginning (its `font-display` periods: CSS Fonts 4 §4.9.1, the font display timeline starts as
+// the face is first used — the downloads of the sources it tried before counted in, Firefox `d1`; Chrome times the last
+// alone). Under way where the first source not yet known is a download under way — the FontFace `waiter`
+// (`[face, state]`), where given, waiting for it; failed, its other sources untried, where its document's abort cancelled
+// that download.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn face_file(
     scope: &mut v8::PinScope<'_, '_>,
@@ -126,10 +136,12 @@ pub(crate) fn face_file(
         let file = Some(file.to_owned()).filter(|p| crate::font::register_path(p) >= 0);
         return Ok(FaceFile::Settled { loaded: file.is_some(), file });
     }
+    let mut tried = 0.0;
     for source in sources {
         match source_file(scope, cid, source, bucket, referrer, host)? {
-            Got::File(path, took) => return Ok(FaceFile::Settled { file: (took <= usable_for).then_some(path), loaded: true }),
-            Got::None => {}
+            Got::File(path, took) => return Ok(FaceFile::Settled { file: (tried + took <= usable_for).then_some(path), loaded: true }),
+            Got::None(took) => tried += took,
+            Got::Cancelled => break,
             Got::Pending => {
                 if let (Some((face, state)), FaceSource::Url(url)) = (waiter, source) {
                     let (face, state) = (v8::Global::new(scope, face), v8::Global::new(scope, state));
@@ -150,26 +162,42 @@ pub(crate) struct Landed {
     pub(crate) url: String,
     pub(crate) waiters: Vec<(v8::Global<v8::Object>, v8::Global<v8::Object>)>,
 }
-pub(crate) fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, slot: u32, host: v8::Local<'_, v8::Function>) -> Result<Option<Landed>, Terminated> {
+pub(crate) fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>) -> Result<Option<Landed>, Terminated> {
     let files = &mut realm(scope, cid).font_files;
-    let Some(url) = files.flights.iter().find(|(_, f)| f.fetch.slot == slot).map(|(u, _)| u.clone()) else { return Ok(None) };
+    let Some(url) = files.flights.iter().find(|(_, f)| f.fetch.id == id).map(|(u, _)| u.clone()) else { return Ok(None) };
     let flight = files.flights.remove(&url).expect("just found");
-    let path = crate::subresource_obtain::font_fetch_land(scope, host, &flight.fetch)?;
+    let cancelled = flight.fetch.cancelled();
+    let path = crate::subresource_obtain::font_fetch_land(scope, host, flight.fetch)?;
     let arena = realm(scope, cid);
     let took = arena.event_loop.clock - flight.began;
     let files = &mut arena.font_files;
-    files.files.insert((URL, url.clone()), path);
-    files.took.insert(url.clone(), took);
+    if cancelled {
+        files.cancelled.insert(url.clone());
+    } else {
+        files.files.insert((URL, url.clone()), path);
+        files.took.insert(url.clone(), took);
+    }
     files.generation = files.generation.wrapping_add(1);
     Ok(Some(Landed { url, waiters: flight.waiters }))
 }
-// …and every download under way let go of: a new document begins in the realm, whose faces are its own to load.
-pub(crate) fn forget_flights(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>) -> Result<(), Terminated> {
-    let flights: Vec<Flight> = realm(scope, cid).font_files.flights.drain().map(|(_, f)| f).collect();
-    for flight in flights {
-        crate::subresource_obtain::font_fetch_drop(scope, host, &flight.fetch)?;
+// …and every download under way let go of: a new document begins in the realm, whose faces are its own to load
+// (`cancel` false: nothing lands them) — or its document's abort cancels them (`cancel`: each lands as a network error,
+// its landing task to run at once), their numbers.
+pub(crate) fn drop_flights(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, cancel: bool) -> Result<Vec<u32>, Terminated> {
+    let files = &mut realm(scope, cid).font_files;
+    let mut flights: Vec<(String, Flight)> = files.flights.drain().collect();
+    let mut ids = Vec::with_capacity(flights.len());
+    for (_, flight) in &mut flights {
+        crate::subresource_obtain::font_fetch_drop(scope, host, &mut flight.fetch, cancel)?;
+        ids.push(flight.fetch.id);
     }
-    Ok(())
+    let files = &mut realm(scope, cid).font_files;
+    if cancel {
+        files.flights.extend(flights);
+    } else {
+        files.cancelled.clear();
+    }
+    Ok(ids)
 }
 // …the answer an op gives of a face's file: the path, null for none, undefined while it is under way — nothing at all
 // once the script is terminated.
