@@ -295,7 +295,7 @@ module Capybara
         @default_host                 = self.class.default_host
         # The WPT runner serves EVERY host through one in-process Rack app (the
         # wptserve catch-all), so cross-origin test fixtures are genuinely local
-        # there. Setting this makes `url_is_local?` true for all hosts, so a
+        # there. Setting this makes `reaches_app?` true for all hosts, so a
         # cross-origin request is served by @app.call directly (no failing
         # net_http_fetch). Apps leave it off: another host's request goes to the
         # network first. The Driver captures this at session-construction time (when the
@@ -10128,7 +10128,7 @@ module Capybara
                   ct    = response_field(r, 'content-type')
                   body2 = r['body'].to_s
                 end
-                # Strict (unlike classic importScripts' `url_is_local?`-gated check, the
+                # Strict (unlike classic importScripts' `reaches_app?`-gated check, the
                 # Mastodon-Tesseract concession): Chrome enforces JS MIME for module
                 # scripts unconditionally.
                 raise "module import has an unsupported MIME type: #{abs}" unless js_mime_type?(ct)
@@ -13577,7 +13577,7 @@ module Capybara
         # otherwise handle it, matching the pre-cross-host behavior
         # for tests that route through an external OAuth provider URL
         # without intending the call to land.
-        remote = (transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)) unless url_is_local?(url)
+        remote = (transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)) unless reaches_app?(url)
         return nil if remote == :network_error
 
         response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?, own_host: reaches_app?(url))))
@@ -13681,49 +13681,31 @@ module Capybara
         out
       end
 
-      # Whether a browser's request of `url` would have reached the app's server, which a run with a server listens on one port
-      # under any name that resolves to it: a subdomain's, an apex's — the page's own, or its port under a name of its site, or
-      # under any name at a port no CDN is on (cuprite with `host-resolver-rules`, measured). A limit: another site's name at the
-      # same non-default port counts, which a browser reaches only where it resolves here. (…none of it on the default stand-in:
-      # a real run's server is 127.0.0.1 and a port, which `www.example.com`'s sibling names do not reach.)
+      # Whether a browser's request of `url` would have reached the app's server — asked of its host, whatever page made it:
+      # the app's own host and port (`@default_host`: `Capybara.app_host`, the server's, or the default stand-in), or that port
+      # under another name that resolves to the server, which a run with one listens on under any: a subdomain's, an apex's
+      # — a name of the app's site, or any name at a port no CDN is on (cuprite with `host-resolver-rules`, measured). A
+      # limit: another site's name at the same non-default port counts, which a browser reaches only where it resolves here.
+      # (…none of the sibling names on the default stand-in: a real run's server is 127.0.0.1 and a port, which
+      # `www.example.com`'s sibling names do not reach.) Every host does where the session serves them all in-process (the
+      # WPT runner's `@all_hosts_local`); a URL of no host — relative, or a scheme's of none — is no other host's.
       private def reaches_app?(url)
-        return true if url_is_local?(url)
-        return false if @loopback_stand_in
+        return true if @all_hosts_local
 
         uri = parse_url(url.to_s)
-        ref = current_url_parts || parse_url(@default_host.to_s)
-        return false if uri.nil? || ref.nil? || effective_port(uri) != effective_port(ref)
-
-        ![80, 443].include?(effective_port(uri).to_i) || Native.site(url.to_s).to_s == Native.site(page_url.to_s).to_s
-      end
-
-      # Path-only or fragment-only URLs are always against the current
-      # origin. For absolute URLs, compare host:port to the cached
-      # parsed `page_url` (or default_host on first navigate).
-      def url_is_local?(url)
-        return true if @all_hosts_local
-        s = url.to_s
-        return true if s.empty? || s.start_with?('/', '#', '?')
-        uri = parse_url(s)
         return true if uri.nil? || uri[:hostname].empty?
-        ref = current_url_parts || parse_url(@default_host.to_s)
-        return true if ref.nil? || ref[:hostname].empty?
-        uri[:hostname] == ref[:hostname] && effective_port(uri) == effective_port(ref)
+
+        app = app_url_parts
+        return true if app.nil? || app[:hostname].empty?
+        return false if effective_port(uri) != effective_port(app)
+        return true if uri[:hostname] == app[:hostname]
+        return false if @loopback_stand_in
+
+        ![80, 443].include?(effective_port(uri).to_i) || Native.site(url.to_s).to_s == Native.site(@default_host.to_s).to_s
       end
 
-      # The current URL's parts, kept while it stays the same.
-      def current_url_parts
-        return nil unless (url = page_url)
-
-        # (…the URL and its parts kept as one frozen pair, swapped whole: another thread — an event stream's reader — asks
-        # too, and must never find one URL beside another's parts)
-        kept_url, parts = @current_url_parts
-        return parts if kept_url == url
-
-        parts = parse_url(url)
-        @current_url_parts = [url, parts].freeze
-        parts
-      end
+      # The app's host's URL parts (`@default_host`'s), parsed once.
+      private def app_url_parts = (@app_url_parts ||= parse_url(@default_host.to_s))
 
       def effective_port(url)
         url[:port].empty? ? (url[:protocol] == 'https:' ? 443 : 80) : url[:port].to_i

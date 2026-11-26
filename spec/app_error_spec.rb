@@ -179,10 +179,8 @@ RSpec.describe 'an exception of the app under a request of the page' do
       ['http://lvh.test:18555/', 'http://foo.lvh.test:18555/raise', :raises],
       ['http://foo.lvh.test:18555/', 'http://lvh.test:18555/raise', :raises],
       ['http://lvh.test:18555/', 'http://other.test:18555/raise', :raises],
-      ['http://lvh.test/', 'http://foo.lvh.test/raise', :raises],
       ['http://lvh.test:18555/', 'http://lvh.test:18556/raise', :none],
-      ['http://lvh.test:18555/', 'http://cdn.example.invalid/raise', :none],
-      ['http://lvh.test/', 'http://cdn.example.invalid/raise', :none]
+      ['http://lvh.test:18555/', 'http://cdn.example.invalid/raise', :none]
     ].each do |page, url, outcome|
       it "#{outcome == :raises ? 'raises' : 'raises nothing of'} #{url} from #{page}" do
         got = request_from(page, url)
@@ -194,6 +192,30 @@ RSpec.describe 'an exception of the app under a request of the page' do
           expect { session.visit(page) }.not_to raise_error
         end
       end
+    end
+  end
+
+  # …and on a default port, a name of the app's site alone: a subdomain's to its apex, not a CDN's.
+  describe 'a request off the app\'s host on a default port' do
+    before {
+      Capybara.app_host = 'http://lvh.test'
+      allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch).and_return(nil)
+    }
+    after { Capybara.app_host = nil }
+
+    def request_from(page, url)
+      session.visit(page)
+      session.evaluate_async_script("const d = arguments[0]; fetch(#{url.to_json}, {mode: 'no-cors'}).then((r) => d(r.type), (e) => d(e.name))")
+    end
+
+    it 'raises http://foo.lvh.test/raise from http://lvh.test/' do
+      expect(request_from('http://lvh.test/', 'http://foo.lvh.test/raise')).not_to eq('TypeError')
+      expect { session.visit('http://lvh.test/') }.to raise_error(ArgumentError, 'of the app')
+    end
+
+    it 'raises nothing of http://cdn.example.invalid/raise from http://lvh.test/' do
+      expect(request_from('http://lvh.test/', 'http://cdn.example.invalid/raise')).to eq('TypeError')
+      expect { session.visit('http://lvh.test/') }.not_to raise_error
     end
   end
 

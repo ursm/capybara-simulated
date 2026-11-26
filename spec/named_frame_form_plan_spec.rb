@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A page form's navigation of a frame its `target` names is PLANNED (HTML "plan to navigate"): its request sent as the
 # planned navigation runs, and none where another navigation of the frame comes before it — the frame's `src` or
@@ -167,7 +168,7 @@ RSpec.describe "a page form's planned navigation of a named frame" do
   end
 
   # A `<frame>`'s navigation is of the destination "frame" (Chrome and Firefox).
-  it "tells a form's navigation of a <frame> so" do
+  it "tells a form's navigation of a <frame> so", :every_host_local do
     dest = nil
     session = simulated_session(lambda {|env|
       dest = env['HTTP_SEC_FETCH_DEST'] if env['PATH_INFO'] == '/x'
