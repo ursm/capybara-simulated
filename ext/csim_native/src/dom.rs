@@ -1167,7 +1167,7 @@ pub(crate) struct RealmState {
     // Its parse's list of scripts to execute after parsing (script.rs `list_parser_script`), until "the end" takes it,
     // and the source text an inline one of them had at its end tag, until it runs.
     pub(crate) parser_list: Vec<NodeId>,
-    // Whether the parser has waited on a fetch (script.rs `parserWaits`).
+    // Whether the parser has waited on a fetch (script.rs `parser_waits`).
     pub(crate) parser_waited: bool,
     pub(crate) parser_sources: std::collections::HashMap<NodeId, Vec<u16>>,
     // The script fetches its document's elements began — a classic script's, a module graph's entry's (script_fetch.rs) —

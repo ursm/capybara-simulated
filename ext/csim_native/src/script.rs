@@ -506,7 +506,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "takeParserNext", take_parser_next_op, context_id);
     crate::dom::register(scope, ns, "takeParserAsync", take_parser_async_op, context_id);
     crate::dom::register(scope, ns, "forgetParserScripts", forget_parser_scripts_op, context_id);
-    crate::dom::register(scope, ns, "parserWaits", parser_waits_op, context_id);
     crate::dom::register(scope, ns, "takeParserSource", take_parser_source_op, context_id);
     crate::dom::register(scope, ns, "scriptBlocksParser", script_blocks_parser_op, context_id);
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
@@ -701,7 +700,7 @@ fn take_parser_next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 }
 // What of the `async` external scripts its end tags listed — the realm's parser's "set of scripts that will execute as soon
 // as possible" — `takeParserAsync(which)` takes: every one (`ASYNC_ALL`); where its parser has waited on a fetch, every
-// one whose fetch has landed by now (`ASYNC_WAITED`: `parserWaits`, script_fetch.rs `due_now`), none where it has not. A
+// one whose fetch has landed by now (`ASYNC_WAITED`: `parser_waits`, script_fetch.rs `due_now`), none where it has not. A
 // fetch takes no time here unless its server's does, so with the parser's first wait every one of the document's has
 // landed whose server took none — as a browser's parser waiting has fetched ahead (Chrome and Firefox: one listed after a
 // parser-blocking script still runs before DOMContentLoaded, csim-bench rvfn `y_after_block`) — and one whose server took
@@ -739,18 +738,13 @@ fn forget_parser_scripts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
 fn listed_async(arena: &crate::dom::RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.plain_attr("async").is_some() && n.plain_attr("src").is_some())
 }
-// __dom.parserWaits(lands) -> the mark the realm's parser spins the event loop by as it waits on a fetch — a pending
-// parsing-blocking script's, a style sheet's that blocks a script, a deferred script's in "the end" — 0 for no spin
-// (timers.rs `spin_mark`): the tasks queued by now run before the fetch lands, as its response is a task queued as it
-// began (Chrome and Firefox: a zero timer set before a parser-blocking script, or before or after a deferred one, runs
-// before it — r13 `p_t0blk_*`, `p_t0dfr_*`, `q_dfrt0_0`, `q_t0css`). `lands`: a wait of the parser's own, with which its
-// async scripts land (`ASYNC_WAITED`).
-fn parser_waits_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let lands = args.get(0).is_true();
-    rv.set_double(crate::dom::realm(scope, cid).parser_waits(cid, lands));
-}
 impl RealmArena {
+    // The mark the realm's parser spins the event loop by as it waits on a fetch — a pending
+    // parsing-blocking script's, a style sheet's that blocks a script, a deferred script's in "the end" — 0 for no spin
+    // (timers.rs `spin_mark`): the tasks queued by now run before the fetch lands, as its response is a task queued as it
+    // began (Chrome and Firefox: a zero timer set before a parser-blocking script, or before or after a deferred one, runs
+    // before it — r13 `p_t0blk_*`, `p_t0dfr_*`, `q_dfrt0_0`, `q_t0css`). `lands`: a wait of the parser's own, with which its
+    // async scripts land (`ASYNC_WAITED`).
     pub(crate) fn parser_waits(&mut self, cid: i32, lands: bool) -> f64 {
         if lands {
             if let Some(state) = self.realm_state_mut(cid) {

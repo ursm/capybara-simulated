@@ -4190,22 +4190,10 @@ module Capybara
       # `referrer` where it names one of its own (an `@import`'s, its importing sheet's location) — answered as
       # `external_asset_response` answers it.
       # (…a module's — a modulepreload's, `module` — its document's module map's: `asset_request`)
-      # (…`since`, a parser-blocking script's: how long ago, in virtual ms, its fetch is dated to have begun — its server's
-      # sleeps counted as the request is made, and only what is left of them past that date waited on the event loop: one a
-      # preload scanner saw dated as its parse began, Chrome and Firefox `b b2 inl a.js-ran`, rv-r13-probe `s6_dating`)
-      def planned_external_asset(url, document, realm, plan, referrer = nil, module_map: false, since: nil)
+      def planned_external_asset(url, document, realm, plan, referrer = nil, module_map: false)
         mode, credentials, policy, dest = request_of_plan(plan)
         referrer = nil if referrer.to_s.empty?
-        return external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map) unless since
-
-        answer, slept = server_timed_sleeps {
-          external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
-        }
-        # (…none of its sleeps' real time the page's script time — the virtual clock shows the server's: `agentExcuse`)
-        @runtime.call('agentExcuse', slept) if slept.positive?
-        left = slept - since.to_f
-        server_slept_ms(left) if left.positive?
-        answer
+        external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, module_map: module_map)
       end
       # …answered as [its text, nil where the load failed; the facts of the response it came from (`resource_timing_meta`,
       # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of

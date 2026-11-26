@@ -69,4 +69,19 @@ RSpec.describe 'a script fetch and cookies' do
       expect(log_with(busy)).to eq('inl: sc:s=1')
     end
   end
+
+  # …a parser-blocking script's too: its fetch begun as it is prepared, in parallel, a timer the parser's wait runs as its
+  # server takes its time reads none of it (Chrome and Firefox `t50: b:b=1 inl:b=1`, csim-bench theend5 `t5_ckblk`).
+  it "stores a parser-blocking script's cookie as it lands, not as its server works" do
+    app = ->(env) {
+      if env['PATH_INFO'] == '/b.js'
+        sleep 0.15
+        next [200, {'content-type' => 'text/javascript', 'set-cookie' => 'b=1; path=/'}, ['R.push("b:" + document.cookie)']]
+      end
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><title>t</title><script>window.R = []; setTimeout(() => R.push("t50:" + document.cookie), 50)</script><script src="/b.js"></script><script>R.push("inl:" + document.cookie)</script>']]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    expect(s.evaluate_script('R.join(" ")')).to eq('t50: b:b=1 inl:b=1')
+  end
 end

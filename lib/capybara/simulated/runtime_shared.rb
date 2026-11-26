@@ -28,7 +28,7 @@ module Capybara
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
         'rackFetch'                    => ->(b, *a) { b.rack_fetch_request(a[0], a[1]) },
-        'externalAsset'                => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4], module_map: a[5] == true, since: a[6]) },
+        'externalAsset'                => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4], module_map: a[5] == true) },
         'subresourceFetch'             => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2]) },
         'assetDocumentStarted'         => ->(b, *_a) { b.asset_document_started },
         # fetch(…, {keepalive}) — eager detached-thread dispatch + one-shot result poll.
@@ -173,6 +173,8 @@ module Capybara
         'scriptFetchForget'            => ->(b, *a) { b.script_fetch_forget(a[0]) },
         'scriptFetchesForgetRealm'     => ->(b, *a) { b.script_fetches_forget_realm(a[0]) },
         'spinServeWorkers'             => ->(b, *a) { b.spin_serve_workers(a[0]); nil },
+        # …and the server's time a parser-blocking script's fetch took past its date, the event loop run on for it.
+        'serverSlept'                  => ->(b, *a) { b.server_slept_ms(a[0].to_f); nil },
         'blobWindow'                   => ->(b, *_a) { b.blob_window },
         'blobUnregister'               => ->(b, *a) { b.blob_unregister(a[0], a[1]); nil },
         'partitionBlob'                => ->(b, *a) { b.partition_blob(a[0], a[1]) },

@@ -604,8 +604,8 @@ impl AgentTime {
 }
 
 // __dom.agentExcuse(ms) — `ms` of the real time just past none of the calling agent's script time: a server's sleeps the
-// host counted rather than ran on the event loop, in a fetch the page's script made no wait of (a parser-blocking
-// script's, Browser#planned_external_asset), which the virtual clock shows as far as it shows them at all.
+// host counted rather than ran on the event loop, in a fetch whose work is the page's time (a parser-blocking script's,
+// subresource-host.js `H_SCRIPT_BLOCKING`), which the virtual clock shows as far as it shows them at all.
 fn agent_excuse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let ms = args.get(0).number_value(scope).filter(|ms| ms.is_finite() && *ms > 0.0).unwrap_or(0.0);
     let time = &mut dom(scope).agent_time;

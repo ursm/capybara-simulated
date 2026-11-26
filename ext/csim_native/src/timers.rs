@@ -336,7 +336,7 @@ impl RealmArena {
     // …how many of them are left — what a run of them is capped at — and whether the event loop's next task is one of
     // them — where it is one queued after the mark (its turn ahead of theirs: an `AHEAD` one), the run stops, the rest
     // left to the event loop's own steps. `in_turn` counts none `BEHIND`: what a parser waiting on a fetch runs first
-    // (script.rs `parserWaits`), the response it waits on landing ahead of the others due with it.
+    // (script.rs `parser_waits`), the response it waits on landing ahead of the others due with it.
     fn queued_count(&mut self, (mark, clock): (u64, f64), in_turn: bool) -> u32 {
         let mut count = 0;
         for realm in self.event_loop_realms() {

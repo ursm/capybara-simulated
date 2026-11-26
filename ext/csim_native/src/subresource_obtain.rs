@@ -103,7 +103,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "fetchTimedResources", fetch_timed_resources_op, context_id);
     register(scope, ns, "obtainResume", resume_op, context_id);
     register(scope, ns, "processPlugin", process_plugin_op, context_id);
-    register(scope, ns, "fetchClassicScript", fetch_classic_script_op, context_id);
     register(scope, ns, "imageObtain", image_obtain_op, context_id);
     register(scope, ns, "mediaFetchResource", media_fetch_resource_op, context_id);
     register(scope, ns, "linkObtain", link_obtain_op, context_id);
@@ -901,54 +900,6 @@ fn link_scheme(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Functio
     Ok(link_verdict_of(scope, r, &scheme_facts(content_type), crate::subresource_judge::SRC_SCHEME, &body, "no-cors", destinations))
 }
 
-// __dom.fetchClassicScript(el, doc, src, parser, host, plan, integrity) -> `[ok, body, entry]`: HTML "fetch a classic
-// script" for the script element `el` (of its preparation-time document `doc`) whose src is `src` (resolved; null where
-// it does not resolve, the raw attribute its URL then), its request as it was prepared — its `plan` (subresource_plan.rs)
-// and its `integrity` metadata, a later change of the element's attributes no part of it; none given, the element's now,
-// a parser's script fetched as the parser waits on it — begun and landed at once (`classic_script_begin`,
-// `classic_script_land`): a parser-blocking script's, the parser waiting inside the host's fetch, which dates it as the
-// parser's other fetches are (script_fetch.rs `began_at`: as its parse began where it is markup the parse took from the
-// network) — its server's sleeps counted as the request is made and only what is left of them past that date waited
-// (a server's `sleep` runs the event loop on meanwhile, Browser#planned_external_asset).
-fn fetch_classic_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return };
-    let Some(mut request) = classic_request(scope, &args) else { return };
-    let cid = realm_id(scope, &args);
-    let scanned = crate::script_fetch::parser_input_scanned(scope, cid);
-    request.began = Some(crate::script_fetch::began_at(realm(scope, cid), cid, scanned));
-    let Ok(fetch) = classic_script_begin(scope, cid, host, request, false) else { return };
-    let Ok(landed) = classic_script_land(scope, cid, host, fetch) else { return };
-    rv.set(landed_value(scope, landed).into());
-}
-// The request of a classic script the op's arguments `(el, doc, src, parser, host, plan, integrity)` name.
-pub(crate) fn classic_request(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Option<ClassicRequest> {
-    let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, args, 0), crate::dom::nid_arg(scope, args, 1)) else { return None };
-    let src = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
-    let parser = args.get(3).is_true();
-    let cid = realm_id(scope, args);
-    let (plan, integrity) = if args.get(5).is_number() {
-        (args.get(5).uint32_value(scope).unwrap_or(0), args.get(6).to_rust_string_lossy(scope))
-    } else {
-        let arena = realm(scope, cid);
-        let integrity = arena.get(el).and_then(|n| n.plain_attr("integrity")).unwrap_or("").to_owned();
-        (plan_in(arena, crate::subresource_judge::J_CLASSIC_SCRIPT, Some(el), Some(doc), None), integrity)
-    };
-    Some(ClassicRequest { el, doc, src, parser, plan, integrity, began: None })
-}
-// …and what a landing hands the bindings: `[ok, body, entry]`.
-pub(crate) fn landed_value<'s>(scope: &mut v8::PinScope<'s, '_>, (ok, body, entry): Landed) -> v8::Local<'s, v8::Array> {
-    let body = match body {
-        ScriptText::Host(host_text) => v8::Local::new(scope, host_text),
-        ScriptText::Decoded(decoded) => text(scope, &decoded),
-    };
-    let entry = match entry {
-        Some(e) => v8::Local::new(scope, e),
-        None => v8::null(scope).into(),
-    };
-    let items = [v8::Boolean::new(scope, ok).into(), body, entry];
-    v8::Array::new_with_elements(scope, &items)
-}
-
 // A classic script's source text: the host's own (its response read as UTF-8, which it is), or decoded.
 pub(crate) enum ScriptText {
     Host(v8::Global<v8::Value>),
@@ -973,6 +924,18 @@ pub(crate) struct ClassicRequest {
     integrity: String,
     // (…when on the event loop's clock it began, where that is not now: script_fetch.rs `began_at`)
     pub(crate) began: Option<f64>,
+    // (…a parser-blocking one's, which the parser waits on: the work of its request the page's time, as a fetch a script
+    // waits inside is — its Resource Timing entry of a duration, WPT resource-timing/status-codes-create-entry —
+    // where another's is the network's alone, `H_SCRIPT_START`)
+    pub(crate) blocking: bool,
+}
+impl ClassicRequest {
+    // …as the element `el` is now: its plan (its CORS setting, its referrer policy, its client) and its integrity metadata.
+    pub(crate) fn of_element(arena: &crate::dom::RealmArena, el: NodeId, doc: NodeId, src: Option<String>, parser: bool) -> ClassicRequest {
+        let integrity = arena.get(el).and_then(|n| n.plain_attr("integrity")).unwrap_or("").to_owned();
+        let plan = plan_in(arena, crate::subresource_judge::J_CLASSIC_SCRIPT, Some(el), Some(doc), None);
+        ClassicRequest { el, doc, src, parser, plan, integrity, began: None, blocking: false }
+    }
 }
 // …its fetch begun (`classic_script_begin`): the request the engine made of it, and the leg that answers it.
 pub(crate) struct ClassicFetch {
@@ -986,8 +949,7 @@ pub(crate) struct ClassicFetch {
 // resolves to none).
 pub(crate) enum Leg {
     Answered(Landed),
-    // (…a dated one's — a parser-blocking script's — how long ago, in virtual time, it is dated to have begun)
-    Worker(Option<f64>),
+    Worker,
     Slot(u32, f64),
     Host(Option<v8::Global<v8::Value>>),
 }
@@ -1011,15 +973,15 @@ pub(crate) fn scheme_facts(content_type: String) -> crate::subresource_judge::Fa
     crate::subresource_judge::Facts { response_type: "basic".to_owned(), status: Some(200), content_type, ..Default::default() }
 }
 
-// HTML "fetch a classic script" begun — `parallel`, its network leg the host's slot's, landing later (script_fetch.rs) — from a `data:`
+// HTML "fetch a classic script" begun — in parallel, its network leg the host's slot's, landing later (script_fetch.rs) — from a `data:`
 // or a `blob:` URL its scheme's, read now, as no network delays it; else the preload its request takes (no entry of its
 // own); else, a service worker controlling the document, its answer asked as it lands; else — the parser's — the
 // cross-visit asset cache's, or the network's. Its errors are muted where its response is of another origin (the report of
 // an exception thrown in it reads its URL's).
-pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, request: ClassicRequest, parallel: bool) -> Result<ClassicFetch, Terminated> {
+pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, request: ClassicRequest) -> Result<ClassicFetch, Terminated> {
     use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_DATA};
     use crate::subresource_judge::{J_CLASSIC_SCRIPT, SRC_NETWORK, SRC_SCHEME};
-    let ClassicRequest { el, doc, src, parser, plan, integrity, began } = request;
+    let ClassicRequest { el, doc, src, parser, plan, integrity, began, blocking } = request;
     let url = match &src {
         Some(u) => u.clone(),
         None => realm(scope, cid).get(el).and_then(|n| n.plain_attr("src")).unwrap_or("").to_owned(),
@@ -1055,21 +1017,27 @@ pub(crate) fn classic_script_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, h
         };
         return Ok(ClassicFetch { request: r, parser, leg: Leg::Answered(landed) });
     }
-    if !parallel || controlled(scope, host)? {
-        return Ok(ClassicFetch { request: r, parser, leg: Leg::Worker(since.filter(|_| !parallel)) });
+    if controlled(scope, host)? {
+        return Ok(ClassicFetch { request: r, parser, leg: Leg::Worker });
     }
     // (…the parser's from the cross-visit asset cache, an inserted one's from the network: the host's slot's, or its
     // memory's answer at once)
     let mut args = request_args(scope, &r).to_vec();
     let id = next_slot();
     let (parser_arg, began_arg, id_arg): (v8::Local<v8::Value>, v8::Local<v8::Value>, v8::Local<v8::Value>) =
-        (v8::Boolean::new(scope, parser).into(), v8::Number::new(scope, clock - since.unwrap_or(0.0)).into(), v8::Integer::new_from_unsigned(scope, id).into());
+        (script_kind(scope, parser, blocking), v8::Number::new(scope, clock - since.unwrap_or(0.0)).into(), v8::Integer::new_from_unsigned(scope, id).into());
     args.extend([parser_arg, began_arg, id_arg]);
     let leg = match call(scope, host, H_SCRIPT_START, &args)? {
         Some(slept) if v8::Local::new(scope, &slept).is_number() => Leg::Slot(id, slept_ms(scope, v8::Local::new(scope, &slept))),
         answer => Leg::Host(answer),
     };
     Ok(ClassicFetch { request: r, parser, leg })
+}
+// What a script's request `H_SCRIPT_START` makes is of: an inserted one's (false), the parser's (true) — a parser-blocking
+// one's `H_SCRIPT_BLOCKING`, the parser waiting inside it.
+const H_SCRIPT_BLOCKING: u32 = 3;
+fn script_kind<'s>(scope: &mut v8::PinScope<'s, '_>, parser: bool, blocking: bool) -> v8::Local<'s, v8::Value> {
+    if blocking { v8::Integer::new_from_unsigned(scope, H_SCRIPT_BLOCKING).into() } else { v8::Boolean::new(scope, parser).into() }
 }
 // Whether a service worker controls the calling realm's document.
 fn controlled(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>) -> Result<bool, Terminated> {
@@ -1111,7 +1079,7 @@ pub(crate) fn classic_script_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, ho
             let id = v8::Integer::new_from_unsigned(scope, id).into();
             call(scope, host, H_SCRIPT_TAKE, &[id])?
         }
-        Leg::Worker(since) => {
+        Leg::Worker => {
             let mut sw_args = request_args(scope, &r).to_vec();
             let (binary, integrity_value) = (v8::Boolean::new(scope, true).into(), text(scope, &r.integrity));
             sw_args.extend([binary, integrity_value]);
@@ -1129,11 +1097,7 @@ pub(crate) fn classic_script_land(scope: &mut v8::PinScope<'_, '_>, cid: i32, ho
                 let content_type = header_of(scope, sw_obj, "content-type");
                 return classic_answer(scope, cid, host, &r, (v, content_type, Some(Answered::Worker(answer))), (true, Some(bytes), None));
             }
-            let mut args = request_args(scope, &r).to_vec();
-            if let (true, Some(since)) = (parser, since) {
-                let (module, since): (v8::Local<v8::Value>, v8::Local<v8::Value>) = (v8::Boolean::new(scope, false).into(), v8::Number::new(scope, since).into());
-                args.extend([module, since]);
-            }
+            let args = request_args(scope, &r);
             call(scope, host, if parser { H_ASSET } else { H_FETCH }, &args)?
         }
     };

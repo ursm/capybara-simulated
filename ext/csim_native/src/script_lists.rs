@@ -31,6 +31,8 @@ pub(crate) struct ScriptLists {
     // it goes on (`sheetWaitersParsed`).
     sheet_waiters: Vec<u32>,
     waiters_parsed: Vec<u32>,
+    // The parser's scripts prepared and still to run — one at a time, but for one a script it runs writes (`scriptPrepare`).
+    prepared: Vec<Prepared>,
 }
 
 struct BlockingSheet {
@@ -142,6 +144,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sheetBlockSettle", sheet_settle_op, context_id);
     register(scope, ns, "sheetWaitersParsed", waiters_parsed_op, context_id);
     register(scope, ns, "parserSheetWait", parser_sheet_wait_op, context_id);
+    register(scope, ns, "scriptPrepare", prepare_op, context_id);
+    register(scope, ns, "scriptWaitNext", wait_next_op, context_id);
+    register(scope, ns, "scriptRun", run_op, context_id);
 }
 
 fn lists_of(arena: &mut RealmArena, cid: i32) -> Option<&mut ScriptLists> {
@@ -566,13 +571,283 @@ fn waiters_parsed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(pairs_value(scope, &pairs));
 }
 
-// __dom.parserSheetWait() -> the mark the parser's next script waits by (script.rs `parserWaits`, one its `async` scripts
+// __dom.parserSheetWait() -> the mark the parser's next script waits by (script.rs `parser_waits`, one its `async` scripts
 // land with) where a style sheet came to block scripts since it last asked, -1 where none did.
 fn parser_sheet_wait_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
     let fetched = lists_of(arena, cid).is_some_and(|lists| std::mem::take(&mut lists.sheet_fetched));
     rv.set_double(if fetched { arena.parser_waits(cid, true) } else { -1.0 });
+}
+
+// The parser's script prepared (HTML "prepare the script element", by the parser at its end tag or out of "the end"'s
+// lists — bridge.entry.js `prepareParserScript`): what the parser waits on before it runs it (`scriptWaitNext`) and then
+// runs (`scriptRun`), the script nesting level back at zero as it waits where it is a pending parsing-blocking script.
+struct Prepared {
+    id: u32,
+    el: NodeId,
+    // The document it was prepared in — the realm's — and how many aborts had come to it, and its number, then: one aborted
+    // since, or opened again (a task its wait ran wrote it), runs it no more.
+    doc: NodeId,
+    aborts: u32,
+    generation: u32,
+    // A module script, run whole once its graph's entry has landed.
+    module: bool,
+    // An inline one's source text as it was prepared.
+    text: Option<Vec<u16>>,
+    // Its fetch (script_fetch.rs, 0 for none): a parser-blocking one's begun as it was prepared, dated as its parse began
+    // where a preload scanner saw it; a deferred one's what "the end" waits on (`awaited`).
+    fetch: u32,
+    blocking: bool,
+    awaited: bool,
+    // The mark of the tasks its wait runs first (script.rs `parser_waits`): a style sheet's that blocks it.
+    mark: f64,
+    wait: Wait,
+}
+// Where its wait is: to begin; spun past the tasks queued before it, its landing to await or not; over, whether it goes
+// on to run asked.
+#[derive(Clone, Copy, PartialEq)]
+enum Wait {
+    Begin,
+    Spun { awaits: bool },
+    Over,
+}
+
+// What preparing the parser's script came to (`scriptPrepare`): nothing; its `error` to fire on a task; its import map
+// registered; a module script prepared, waited on and run whole; a classic one prepared — `what + id * 8`.
+const PREPARED_NONE: u32 = 0;
+const PREPARED_ERROR: u32 = 1;
+const PREPARED_IMPORT_MAP: u32 = 2;
+const PREPARED_MODULE: u32 = 3;
+const PREPARED_CLASSIC: u32 = 4;
+
+// __dom.scriptPrepare(el, by, awaited, mark, host) -> what preparing the parser's script `el` came to (`PREPARED_*`) and the
+// number of what it prepared: HTML "prepare the script element" as far as the element decides it (script.rs
+// `prepare_script`, `by` whom), scripting disabled where its node document has no browsing context — a parser-blocking
+// one's fetch begun now, HTML's "fetch a classic script" in parallel, which the parser's wait spins the event loop for
+// (`scriptWaitNext`), one an `async` or a deferred one's the fetch its end tag began — "the end" waiting on a deferred
+// one's (`awaited`); `mark` the mark of a style sheet that blocks an inline one, which its wait runs first.
+fn prepare_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(PREPARED_NONE);
+    let Some(el) = nid_arg(scope, &args, 0) else { return };
+    let by = args.get(1).uint32_value(scope).unwrap_or(crate::script::BY_PARSER);
+    let awaited = args.get(2).is_true();
+    let mark = args.get(3).number_value(scope).unwrap_or(0.0);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return };
+    let cid = realm_id(scope, &args);
+    if let Ok(what) = prepare(scope, cid, el, (by, awaited, mark), host) {
+        rv.set_double(f64::from(what.0) + f64::from(what.1) * 8.0);
+    }
+}
+fn prepare(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (by, awaited, mark): (u32, bool, f64), host: v8::Local<'_, v8::Function>) -> Result<(u32, u32), Terminated> {
+    use crate::script::{BY_PARSER_LIST, PREPARE_CLASSIC, PREPARE_ERROR, PREPARE_IMPORT_MAP, PREPARE_MODULE};
+    let node_doc = crate::node_handle::node_document_of(scope, el);
+    let arena = realm(scope, cid);
+    let scripting = node_doc.is_some_and(|d| arena.document_states.has_browsing_context(d));
+    let module = match arena.prepare_script(el, scripting, by) {
+        PREPARE_ERROR => return Ok((PREPARED_ERROR, 0)),
+        PREPARE_IMPORT_MAP => return Ok((PREPARED_IMPORT_MAP, 0)),
+        PREPARE_MODULE => true,
+        PREPARE_CLASSIC => false,
+        _ => return Ok((PREPARED_NONE, 0)),
+    };
+    let Some(doc) = arena.realm_document(cid) else { return Ok((PREPARED_NONE, 0)) };
+    let lc = arena.document_states.lifecycle(doc);
+    let src = arena.get(el).and_then(|n| n.plain_attr("src")).filter(|s| !s.is_empty()).map(str::to_owned);
+    let mut p = Prepared { id: 0, el, doc, aborts: lc.aborts(), generation: lc.generation(), module, text: None, fetch: 0, blocking: false, awaited, mark: 0.0, wait: Wait::Begin };
+    if module {
+        // (…its graph's entry's fetch, begun at its end tag — an inline one's none: the tasks queued before "the end"'s wait
+        // run first)
+        p.fetch = crate::script_fetch::fetch_of(scope, cid, el);
+        if awaited && p.fetch == 0 {
+            p.mark = realm(scope, cid).parser_waits(cid, false);
+        }
+    } else if let Some(src) = src {
+        // (…its `src` parsed against its node document's base URL as it is prepared, one that does not parse fetched as the
+        // attribute is)
+        let arena = realm(scope, cid);
+        let url = node_doc.and_then(|d| arena.parse_document_url(d, &src)).map(|u| u.href().to_owned());
+        if by == BY_PARSER_LIST {
+            // (…an `async` or a deferred one's the fetch its end tag began: "prepare the script element" fetched it there —
+            // none is a network error)
+            p.fetch = crate::script_fetch::fetch_of(scope, cid, el);
+        } else {
+            // (…the parser waiting on it, its `async` scripts landing with that — the tasks queued by now run first, or, none
+            // being, those a style sheet that blocks it does: script.rs `parser_waits`)
+            p.mark = Some(arena.parser_waits(cid, true)).filter(|&m| m != 0.0).unwrap_or(mark);
+            let scanned = crate::script_fetch::parser_input_scanned(scope, cid);
+            let mut request = crate::subresource_obtain::ClassicRequest::of_element(realm(scope, cid), el, doc, url, true);
+            request.blocking = true;
+            p.fetch = crate::script_fetch::begin_classic(scope, cid, host, request, scanned)?;
+            p.blocking = true;
+        }
+    } else {
+        p.text = Some(realm(scope, cid).child_text(el));
+        p.mark = mark;
+    }
+    let Some(lists) = lists_of(realm(scope, cid), cid) else { return Ok((PREPARED_NONE, 0)) };
+    lists.next += 1;
+    p.id = lists.next;
+    let id = p.id;
+    lists.prepared.push(p);
+    Ok((if module { PREPARED_MODULE } else { PREPARED_CLASSIC }, id))
+}
+
+// What the parser's wait on its script comes to next (`scriptWaitNext`): spin the event loop past the tasks queued by the
+// mark `arg` (bridge.entry.js `parserSpin`); run it on for the `arg` ms its server took past the clock (the host's tick,
+// Browser#server_slept_ms); spin it until the fetch `arg` has landed (`awaitLanding`); the wait over, the script to run;
+// the wait over, none to run — its fetch let go of.
+const WAIT_SPIN: u32 = 1;
+const WAIT_SERVER: u32 = 2;
+const WAIT_AWAIT: u32 = 3;
+const WAIT_GO: u32 = 4;
+const WAIT_STOP: u32 = 5;
+
+// __dom.scriptWaitNext(id, host) -> `[what, arg]`: what the parser's wait on its script `id` comes to next (`WAIT_*`): HTML
+// "spin the event loop" until it is ready — the tasks queued before the wait first (a fetch's response a task queued as
+// it began: Chrome and Firefox, a zero timer set before a parser-blocking script, or before or after a deferred one, runs
+// before it — csim-bench r13 `p_t0blk_*`, `p_t0dfr_*`, `q_dfrt0_0`, `q_t0css`; none run where nothing is: the common
+// page's), then a parser-blocking one's server's time past its date (one a preload scanner saw dated as its parse began:
+// two parser-blocking scripts fetched alongside, Chrome and Firefox `b b2 inl a.js-ran`, rv-r13-probe `s6_dating`,
+// `s6_rt_blk` — none where that has passed), a deferred one's landing, queued at its end tag — and whether it goes on to
+// run it: none where an abort came to its document meanwhile (HTML "abort a document", "discarding any tasks queued"), its
+// parser was aborted ("If this parser has been aborted in the meantime, return"), or a task opened its document again
+// (Chrome and Firefox: a timer's `document.write`, csim-bench r13 `r_t0write`, `r_t0write_dfr`).
+fn wait_next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
+    let cid = realm_id(scope, &args);
+    let Ok((what, arg)) = wait_next(scope, cid, id, host) else { return };
+    let items = [v8::Integer::new_from_unsigned(scope, what).into(), v8::Number::new(scope, arg).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+fn wait_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>) -> Result<(u32, f64), Terminated> {
+    let arena = realm(scope, cid);
+    let Some(p) = lists_of(arena, cid).and_then(|lists| lists.prepared.iter().find(|p| p.id == id)) else { return Ok((WAIT_STOP, 0.0)) };
+    let (doc, fetch, wait, mark, blocking, awaited) = (p.doc, p.fetch, p.wait, p.mark, p.blocking, p.awaited);
+    let (aborts, generation) = (p.aborts, p.generation);
+    let lc = arena.document_states.lifecycle(doc);
+    if lc.aborts() != aborts || lc.generation() != generation {
+        return stop(scope, cid, id, host);
+    }
+    let set = |arena: &mut RealmArena, wait: Wait| {
+        if let Some(p) = lists_of(arena, cid).and_then(|lists| lists.prepared.iter_mut().find(|p| p.id == id)) {
+            p.wait = wait;
+        }
+    };
+    match wait {
+        Wait::Begin => {
+            // (…a deferred one's the tasks queued by now, "the end" waiting on it)
+            let awaits = fetch != 0 && awaited;
+            let mark = if awaits { arena.parser_waits(cid, false) } else { mark };
+            set(arena, Wait::Spun { awaits });
+            if mark != 0.0 {
+                return Ok((WAIT_SPIN, mark));
+            }
+            wait_next(scope, cid, id, host)
+        }
+        Wait::Spun { awaits: true } => {
+            set(arena, Wait::Over);
+            Ok((WAIT_AWAIT, f64::from(fetch)))
+        }
+        Wait::Spun { awaits: false } if blocking => {
+            set(arena, Wait::Over);
+            match crate::script_fetch::due_in(scope, cid, fetch) {
+                Some(due) if due > 0.0 => Ok((WAIT_SERVER, due)),
+                _ => wait_next(scope, cid, id, host),
+            }
+        }
+        Wait::Spun { .. } | Wait::Over => {
+            set(arena, Wait::Over);
+            if lc.is_aborted() {
+                return stop(scope, cid, id, host);
+            }
+            Ok((WAIT_GO, 0.0))
+        }
+    }
+}
+// …the wait over with none to run: the script prepared let go of, its fetch with it.
+fn stop(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Local<'_, v8::Function>) -> Result<(u32, f64), Terminated> {
+    let arena = realm(scope, cid);
+    let Some(lists) = lists_of(arena, cid) else { return Ok((WAIT_STOP, 0.0)) };
+    let Some(at) = lists.prepared.iter().position(|p| p.id == id) else { return Ok((WAIT_STOP, 0.0)) };
+    let p = lists.prepared.remove(at);
+    crate::script_fetch::drop_fetch(scope, cid, p.fetch, host)?;
+    Ok((WAIT_STOP, 0.0))
+}
+
+// What running the parser's script comes to (`scriptRun`): nothing (it moved to another document as the parser waited);
+// its source text run; its `load` or its `error` fired, nothing run (`arg` whether it loaded); its module script run.
+const RUN_PARSER_NOTHING: u32 = 0;
+const RUN_PARSER_SCRIPT: u32 = 1;
+const RUN_PARSER_EVENT: u32 = 2;
+const RUN_PARSER_MODULE: u32 = 3;
+
+// __dom.scriptRun(id, host) -> `[what, el, body]`: the parser's script `id`, waited on, run — taken: its fetch landed, its
+// Resource Timing entry filed; none of it, no event either, where it has moved to another document as the parser waited
+// (HTML "execute the script element" step 2, "If el's preparation-time document is not equal to document, then return" —
+// Chrome and Firefox, csim-bench rv-sf-probe `v_adopt`, `w_adopt_frame`, `w_dfr_adopt`; an inline one a style sheet held
+// too, Firefox's, Chrome runs it: `w_inl_sheet_adopt`); its source text run where it is one that runs — an empty one's
+// none, a loaded one's `load` (Chrome, Firefox), and a failed one's `error` — "already started", and run by "the end"'s
+// reckoning, before its event fires: the after-parse pass does not take it again.
+fn run_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
+    let cid = realm_id(scope, &args);
+    let Some(p) = lists_of(realm(scope, cid), cid).and_then(|lists| {
+        let at = lists.prepared.iter().position(|p| p.id == id)?;
+        Some(lists.prepared.remove(at))
+    }) else {
+        return rv.set_null();
+    };
+    let moved = |scope: &mut v8::PinScope<'_, '_>| crate::node_handle::node_document_of(scope, p.el) != Some(p.doc);
+    let (what, body): (u32, v8::Local<v8::Value>) = if p.module {
+        if moved(scope) {
+            let _ = crate::script_fetch::drop_fetch(scope, cid, p.fetch, host);
+            (RUN_PARSER_NOTHING, v8::undefined(scope).into())
+        } else {
+            if p.fetch != 0 && crate::script_fetch::land(scope, cid, p.fetch, host).is_err() {
+                return;
+            }
+            (RUN_PARSER_MODULE, v8::undefined(scope).into())
+        }
+    } else {
+        let (ok, body, inline) = match p.text {
+            Some(text) => (true, v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into), true),
+            None => match crate::script_fetch::land(scope, cid, p.fetch, host) {
+                Err(_) => return,
+                Ok(Some(Fetched::Classic((ok, text, entry)))) => {
+                    if let Some(entry) = entry {
+                        let entry = v8::Local::new(scope, entry);
+                        if call(scope, host, H_FILE, &[entry]).is_err() {
+                            return;
+                        }
+                    }
+                    let body = match text {
+                        ScriptText::Host(host_text) => v8::Local::new(scope, host_text),
+                        ScriptText::Decoded(decoded) => crate::subresource_obtain::text(scope, &decoded),
+                    };
+                    (ok, body, false)
+                }
+                Ok(_) => (false, v8::undefined(scope).into(), false),
+            },
+        };
+        let empty = !body.is_string() || body.to_string(scope).is_some_and(|s| s.length() == 0);
+        if moved(scope) {
+            (RUN_PARSER_NOTHING, v8::undefined(scope).into())
+        } else if ok && (!empty || inline) {
+            (RUN_PARSER_SCRIPT, body)
+        } else {
+            use crate::script::{SCRIPT_ALREADY_STARTED, SCRIPT_RUN};
+            if let Some(n) = realm(scope, cid).get_mut_quietly(p.el) {
+                n.script_flags |= SCRIPT_ALREADY_STARTED | SCRIPT_RUN;
+            }
+            (RUN_PARSER_EVENT, v8::Boolean::new(scope, ok).into())
+        }
+    };
+    let el = crate::dom::node_value(scope, Some(p.el));
+    let items = [v8::Integer::new_from_unsigned(scope, what).into(), el, body];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 #[cfg(test)]
