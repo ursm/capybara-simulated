@@ -3269,13 +3269,14 @@ module Capybara
       def run_event_loop_frame(frame_ms)
         turns = 0
         # Give any live worker/SW thread a clean GVL slice before the phase-1 quiescence loop
-        # monopolises it. That loop spins `run_loop_step(0)` holding the GVL, which STARVES a
-        # worker mid-flight — in particular a CROSS-ISOLATE reply (a `worker.postMessage(view,
-        # [view.buffer])`) that must complete on the worker thread: no reply is posted → the client's
-        # `onmessage` never fires and the drain force-timeouts it (postmessage.https transferable
-        # subtests; the whole SW→client message reply cluster). A brief `sleep` releases the GVL
-        # so the worker runs (Thread.pass does NOT hand it over); gated on a live worker so
-        # worker-free files pay nothing.
+        # monopolises it. That loop's Ruby between `run_loop_step(0)` calls holds the GVL, which
+        # STARVES a worker mid-flight — its reply to the page, which it must post on its own thread:
+        # no reply is posted → the client's `onmessage` never fires and the drain force-timeouts it
+        # (the SW→client message reply cluster). A brief `sleep` releases the GVL so the worker runs
+        # (Thread.pass does NOT hand it over); gated on a live worker so worker-free files pay nothing.
+        # (…kept when the zero-copy `transferIn` it was first measured for went (clone.rs carries a
+        # message now): without it, 2026-11-27 under load 31, the worker specs and WPT subsets stayed
+        # green and instructions:u even, but no worker bench was faster and their wall-time tails grew.)
         sleep(WORKER_GVL_YIELD) if @workers.any? {|_, w| w[:thread]&.alive? }
         # (…and at most a step's worth of tasks at that instant, however many turns they take: a chain of tasks each due
         # at once — an IndexedDB request whose `success` makes the next — is a turn's whole budget every turn)
