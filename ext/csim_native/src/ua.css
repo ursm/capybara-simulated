@@ -369,6 +369,7 @@ legend[align=right i] { justify-self: right; }
 
 /* 15.4 Replaced elements */
 iframe { border: 2px inset; }
+img:is([sizes="auto" i], [sizes^="auto," i]) { contain: size !important; contain-intrinsic-size: 300px 150px; }
 video { object-fit: contain; }
 marquee { display: inline-block; text-align: initial; overflow: hidden !important; }
 details, summary { display: block; }

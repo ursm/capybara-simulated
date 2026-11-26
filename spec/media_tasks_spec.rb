@@ -132,4 +132,26 @@ RSpec.describe 'media element tasks' do
     poll_until { s.evaluate_script('log.length') >= 5 }
     expect(s.evaluate_script('log').sort).to eq(['audible NotAllowedError', 'p1 AbortError', 'p2 resolved', 'rate 1', 'volume 0 played'])
   end
+
+  # A muted element playing, unmuted by no user's activation, is paused at once: `volumechange`, `timeupdate`, `pause`
+  # (Chrome and Firefox, rv `ap`).
+  it 'pauses an element made audible with no user activation' do
+    s = media_page
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const v = window.v = document.createElement('video');
+      v.muted = true;
+      v.src = '/m.webm';
+      v.oncanplaythrough = () => {
+        v.oncanplaythrough = null;
+        v.play().then(() => {
+          for (const t of ['volumechange', 'timeupdate', 'pause']) v.addEventListener(t, () => log.push(t));
+          v.muted = false;
+          log.push('paused ' + v.paused);
+        });
+      };
+    JS
+    poll_until { s.evaluate_script('log.length') >= 4 }
+    expect(s.evaluate_script('log')).to eq(['paused true', 'volumechange', 'timeupdate', 'pause'])
+  end
 end

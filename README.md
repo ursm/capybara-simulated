@@ -154,6 +154,11 @@ end
 - `viewport:` — `[width, height]` of every window, in CSS pixels (default 1024×768).
 - `user_agent:` — the `User-Agent` the session sends and `navigator.userAgent` reports.
 - `touch:` — `true` for a touchscreen pointer.
+- `autoplay:` — `true` lets a `<video>` or `<audio>` play with sound though no user has interacted with the page, as
+  Chrome's `--autoplay-policy=no-user-gesture-required` does. Off by default, as in Chrome and Firefox: an audible
+  element's `play()` is rejected with a `NotAllowedError` (and `autoplay` starts nothing) until the user clicks, types
+  or taps on the page — a muted element, or one at volume 0, plays either way, and one made audible while it plays is
+  paused. A test that calls `play()` from a script with no click before it either mutes the element or turns this on.
 - `external_network:` — whether a request may go to a host your app does not serve (a CDN, a video embed, a payment
   widget, an API). Off by default: nothing leaves the process. Such a request fails as a browser's does when the
   network refuses it: a page or a frame gets the browser's network-error document (a frame's `load` still fires), an

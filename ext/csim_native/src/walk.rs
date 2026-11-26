@@ -2494,10 +2494,25 @@ impl<'a> Walk<'a> {
             _ => natural,
         }))
     }
-    // …what its content gives it, before its `aspect-ratio`.
+    // …what its content gives it, before its `aspect-ratio` — none of it under size containment (CSS Contain 2 §3.2.1: a
+    // replaced element's natural size its `contain-intrinsic-size`, 0 where it names none, and no natural ratio — the UA
+    // sheet's for an `<img sizes=auto>`, 300x150).
     fn natural_intrinsic(&mut self, id: NodeId) -> Result<Option<Intrinsic>, &'static str> {
-        let node = self.node(id);
         let sized = |w: f64, h: f64| Intrinsic { w, h, ratio: false, ratio_only: false };
+        {
+            use style::values::computed::Contain;
+            use style::values::generics::box_::ContainIntrinsicSize as Cis;
+            let style = self.style(id)?;
+            if style.get_box().contain.contains(Contain::SIZE) {
+                let px = |c: &style::values::computed::ContainIntrinsicSize| match c {
+                    Cis::Length(l) | Cis::AutoLength(l) => f64::from(l.px()),
+                    Cis::None | Cis::AutoNone => 0.0,
+                };
+                let p = style.get_position();
+                return Ok(Some(sized(px(&p.contain_intrinsic_width), px(&p.contain_intrinsic_height))));
+            }
+        }
+        let node = self.node(id);
         Ok(Some(match node.rendering_tag() {
             "iframe" | "frame" | "video" => sized(300.0, 150.0),
             // (…the default object size, as an `<iframe>`'s — unless it shows its fallback, and is no replaced element;

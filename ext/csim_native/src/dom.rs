@@ -957,8 +957,10 @@ pub(crate) struct RealmArena {
     pub(crate) sheet_requests: std::collections::HashMap<NodeId, crate::sheet_fetch::SheetRequest>,
     // Each image element's requests, from its first update (image_requests.rs).
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
-    // …each document's list of available images (`AvailableImages`), and the requests lazy loading put off, until they
-    // intersect the viewport (`imageLazyResume`).
+    // …the fetches of theirs the host makes on threads of its own, by the id it numbers them with, until it hands the
+    // result back (image_requests.rs `HostFetch`), each document's list of available images (`AvailableImages`), and the
+    // requests lazy loading put off, until they intersect the viewport (`imageLazyResume`).
+    pub(crate) image_fetches: std::collections::HashMap<u32, crate::image_requests::HostFetch>,
     pub(crate) available_images: crate::image_requests::AvailableImages,
     pub(crate) lazy_images: Vec<(NodeId, u32)>,
     // The video elements' decoded frames (media.rs `mediaFrame`): each one's first, which a canvas draws — none until a
@@ -1414,7 +1416,7 @@ impl RealmArena {
         self.state = RealmState { faces, sheets, state_epoch: state_epoch + 1, ..RealmState::default() };
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
-        self.forget_available_images_of(cid);
+        self.forget_image_fetches_of(cid);
         self.forget_navigables_of(cid, true);
         self.forget_freed_scroll_events();
         self.forget_freed_frame_navigations();
@@ -1448,7 +1450,7 @@ impl RealmArena {
     pub(crate) fn discard_realm(&mut self, cid: i32) {
         self.observers.drop_realm(cid);
         // (…its image fetches aborted, as a discarded document's are: their elements let go)
-        self.forget_available_images_of(cid);
+        self.forget_image_fetches_of(cid);
         self.forget_navigables_of(cid, false);
         self.discard_timers(cid);
         self.discard_resize_observers(cid);
@@ -1488,7 +1490,7 @@ impl RealmArena {
         }
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
-        self.forget_available_images_of(cid);
+        self.forget_image_fetches_of(cid);
         self.forget_navigables_of(cid, true);
         self.forget_freed_scroll_events();
         self.forget_freed_frame_navigations();

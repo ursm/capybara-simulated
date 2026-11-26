@@ -336,6 +336,14 @@ fn media_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         }
         _ => &[],
     };
+    // (…an element made audible while it plays, by no user's activation, not allowed to play any more: the internal pause
+    // steps — paused at once, its `timeupdate` and `pause` behind its `volumechange` — Chrome and Firefox, rv `ap`)
+    let arena = &mut crate::dom::dom(scope).arena;
+    let audible = matches!(which, VOLUME | MUTED) && !owed.is_empty();
+    if audible && arena.media(id).playing && !allowed_to_play(arena, id) {
+        arena.media_mut(id).playing = false;
+        return queue_events(scope, id, &["volumechange", "timeupdate", "pause", ABORT_PLAY]);
+    }
     if !owed.is_empty() {
         queue_events(scope, id, owed);
     }

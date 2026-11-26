@@ -172,6 +172,7 @@ module Capybara
         'takeWorkerRt'                 => ->(b, *a) { b.take_worker_rt },
         'fontFileFromBytes'            => ->(b, *a) { b.font_file_from_bytes(a[0]) },
         'imageFetch'                   => ->(b, *a) { b.image_fetch(a[0], a[2], realm: a[1]) },
+        'imageFetchStart'              => ->(b, *a) { b.image_fetch_start(a[0], a[2], a[1], a[3]) },
         'scriptFetchStart'             => ->(b, *a) { b.script_fetch_start(a[0], a[1], a[2], a[3], a[4], a[5].to_f, a[6], excuse: a[7] == true) },
         'scriptFetchTake'              => ->(b, *a) { b.script_fetch_take(a[0]) },
         'moduleFetchStart'             => ->(b, *a) { b.module_fetch_start(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7].to_f, a[8], a[9].to_f, a[10]) },

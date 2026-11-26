@@ -396,6 +396,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "loadDelaySettled", load_delay_settled, context_id);
     crate::dom::register(scope, ns, "loadDelayedNow", load_delayed_now, context_id);
     crate::dom::register(scope, ns, "loadDueIn", load_due_in, context_id);
+    crate::dom::register(scope, ns, "loadWaitsOnImages", load_waits_on_images, context_id);
     crate::dom::register(scope, ns, "loadTaskOwes", load_task_owes, context_id);
     crate::dom::register(scope, ns, "loadTaskPays", load_task_pays, context_id);
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
@@ -1202,6 +1203,17 @@ fn load_delayed_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let arena = crate::dom::realm(scope, cid);
     rv.set_bool(arena.load_delayed_here(cid) || arena.realm_state(cid).is_some_and(|s| s.load_gates.pending()));
 }
+// __dom.loadWaitsOnImages() -> whether the calling realm's document's load — or that of a child navigable's document,
+// however deep, as an iframe's delays its container's — still to fire, waits on an image the host is fetching on a thread
+// of its own: what a visit waits for in real time (browser.rb `await_document_load`), its landing then on the clock.
+fn load_waits_on_images(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(waits_on_images(crate::dom::realm(scope, cid), cid));
+}
+fn waits_on_images(arena: &RealmArena, cid: i32) -> bool {
+    let unloaded = arena.realm_document(cid).is_some_and(|doc| !arena.document_states.lifecycle(doc).is_load_fired());
+    unloaded && (arena.images_delay_load(cid) || arena.child_realms(cid).into_iter().any(|kid| waits_on_images(arena, kid)))
+}
 // __dom.loadDueIn() -> how many ms after now the earliest work the calling realm's document's load still waits on is due —
 // 0 for work due now — -1 where its load came, or waits on nothing the event loop is to reach (`load_due_at`): what a
 // visit steps the event loop to before it returns (browser.rb `await_document_load`).
@@ -1252,7 +1264,8 @@ impl RealmArena {
         self.frame_navigations.0.keys().any(|&container| self.get(container).is_some_and(|n| n.realm == cid) && self.is_connected(container))
     }
     pub(crate) fn load_delayed_here(&self, cid: i32) -> bool {
-        self.obtains_delay_load(cid)
+        self.images_delay_load(cid)
+            || self.obtains_delay_load(cid)
             || self.media_delays_load(cid)
             || self.realm_state(cid).is_some_and(|s| s.load_gates.running() || s.load_gates.holding())
             || frame_loads_owed(self, cid)

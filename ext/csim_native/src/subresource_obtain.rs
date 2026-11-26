@@ -29,6 +29,7 @@ const H_LINK_EVENT: u32 = 12;
 pub(crate) const H_ASSET: u32 = 13;
 pub(crate) const H_CONTROLLER: u32 = 14;
 pub(crate) const H_CHARSET: u32 = 15;
+const H_IMAGE_START: u32 = 16;
 const H_MEDIA_BYTES: u32 = 18;
 pub(crate) const H_FRAME_NAVIGATION: u32 = 20;
 pub(crate) const H_LOAD_BLOCKER_SETTLED: u32 = 21;
@@ -1320,9 +1321,10 @@ pub(crate) fn obtain_image(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_,
 }
 // The network's answer to the image `el`'s request `load` of `url`, its request `plan`'s: a `blob:` one its blob, read
 // from this VM's blob URL store (the host has none of its bytes) — one revoked since the source was set is gone
-// (Chrome: `error`); else the host's — an http(s) one fetched now, as a script's is, its server's time counted
-// (Browser#image_fetch), a data: one decoded host-side — decoded, landing as far after it began as that server took
-// (image_requests.rs `land_fetched`).
+// (Chrome: `error`); an http(s) one fetched and decoded on a thread of the host's own (`H_IMAGE_START`) — a page's images
+// all at once, beside its script, as a browser fetches them — handed back as it is done (image_requests.rs
+// `imageFetchLand`), landing as far after it began as its server took; else — a data: one, decoded host-side, or one no
+// thread would start for — at once (`H_LOAD_IMAGE`), the same way (`land_fetched`).
 fn image_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, cid: i32, el: NodeId, url: &str, load: u32, plan: u32) -> Result<(), Terminated> {
     if crate::fetch_rules::fetch_route(url, 0, "") == crate::fetch_rules::ROUTE_BLOB {
         let u = text(scope, url);
@@ -1334,7 +1336,20 @@ fn image_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::
         return Ok(());
     }
     let started = now(scope, host)?;
-    let args = [text(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), v8::Integer::new(scope, cid).into()];
+    fn request<'s>(scope: &mut v8::PinScope<'s, '_>, url: &str, plan: u32, cid: i32) -> [v8::Local<'s, v8::Value>; 3] {
+        [text(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), v8::Integer::new(scope, cid).into()]
+    }
+    if crate::fetch_rules::fetch_route(url, 0, "") == crate::fetch_rules::ROUTE_NETWORK {
+        let began = realm(scope, cid).event_loop.clock;
+        let mut args = request(scope, url, plan, cid).to_vec();
+        args.push(v8::Number::new(scope, began).into());
+        let id = call(scope, host, H_IMAGE_START, &args)?.and_then(|id| v8::Local::new(scope, id).uint32_value(scope)).unwrap_or(0);
+        if id > 0 {
+            crate::image_requests::begin_host_fetch(scope, cid, id, el, load, url, started);
+            return Ok(());
+        }
+    }
+    let args = request(scope, url, plan, cid);
     let result = call(scope, host, H_LOAD_IMAGE, &args)?.map(|r| v8::Local::new(scope, r));
     let result = result.and_then(|r| v8::Local::<v8::Object>::try_from(r).ok());
     crate::image_requests::land_fetched(scope, host, el, load, url, started, result)

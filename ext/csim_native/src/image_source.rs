@@ -127,7 +127,11 @@ pub(crate) fn select(arena: &RealmArena, img: NodeId, viewport: (f32, f32), medi
         return src.map(|s| (s.to_owned(), 1.0));
     }
     if candidates.iter().any(|c| c.width.is_some()) {
-        let size = source_size(sizes.unwrap_or(""), viewport, media_matches);
+        // (…`auto` the image's laid-out width where it is lazily loaded and has a box — HTML: "the concrete object size's
+        // width" — which only a resumed lazy load is chosen after: image_requests.rs `resume`)
+        let lazy = node.plain_attr("loading").is_some_and(|l| l.eq_ignore_ascii_case("lazy"));
+        let auto = lazy.then(|| crate::geometry::rendered_box(arena, img)).flatten().map(|b| b[2]).filter(|w| *w > 0.0);
+        let size = source_size(sizes.unwrap_or(""), viewport, auto, media_matches);
         candidates.retain(|c| c.width.is_some());
         for c in &mut candidates {
             c.density = c.width.unwrap_or(0) as f64 / size;
@@ -145,9 +149,9 @@ pub(crate) fn select(arena: &RealmArena, img: NodeId, viewport: (f32, f32), medi
 
 // HTML "parse a sizes attribute" (§4.8.4.3.11), its source size: the first `<source-size>` of the comma-separated list
 // whose `<media-condition>` matches (one with none always does), its `<source-size-value>` — a length, `calc()` among
-// them — in CSS pixels on a `viewport`; 100vw where none does, or one is invalid (a negative one, a percentage), or the
-// list says `auto` (a lazy image's concrete width, which only layout knows: 100vw as HTML has it where none is taken).
-pub(crate) fn source_size(sizes: &str, viewport: (f32, f32), media_matches: &dyn Fn(&str) -> bool) -> f64 {
+// them — in CSS pixels on a `viewport`; 100vw where none does, or one is invalid (a negative one, a percentage). A
+// leading `auto` is the image's own width, `auto` where it is known (a lazy image's laid out), else passed over.
+pub(crate) fn source_size(sizes: &str, viewport: (f32, f32), auto: Option<f64>, media_matches: &dyn Fn(&str) -> bool) -> f64 {
     let vw = f64::from(viewport.0);
     for item in split_top_level(sizes) {
         let item = item.trim();
@@ -156,7 +160,10 @@ pub(crate) fn source_size(sizes: &str, viewport: (f32, f32), media_matches: &dyn
         }
         let (condition, value) = split_last_value(item);
         if value.eq_ignore_ascii_case("auto") {
-            continue;
+            match auto {
+                Some(width) if condition.trim().is_empty() => return width,
+                _ => continue,
+            }
         }
         let Some(px) = css_length(value, viewport).filter(|v| *v >= 0.0) else { continue };
         let condition = condition.trim();
@@ -356,11 +363,12 @@ mod tests {
     #[test]
     fn takes_the_first_matching_source_size() {
         let matches = |m: &str| m == "(min-width: 500px)";
-        assert_eq!(source_size("(min-width: 500px) 50vw, 100px", (800.0, 600.0), &matches), 400.0);
-        assert_eq!(source_size("(max-width: 1px) 10px, calc(100vw - 2 * 10px)", (800.0, 600.0), &matches), 780.0);
-        assert_eq!(source_size("auto, 2em", (800.0, 600.0), &matches), 32.0);
-        assert_eq!(source_size("-5px, bogus", (800.0, 600.0), &matches), 800.0);
-        assert_eq!(source_size("", (800.0, 600.0), &matches), 800.0);
+        assert_eq!(source_size("(min-width: 500px) 50vw, 100px", (800.0, 600.0), None, &matches), 400.0);
+        assert_eq!(source_size("(max-width: 1px) 10px, calc(100vw - 2 * 10px)", (800.0, 600.0), None, &matches), 780.0);
+        assert_eq!(source_size("auto, 2em", (800.0, 600.0), None, &matches), 32.0);
+        assert_eq!(source_size("auto, 2em", (800.0, 600.0), Some(300.0), &matches), 300.0);
+        assert_eq!(source_size("-5px, bogus", (800.0, 600.0), None, &matches), 800.0);
+        assert_eq!(source_size("", (800.0, 600.0), None, &matches), 800.0);
     }
 
     #[test]

@@ -159,8 +159,10 @@ module Capybara
       SCREEN_SIZE = Native.screen_size.freeze
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
-      # How far a visit will step the virtual clock for its document's load (see await_document_load).
+      # How far a visit will step the virtual clock for its document's load (see await_document_load) — and how long it
+      # will wait in real time for the image fetches its load waits on, a hung server left to a later drain.
       VISIT_LOAD_BUDGET_MS = 10_000
+      VISIT_IMAGE_WAIT_S = 30
       # …and how many steps of nothing due later it takes before it lets go — work due now that the event loop does not
       # run: one held for the host, a testdriver action, a frame's response not yet in.
       VISIT_LOAD_STALLED_STEPS = 3
@@ -479,6 +481,14 @@ module Capybara
         @keepalive_seq     = 0
         @keepalive_lock    = Mutex.new
         @keepalive_session = Native.keepalive_session_new
+        # Images' fetches (`image_fetch_start`): made on threads of their own, a page's all at once as a browser makes them,
+        # each one's result kept by number until its realm takes it (`deliver_image_fetches`) — `@image_fetch_done`
+        # signalled as one finishes, which a visit whose load waits on them blocks on (`await_document_load`).
+        @image_fetch_seq     = 0
+        @image_fetch_results = {}
+        @image_fetch_flights = {}
+        @image_fetch_lock    = Mutex.new
+        @image_fetch_done    = ConditionVariable.new
         # Scripts' fetches (`script_fetch_start`): each one's slot, by number, until its realm takes it.
         @script_fetch_seq   = 0
         @script_fetches     = {}
@@ -1194,14 +1204,15 @@ module Capybara
       # timer-driven runloop pages.
       def async_io_pending?
         worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? ||
-          window_tasks_takeable? || agent_notices_pending? || sw_host_work_pending?
+          image_fetches_pending? || window_tasks_takeable? || agent_notices_pending? || sw_host_work_pending?
       end
       # …of those of this window's own, the ones that are work under way, which its own step delivers whichever window is
       # the active one (`steps_pending?`): its workers' at work (`worker_drive_pending?` — not a message posted to one that
       # may never answer), what its event streams and its hijacked fetches have read (not a long poll still open), its
-      # cross-window inboxes, its WebSockets'.
+      # cross-window inboxes, its WebSockets', its images'.
       def own_work_pending?
-        worker_drive_pending? || event_source_pending? || !@hijack_fetch_queue.empty? || window_message_pending? || websocket_pending?
+        worker_drive_pending? || event_source_pending? || !@hijack_fetch_queue.empty? || window_message_pending? || websocket_pending? ||
+          image_fetches_pending?
       end
 
       # The engine registries' notices (agents.rs — IndexedDB's, Web Locks') for this window's realms, taken — each realm
@@ -2066,6 +2077,7 @@ module Capybara
           deliver_hijacked_fetches
           deliver_window_messages
           deliver_websocket_events
+          deliver_image_fetches
           deliver_agent_notices
           deliver_sw_host_work
           deliver_sw_client_navs
@@ -2084,6 +2096,7 @@ module Capybara
           deliver_hijacked_fetches
           deliver_window_messages
           deliver_websocket_events
+          deliver_image_fetches
           deliver_agent_notices
           deliver_sw_host_work
           deliver_sw_client_navs
@@ -2117,6 +2130,9 @@ module Capybara
           # via `tick_real_time`. SSE / Worker channels keep us in
           # the loop as long as background threads have data queued.
           break if @runtime.settle_gen == prev_gen && !@runtime.has_ready_timer? && !async_io_pending?
+          # Only image fetches in flight keeping us here? Yield the GVL briefly so their threads can finish inside this
+          # settle — spinning empty zero-budget loop steps would starve exactly the threads waited on.
+          sleep 0.005 if image_fetches_pending? && !@timers_active && !@runtime.has_ready_timer?
           prev_gen = @runtime.settle_gen
         end
         # Free the native state of what the settle's churn left unreachable — a CSSOM rule's or sheet's, a
@@ -3122,6 +3138,7 @@ module Capybara
           @last_tick_ts = now
           effective_step = step_ms || horizon_fast_forward_step
           if (step_ms || @timers_active || (!@workers.empty? && worker_next_timer_at)) && effective_step > 0
+            pace_image_fetches(effective_step)
             # When the page has work runnable NOW (a rAF chain / timer burst — set
             # by `horizon_fast_forward_step`), run the poll's worth of virtual time
             # in frame-sized chunks so the page renders at real-browser cadence
@@ -3491,7 +3508,7 @@ module Capybara
       # Returns true if any channel delivered.
       private def drain_async_channels
         n = deliver_worker_messages + deliver_event_source_events + deliver_hijacked_fetches +
-            deliver_window_messages + deliver_websocket_events + deliver_agent_notices
+            deliver_window_messages + deliver_websocket_events + deliver_image_fetches + deliver_agent_notices
         @find_cache_dirty = true if n.positive?
         n.positive?
       end
@@ -3521,7 +3538,7 @@ module Capybara
         end
         # (1) Background async (cheap Ruby-side checks, no V8 crossing) we must let
         #     land before jumping the clock: advance one fixed step, reset the guard.
-        if worker_pending? || event_source_pending? || hijack_fetch_pending? || websocket_pending? || agent_notices_pending?
+        if worker_pending? || event_source_pending? || hijack_fetch_pending? || websocket_pending? || image_fetches_pending? || agent_notices_pending?
           @ff_transient_polls = 0
           return POLL_TICK_STEP_MS
         end
@@ -3764,6 +3781,11 @@ module Capybara
         # anyway — the server finishes an aborted request; only the client-side wait
         # is discarded.
         drain_app_request_threads
+        # (…and the image fetches' results: one a thread finishes after this finds no slot and keeps nothing)
+        @image_fetch_lock.synchronize do
+          @image_fetch_results.clear
+          @image_fetch_flights.clear
+        end
         @script_fetches.clear
         @module_fetches.clear
         # (…and the module fetches its graphs noted and no realm filed — a frame's `import()` whose page went before its
@@ -8804,6 +8826,113 @@ module Capybara
         answer&.merge('slept' => slept)
       end
 
+      # …and one made on a thread of its own (an http(s) image's: image_requests.rs `begin_host_fetch`), its server's real
+      # time spent beside the page's script and the other images', as a browser fetches a page's images at once: the
+      # number its result is kept under until its realm takes it (`deliver_image_fetches`), or 0 for a URL that resolves
+      # to none. Its server's sleeps counted in the thread's slot (`SleepHook`), its result landing that far after `began`
+      # — the event loop's clock as it began, the first of its flight's — however soon the thread is done. One flight per
+      # request identity: an avatar column's images make one request and one decode, each joiner landing as far after
+      # the flight's beginning as its server took (its own, where it joined late: its landing never before its begin).
+      def image_fetch_start(url, plan, realm, began)
+        key = resolve_against_current(url.to_s)
+        return 0 unless key.is_a?(String)
+
+        cors, credentials, client = planned_request(plan, realm)
+        flight = [key, cors, credentials, client]
+        @image_fetch_lock.synchronize do
+          id = (@image_fetch_seq += 1)
+          if (slot = @image_fetch_flights[flight])
+            @image_fetch_results[id] = slot
+            next id
+          end
+          slot = {began: began.to_f, slept: 0.0, done: false, result: nil}
+          @image_fetch_flights[flight] = slot
+          @image_fetch_results[id] = slot
+          spawn_app_request_thread do
+            Thread.current.thread_variable_set(:csim_server_slept, slot)
+            slot[:result] = image_fetch_result(key, cors, credentials, client)
+          rescue StandardError
+            slot[:result] = nil
+          ensure
+            # (…`ensure`: a kill or an escaping error must not strand the slot unfinished, holding a visit's wait)
+            @image_fetch_lock.synchronize do
+              @image_fetch_flights.delete(flight) if @image_fetch_flights[flight].equal?(slot)
+              slot[:done] = true
+              @image_fetch_done.broadcast
+            end
+          end
+          id
+        end
+      end
+      # The thread-side body: everything but the transfer stash (engine-affine, made at delivery on the main thread).
+      private def image_fetch_result(key, cors, credentials, client)
+        Thread.current[:csim_image_meta] = nil
+        entry = cached_image(key, cors, credentials, client: client)
+        return {'unsupported' => true} if entry == :unsupported
+        return undecodable_image_result unless entry
+
+        {entry: entry, meta: Thread.current[:csim_image_meta]}
+      end
+      # Whether an image fetch's result is still to be taken: its thread at work, or done and not yet delivered.
+      def image_fetches_pending?
+        !@image_fetch_results.empty?
+      end
+      # Hand each finished image fetch to the realm that began it (`imageFetchRealm`): `{…record, slept, began}`, its bitmap
+      # stashed for transfer now — an id no realm has (its page went) dropped, its bitmap reclaimed. The number delivered.
+      def deliver_image_fetches
+        return 0 if @image_fetch_results.empty?
+
+        finished = @image_fetch_lock.synchronize { @image_fetch_results.select {|_, slot| slot[:done] }.each_key {|id| @image_fetch_results.delete(id) } }
+        finished.each do |id, slot|
+          payload = image_result_payload(slot[:result])
+          payload = payload.merge('slept' => slot[:slept], 'began' => slot[:began]) if payload.is_a?(Hash)
+          consumed = begin
+            rid = @runtime.call('imageFetchRealm', id).to_i
+            if rid.zero? then @runtime.call('applyAsyncImage', id, payload) == true
+            elsif rid.positive? then @runtime.realm_call(rid, 'applyAsyncImage', id, payload) == true
+            end
+          rescue StandardError
+            false
+          end
+          next if consumed || !payload.is_a?(Hash)
+
+          transfer_buffer_fetch(payload['refId']) if payload['refId']
+          transfer_buffer_fetch(payload['refIdP3']) if payload['refIdP3']
+        end
+        finished.size
+      end
+      # Block until an image fetch's thread is done (or `deadline`, the monotonic clock's), delivering what finished: what
+      # a visit whose document's load waits on one does — the one real wait for them, the wall time of the slowest.
+      def await_image_fetch(deadline)
+        @image_fetch_lock.synchronize do
+          until @image_fetch_results.empty? || @image_fetch_results.each_value.any? {|slot| slot[:done] }
+            left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            break if left <= 0
+
+            @image_fetch_done.wait(@image_fetch_lock, left)
+          end
+        end
+        deliver_image_fetches
+      end
+      # Keep the virtual clock from outrunning the image fetches in flight: before it moves `ms` on, wait — at most `ms` of
+      # real time, as a browser's clock would take — for their threads, each result delivered as it is done, landing at
+      # its own time on the clock (an image its server takes 100 ms over loads before a 700 ms timer, as in a browser). No
+      # wait with none in flight; the visit's wait for the ones its load waits on is whole (`await_document_load`).
+      def pace_image_fetches(ms)
+        return unless image_fetches_pending?
+
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + (ms / 1000.0)
+        await_image_fetch(deadline) while image_fetches_pending? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+      end
+      # Shape a thread result into what `imageFetchLand` reads, stashing the bitmap for transfer HERE, on the main thread,
+      # only for results that actually deliver.
+      private def image_result_payload(r)
+        return nil if r.nil?
+        return r unless r.is_a?(Hash) && r.key?(:entry)
+
+        image_payload(r[:entry], r[:meta])
+      end
+
       # A response that arrived but is no image: the element is broken, the resource was still
       # fetched — its Resource Timing entry carries the real status and size.
       private def undecodable_image_result
@@ -13105,10 +13234,13 @@ module Capybara
       # cap bounds the visit alone: the next read's clock step goes on from where it stopped, as any read's does —
       # `tick_real_time` — so a 20 s sheet still lands, and a page timer still fires, at its own time.)
       def await_document_load
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + VISIT_IMAGE_WAIT_S
+        await_load_images(deadline)
         return unless @timers_active
 
         waited = stalled = 0
         while waited < VISIT_LOAD_BUDGET_MS && stalled < VISIT_LOAD_STALLED_STEPS
+          await_load_images(deadline)
           due = @runtime.call('loadDueIn').to_f
           break if due.negative?
 
@@ -13118,6 +13250,15 @@ module Capybara
           waited += step
         end
         @find_cache_dirty = true if waited.positive? || stalled.positive?
+      end
+
+      # …an image whose fetch is under way on a thread of its own, which the document's load waits for: that thread waited
+      # for in real time — the one wait for it, the slowest's — the response it brings landing at its time on the clock;
+      # none of one begun after the load, which a browser's driver does not wait for either.
+      private def await_load_images(deadline)
+        while image_fetches_pending? && @runtime.call('loadWaitsOnImages') == true && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          await_image_fetch(deadline)
+        end
       end
 
       # Run the page's own DUE-NOW init as the load ends — the `setTimeout(0)` a

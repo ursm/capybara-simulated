@@ -172,6 +172,19 @@ impl AvailableImages {
     }
 }
 
+// An image's fetch the host makes on a thread of its own (subresource_obtain.rs `image_from_network`): the realm that
+// began it — whose document's load it delays, and which takes its result — the element, held (an element whose image is
+// being fetched is kept from being collected), the request it is for, its URL and when it began on the page's clock (its
+// Resource Timing entry's start), until the host hands the result back (`imageFetchLand`).
+pub(crate) struct HostFetch {
+    realm: i32,
+    node: NodeId,
+    _held: v8::Global<v8::Value>,
+    load: u32,
+    src: String,
+    start: f64,
+}
+
 impl RealmArena {
     // What an image element's current request says of it as an image source (canvas_image.rs): whether it is broken,
     // its size, whether it is tainted and whether it has decoded pixels — none while an update of its data is under way
@@ -200,10 +213,16 @@ impl RealmArena {
     pub(crate) fn image_density(&self, id: NodeId) -> f64 {
         self.image(id).map(|r| r.current.density).filter(|&d| d > 0.0 && d.is_finite()).unwrap_or(1.0)
     }
-    // …realm `realm`'s list of available images forgotten with its nodes: a node id a later page reuses is no image of
-    // theirs.
-    pub(crate) fn forget_available_images_of(&mut self, realm: i32) {
+    // …realm `realm`'s fetches and list of available images forgotten with its nodes: a node id a later page reuses is no
+    // image of theirs, and its realm's document delays nothing any more.
+    pub(crate) fn forget_image_fetches_of(&mut self, realm: i32) {
+        self.image_fetches.retain(|_, f| f.realm != realm);
         self.available_images.forget_realm(realm);
+    }
+    // Whether realm `realm`'s images delay its document's load event (HTML: an image's fetch in progress does): a live
+    // request the host is fetching on a thread of its own. (…its response's task, once it has one, is a load gate)
+    pub(crate) fn images_delay_load(&self, realm: i32) -> bool {
+        self.image_fetches.values().any(|f| f.realm == realm && self.get(f.node).is_some() && self.image_request_live(f.node, f.load))
     }
     // Whether request `load` is `id`'s current or pending one (no later one aborted it).
     pub(crate) fn image_request_live(&self, id: NodeId, load: u32) -> bool {
@@ -236,6 +255,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageUrl", url, context_id);
     crate::dom::register(scope, ns, "imageBitmap", bitmap_op, context_id);
     crate::dom::register(scope, ns, "imageLazyPending", lazy_pending, context_id);
+    crate::dom::register(scope, ns, "imageFetchRealm", fetch_realm, context_id);
+    crate::dom::register(scope, ns, "imageFetchLand", fetch_land, context_id);
     crate::dom::register(scope, ns, "imageLazyResume", lazy_resume, context_id);
 }
 
@@ -476,11 +497,23 @@ fn stable_state(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, update: 
 fn lazy(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.is_html_named("img") && n.plain_attr("loading").is_some_and(|l| l.eq_ignore_ascii_case("lazy")))
 }
-// The lazy load resumption steps of the element's request put off, if it has one: its fetch made.
+// The lazy load resumption steps of the element's request put off, if it has one: its fetch made — of the source it
+// selects now it is laid out, where its `sizes` is `auto` and so its own width (HTML), else the one it had.
 fn resume(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, host: v8::Local<'_, v8::Function>) {
     let arena = crate::dom::realm(scope, cid);
     let Some(at) = arena.lazy_images.iter().position(|&(el, _)| el == id) else { return };
     let (_, load) = arena.lazy_images.remove(at);
+    let auto = arena.get(id).and_then(|n| n.plain_attr("sizes")).is_some_and(|s| s.trim_start().get(..4).is_some_and(|a| a.eq_ignore_ascii_case("auto")));
+    let reselected = if auto { select_source(scope, cid, id) } else { None };
+    if let (Some((source, density)), Some(doc)) = (reselected, crate::dom::node_document(scope, id)) {
+        let arena = crate::dom::realm(scope, cid);
+        let url = arena.parse_document_url(doc, &source).map(|u| u.href().to_owned());
+        if let (Some(url), Some(request)) = (url, arena.images.get_mut(&id).and_then(|r| r.request_mut(load))) {
+            request.url = url;
+            request.density = density;
+        }
+    }
+    let arena = crate::dom::realm(scope, cid);
     let url = arena.image(id).and_then(|r| {
         let request = if r.current.id == load { Some(&r.current) } else { r.pending.as_ref().filter(|p| p.id == load) };
         request.map(|q| q.url.clone())
@@ -492,12 +525,14 @@ fn resume(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, host: v8::Loca
 // agent's to choose): Chrome's on a fast connection.
 const LAZY_ROOT_MARGIN: f64 = 1250.0;
 
-// __dom.imageLazyPending() -> whether an image of the calling realm's document has a fetch its lazy loading put off: what
-// the rendering update asks before it lays out to resume one (timers.js).
+// __dom.imageLazyPending([anyRealm]) -> whether an image of the calling realm's document — or, `anyRealm`, of any
+// document's, a frame's among them, which a scroll of its parent may bring near — has a fetch its lazy loading put off:
+// what the rendering update asks before it lays out to resume one (dom-nodes.js), and a scroll before it wakes the loop.
 fn lazy_pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
+    let any = args.get(0).is_true();
     let arena = crate::dom::realm(scope, cid);
-    rv.set_bool(arena.lazy_images.iter().any(|&(el, _)| arena.get(el).is_some_and(|n| n.realm == cid)));
+    rv.set_bool(arena.lazy_images.iter().any(|&(el, _)| arena.get(el).is_some_and(|n| any || n.realm == cid)));
 }
 // __dom.imageLazyResume(host) — at the rendering update, its layout current: the lazy load intersection observer's steps
 // for the calling realm's lazy images — each that intersects the viewport, grown by `LAZY_ROOT_MARGIN`, its fetch made
@@ -510,6 +545,12 @@ fn lazy_resume(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     lazy.retain(|&(el, load)| arena.get(el).is_some() && arena.image(el).is_some_and(|r| r.live(load)));
     arena.lazy_images = lazy;
     let margin = [crate::intersection::Margin { value: LAZY_ROOT_MARGIN, percent: false }; 4];
+    // (…the observer's root the top-level viewport: a frame's images none while its container, or one of its ancestors'
+    // up the frame tree, is that far from its document's viewport — Chrome and Firefox, rv `lazy2`)
+    if !frame_in_view(scope, cid, &margin) {
+        return;
+    }
+    let arena = crate::dom::realm(scope, cid);
     let root = arena.root_intersection_rect(None, &margin);
     let due: Vec<NodeId> = arena
         .lazy_images
@@ -520,6 +561,25 @@ fn lazy_resume(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     for el in due {
         resume(scope, cid, el, host);
     }
+}
+
+// Whether realm `cid`'s document is within `margin` of the top-level viewport: each container up its frame tree
+// intersecting its own document's viewport grown by it (a top-level document's always).
+fn frame_in_view(scope: &mut v8::PinScope<'_, '_>, cid: i32, margin: &[crate::intersection::Margin; 4]) -> bool {
+    let mut realm = cid;
+    let seen = loop {
+        let arena = crate::dom::realm(scope, realm);
+        let Some(container) = arena.live_container(realm) else { break true };
+        let Some(parent) = arena.get(container).map(|n| n.realm) else { break true };
+        let arena = crate::dom::realm(scope, parent);
+        let root = arena.root_intersection_rect(None, margin);
+        if arena.observe_intersection(container, None, root, &[0.0]).intersection.is_none() {
+            break false;
+        }
+        realm = parent;
+    };
+    crate::dom::realm(scope, cid);
+    seen
 }
 
 // What an element task of an image's carries out (`run_task`): a request's response landed — its data shown, its `load`
@@ -698,14 +758,16 @@ fn settle_decodes(scope: &mut v8::PinScope<'_, '_>, el: v8::Local<'_, v8::Value>
 
 // __dom.imageFetchesStop() -> how many requests of the calling realm's document's images its abort cancelled (HTML "abort
 // a document": "cancel any instance of the fetch algorithm in the context of document, discarding any tasks queued for
-// them") — each whose response's task is still to run — its response landing into nothing, delaying the load no more, broken on an element task with no event, as Firefox has it, where Chrome fires `error`. An
+// them") — each the host is fetching, or whose response's task is still to run — its response landing into nothing,
+// delaying the load no more, broken on an element task with no event, as Firefox has it, where Chrome fires `error`. An
 // instance whose stable state has not come has made no request yet: it goes on to its `load` or its `error` as it would —
 // Chrome and Firefox, with a real image, for an `src` set, a node inserted or a `document.write` in the same task as the
 // `stop()` (rvfn x_real_*, 2026-11-06).
 fn fetches_stop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let arena = &mut crate::dom::dom(scope).arena;
-    let mut stopped = Vec::new();
+    let mut stopped: Vec<(NodeId, u32)> = arena.image_fetches.values().filter(|f| f.realm == cid).map(|f| (f.node, f.load)).collect();
+    arena.image_fetches.retain(|_, f| f.realm != cid);
     let ours: Vec<NodeId> = arena.images.keys().copied().filter(|&id| arena.get(id).is_some_and(|n| n.realm == cid)).collect();
     for id in ours {
         let Some(r) = arena.images.get_mut(&id) else { continue };
@@ -782,16 +844,19 @@ fn url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>
 }
 
 // Request `load` of the image `el`'s for `src`, begun at `start` on the page's clock, answered by the host with the record
-// `r` (subresource_obtain.rs `image_from_network`): landed (`land_record`) as far after it began as its server took — its
-// sleeps (`slept`, which the host counts as a script fetch's: Browser#image_fetch) and its modeled delay (`meta.delayMs`,
-// a WPT handler's virtualized `time.sleep`), virtual ms on the event loop's clock, a load gate whose due a visit steps to
-// — its entry filed as it lands (`file_image`; at once for one due now).
+// `r` (subresource_obtain.rs `image_from_network`, `imageFetchLand`): landed (`land_record`) as far after it began as its
+// server took — its sleeps (`slept`, which the host counts as a script fetch's: Browser#image_fetch_start) and its
+// modeled delay (`meta.delayMs`, a WPT handler's virtualized `time.sleep`), virtual ms on the event loop's clock from
+// `began` (its flight's, for one that joined another's: none of it before now) — a load gate whose due a visit steps to,
+// its entry filed as it lands (`file_image`; at once for one due now).
 pub(crate) fn land_fetched(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, el: NodeId, load: u32, src: &str, start: f64, r: Option<v8::Local<'_, v8::Object>>) -> Result<(), crate::font_files::Terminated> {
     let ms = |scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Object>>, k: &str| {
         obj.and_then(|o| crate::dom::member(scope, o, k)).and_then(|v| v.number_value(scope)).filter(|v| v.is_finite()).unwrap_or(0.0)
     };
     let meta = r.and_then(|r| crate::dom::member(scope, r, "meta")).and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
-    let due = ms(scope, r, "slept") + ms(scope, meta, "delayMs");
+    let clock = crate::dom::dom(scope).arena.event_loop.clock;
+    let began = r.and_then(|o| crate::dom::member(scope, o, "began")).and_then(|v| v.number_value(scope)).unwrap_or(clock);
+    let due = (began + ms(scope, r, "slept") + ms(scope, meta, "delayMs") - clock).max(0.0);
     if due <= 0.0 {
         crate::subresource_obtain::file_image(scope, host, el, src, start, r)?;
     } else {
@@ -802,4 +867,42 @@ pub(crate) fn land_fetched(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_,
     }
     land_record(scope, el, load, r, due);
     Ok(())
+}
+
+// The host fetches request `load` of the image `node`'s — of realm `realm`'s making — on a thread of its own, as host
+// request `id`, `src` begun at `start` on the page's clock (`HostFetch`), its result handed back to the realm that began
+// it (`imageFetchLand`).
+pub(crate) fn begin_host_fetch(scope: &mut v8::PinScope<'_, '_>, realm: i32, id: u32, node: NodeId, load: u32, src: &str, start: f64) {
+    let element = crate::dom::node_value(scope, Some(node));
+    let _held = v8::Global::new(scope, element);
+    crate::dom::dom(scope).arena.image_fetches.insert(id, HostFetch { realm, node, _held, load, src: src.to_owned(), start });
+}
+// __dom.imageFetchLand(id, r, host) -> whether the host's request `id` was one the calling realm began (the host offers it
+// to each realm in turn): its record `r` landed (`land_fetched`). Nothing lands of one whose element is gone, nor of one a
+// later request aborted.
+fn fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = crate::dom::realm_id(scope, &args);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(2)) else { return rv.set_bool(false) };
+    let arena = &mut crate::dom::dom(scope).arena;
+    let Some(f) = arena.image_fetches.get(&id) else { return rv.set_bool(false) };
+    if arena.get(f.node).is_none() {
+        arena.image_fetches.remove(&id);
+        return rv.set_bool(false);
+    }
+    if f.realm != cid {
+        return rv.set_bool(false);
+    }
+    let HostFetch { node, load, src, start, .. } = arena.image_fetches.remove(&id).expect("a fetch found above");
+    rv.set_bool(true);
+    if arena.image_request_live(node, load) {
+        let r = v8::Local::<v8::Object>::try_from(args.get(1)).ok();
+        let _ = land_fetched(scope, host, node, load, &src, start, r);
+    }
+}
+// __dom.imageFetchRealm(id) -> the realm that began the host's request `id` — the one to hand its result to — or -1 for
+// none (a request of a realm gone, or of a page left).
+fn fetch_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    rv.set_int32(crate::dom::dom(scope).arena.image_fetches.get(&id).map_or(-1, |f| f.realm));
 }

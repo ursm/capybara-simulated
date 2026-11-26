@@ -1519,7 +1519,7 @@ module WptRunner
           advance      = true
           wait_started = nil
           hold_last    = nil
-        elsif s.driver.worker_drive_pending?
+        elsif s.driver.worker_drive_pending? || s.driver.browser.image_fetches_pending?
           # Async-only frame with worker cross-thread work in flight (an SW
           # round-trip, a worker mid-boot / mid-message — in ANY window; the
           # driver aggregate matches the merged `async` above): the page is

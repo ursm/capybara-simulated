@@ -178,4 +178,40 @@ RSpec.describe 'update the image data' do
     poll_until { s.evaluate_script('log.length') >= 2 }
     expect(s.evaluate_script('log')).to eq(['a.png', 'decoded'])
   end
+
+  # A page's images are fetched at once, beside each other, as a browser fetches them: ten whose server takes 200 ms each
+  # load in about 200 ms of real time, not two seconds — each landing 200 ms after it began on the clock all the same.
+  it "fetches a page's images at once, each landing at its server's time" do
+    slow = File.binread(File.join(__dir__, 'wpt/images/green-1x1.png'))
+    app = lambda {|env|
+      next [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{(0...10).map {|i| "<img src=/s#{i}.png>" }.join}"]] if env['PATH_INFO'] == '/'
+
+      sleep 0.2
+      [200, {'content-type' => 'image/png'}, [slow]]
+    }
+    s = simulated_session(app)
+    t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    s.visit '/'
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).to be < 1.2
+    expect(s.evaluate_script('[...document.images].every((i) => i.complete && i.naturalWidth === 1)')).to be true
+    expect(s.evaluate_script('performance.now()')).to be >= 200
+  end
+
+  # A lazy image in a frame the top-level viewport is far from waits for the frame to near it (Chrome and Firefox, rv
+  # `lazy2`); `sizes=auto` sizes an image 300x150 by the UA sheet's size containment (both).
+  it "takes a frame's place in the page for its lazy images, and sizes an auto-sized image 300 wide" do
+    requests = []
+    s = image_session(png, small, requests)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      document.body.style.margin = '0';
+      document.body.innerHTML = '<img id=auto sizes="auto, 50px" srcset="/a.png 100w"><div style="height: 6000px"></div><iframe id=far></iframe>';
+      far.srcdoc = '<img loading=lazy src="/b.png" onload="parent.log.push(1)">';
+    JS
+    s.evaluate_script('new Promise((r) => setTimeout(r, 300))')
+    expect([s.evaluate_script('[log.length, auto.width]'), requests.include?('/b.png')]).to eq([[0, 300], false])
+    s.execute_script('far.scrollIntoView()')
+    poll_until { s.evaluate_script('log.length') >= 1 }
+    expect(requests).to include('/b.png')
+  end
 end
