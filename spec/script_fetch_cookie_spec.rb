@@ -84,4 +84,19 @@ RSpec.describe 'a script fetch and cookies' do
     s.visit '/'
     expect(s.evaluate_script('R.join(" ")')).to eq('t50: b:b=1 inl:b=1')
   end
+
+  # …and none of a fetch the parser's wait gave up: a `stop()` in a timer its wait ran cancels it before its response is in
+  # (Chrome and Firefox `stop: t300:`, rv-end-probe `a11_stop_cookie`).
+  it "stores no cookie of a parser-blocking script whose fetch a `stop()` cancelled" do
+    app = ->(env) {
+      if env['PATH_INFO'] == '/b.js'
+        sleep 0.15
+        next [200, {'content-type' => 'text/javascript', 'set-cookie' => 'b=1; path=/'}, ['R.push("ran")']]
+      end
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><title>t</title><script>window.R = []; setTimeout(() => { stop(); R.push("stop:" + document.cookie) }, 20); setTimeout(() => R.push("t300:" + document.cookie), 300)</script><script src="/b.js"></script>']]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    expect(s.evaluate_async_script('const done = arguments[0]; setTimeout(() => done(R.join(" ")), 400)')).to eq('stop: t300:')
+  end
 end

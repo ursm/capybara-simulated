@@ -8911,7 +8911,9 @@ module Capybara
       # (…and one the document's same request under way already shares that one's slot, as the graph's fetch, or a
       # modulepreload's, takes it, the rest of its server's time its own: `asset_request`)
       # (…a slot a Hash of its own and nothing more per script — no Proc, no key Array: one is begun per script of a page)
-      def script_fetch_start(url, realm, plan, document, referrer, graph_entry, began, id, started)
+      # (…`excuse`, a parser-blocking script's, whose request's work is the page's time: the sleeps of its server this
+      # request made counted none of it — the virtual clock's to show — and none of one whose flight it joined)
+      def script_fetch_start(url, realm, plan, document, referrer, graph_entry, began, id, started, excuse: false)
         realm = realm.to_i
         if document
           mode, credentials, policy, dest = request_of_plan(plan)
@@ -8934,6 +8936,7 @@ module Capybara
         end
         script_fetch_make(slot)
         @script_fetches[id.to_i] = slot
+        @runtime.call('agentExcuse', slot[:slept]) if excuse && slot[:slept].positive?
         slot[:slept]
       end
       # …the request made, its server's sleeps counted in the slot (`SleepHook`), the cookies its responses set kept in it
