@@ -222,7 +222,7 @@ RSpec.describe 'the module map' do
   # fetch as its server took — the event loop running on meanwhile — and one module however many ask for it.
   describe 'under a service worker that lets its requests through' do
     it "lands a module's imports as late as their servers take" do
-      files = {'/x.js' => "L.push('x-ran'); export const x = 1;", '/m.js' => "import '/slow/300/x.js'; L.push('m-ran');",
+      files = {'/x.js' => "L.push('x-ran'); export const x = 1;", '/m.js' => "import '/slow/300/x.js'; L.push('m-ran', 'm-on-time:' + (performance.now() < 450));",
                '/sw.js' => "addEventListener('install', () => skipWaiting()); addEventListener('activate', (e) => e.waitUntil(clients.claim())); addEventListener('fetch', () => {});"}
       session = session_of(<<~HTML, files)
         <script>
@@ -230,6 +230,7 @@ RSpec.describe 'the module map' do
             navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => { L.push('registered'); done(); });
           } else {
             setTimeout(() => { L.push('t100'); import('/slow/300/x.js').then(() => L.push('dyn-ok'), () => L.push('dyn-fail')); }, 100);
+            setTimeout(() => L.push('t400'), 400);
             setTimeout(done, 1000);
           }
         </script>
@@ -239,7 +240,8 @@ RSpec.describe 'the module map' do
       expect(session).to have_title('done', wait: 10)
       session.visit '/'
       expect(session).to have_title('done', wait: 10)
-      expect(session.find('#out', visible: :all).text(:all).split).to start_with('t100', 'x-ran').and include('m-ran', 'dyn-ok')
+      # (…its server's time on the clock once: a timer due after it runs after it, as the uncontrolled page's does)
+      expect(session.find('#out', visible: :all).text(:all).split).to start_with('t100', 'x-ran').and include('m-ran', 'm-on-time:true', 'dyn-ok').and end_with('t400')
     end
   end
 

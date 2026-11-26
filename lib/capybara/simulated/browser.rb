@@ -9010,6 +9010,8 @@ module Capybara
 
         slot, wait = asset_slot(request, document, began, id)
         slept = wait || slot[:slept]
+        # (…the sleeps of its server this request made none of the landing's script time: the slot's to put on the clock)
+        @runtime.call('agentExcuse', slot[:slept]) if wait.nil? && slot[:slept].positive?
         slept.positive? ? slept.to_f : slot
       end
       # …the milliseconds a request took, of its host times (`asset_fetch`'s `[started, ended]`), 0 for none.
