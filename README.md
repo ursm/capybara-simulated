@@ -165,6 +165,10 @@ end
   Capybara::Simulated::Driver.new(app, external_network: ['localhost:4020'])   # a local streaming server
   ```
 
+  Each entry is a host — a name (an internationalized one in either form), an IPv4 address, or an IPv6 address in
+  brackets (`[::1]`) — optionally followed by `:port`; a host alone allows every port of it. No scheme, path or
+  whitespace: `Driver.new` raises an `ArgumentError` for those. Names compare case-insensitively, a trailing dot ignored.
+
   The hosts your app serves are read as each request is made, so a test may set `Capybara.app_host` whenever it likes
   (a tenant's subdomain per test):
 
@@ -174,7 +178,9 @@ end
   - another name at that port, where a real server would answer it too: a name of the app's site
     (`admin.shop.test` beside `shop.test`), or any name where the port is not 80 or 443 (none of these with the
     stand-in);
-  - `localhost`, `127.0.0.1` and `[::1]` at `Capybara.server_port`.
+  - `localhost`, `127.0.0.1` and `[::1]` at `Capybara.server_port`;
+  - the origin of any document the app itself served in this session (until `reset!`): a page loaded under an
+    `app_host` the test has since changed still reaches the app with its own requests.
 
   Anything else is another host — `localhost` at another port among them: a local streaming server, a Vite dev server.
   Name it in the Array to reach it.

@@ -158,4 +158,45 @@ RSpec.describe 'a request of a host the app does not serve' do
     ports = %w[ws://a.test/ wss://a.test/ http://a.test/ https://a.test/].map {|u| browser.send(:effective_port, browser.send(:parse_url, u)) }
     expect(ports).to eq([80, 443, 80, 443])
   end
+
+  # The process-wide memo of a script's or a sheet's source is the network's too, for a session that refuses it.
+  it "gives no memoized script or style sheet of another host to a session that refuses it" do
+    Capybara.register_driver(:simulated_external_network) {|a| Capybara::Simulated::Driver.new(a, external_network: true) }
+    assets = lambda do |env|
+      case env['PATH_INFO']
+      when '/m.js' then [200, {'content-type' => 'text/javascript', 'cache-control' => 'max-age=3600'}, ['window.X = "memo"']]
+      when '/m.css' then [200, {'content-type' => 'text/css', 'cache-control' => 'max-age=3600'}, ['body { color: rgb(1, 2, 3) }']]
+      else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><link rel=stylesheet href="http://cdn.test/m.css"><script src="http://cdn.test/m.js"></script>']]
+      end
+    end
+    allow_any_instance_of(Capybara::Simulated::Browser).to receive(:net_http_fetch).and_return(nil)
+    read = "[window.X || null, getComputedStyle(document.body).color]"
+    open = simulated_session(assets, mode: :simulated_external_network)
+    open.visit 'http://www.example.com/'
+    expect(open.evaluate_script(read)).to eq(['memo', 'rgb(1, 2, 3)'])
+    shut = simulated_session(assets)
+    shut.visit 'http://www.example.com/'
+    expect(shut.evaluate_script(read)).to eq([nil, 'rgb(0, 0, 0)'])
+  end
+
+  # A page the app served under an app host the test has since moved on from still reaches the app.
+  context 'from a page served under the last app host' do
+    let(:session) { simulated_session(app) }
+
+    after { Capybara.app_host = nil }
+
+    it 'asks the app' do
+      Capybara.app_host = 'http://shop.test'
+      session.visit '/'
+      Capybara.app_host = 'http://other.test'
+      expect(session.evaluate_async_script("const d = arguments[0]; fetch('/api').then((r) => d(r.status), () => d('rejected'))")).to eq(200)
+      expect(requests.last).to eq('shop.test/api')
+    end
+  end
+
+  it 'refuses an allowed host that is no host or host:port' do
+    ['http://a.test', 'a.test/x', '::1:9', 'a.test ', 'a.test:99999'].each do |entry|
+      expect { Capybara::Simulated::Driver.new(app, external_network: [entry]) }.to raise_error(ArgumentError)
+    end
+  end
 end

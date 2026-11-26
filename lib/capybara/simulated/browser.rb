@@ -220,7 +220,7 @@ module Capybara
         @all_hosts_local_override     = all_hosts_local
         # Whether a request of a host the app does not serve goes to the network — off by default, a network error — or of
         # which hosts (`host` or `host:port`, downcased): the driver's `external_network:`, `network_refused?`.
-        @external_network             = external_network.is_a?(Array) ? external_network.map {|h| h.to_s.downcase }.freeze : external_network == true
+        @external_network             = external_network.is_a?(Array) ? self.class.external_network_hosts(external_network) : external_network == true
         @browsing_context_group       = "g#{object_id}"
         # (…the thread the window's isolate is driven on: a worker's thread waiting on another worker touches nothing of
         # the window's — `await_worker_reply`)
@@ -3817,6 +3817,8 @@ module Capybara
         reset_frame_scope
         @session_history.clear
         @frame_leaving_entries = nil   # (…the entries the last test's frames were leaving: `leave_frame_entry`)
+        @app_served_origins = nil      # (…the origins the app served the last test's documents at: `app_served`)
+        @reaches_app_memo = nil
         Native.cors_preflight_cache_clear(@cors_preflight_cache)   # the window's CORS-preflight cache: a test's grants none of the next's
         @file_picks      = {} if @file_picks
         # Hand the live trace off to `@pending_trace` so an after-hook
@@ -4267,7 +4269,9 @@ module Capybara
         client     = client_for(realm.to_i, policy, referrer: referrer)
         shared_key = "#{memo_key} #{client_origin_of(client)}"
         @@asset_src_lock.synchronize do
-          if (e = @@asset_src[shared_key])
+          # (…none for a request the session refuses: a memo of the network's response, which another session — one that
+          # allows it — kept)
+          if !network_refused?(key) && (e = @@asset_src[shared_key])
             if e[1].nil? || Time.now.to_f < e[1]
               Thread.current[:csim_asset_meta] = e[2]
               return [e[0], e[2], e[3]]
@@ -7581,6 +7585,7 @@ module Capybara
         close_rack_body(hop.rack_body) if hop.rack_body
         hop.rack_body = hop.document = nil
         response = dispatch_navigation_hop(target, method, headers, body: body, content_type: content_type, cookie_context: cookie_context) or return nil
+        app_served(target) if reaches_app?(target)
         hop.status, hop.headers, hop.rack_body = response
         [hop.status, hop.headers]
       end
@@ -13684,7 +13689,13 @@ module Capybara
       # The app's host — `Capybara.app_host`, the server's, or the default stand-in — as Capybara has it NOW: a test may set
       # `Capybara.app_host` whenever it likes (a tenant's subdomain per test), and the session's Browsers live across tests.
       # Read as each request is made; its parts parsed once per host (`app_url_parts`).
-      private def default_host = self.class.default_host
+      private def default_host
+        app_host, server_host, server_port = ::Capybara.app_host, ::Capybara.server_host, ::Capybara.server_port
+        memo = @default_host_memo
+        return memo[3] if memo && memo[0] == app_host && memo[1] == server_host && memo[2] == server_port
+
+        (@default_host_memo = [app_host, server_host, server_port, self.class.default_host].freeze)[3]
+      end
       # …and whether that host is the stand-in for the app's server on 127.0.0.1 — a secure context as that is (url_ops.rs
       # `LOOPBACK_STAND_IN`), the session history told as it changes — none for a session that serves every host at the URL
       # it asks for.
@@ -13704,42 +13715,84 @@ module Capybara
       # counts, which a browser reaches only where it resolves here. (…none of the sibling names on the default stand-in: a
       # real run's server is 127.0.0.1 and a port, which `www.example.com`'s sibling names do not reach.) A loopback name —
       # `127.0.0.1`, `localhost`, `[::1]` — at `Capybara.server_port` reaches the app's own server whatever stands in for it
-      # (a mailer's link from `default_url_options`). Every host does where the session serves them all in-process (the WPT
-      # runner's `@all_hosts_local`); a URL of no host — relative, or a scheme's of none — is no other host's.
+      # (a mailer's link from `default_url_options`); and so does the origin of a document the app served this session —
+      # a page loaded under an `app_host` a test has since moved on from (`app_served`). Every host does where the session
+      # serves them all in-process (the WPT runner's `@all_hosts_local`); a URL of no host — relative, or a scheme's of
+      # none — is no other host's. The last URL's answer kept: a hop asks it of its cache and of its dispatch alike.
       private def reaches_app?(url)
         return true if @all_hosts_local
 
-        uri = parse_url(url.to_s)
+        url  = url.to_s
+        host = default_host
+        memo = @reaches_app_memo
+        return memo[2] if memo && memo[0] == url && memo[1].equal?(host)
+
+        verdict = judge_reaches_app(url, host)
+        @reaches_app_memo = [url, host, verdict].freeze
+        verdict
+      end
+      private def judge_reaches_app(url, host)
+        uri = parse_url(url)
         return true if uri.nil? || uri[:hostname].empty?
         return true if LOOPBACK_NAMES.include?(uri[:hostname]) && (port = ::Capybara.server_port.to_i).positive? && effective_port(uri) == port
+        return true if @app_served_origins&.include?(uri[:origin])
 
-        app = app_url_parts
+        app = app_url_parts(host)
         return true if app.nil? || app[:hostname].empty?
         return false if effective_port(uri) != effective_port(app)
         return true if uri[:hostname] == app[:hostname]
         return false if loopback_stand_in?
 
-        ![80, 443].include?(effective_port(uri).to_i) || Native.site(url.to_s).to_s == Native.site(default_host.to_s).to_s
+        ![80, 443].include?(effective_port(uri).to_i) || Native.site(url).to_s == Native.site(host.to_s).to_s
       end
       LOOPBACK_NAMES = %w[127.0.0.1 localhost [::1]].freeze
 
       # The app's host's URL parts (`default_host`'s), parsed once per host.
-      private def app_url_parts
-        host = default_host
-        @app_url_parts = [host, parse_url(host.to_s)].freeze unless @app_url_parts&.first == host
+      private def app_url_parts(host = default_host)
+        @app_url_parts = [host, parse_url(host.to_s)].freeze unless @app_url_parts&.first.equal?(host)
         @app_url_parts.last
       end
 
+      # A document the app served — a navigation's response that reached it (`navigation_network_hop`): its origin the
+      # app's from here on in this session, whatever `Capybara.app_host` says next (`reaches_app?`); forgotten by `reset!`.
+      private def app_served(url)
+        origin = parse_url(url.to_s)&.[](:origin)
+        return if origin.nil? || origin == 'null' || (@app_served_origins ||= Set.new).include?(origin)
+
+        @app_served_origins << origin
+        @reaches_app_memo = nil
+      end
+
       # Whether a request of `url` is refused — a host the app does not serve, which the session sends nothing to
-      # (`external_network:` false), or none it lists (an Array of `host` / `host:port`): `dispatched`, and the caches a
-      # response of the network may be served from without coming to it.
-      private def network_refused?(url, own = reaches_app?(url))
+      # (`external_network:` false), or none it lists (an Array of `host` / `host:port`: `Browser.external_network_hosts`):
+      # `dispatched`, and the caches a response of the network may be served from without coming to it.
+      def network_refused?(url, own = reaches_app?(url))
         return false if own
         return true unless @external_network
         return false if @external_network == true
 
         uri = parse_url(url.to_s) or return true
-        !@external_network.any? {|allowed| allowed == uri[:hostname] || allowed == "#{uri[:hostname]}:#{effective_port(uri)}" }
+        hostname = uri[:hostname].delete_suffix('.')
+        !@external_network.any? {|allowed| allowed == hostname || allowed == "#{hostname}:#{effective_port(uri)}" }
+      end
+      public :network_refused?
+
+      # The hosts of an `external_network:` Array, each a host or `host:port` — a name, an IPv4 address, an IPv6 one in
+      # brackets — as the URL parser writes a URL's host (lowercased, an IDN its A-label) with no trailing dot; anything else
+      # (a scheme, a path, whitespace, an IPv6 address unbracketed, a port out of range) an ArgumentError.
+      def self.external_network_hosts(list)
+        list.map do |entry|
+          text = entry.to_s
+          raise ArgumentError, "external_network: #{entry.inspect} is no host or host:port" unless text.match?(/\A(?:\[[0-9A-Fa-f:.]+\]|[^\s\/:@?#\[\]]+)(?::\d{1,5})?\z/)
+
+          port   = text[/:(\d+)\z/, 1]&.to_i
+          raise ArgumentError, "external_network: #{entry.inspect} has a port out of range" if port && !(1..65_535).cover?(port)
+
+          host   = port ? text.delete_suffix(":#{port}") : text
+          parsed = Native.url_parts("http://#{host}/", nil) or raise ArgumentError, "external_network: #{entry.inspect} is no host"
+          name   = URL_PARTS.zip(parsed).to_h[:hostname].delete_suffix('.')
+          port ? "#{name}:#{port}" : name
+        end.uniq.freeze
       end
 
       def effective_port(url)

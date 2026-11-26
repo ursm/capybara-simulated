@@ -78,6 +78,8 @@ module Capybara
         directive = @browser.source_map_of(url)
         return nil unless directive
         map_url = @browser.resolve_against(directive, url)
+        # (…none of a host the session sends nothing to: a map another session fetched is the network's)
+        return nil if @browser.network_refused?(map_url)
         return @@maps[map_url] if @@maps.key?(map_url)
         @@lock.synchronize {
           return @@maps[map_url] if @@maps.key?(map_url)
