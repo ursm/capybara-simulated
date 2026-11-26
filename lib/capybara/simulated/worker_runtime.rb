@@ -29,13 +29,11 @@ module Capybara
       # terminated call; the worker's own loop then unwinds and disposes.
       def terminate = (@ctx.terminate rescue nil)
 
-      # A module worker's script (a `{type: 'module'}` worker's, a module service worker's) run as a module graph: the
-      # engine's module map fetches it (module_map.rs — the worker's map: the empty import map, a `type` its import names
-      # the module type, CSS none in a worker), its script `src` of `url` already in hand, its imports through
-      # `fetch_import` (`module_steps`), each fetched as the map asks — the worker's thread waits on each, none of its
-      # server's time on the worker's clock (KNOWN GAP: a window's graph lands as late as its servers took) — and the
-      # graph linked and evaluated here. One that could not be fetched, or that has an error to rethrow, raises
-      # `ModuleGraphFailed`.
+      # A module service worker's script run as a module graph: the engine's module map fetches it (module_map.rs — the
+      # worker's map: the empty import map, a `type` its import names the module type, CSS none in a worker), its script
+      # `src` of `url` already in hand, its imports through `fetch_import` (`module_steps`), fetched whole as the worker
+      # waits — none of its servers' time on its clock: its job waits on its evaluation — and the graph linked and
+      # evaluated here. One that could not be fetched, or that has an error to rethrow, raises `ModuleGraphFailed`.
       #
       # A SERVICE worker's graph, fetched whole as it waits — its job waits on its evaluation — may not await at its top
       # level ("Run Service Worker" fails the script; Chrome rejects the registration): V8's IsGraphAsync
