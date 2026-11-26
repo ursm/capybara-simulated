@@ -187,16 +187,16 @@ fn begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let aborts = arena.document_states.lifecycle(doc).aborts();
     let in_order = matches!(kind, Kind::Inserted { .. })
         && arena.get(el).is_some_and(|n| n.script_flags & crate::script::SCRIPT_NOT_FORCE_ASYNC != 0 && n.plain_attr("async").is_none());
-    // (…the style sheets blocking scripts as it is prepared, which it waits for — while its document's parser is at work:
-    // HTML's async branch states no wait, and where it is silent the browsers decide — both wait while the page parses
-    // (`rv_css_asy`), and one inserted once it has (a DOMContentLoaded listener's) Firefox runs at once, Chrome's having
-    // fired DOMContentLoaded after the sheet, no evidence either way: rv-r13-probe `s4_dclins`, Firefox
-    // `dcl ins i.js-ran css load`)
-    let parsing = arena.document_states.lifecycle(doc).is_parsing();
+    // (…a parser's `async` one, the style sheets blocking scripts as it is prepared, which it waits for while its
+    // document's parser is at work: HTML's branch for it states no wait, and where it is silent the browsers decide — both
+    // hold it behind them as the page parses (`rv_css_asy`, rv-r13-probe `s4_base`). None for an inserted one, which the
+    // browsers run as soon as it lands, sheet or none: Chrome `ins i21.js-ran css`, Firefox `dcl ins i21.js-ran css`,
+    // rv-sh-probe `q21_ins_during_sheet`)
+    let waits = matches!(kind, Kind::Async) && arena.document_states.lifecycle(doc).is_parsing();
     let Some(lists) = lists_of(arena, cid) else { return };
     lists.next += 1;
     let id = lists.next;
-    let sheets_up_to = if parsing { lists.sheets_now() } else { 0 };
+    let sheets_up_to = if waits { lists.sheets_now() } else { 0 };
     lists.landings.push(Landing { id, el, doc, aborts, fetch, kind, speculative, sheets_up_to, in_order, state: State::Queued, prepared, exec: Exec::Nothing, landed_aborts: None });
     if in_order {
         lists.in_order.push_back(id);

@@ -603,7 +603,8 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     // `<style>`'s `media`, `title` or `type` — but an `href`, a `rel`, an `as` or a `crossorigin` set to the value it had,
     // which changes nothing: the same resource, Chrome 155 keeps the sheet and fetches no preload again — and of those a
     // `<link>`'s that may name another resource or ask for it another way: its `rel`, its `href`, its `crossorigin`, its
-    // `disabled` removed)
+    // `type` — which obtains it a new sheet, made as its fetch is processed again (HTML: "when the type attribute … is set
+    // or changed") — its `disabled` removed)
     // (…a sheet owner's: an HTML or SVG `<style>`, an HTML `<link>`)
     let owner = crate::sheet_owners::is_sheet_owner(n);
     let link_sheet = owner
@@ -614,7 +615,7 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
             _ => false,
         };
     steps |= flag(link_sheet || (owner && tag == "style" && matches!(local, "media" | "title" | "type")), STEP_SHEET);
-    steps |= flag(link_sheet && (matches!(local, "rel" | "href" | "crossorigin") || (local == "disabled" && !set)), STEP_LINK_RESOURCE);
+    steps |= flag(link_sheet && (matches!(local, "rel" | "href" | "crossorigin" | "type") || (local == "disabled" && !set)), STEP_LINK_RESOURCE);
     steps |= flag(local == "disabled" && set, STEP_DISABLED);
     steps |= flag(matches!(local, "id" | "name") && value.is_some_and(|v| !v.is_empty()), STEP_NAMED);
     steps |= flag(html && tag == "canvas" && matches!(local, "width" | "height"), STEP_CANVAS);

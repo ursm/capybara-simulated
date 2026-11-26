@@ -41,20 +41,24 @@ RSpec.describe 'a subresource request plan' do
     expect(seen.assoc('/d.js')[1]).to eq('http://www.example.com/m.js')
   end
 
+  # (…the link's one `load`, its first fetch's task superseded: Chrome and Firefox, rv-sh-probe `q10_crossorigin`)
   it "fetches a sheet as its link is connected and again with a crossorigin set after, a preload once" do
     session.visit '/'
     session.execute_script(<<~JS)
+      window.loads = 0;
       for (const [rel, href] of [['preload', '/p.js'], ['stylesheet', '/c.css']]) {
         const link = document.createElement('link');
         link.rel = rel;
         if (rel === 'preload') link.as = 'script';
         link.href = href;
+        if (rel === 'stylesheet') link.onload = () => window.loads++;
         document.head.append(link);
         link.crossOrigin = 'anonymous';
       }
     JS
     session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
     expect(seen.select {|(path, _, _)| %w[/p.js /c.css].include?(path) }.map(&:first).sort).to eq(%w[/c.css /c.css /p.js])
+    expect(session.evaluate_script('window.loads')).to eq(1)
   end
   # A media element's shown track is fetched by the media element's `crossorigin` (HTML's track processing model): a
   # CORS request — its Origin sent to the other origin — under a `crossorigin` video, and under one of none a same-origin

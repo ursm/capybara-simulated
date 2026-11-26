@@ -388,24 +388,6 @@ impl SheetStore {
     }
 }
 
-// The URLs, resolved against `base`, of the `@import` rules a sheet of `css` has, as the style engine's parse takes them
-// (a rule it refuses, one after the rules that may import, one in a comment: none) — read off a parse of its own, which
-// makes no sheet and fetches nothing; none at once for text that can name no `@import` — neither it, in any case, nor an
-// escape (an `@\69mport` is one).
-pub(crate) fn import_urls(css: &str, base: &str, quirks: bool) -> Vec<String> {
-    let named = css.as_bytes().windows(7).any(|w| w.eq_ignore_ascii_case(b"@import"));
-    if !named && !css.contains('\\') {
-        return Vec::new();
-    }
-    let lock = SharedRwLock::new();
-    let url = UrlExtraData::from(url::Url::parse(base).unwrap_or_else(|_| url::Url::parse("about:blank").unwrap()));
-    let media = Arc::new(lock.wrap(MediaList::empty()));
-    let pending = RefCell::new(Vec::new());
-    let loader = Loader { pending: &pending, chain: Vec::new(), referrer: None };
-    parse_sheet(&lock, css, url, Origin::Author, media, AllowImportRules::Yes, Some(&loader), mode(quirks));
-    pending.into_inner().into_iter().map(|p| p.url).collect()
-}
-
 // `css` parsed as a sheet of `origin` at `url`, under `media`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn parse_sheet(

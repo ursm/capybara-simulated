@@ -1,7 +1,8 @@
 // The style engine's sheets, as a document or a shadow root has them: each sheet owner's — a `<style>`'s made of its
 // block (HTML "update a style block"), a `<link>`'s or an `<?xml-stylesheet?>`'s of the sheet fetched for its `href`
-// (HTML "process the linked resource": sheet_fetch.rs) — ONE per owner (`MadeSheet`), its `@import`s fetched and handed
-// over before it is used (sheet_fetch.rs `resolve_imports`); and the list of them a document's or a shadow root's
+// (HTML "process the linked resource": sheet_fetch.rs, none before its load task processed it) — ONE per owner
+// (`MadeSheet`), its `@import`s fetched in parallel and handed over as its owner's load task lands them (sheet_fetch.rs
+// `resolve_imports`); and the list of them a document's or a shadow root's
 // style engine is handed — the owners whose sheets take part, in tree order (`sheet_set`), its adopted ones after them
 // (dom.rs `set_document_sheets`, `set_shadow_sheets`) — and WHEN: where a change made its cascade stale (`stale_cascade`:
 // a `<style>` / `<link>` inserted, removed or rewritten, a CSSOM edit, a parse ended) or moved its rule set, the next
@@ -16,6 +17,7 @@ use crate::sheet_owners::MadeSheet;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "ownerSheet", owner_sheet_op, context_id);
     register(scope, ns, "fetchedSheet", fetched_sheet_op, context_id);
+    register(scope, ns, "sheetImportsDue", imports_due_op, context_id);
     register(scope, ns, "styleFresh", style_fresh_op, context_id);
     register(scope, ns, "cascadeStale", cascade_stale_op, context_id);
 }
@@ -164,8 +166,11 @@ fn style_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
     let doc = document_of(arena, style);
     let base = doc.map(|d| arena.document_base_url(d)).unwrap_or_default();
     let quirks = arena.document_mode(doc).0;
-    let Some((id, rev, waiting)) = make(scope, cid, style, None, &base, &media, quirks) else { return Ok(None) };
-    crate::sheet_fetch::resolve_imports(scope, cid, host, waiting, doc, None)?;
+    let (made, anew) = made_anew(scope, cid, style, |scope| make(scope, cid, style, None, &base, &media, quirks));
+    let Some((id, rev, waiting)) = made else { return Ok(None) };
+    if anew {
+        crate::sheet_fetch::resolve_imports(scope, cid, host, waiting, doc, None, Some((style, (id, rev))))?;
+    }
     Ok(Some((id, rev)))
 }
 
@@ -176,7 +181,10 @@ fn style_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
 // encoding it decoded in. Where it was not fetched — its `href` no URL, or no response to use: a network error, a
 // status not ok, a type not text/css — none (HTML "process the linked resource": a CSS style sheet is created only
 // where it succeeded, and an associated one removed first), its `.sheet` null; not asked again until it obtains another
-// (its request's `made_none`, sheet_fetch.rs).
+// (its request's `made_none`, sheet_fetch.rs). A `<link>`'s none until its load task has processed its fetch (its
+// request's `processed`): HTML "process the linked resource" is what makes the sheet, and nothing sees it before —
+// `.sheet` null, `document.styleSheets` and the cascade without it (Chrome and Firefox, rv-sh-probe `q01_gcs_ins`,
+// `q02_gcs_parser`, `q30_link_gcs_early_load`).
 fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: NodeId) -> Result<Option<(u32, u32)>, Terminated> {
     let arena = realm(scope, cid);
     let Some(n) = arena.get(owner) else { return Ok(None) };
@@ -195,8 +203,16 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
     let quirks = arena.document_mode(doc).0;
     // (…its origin-clean flag the kept sheet's, which a sheet made anew of its text takes too)
     let kept = arena.made_sheets.get(&owner).filter(|m| m.realm == cid && m.count == count).and_then(|m| Some((m.text.clone()?, m.base.clone(), m.id)));
-    if kept.is_none() && crate::sheet_fetch::request_of(arena, owner).made_none {
-        return Ok(None);
+    let url = doc.and_then(|d| arena.parse_document_url(d, &href)).map(|u| u.href().to_owned());
+    if kept.is_none() {
+        // (…but one of a scheme's — a `data:` URL's, a `blob:` URL's — read at once, as Chrome makes it as its link is
+        // inserted: WPT dom/nodes/insertion-removing-steps/Node-appendChild-script-and-style.html, an earlier-inserted
+        // script reading it)
+        let network = url.as_deref().is_some_and(|u| crate::fetch_rules::fetch_route(u, 0, "") == crate::fetch_rules::ROUTE_NETWORK);
+        let request = crate::sheet_fetch::request_of(arena, owner);
+        if request.made_none || !pi && network && !request.processed {
+            return Ok(None);
+        }
     }
     let (text, location, clean) = match kept {
         Some((text, location, id)) => {
@@ -204,7 +220,6 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
             (text, location, clean)
         }
         None => {
-            let url = doc.and_then(|d| arena.parse_document_url(d, &href)).map(|u| u.href().to_owned());
             let sheet = match &url {
                 Some(url) => Some(crate::sheet_fetch::fetch(scope, cid, host, (!pi).then_some(crate::sheet_fetch::Owner { id: owner, doc }), url, None, None)?),
                 None => None,
@@ -218,14 +233,25 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
             }
         }
     };
-    let Some((id, rev, waiting)) = make(scope, cid, owner, Some(text), &location, &media, quirks) else { return Ok(None) };
+    let (made, anew) = made_anew(scope, cid, owner, |scope| make(scope, cid, owner, Some(text), &location, &media, quirks));
+    let Some((id, rev, waiting)) = made else { return Ok(None) };
     let arena = realm(scope, cid);
     if let Some(stored) = arena.sheets.stored_mut(id) {
         stored.origin_dirty = !clean;
     }
-    let environment = crate::sheet_fetch::encoding_of(arena, cid, &location).map(str::to_owned);
-    crate::sheet_fetch::resolve_imports(scope, cid, host, waiting, doc, environment)?;
+    if anew {
+        let environment = crate::sheet_fetch::encoding_of(arena, cid, &location).map(str::to_owned);
+        crate::sheet_fetch::resolve_imports(scope, cid, host, waiting, doc, environment, Some((owner, (id, rev))))?;
+    }
     Ok(Some((id, rev)))
+}
+// …`make`'s, and whether it made the sheet anew (its `@import`s, none of a sheet kept, asked for again).
+type Made = Option<(u32, u32, Vec<(String, Option<String>)>)>;
+fn made_anew(scope: &mut v8::PinScope<'_, '_>, cid: i32, owner: NodeId, make: impl FnOnce(&mut v8::PinScope<'_, '_>) -> Made) -> (Made, bool) {
+    let had = realm(scope, cid).made_sheets.get(&owner).map(|m| (m.id, m.rev));
+    let made = make(scope);
+    let anew = made.as_ref().is_some_and(|(id, rev, _)| had != Some((*id, *rev)));
+    (made, anew)
 }
 
 // The sheets of `owners` — a document's or a shadow root's that take part, in order (`sheet_set`) — each one's id: none
@@ -233,11 +259,14 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
 fn owner_sheet_ids(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owners: &[NodeId]) -> Result<Vec<u32>, Terminated> {
     let mut ids = Vec::with_capacity(owners.len());
     for &owner in owners {
-        let style = realm(scope, cid).get(owner).is_some_and(|n| n.kind == NodeKind::Element && &*n.local_name == "style");
-        let sheet = if style { style_sheet(scope, cid, host, owner)? } else { fetched_sheet(scope, cid, host, owner)? };
-        ids.extend(sheet.map(|(id, _)| id));
+        ids.extend(owner_sheet(scope, cid, host, owner)?.map(|(id, _)| id));
     }
     Ok(ids)
+}
+// …one owner's: a `<style>`'s (`style_sheet`), else a fetched one (`fetched_sheet`).
+fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: NodeId) -> Result<Option<(u32, u32)>, Terminated> {
+    let style = realm(scope, cid).get(owner).is_some_and(|n| n.kind == NodeKind::Element && &*n.local_name == "style");
+    if style { style_sheet(scope, cid, host, owner) } else { fetched_sheet(scope, cid, host, owner) }
 }
 
 // The realm document `doc`'s sheets — those of `owners` — handed to its style engine, at its base URL: as of the rule-set
@@ -302,6 +331,18 @@ fn fetched_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     }
 }
 
+// __dom.sheetImportsDue(ownerNid, host) -> how many ms after now the `@import` tree of the sheet of a connected `<style>`
+// or `<link>` comes in — its load task's, its critical subresources' — its sheet made now where it was not (`style_sheet`,
+// `fetched_sheet`): the parse that makes it asks for its `@import`s, each fetched in parallel from then
+// (sheet_fetch.rs `resolve_imports`). -1 for a sheet that imports nothing, or none.
+fn imports_due_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_double(-1.0);
+    let (Some(owner), Some(host)) = (crate::dom::nid_arg(scope, &args, 0), host_arg(&args, 1)) else { return };
+    let cid = realm_id(scope, &args);
+    if let Ok(Some(made)) = owner_sheet(scope, cid, host, owner) {
+        rv.set_double(crate::sheet_fetch::imports_due(realm(scope, cid), cid, owner, made));
+    }
+}
 // __dom.styleFresh(host): the realm's style engine handed what it is to style with, where it was not yet (`fresh`) —
 // asked by the bindings before a read where a mark says so.
 fn style_fresh_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {

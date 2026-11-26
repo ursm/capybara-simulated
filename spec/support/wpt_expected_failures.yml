@@ -1829,8 +1829,6 @@ css/cssom/CSSStyleSheet-constructable-insertRule-base-uri.html:
 - "== css/cssom/CSSStyleSheet-constructable-insertRule-base-uri-ref.html"
 css/cssom/CSSStyleSheet-template-adoption.html:
 - adoptedStyleSheets won't be cleared when adopting into/from <template>s
-css/cssom/HTMLLinkElement-load-event-002.html:
-- "[harness] ERROR"
 css/cssom/computed-style-003.html:
 - Check that a percent width in an iframe is the resolved width when the iframe is
   displayed.
@@ -2248,6 +2246,8 @@ dom/nodes/moveBefore/moveBefore-size-query.html:
 - moveBefore() between different size containers invalidates target
 dom/nodes/moveBefore/pointer-events.html:
 - Pointer capture should not be released when moving
+dom/nodes/moveBefore/preserve-render-blocking-style.html:
+- A moved script should keep its render-blocking state
 dom/nodes/moveBefore/relevant-mutations.html:
 - "[harness] TIMEOUT"
 dom/nodes/moveBefore/selection-preserve.html:
