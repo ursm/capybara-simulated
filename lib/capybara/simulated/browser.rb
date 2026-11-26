@@ -5269,11 +5269,18 @@ module Capybara
         # sw_update_fetch) — exactly those, not a re-fetch that could hit the HTTP cache or a newer server
         # response. The import PROBE results ride along as its script resource map (`sw_imports`: importScripts consume
         # them instead of re-fetching — a 404 the byte-check saw stays a 404).
+        # (…its server's sleeps counted, run on no event loop — none of them the creator's script time: the fetch is in
+        # parallel — its script run that much later on its clock, which the window's follows: `run_worker`)
+        slept = 0.0
         body = if service && sw_body
           sw_body
         elsif !sw_script
-          fetch_worker_script(target, parent_worker ? @worker_host.worker_url(parent_worker) : frame_realm_url(realm_id),
-                              client_origin: Native.opaque_origin_key?(creator_key.to_s) ? 'null' : creator_key, dest: shared ? 'sharedworker' : 'worker')
+          fetched, slept = server_timed_sleeps {
+            fetch_worker_script(target, parent_worker ? @worker_host.worker_url(parent_worker) : frame_realm_url(realm_id),
+                                client_origin: Native.opaque_origin_key?(creator_key.to_s) ? 'null' : creator_key, dest: shared ? 'sharedworker' : 'worker')
+          }
+          @runtime.call('agentExcuse', slept) if slept.positive? && !parent_worker
+          fetched
         end
         # Resource Timing for a DEDICATED worker's own main-script fetch — a browser files it in the
         # creating context's timeline (a classic worker as 'other', a module worker as 'script'; the
@@ -5324,7 +5331,7 @@ module Capybara
         # stop and the worker's own dispose, and holding it across a native call must not block anything else in the
         # browser. And its window's engine host, which its agent record is in, where its thread waits in another window's
         # (`await_worker_reply`), and which its thread's requests ask what they carry (`worker_identity`).
-        record = {handle: handle, host: @worker_host, thread: nil, inbox: inbox, rt: nil, rt_lock: Mutex.new}
+        record = {handle: handle, host: @worker_host, thread: nil, inbox: inbox, rt: nil, rt_lock: Mutex.new, script_slept: slept}
         # What its requests and its realm carry, as it was made — the engine's (worker_records.rs `Identity`): its storage
         # partition its owner document's (a nested worker's its parent's: blob_rules.rs `partition_site`); a dedicated or
         # shared worker's site for cookies its owner document's — HTML's worker settings — which its fetches, on its own
@@ -10183,6 +10190,9 @@ module Capybara
         # made and its scope installed, which its window's clock does not go on through — a worker read its window's
         # `Date` that far ahead for good, 25 ms on a loaded machine (agent_clock.rs).
         rt.call('setClockEpoch', time_origin[0], WORKER_START_MS, time_origin[1], time_origin[2]) if time_origin
+        # (…as late as its script's server took: what it does first, its messages' times, observe it — HTML fetches a
+        # worker's script in parallel, its creator going on meanwhile: Chrome and Firefox `t100 c:ran` for a 200 ms script)
+        record[:clock_moved_by].call(record[:script_slept]) if record && record[:script_slept].to_f.positive?
         if service
           # A SERVICE worker's registration is GATED on its script actually evaluating
           # ("Run Service Worker": an importScripts that 404s, a top-level throw, a
@@ -10209,8 +10219,11 @@ module Capybara
                   body2 = rec['body'].to_s
                 else
                   # (…of the worker's destination, a module script's CORS request: HTML's fetch of a module worker script graph)
-                  r = rack_fetch('GET', abs, '', {}, 'follow', 'cors', cache_mode: sw_uvc == 'none' ? 'no-cache' : 'default', client_url: url.to_s,
-                                                                         dest: 'serviceworker')
+                  # (…its server's sleeps counted: the time the worker's clock moves on by as its graph comes in)
+                  r, slept = server_timed_sleeps {
+                    rack_fetch('GET', abs, '', {}, 'follow', 'cors', cache_mode: sw_uvc == 'none' ? 'no-cache' : 'default', client_url: url.to_s,
+                                                                    dest: 'serviceworker')
+                  }
                   raise "module import failed: #{abs}" unless resource_loaded?(r) && (200..299).cover?(r['status'].to_i)
 
                   ct    = response_field(r, 'content-type')
@@ -10219,7 +10232,7 @@ module Capybara
                 # (…its MIME type its module type's, held to it as the graph takes it: WorkerRuntime — strict, unlike classic
                 # importScripts' `reaches_app?`-gated check, the Mastodon-Tesseract concession)
                 sw_note_import(handle, abs, body2)
-                [body2, abs, ct.to_s]
+                [body2, abs, ct.to_s, slept.to_f]
               end
               rt.eval_module_graph(body, url, sw_import_fetch)
             else
@@ -10788,6 +10801,15 @@ module Capybara
       # worker's imported script), described by name (fetch_request.rs `fetchRequest` / `importScriptRequest`) — its
       # client the realm's own document, its frame's ancestors given — and `body` its bytes.
       # (…`transport` and `stream` as `rack_fetch` takes them)
+      # A worker's import from the network (`importScripts`, subresource-host.js `H_IMPORT_NETWORK`), on its thread: its
+      # server's sleeps counted, run on no event loop, and the worker's clock moved on by them as its script waits inside it
+      # (`clock_moved_by`, as a sync XHR's answer moves it) — what it does next, its messages' times, observing them: the
+      # fetch is synchronous (Chrome and Firefox `t100 c:ran` for a 200 ms import, csim-bench mod8 `w_cl`).
+      def import_fetch(request)
+        response, slept = server_timed_sleeps { rack_fetch_request(request, '') }
+        Thread.current[:csim_worker_record]&.[](:clock_moved_by)&.call(slept) if slept.positive?
+        response
+      end
       def rack_fetch_request(request, body, env_extras: nil, transport: nil, stream: false)
         r = request.to_h
         rack_fetch(

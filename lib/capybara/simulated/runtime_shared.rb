@@ -28,6 +28,10 @@ module Capybara
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
         'rackFetch'                    => ->(b, *a) { b.rack_fetch_request(a[0], a[1]) },
+        # A worker's import from the network (`importScripts`): Browser#import_fetch.
+        'importFetch'                  => ->(b, *a) { b.import_fetch(a[0]) },
+        # …and a worker's clock moved on by `ms` as its script waits (a service worker's module graph coming in).
+        'workerClockMovedBy'           => ->(_b, *a) { Thread.current[:csim_worker_record]&.[](:clock_moved_by)&.call(a[0].to_f); nil },
         'externalAsset'                => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4], since: a[5], waits: a[6] != false) },
         'subresourceFetch'             => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2]) },
         'assetDocumentStarted'         => ->(b, *_a) { b.asset_document_started },
