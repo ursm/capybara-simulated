@@ -54,4 +54,19 @@ RSpec.describe "a frame's navigation steps" do
     JS
     expect(poll_until { session.evaluate_script('log').grep(/abort/).size == 2 && session.evaluate_script('log').grep(/abort/) }).to eq(%w[abort:b abort:a])
   end
+
+  # A navigation of a frame whose navigable a handler of the document it asked destroyed — its beforeunload removing the
+  # frame above it — makes no document: HTML "navigate" commits none for a destroyed navigable, and Chrome runs none.
+  it 'makes no document for a frame whose beforeunload removed the frame above it' do
+    session.execute_script(<<~JS)
+      a.srcdoc = `<iframe srcdoc="<script>addEventListener('beforeunload', () => { top.log.push('bu'); top.a.remove(); })<\\/script>"></iframe>`;
+    JS
+    poll_until { session.evaluate_script("a.contentDocument && a.contentDocument.querySelector('iframe') && a.contentDocument.querySelector('iframe').contentDocument.readyState == 'complete'") }
+    session.execute_script("a.contentDocument.querySelector('iframe').srcdoc = '<script>top.log.push(\"ran\")<\\/script>'")
+    poll_until { session.evaluate_script('window.length') == 0 }
+    sleep 0.2
+    # (…`a`'s first document, `/child`, asked and unloaded as the srcdoc replaced it; then the grandchild asked — and
+    # nothing of the document it was navigating to)
+    expect(session.evaluate_script('[log, window.length]')).to eq([%w[bu unload bu], 0])
+  end
 end

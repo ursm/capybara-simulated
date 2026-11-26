@@ -1726,7 +1726,7 @@ impl RealmArena {
 // The next thing run `id`'s steps do as the bindings run phase `phase` of them, `answer` theirs to the last step — `(what,
 // the phase to come back with, its argument)` (`LOAD_*`): the order of HTML "navigate"'s steps for an iframe, its build
 // (`frameWindow`) and the iframe load event steps.
-fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: u32, mut phase: u32, answer: f64, now: f64) -> (u32, u32, i32) {
+fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: u32, mut phase: u32, answer: f64, now: f64) -> (u32, u32, i64) {
     let done = (LOAD_DONE, LOAD_PHASE_RUN, 0);
     loop {
         let arena = crate::dom::realm(scope, cid);
@@ -1736,6 +1736,12 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
             let fire = matches!(phase, LOAD_PHASE_FIRE | LOAD_PHASE_FIRE_NOW | LOAD_PHASE_QUEUE_LOAD);
             return if fire && !arena.is_connected(container) { (LOAD_PAY, LOAD_PHASE_RUN, 0) } else { done };
         };
+        // (…none of a navigable destroyed meanwhile — its container's document no longer fully active, a handler of the
+        // document it asked having removed a frame above it: HTML "navigate" makes no document of a destroyed navigable,
+        // and Chrome runs none, life.rb `bu-remove-parent`)
+        if !arena.navigables.fully_active(cid) {
+            return done;
+        }
         let latest = arena.load_latest(container, run.generation);
         let update = |arena: &mut RealmArena, change: &dyn Fn(&mut LoadRun)| {
             if let Some(r) = arena.load_run(container, id) {
@@ -1751,7 +1757,7 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
                     let realm = arena.frame_nav_asks(container, Some(run.generation), asked);
                     if realm >= 0 {
                         update(arena, &|r| r.asking = realm);
-                        return (LOAD_ASK, LOAD_PHASE_ASKED, realm);
+                        return (LOAD_ASK, LOAD_PHASE_ASKED, realm.into());
                     }
                     return (LOAD_QUEUE, LOAD_PHASE_RUN, 0);
                 }
@@ -1768,7 +1774,7 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
                 match run.gate {
                     Some(gate) => {
                         update(arena, &|r| r.gate_taken = true);
-                        return (LOAD_TAKE_GATE, LOAD_PHASE_GATE_TAKEN, gate as i32);
+                        return (LOAD_TAKE_GATE, LOAD_PHASE_GATE_TAKEN, gate.into());
                     }
                     None => phase = LOAD_PHASE_QUEUE_LOAD,
                 }
@@ -1786,7 +1792,7 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
                 let realm = run.asking;
                 let loading = arena.realm_document(realm).is_some_and(|d| !arena.document_states.lifecycle(d).is_load_fired());
                 if latest && loading {
-                    return (LOAD_ABORT, LOAD_PHASE_ASK_DONE, realm);
+                    return (LOAD_ABORT, LOAD_PHASE_ASK_DONE, realm.into());
                 }
                 phase = LOAD_PHASE_ASK_DONE;
             }
@@ -1849,7 +1855,7 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
                 }
                 return match due {
                     DUE_PAID => (LOAD_PAY, LOAD_PHASE_END, 0),
-                    DUE_FIRE => (LOAD_FIRE, LOAD_PHASE_END, i32::from(phase == LOAD_PHASE_FIRE_NOW)),
+                    DUE_FIRE => (LOAD_FIRE, LOAD_PHASE_END, i64::from(phase == LOAD_PHASE_FIRE_NOW)),
                     _ => done,
                 };
             }
@@ -1857,10 +1863,10 @@ fn load_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, container: NodeId, id: 
         }
     }
 }
-// __dom.frameLoadNext(container, run, phase, answer, now) -> the next thing the bindings do (`load_next`): `what` in the
-// low 4 bits, the phase to come back with in the next 4, its argument above.
+// __dom.frameLoadNext(container, run, phase, answer, now) -> the next thing the bindings do (`load_next`), as one number:
+// `what + phase * 16 + arg * 256` — a double, its argument (a realm's number, a load gate's) whole up to 2^45.
 fn frame_load_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_int32(0);
+    rv.set_double(0.0);
     let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let id = args.get(1).uint32_value(scope).unwrap_or(0);
     let phase = args.get(2).uint32_value(scope).unwrap_or(u32::MAX);
@@ -1868,7 +1874,7 @@ fn frame_load_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let now = args.get(4).number_value(scope).unwrap_or(0.0);
     let cid = realm_id(scope, &args);
     let (what, next, arg) = load_next(scope, cid, container, id, phase, answer, now);
-    rv.set_int32(what as i32 | (next as i32) << 4 | arg << 8);
+    rv.set_double(f64::from(what) + f64::from(next) * 16.0 + arg as f64 * 256.0);
 }
 // __dom.frameLoadGate(container, run, gate) — the load gate run `run`'s build runs under (`LoadRun::gate`).
 fn frame_load_gate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
