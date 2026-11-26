@@ -25,6 +25,10 @@ RSpec.describe 'a declarative refresh' do
       when '/both' then html.('<title>both</title><meta http-equiv=refresh content="0; url=/landed?from=meta">', {'refresh' => '0;url=/landed?from=header'})
       when '/utf8' then html.('<title>utf8</title>', {'refresh' => '0;url=/landed?from=café'})
       when '/landed' then html.("<title>landed #{env['QUERY_STRING']}</title>")
+      when '/framed' then html.('<title>framed</title><script>window.L = []; onload = () => L.push("load")</script><iframe src="/r1"></iframe>')
+      when '/r1' then html.('<meta http-equiv=refresh content="0;url=/r2"><script>onload = () => top.L.push("r1-load")</script><img src="/slow.png">')
+      when '/slow.png' then sleep(0.1) || [404, {}, ['']]
+      when '/r2' then html.('<script>top.L.push("refreshed")</script>')
       else html.('')
       end
     })
@@ -34,6 +38,13 @@ RSpec.describe 'a declarative refresh' do
   it 'reads a Refresh header given as UTF-8 text as that text' do
     session.visit '/utf8'
     expect(poll_until { session.title.start_with?('landed') && session.title }).to eq('landed from=caf%C3%A9')
+  end
+
+  # (…its navigation begun after the tasks its document's load queued: the parent's `load`, which a frame's navigation begun
+  # first would delay again — Chrome and Firefox, rv-end-probe `a15_refresh0`)
+  it "refreshes a frame after its parent's load" do
+    session.visit '/framed'
+    expect(poll_until { session.evaluate_script('L.length >= 3 && L.join(" ")') }).to eq('r1-load load refreshed')
   end
 
   it 'navigates to the first one, its entry replaced' do
