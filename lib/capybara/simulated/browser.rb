@@ -8975,6 +8975,7 @@ module Capybara
         end
 
         _, credentials, policy = request_of_plan(plan)
+        Thread.current[:csim_asset_times] = nil
         request = asset_request(url, document, realm, policy, referrer: referrer, dest: dest, mode: 'cors', credentials: credentials, joins: false, module_map: true)
         return @module_fetches.delete(id.to_i) && nil unless request
         # (…its document's module map's memo, a modulepreload's — or the cross-visit cache's — answer at once)
@@ -9015,8 +9016,10 @@ module Capybara
         else
           # (…a fetch made for it timed on the page's clock, as a classic script's — from its beginning to its landing, or,
           # where it lands as it began (none of its server's time to wait: an import fetched as its referrer landed), as
-          # long as the request took — one a memo answered as that fetch was)
+          # long as the request took — one its document's module map's memo answered as that fetch was, any other memo's
+          # from its beginning to its landing)
           times = result[:answered] ? result[:times] : [:page, mod[:started], [now.to_f, mod[:started] + request_ms(result[:times])].max]
+          times ||= [:page, mod[:started], now.to_f]
           source, meta, raw = result[:answered] || asset_answer(slot[:request], result.merge(times: times))
           return nil unless source
           return nil if !mod[:integrity].to_s.empty? && Native.integrity_refuses((raw || source).b, mod[:integrity].to_s)
@@ -9102,7 +9105,13 @@ module Capybara
       # left to land them.
       def script_fetches_forget_realm(realm)
         realm = realm.to_i
-        @script_fetches.delete_if {|id, slot| slot[:realm] == realm && (script_fetch_landed(slot) || @module_fetches.delete(id) || true) }
+        @script_fetches.delete_if do |id, slot|
+          next false unless slot[:realm] == realm
+
+          script_fetch_landed(slot)
+          @module_fetches.delete(id)
+          true
+        end
         nil
       end
       # …no fetch under way that another request of the document's takes from then on: what it answered is the memo's.

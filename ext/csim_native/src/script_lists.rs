@@ -660,8 +660,7 @@ struct Prepared {
     doc: NodeId,
     aborts: u32,
     generation: u32,
-    // A module script, run whole once its graph's entry has landed — from the URL its end tag parsed its `src` to (`Some(None)`
-    // none: one that did not parse), an inline one's none.
+    // A module script, run once its graph's every module is in (its fetch, module_map.rs).
     module: bool,
     // An inline one's source text as it was prepared.
     text: Option<Vec<u16>>,

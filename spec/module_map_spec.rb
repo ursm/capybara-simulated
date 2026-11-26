@@ -42,7 +42,9 @@ RSpec.describe 'the module map' do
       HTML
       next [404, {}, ['']] unless files.key?(path)
 
-      [200, {'content-type' => query['ct'] || MODULE_MAP_TYPES.fetch(path.split('.').last, 'text/plain')}, [files[path]]]
+      headers = {'content-type' => query['ct'] || MODULE_MAP_TYPES.fetch(path.split('.').last, 'text/plain')}
+      headers['cache-control'] = 'max-age=3600' if query.key?('fresh')
+      [200, headers, [files[path]]]
     })
   end
 
@@ -160,6 +162,39 @@ RSpec.describe 'the module map' do
         <script type="module">import '/x.js?once'; L.push('b');</script>
         <script type="module">import('/x.js?once').then(() => fetch('/counts')).then((r) => r.json()).then((c) => { L.push('n=' + c['/x.js?once']); done(); });</script>
       HTML
+    end
+
+    # HTML "fetch the descendants of and link": the first failure its loading meets decides — a fetch that failed while no
+    # error to rethrow was set nulls the graph (`error` at the element), a parse error met first is rethrown at the window
+    # (Firefox both; Chrome nulls a graph with any failed fetch).
+    it 'fails as the first failure its loading meets' do
+      graphs = files.merge('/a.js' => 'export const a = ;', '/e.js' => "import '/slow/300/a.js'; import '/missing.js';",
+                           '/f.js' => "import '/a.js'; import '/slow/300/missing.js';")
+      expect(log_of(<<~HTML, graphs)).to eq('e:error error:SyntaxError f:load')
+        <script>setTimeout(done, 1000);</script>
+        <script type="module" src="/e.js" onload="L.push('e:load')" onerror="L.push('e:error')"></script>
+        <script type="module" src="/f.js" onload="L.push('f:load')" onerror="L.push('f:error')"></script>
+      HTML
+    end
+
+    # A JSON module nested past what a literal compiles to is JSON.parse's value all the same (Chrome).
+    it 'imports a JSON module however deeply it nests' do
+      deep = files.merge('/deep.json' => ('[' * 20_000) + (']' * 20_000))
+      expect(log_of(<<~HTML, deep)).to eq('deep:true')
+        <script type="module">import d from '/deep.json' with { type: 'json' }; L.push('deep:' + Array.isArray(d[0][0])); done();</script>
+      HTML
+    end
+
+    # …and a module a cache answers files its Resource Timing entry as one fetched does.
+    it "files a Resource Timing entry for a module the cache answers" do
+      session = session_of(<<~HTML, files)
+        <script type="module" src="/x.js?fresh" onload="L.push(performance.getEntriesByType('resource').some((e) => e.name.endsWith('/x.js?fresh'))); done()"></script>
+      HTML
+      2.times do
+        session.visit '/'
+        expect(session).to have_title('done', wait: 10)
+        expect(session.find('#out', visible: :all).text(:all)).to eq('x-ran true')
+      end
     end
 
     it "takes a redirected module's base URL from its response, keying it by its request's" do

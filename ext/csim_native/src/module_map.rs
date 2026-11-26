@@ -86,13 +86,44 @@ pub(crate) fn module_body(source: String, code: u32) -> Option<String> {
     let literal = |text: &str| serde_json::to_string(text).unwrap_or_default();
     Some(match ModuleType::of_code(code) {
         ModuleType::JavaScript => source,
-        ModuleType::Json => format!("export default {};", json_literal(&source)?),
+        ModuleType::Json => match json_literal(&source) {
+            Some(value) => format!("export default {value};"),
+            // (…one nested past what a literal of it compiles to: parsed by JSON.parse as it evaluates — a JSON text that
+            // is none then thrown as it does, a SyntaxError)
+            None if nested_past(&source, JSON_LITERAL_DEPTH) => format!("export default JSON.parse({});", literal(&source)),
+            None => return None,
+        },
         ModuleType::Css => format!("const sheet = new CSSStyleSheet();\nsheet.replaceSync({});\nexport default sheet;", literal(&source)),
         ModuleType::Text => format!("export default {};", literal(&source)),
     })
 }
+// How deep a JSON text's arrays and objects nest at most for its literal: deeper, the literal no compile takes (V8's
+// parser recurses), and none of the walk below's recursion either.
+const JSON_LITERAL_DEPTH: usize = 512;
+// Whether `text`'s brackets, outside its strings, nest past `depth`.
+fn nested_past(text: &str, depth: usize) -> bool {
+    let (mut level, mut in_string, mut escaped) = (0usize, false, false);
+    for b in text.bytes() {
+        match (in_string, b) {
+            (true, _) if escaped => escaped = false,
+            (true, b'\\') => escaped = true,
+            (true, b'"') => in_string = false,
+            (true, _) => {}
+            (false, b'"') => in_string = true,
+            (false, b'[' | b'{') => {
+                level += 1;
+                if level > depth {
+                    return true;
+                }
+            }
+            (false, b']' | b'}') => level = level.saturating_sub(1),
+            _ => {}
+        }
+    }
+    false
+}
 // A JSON text as a JavaScript expression of the value JSON.parse makes of it — None for one that is no JSON text (ECMA-404,
-// whitespace around it): the text itself, each member name made a computed property name, as JSON.parse defines every
+// whitespace around it), or one nested past `JSON_LITERAL_DEPTH`: the text itself, each member name made a computed property name, as JSON.parse defines every
 // member as an own data property (`"__proto__"` too, which a literal's plain name would make the object's prototype).
 fn json_literal(text: &str) -> Option<String> {
     struct Copy<'t> {
@@ -112,6 +143,9 @@ fn json_literal(text: &str) -> Option<String> {
             self.at += n;
         }
         fn value(&mut self, depth: usize) -> Option<()> {
+            if depth > JSON_LITERAL_DEPTH {
+                return None;
+            }
             self.ws();
             match *self.bytes.get(self.at)? {
                 b'{' => {
@@ -268,8 +302,8 @@ struct Script {
     // Its fetch options (the request plan its graph's fetches are made with, subresource_plan.rs).
     plan: u32,
     // What its requests resolved to, as a graph first came to it — each module once: the resolved module set keeps
-    // resolution stable — or the error to rethrow its graph takes.
-    resolved: Option<Result<Vec<Key>, Rethrow>>,
+    // resolution stable.
+    resolved: Option<Vec<Key>>,
     // Whether the host has its links (`moduleGraphResult`).
     linked: bool,
 }
@@ -297,6 +331,9 @@ struct Graph {
     plan: u32,
     waiting: Vec<(Key, f64)>,
     visited: HashSet<Key>,
+    // What failed it first, in the order its modules came in (HTML "fetch the descendants of and link": the first parse,
+    // resolution or type error its loading met its error to rethrow; a fetch that failed while none had, the graph null).
+    failed: Option<Outcome>,
 }
 enum Root {
     Entry(Key),
@@ -438,7 +475,7 @@ fn new_graph(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: Root, plan: u32, 
     map.next_graph += 1;
     let id = map.next_graph;
     let visited = waiting.iter().map(|(k, _)| k.clone()).collect();
-    map.graphs.push(Graph { id, root, plan, waiting, visited });
+    map.graphs.push(Graph { id, root, plan, waiting, visited, failed: None });
     Some(id)
 }
 // …an external one's: its entry's, as the map has it or as its fetch begins (`integrity` the element's, none of one with
@@ -637,24 +674,35 @@ fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, slot: u32, due: f
 fn walk(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, key: Option<&Key>, reached: f64) -> Result<(), Terminated> {
     let Some(map) = map_of(scope, cid) else { return Ok(()) };
     let Some(gi) = map.graphs.iter().position(|g| g.id == gid) else { return Ok(()) };
-    let plan = map.graphs[gi].plan;
-    let Some((script, at)) = script_in(map, gi, key) else { return Ok(()) };
-    if script.parse_error.is_some() {
+    let Some((script, at)) = script_in(map, gi, key) else {
+        map.graphs[gi].failed.get_or_insert(Outcome::Null);
+        return Ok(());
+    };
+    if let Some(error) = script.parse_error.clone() {
+        map.graphs[gi].failed.get_or_insert(Outcome::Rethrow(error));
         return Ok(());
     }
-    let (base, began) = (script.base.clone(), at.max(reached));
+    // (…its imports fetched with its own fetch options: HostLoadImportedModule's descendant script fetch options)
+    let (base, plan, began) = (script.base.clone(), script.plan, at.max(reached));
     let resolved = match script.resolved.clone() {
-        Some(resolved) => resolved,
+        Some(resolved) => Ok(resolved),
         None => {
             let requests = script.requests.clone();
             let resolved = resolve_all(map, &requests, &base);
-            if let Some((script, _)) = script_in(map, gi, key) {
-                script.resolved = Some(resolved.clone());
+            // (…a failure resolved again by the next graph to come to it: an import map registered meanwhile may map it)
+            if let (Ok(keys), Some((script, _))) = (&resolved, script_in(map, gi, key)) {
+                script.resolved = Some(keys.clone());
             }
             resolved
         }
     };
-    let Ok(children) = resolved else { return Ok(()) };
+    let children = match resolved {
+        Ok(children) => children,
+        Err(error) => {
+            map.graphs[gi].failed.get_or_insert(Outcome::Rethrow(error));
+            return Ok(());
+        }
+    };
     for child in children {
         let Some(graph) = map_of(scope, cid).and_then(|map| map.graphs.iter_mut().find(|g| g.id == gid)) else { return Ok(()) };
         if !graph.visited.insert(child.clone()) {
@@ -694,18 +742,33 @@ fn resolve_all(map: &mut ModuleMap, requests: &[(String, Option<ModuleType>)], b
 pub(crate) fn due_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32) -> Option<f64> {
     advance(scope, cid, gid, false).ok().flatten()
 }
-// The graph let go of: its script's fetch cancelled, or run. (Its entries' fetches go on: another graph may wait on them.)
+// The graph let go of: its script's fetch cancelled, or run — the fetches it waited on that no other graph waits on
+// cancelled with it (their slots let go of).
 pub(crate) fn drop_graph(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32) {
-    if let Some(map) = map_of(scope, cid) {
-        map.graphs.retain(|g| g.id != gid);
+    let Some(map) = map_of(scope, cid) else { return };
+    let Some(at) = map.graphs.iter().position(|g| g.id == gid) else { return };
+    let graph = map.graphs.remove(at);
+    let mut slots = Vec::new();
+    for (key, _) in graph.waiting {
+        let waited = map.graphs.iter().any(|g| g.waiting.iter().any(|(k, _)| *k == key));
+        if let (false, Some(&Entry::Fetching { slot, .. })) = (waited, map.entries.get(&key)) {
+            map.entries.remove(&key);
+            slots.push(slot);
+        }
+    }
+    let Some(host) = host_of(scope, cid) else { return };
+    for slot in slots {
+        let slot = v8::Integer::new_from_unsigned(scope, slot).into();
+        if call(scope, host, crate::subresource_obtain::H_SCRIPT_FORGET, &[slot]).is_err() {
+            return;
+        }
     }
 }
 
 // ── its result ──
 
-// What a graph came to (HTML "fetch the descendants of and link", onComplete): null where a module could not be
-// fetched; the first error to rethrow its modules hold, in the order loading them comes to them (a module's own parse
-// error, a request of one that resolves to none or names no module type); else its root's record, and the links of each
+// What a graph came to (HTML "fetch the descendants of and link", onComplete): what failed it first (`Graph::failed`) —
+// null for a module that could not be fetched, else its error to rethrow; else its root's record, and the links of each
 // module the host is to link that it has not had yet — `[root, base, [specifier, record, …], base, […], …]`.
 enum Outcome {
     Null,
@@ -714,6 +777,9 @@ enum Outcome {
 }
 fn outcome(map: &mut ModuleMap, gid: u32) -> Option<Outcome> {
     let gi = map.graphs.iter().position(|g| g.id == gid)?;
+    if let Some(failed) = map.graphs[gi].failed.take() {
+        return Some(failed);
+    }
     let root = match &map.graphs[gi].root {
         Root::Entry(key) => Some(key.clone()),
         Root::Inline(_) => None,
@@ -737,11 +803,7 @@ fn outcome(map: &mut ModuleMap, gid: u32) -> Option<Outcome> {
             return Some(Outcome::Rethrow(error.clone()));
         }
         root_record.get_or_insert(script.record);
-        let children = match &script.resolved {
-            Some(Ok(children)) => children.clone(),
-            Some(Err(error)) => return Some(Outcome::Rethrow(error.clone())),
-            None => Vec::new(),
-        };
+        let children = script.resolved.clone().unwrap_or_default();
         // (…an inline root's links each time: every inline module of a document is named by its base URL)
         if key.is_none() || !script.linked {
             let requests = script.requests.iter().zip(&children).map(|((specifier, _), child)| {
@@ -835,10 +897,14 @@ fn module_import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         return rv.set(value);
     };
     // (…the referring module's fetch options; a classic script's, an inline module's, the defaults)
-    let referring = map.entries.iter().find_map(|((u, ty), e)| match e {
-        Entry::Ready(script, _) if *ty == ModuleType::JavaScript && (*u == name || script.base == name) => Some(script.plan),
-        _ => None,
-    });
+    let referring = match map.entries.get(&(name.clone(), ModuleType::JavaScript)) {
+        Some(Entry::Ready(script, _)) => Some(script.plan),
+        // (…a redirected one's by its base URL, the name it was compiled under)
+        _ => map.entries.values().find_map(|e| match e {
+            Entry::Ready(script, _) if script.base == name => Some(script.plan),
+            _ => None,
+        }),
+    };
     let arena = realm(scope, cid);
     let doc = arena.realm_document(cid);
     let plan = referring.unwrap_or_else(|| crate::subresource_plan::plan_in(arena, crate::subresource_plan::J_MODULE_SCRIPT, None, doc, None));
@@ -884,5 +950,7 @@ mod tests {
         }
         assert!(module_body("x".into(), 3).unwrap().contains(r#"export default "x";"#));
         assert_eq!(module_body("{".into(), 1), None);
+        let deep = format!("{}{}", "[".repeat(200_000), "]".repeat(200_000));
+        assert!(module_body(deep, 1).unwrap().starts_with("export default JSON.parse("));
     }
 }
