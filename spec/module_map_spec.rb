@@ -236,6 +236,47 @@ RSpec.describe 'the module map' do
       HTML
     end
 
+    # …fetched in parallel as its link is processed, blocking nothing; its `load` as its module lands — one a graph is
+    # fetching already the same fetch, its `load` as that lands — and an `as` naming a destination no module is its
+    # `error` (Chrome; WPT preload/modulepreload-as.html).
+    it 'fetches a modulepreload as a slot of its own, its event as its module lands' do
+      preloads = files.merge('/w.js' => "L.push('w-ran');")
+      expect(log_of(<<~HTML, preloads)).to eq('blocked:false t100 a-load b-load mp-w-load w-ran audio-error')
+        <script type="module">import '/slow/300/w.js';</script>
+        <script>
+          setTimeout(() => L.push('t100'), 100);
+          const link = (href, name, as) => {
+            const l = Object.assign(document.createElement('link'), { rel: 'modulepreload', href });
+            if (as) l.as = as;
+            l.onload = () => L.push(name + '-load'); l.onerror = () => L.push(name + '-error');
+            return l;
+          };
+          const t0 = performance.now();
+          document.head.append(link('/slow/200/x.js?a', 'a'), link('/slow/200/x.js?b', 'b'));
+          L.push('blocked:' + (performance.now() - t0 > 50));
+          setTimeout(() => document.head.append(link('/slow/300/w.js', 'mp-w')), 50);
+          setTimeout(() => document.head.append(link('/x.js?audio', 'audio', 'audio')), 600);
+          setTimeout(done, 800);
+        </script>
+      HTML
+    end
+
+    # A graph a failure ended leaves the fetches it still waited on to land in the map: a later import of one of them
+    # takes it (Chrome, Firefox: fetched once).
+    it 'leaves the fetches a failed graph waited on in the map' do
+      graphs = files.merge('/g.js' => "import '/missing.js'; import '/slow/200/x.js?inflight';")
+      expect(log_of(<<~HTML, graphs)).to eq('g:error x-ran n=1')
+        <script type="module" src="/g.js" onerror="L.push('g:error'); import('/slow/200/x.js?inflight').then(() => fetch('/counts')).then((r) => r.json()).then((c) => { L.push('n=' + c['/slow/200/x.js?inflight']); done(); })"></script>
+      HTML
+    end
+
+    # …and a module that could not be fetched files its Resource Timing entry all the same (Chrome and Firefox).
+    it 'files a Resource Timing entry for a module that is not found' do
+      expect(log_of(<<~HTML, files)).to eq('script')
+        <script type="module" src="/nf.js" onerror="setTimeout(() => { L.push(performance.getEntriesByType('resource').filter((e) => e.name.endsWith('/nf.js')).map((e) => e.initiatorType).join()); done(); })"></script>
+      HTML
+    end
+
     it "takes a redirected module's base URL from its response, keying it by its request's" do
       expect(log_of(<<~HTML, files)).to eq('http://www.example.com/sub/meta.js sub n=2')
         <script type="module">

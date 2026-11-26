@@ -596,12 +596,18 @@ fn as_keyword(as_value: &str) -> Option<&'static str> {
     PRELOAD_DESTINATIONS.iter().chain(&MODULE_PRELOAD_DESTINATIONS).copied().find(|d| d.eq_ignore_ascii_case(as_value))
 }
 // The destination a `<link rel=modulepreload>` fetches with, by its `as` (HTML "fetch and process the linked resource",
-// modulepreload): the module preload destination it names, `script` for an `as` in no state (missing, or no keyword:
-// `as=audio` too); None for one naming a preload destination no module is (`image`, `fetch`), which fetches nothing and
-// fails.
+// modulepreload): the module preload destination it names, `script` for an `as` in no state (missing, empty, or naming
+// no destination: `invalid-dest`); None for one naming a destination no module is (`audio`, `image`, `fetch`,
+// `document`, …), which fetches nothing and fails — WPT preload/modulepreload-as.html, Chrome.
 pub(crate) fn modulepreload_destination(as_value: &str) -> Option<&'static str> {
-    let Some(named) = as_keyword(as_value) else { return Some("script") };
-    MODULE_PRELOAD_DESTINATIONS.contains(&named).then_some(named)
+    // (…the request destinations an `as` may name: Fetch's, `fetch` the empty one's keyword)
+    const DESTINATIONS: [&str; 24] = [
+        "audio", "audioworklet", "document", "embed", "fetch", "font", "frame", "iframe", "image", "json", "manifest", "object",
+        "paintworklet", "report", "script", "serviceworker", "sharedworker", "style", "text", "track", "video", "webidentity",
+        "worker", "xslt",
+    ];
+    let Some(named) = DESTINATIONS.iter().copied().find(|d| d.eq_ignore_ascii_case(as_value)) else { return Some("script") };
+    MODULE_PRELOAD_DESTINATIONS.iter().copied().find(|d| *d == named)
 }
 // The destination a `<link rel=preload>` fetches with (HTML "translate a preload destination"): the preload destination
 // its `as` names, `fetch` the empty one — None for any other (missing, empty, no keyword, a module's alone: `json`,
@@ -801,7 +807,7 @@ mod tests {
         assert_eq!((preload_destination("Style"), preload_destination("fetch")), (Some("style"), Some("")));
         assert_eq!((preload_destination(""), preload_destination("bogus")), (None, None));
         assert_eq!((preload_destination("audio"), preload_destination("worker")), (None, None));
-        assert_eq!((modulepreload_destination("audio"), modulepreload_destination("track")), (Some("script"), None));
+        assert_eq!((modulepreload_destination("audio"), modulepreload_destination("track")), (None, None));
         assert!(module_content("text/javascript; charset=utf-8", "script"));
         assert!(!module_content("text/javascript", "style") && !module_content("text/javascript", "json"));
         assert!(module_content("text/css", "style") && module_content("application/ld+json", "json"));

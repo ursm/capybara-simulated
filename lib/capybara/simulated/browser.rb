@@ -3985,14 +3985,15 @@ module Capybara
       # A module a graph fetched (`module_fetch_take`) — collected so the bridge can file its 'script' Resource Timing entry:
       # the facts of its response (`meta`) or a controlling service worker's answer (`answer`), and its fetch's times
       # (`take_module_rt`). One per URL, as the browser files it.
-      def note_module_fetch(url, times:, meta: nil, answer: nil)
+      # (…`kind` the consumer kind it is filed as — a modulepreload's link's — none a module script's)
+      def note_module_fetch(url, times:, meta: nil, answer: nil, kind: 0)
         return unless meta || answer
 
         url  = url.to_s
         list = (@module_rt[Thread.current] ||= [])
         return if list.any? {|m| m['url'] == url }
 
-        list << {'url' => url, 'meta' => meta, 'answer' => answer, 'times' => times}
+        list << {'url' => url, 'meta' => meta, 'answer' => answer, 'times' => times, 'kind' => kind.to_i}
       end
       # The modules fetched since the last call, for the bridge to time as 'script' — cleared on read — each with when its
       # fetch began and ended on the page's clock (`startTime`, `endTime`): one whose fetch was a slot (`[:page, started,
@@ -4003,7 +4004,7 @@ module Capybara
         now = nil
         list.map {|m|
           kind, began, ended = m['times']
-          entry = {'url' => m['url'], 'meta' => m['meta'], 'answer' => m['answer']}
+          entry = {'url' => m['url'], 'meta' => m['meta'], 'answer' => m['answer'], 'kind' => m['kind']}
           next entry.merge!('startTime' => began, 'endTime' => ended) if kind == :page
 
           now ||= Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -8950,9 +8951,12 @@ module Capybara
       def module_fetch_start(url, realm, plan, document, referrer, integrity, type, began, id, started, sw)
         realm = realm.to_i
         url   = url.to_s
-        @module_fetches[id.to_i] = {url: url, type: type.to_i, integrity: integrity.to_s, started: started.to_f, realm: realm}
+        # (…`type` its module type, its high bits the consumer kind its Resource Timing entry is filed as: a modulepreload's
+        # link's, none a module script's)
+        type, rt_kind = type.to_i & 0xff, type.to_i >> 8
+        @module_fetches[id.to_i] = {url: url, type: type, integrity: integrity.to_s, started: started.to_f, realm: realm, rt_kind: rt_kind}
         referrer = nil if referrer.to_s.empty?
-        dest = MODULE_DESTINATIONS[type.to_i] || 'script'
+        dest = MODULE_DESTINATIONS[type] || 'script'
         if (local = local_module_source(url, realm))
           @script_fetches[id.to_i] = {began: began.to_f, slept: 0.0, cookies: nil, request: nil, realm: realm, result: {local: local}}
           return 0.0
@@ -9044,7 +9048,7 @@ module Capybara
         elsif (answer = result[:sw])
           return nil if answer['blocked']
 
-          note_module_fetch(url, answer: answer, times: result[:times])
+          note_module_fetch(url, answer: answer, times: result[:times], kind: mod[:rt_kind])
           source, content_type = answer['body'], answer['contentType']
           base = answer['url'].to_s.empty? ? url : answer['url'].to_s
         else
@@ -9053,10 +9057,11 @@ module Capybara
           # the request took)
           times = [:page, mod[:started], [now.to_f, mod[:started] + request_ms(result[:times])].max]
           source, meta, raw = result[:answered] || asset_answer(slot[:request], result.merge(times: times))
+          # (…its entry filed whatever came in, a 404's too: Chrome and Firefox)
+          note_module_fetch(url, meta: meta, times: times, kind: mod[:rt_kind])
           return nil unless source
           return nil if !mod[:integrity].to_s.empty? && Native.integrity_refuses((raw || source).b, mod[:integrity].to_s)
 
-          note_module_fetch(url, meta: meta, times: times)
           content_type = meta&.dig('headers', 'content-type')
           base = meta&.[]('url').to_s.empty? ? url : meta['url']
         end

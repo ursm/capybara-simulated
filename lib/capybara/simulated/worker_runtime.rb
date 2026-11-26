@@ -106,7 +106,7 @@ module Capybara
         @ctx.attach('@moduleFetchStart', ->(url, *rest) {
           id = rest[7].to_i
           @fetched[id] = seeded.delete(url.to_s) || begin
-            fetch_import.call(url.to_s, rest[5].to_i)
+            fetch_import.call(url.to_s, rest[5].to_i & 0xff)
           rescue StandardError
             nil
           end

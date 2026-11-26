@@ -271,7 +271,7 @@ fn next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, phase: u32, host: v
     // (…its server's time waited out where its script still waits on the fetch — none where its document's abort, or a
     // move, ended that: HTML "abort a document" cancels it, a network error at once)
     if fetch != 0 && waits(scope, cid, id) {
-        let due = crate::script_fetch::due_in(scope, cid, fetch).unwrap_or(0.0);
+        let due = crate::script_fetch::advance_due(scope, cid, fetch)?.unwrap_or(0.0);
         if due > 0.0 {
             if let Some(l) = lists_of(realm(scope, cid), cid).and_then(|lists| lists.find(id)) {
                 l.state = State::Waiting;
@@ -446,7 +446,7 @@ fn take_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let what = match l.exec {
         // (…a module script's graph let go of where none of it runs)
         Exec::Module(gid) if !current => {
-            crate::module_map::drop_graph(scope, cid, gid);
+            crate::module_map::drop_graph(scope, cid, gid, true);
             RUN_NOTHING
         }
         _ if !current => RUN_NOTHING,

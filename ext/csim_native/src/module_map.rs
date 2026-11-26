@@ -32,12 +32,9 @@ use crate::subresource_obtain::{call, next_slot, slept_ms, text};
 //                                     type no module of its type is, an integrity mismatch) — or how many milliseconds later
 //                                     it lands (a controlling worker let it through to a server that took time)
 //   H_MODULE_INLINE (source, base URL) an inline module script's source compiled, answered as `H_MODULE_TAKE` answers
-//   H_MODULE_COMPILE (source, base URL, type)
-//                                     a module a modulepreload fetched compiled, answered as `H_MODULE_TAKE` answers
 pub(crate) const H_MODULE_START: u32 = 34;
 pub(crate) const H_MODULE_TAKE: u32 = 35;
 pub(crate) const H_MODULE_INLINE: u32 = 36;
-pub(crate) const H_MODULE_COMPILE: u32 = 37;
 
 // A module type (HTML "module type from module request").
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -352,6 +349,9 @@ struct Graph {
     plan: u32,
     waiting: Vec<(Key, f64)>,
     visited: HashSet<Key>,
+    // A modulepreload's: its entry alone, none of its descendants fetched (HTML "fetch a modulepreload module script
+    // graph" leaves them optional).
+    single: bool,
     // What failed it first, in the order its modules came in (HTML "fetch the descendants of and link": the first parse,
     // resolution or type error its loading met its error to rethrow; a fetch that failed while none had, the graph null).
     failed: Option<Outcome>,
@@ -364,13 +364,14 @@ enum Root {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "importMapRegister", import_map_register_op, context_id);
     register(scope, ns, "moduleResolve", module_resolve_op, context_id);
-    register(scope, ns, "moduleIntegrity", module_integrity_op, context_id);
     register(scope, ns, "moduleScriptFetch", module_script_fetch_op, context_id);
     register(scope, ns, "moduleGraphResult", module_graph_result_op, context_id);
     register(scope, ns, "moduleImport", module_import_op, context_id);
     register(scope, ns, "noteReferringScript", note_referring_script_op, context_id);
     register(scope, ns, "moduleGraphBegin", module_graph_begin_op, context_id);
     register(scope, ns, "moduleGraphDue", module_graph_due_op, context_id);
+    register(scope, ns, "modulePreloadBegin", module_preload_begin_op, context_id);
+    register(scope, ns, "modulePreloadLoaded", module_preload_loaded_op, context_id);
 }
 
 fn map_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut ModuleMap> {
@@ -435,13 +436,6 @@ fn module_resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         None => rv.set_null(),
     }
 }
-// __dom.moduleIntegrity(url) -> the integrity metadata the import map gives `url`, '' for none.
-fn module_integrity_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let url = args.get(0).to_rust_string_lossy(scope);
-    let cid = realm_id(scope, &args);
-    let integrity = map_of(scope, cid).map(|map| map.integrity(&url).to_owned()).unwrap_or_default();
-    rv.set(text(scope, &integrity));
-}
 
 // ── fetching a graph ──
 
@@ -500,7 +494,10 @@ fn module_graph_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 fn module_graph_due_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let gid = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    rv.set_double(due_in(scope, cid, gid).unwrap_or(-1.0));
+    match advance_due(scope, cid, gid) {
+        Ok(due) => rv.set_double(due.unwrap_or(-1.0)),
+        Err(_) => rv.set_double(-1.0),
+    }
 }
 fn keep_host(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>) {
     let kept = map_of(scope, cid).is_some_and(|map| map.host.is_some());
@@ -543,14 +540,14 @@ fn new_graph(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: Root, plan: u32, 
     map.next_graph += 1;
     let id = map.next_graph;
     let visited = waiting.iter().map(|(k, _)| k.clone()).collect();
-    map.graphs.push(Graph { id, root, plan, waiting, visited, failed: None });
+    map.graphs.push(Graph { id, root, plan, waiting, visited, single: false, failed: None });
     Some(id)
 }
 // …an external one's: its entry's, as the map has it or as its fetch begins (`integrity` the element's, none of one with
 // no `integrity` attribute: the import map's).
 fn begin_external(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: String, plan: u32, integrity: Option<String>, began: f64) -> Result<Option<u32>, Terminated> {
     let key = (url, ModuleType::JavaScript);
-    ensure_fetch(scope, cid, &key, plan, None, integrity, began)?;
+    ensure_fetch(scope, cid, &key, plan, None, integrity, began, 0)?;
     Ok(new_graph(scope, cid, Root::Entry(key.clone()), plan, vec![(key, began)]))
 }
 // …an inline one's: its source compiled now, its descendants' fetches begun.
@@ -570,7 +567,9 @@ fn begin_inline(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: String, base
 // The entry `key` being fetched, or had: its fetch begun at `began` where the map has none — or one that failed (HTML
 // "fetch a single module script": the map forgets a failure) — its request `plan`'s, referred by `referrer` (the
 // referring script's base URL; none: its client), with `integrity` (none: the import map's).
-fn ensure_fetch(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, plan: u32, referrer: Option<&str>, integrity: Option<String>, began: f64) -> Result<(), Terminated> {
+// (…`initiator` the consumer kind its Resource Timing entry is filed as, a link's for a modulepreload's — 0: a module
+// script's)
+fn ensure_fetch(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, plan: u32, referrer: Option<&str>, integrity: Option<String>, began: f64, initiator: u32) -> Result<(), Terminated> {
     let Some(map) = map_of(scope, cid) else { return Ok(()) };
     if matches!(map.entries.get(key), Some(Entry::Fetching { .. } | Entry::Ready(..))) {
         return Ok(());
@@ -583,7 +582,7 @@ fn ensure_fetch(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, plan: u32
         v8::Integer::new_from_unsigned(scope, plan).into(),
         crate::subresource_obtain::text_or_null(scope, referrer),
         text(scope, &integrity),
-        v8::Integer::new_from_unsigned(scope, key.1 as u32).into(),
+        v8::Integer::new_from_unsigned(scope, key.1 as u32 | initiator << 8).into(),
         v8::Number::new(scope, began).into(),
         v8::Integer::new_from_unsigned(scope, id).into(),
     ];
@@ -777,12 +776,16 @@ fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, slot: u32, due: f
 fn walk(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, key: Option<&Key>, reached: f64) -> Result<(), Terminated> {
     let Some(map) = map_of(scope, cid) else { return Ok(()) };
     let Some(gi) = map.graphs.iter().position(|g| g.id == gid) else { return Ok(()) };
+    let single = map.graphs[gi].single;
     let Some((script, at)) = script_in(map, gi, key) else {
         map.graphs[gi].failed.get_or_insert(Outcome::Null);
         return Ok(());
     };
     if let Some(error) = script.parse_error.clone() {
         map.graphs[gi].failed.get_or_insert(Outcome::Rethrow(error));
+        return Ok(());
+    }
+    if single {
         return Ok(());
     }
     // (…its imports fetched with its own fetch options: HostLoadImportedModule's descendant script fetch options)
@@ -812,7 +815,7 @@ fn walk(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, key: Option<&Key>,
             continue;
         }
         graph.waiting.push((child.clone(), began));
-        ensure_fetch(scope, cid, &child, plan, Some(&base), None, began)?;
+        ensure_fetch(scope, cid, &child, plan, Some(&base), None, began, 0)?;
     }
     Ok(())
 }
@@ -840,17 +843,42 @@ fn resolve_all(map: &mut ModuleMap, requests: &[(String, Option<ModuleType>)], b
     }
     Ok(keys)
 }
-// How long until the graph `gid` of realm `cid` has every module in (`advance`), as far as its fetches have gone by the
-// event loop's clock — None for a graph it has no more.
-pub(crate) fn due_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32) -> Option<f64> {
-    advance(scope, cid, gid, false).ok().flatten()
+// How long until the graph `gid` of realm `cid` next goes on, its fetches gone on as far as the event loop's clock has
+// come (`advance`: modules land, compile, their responses' cookies stored) — 0 for a graph whose every module is in, or
+// one a failure ended; None for none.
+pub(crate) fn advance_due(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32) -> Result<Option<f64>, Terminated> {
+    advance(scope, cid, gid, false)
 }
-// The graph let go of: its script's fetch cancelled, or run — the fetches it waited on that no other graph waits on
-// cancelled with it (their slots let go of).
-pub(crate) fn drop_graph(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32) {
+// …as far as it can be told without going on — nothing landed, no host asked: what a reckoning of when the event loop is
+// next due asks (frame_navigation.rs `load_due_at`, a spin's wait) — the earliest landing it waits on, 0 where one is due
+// or in already (its going on its landing task's: script_lists.rs).
+pub(crate) fn due_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32) -> Option<f64> {
+    let now = realm(scope, cid).event_loop.clock;
+    let map = map_of(scope, cid)?;
+    let graph = map.graphs.iter().find(|g| g.id == gid)?;
+    if graph.failed.is_some() {
+        return Some(0.0);
+    }
+    let mut next: Option<f64> = None;
+    for (key, _) in &graph.waiting {
+        let at = match map.entries.get(key) {
+            Some(&Entry::Fetching { due, .. }) => due,
+            _ => now,
+        };
+        next = Some(next.map_or(at, |n: f64| n.min(at)));
+    }
+    Some(next.map_or(0.0, |at| (at - now).max(0.0)))
+}
+// The graph let go of: run — the fetches it still waits on, a failure having ended it, left to land in the map, whatever
+// asks for their modules next — or, `cancelled`, its script's fetch cancelled with it (its document aborted, it moved
+// to another): the fetches no other graph waits on cancelled too, their slots let go of.
+pub(crate) fn drop_graph(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, cancelled: bool) {
     let Some(map) = map_of(scope, cid) else { return };
     let Some(at) = map.graphs.iter().position(|g| g.id == gid) else { return };
     let graph = map.graphs.remove(at);
+    if !cancelled {
+        return;
+    }
     let mut slots = Vec::new();
     for (key, _) in graph.waiting {
         let waited = map.graphs.iter().any(|g| g.waiting.iter().any(|(k, _)| *k == key));
@@ -870,42 +898,46 @@ pub(crate) fn drop_graph(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32) {
 
 // ── a modulepreload's entry ──
 
-// What the module map has for a modulepreload of `url` and the module preload destination `destination`, before it
-// fetches (HTML "fetch a single module script": an entry the map has, or one being fetched, answers it): whether its
-// module script loads — a module script loaded, one being fetched landed now and judged as it comes in — None where the
-// map has none (one that failed is fetched again).
-pub(crate) fn preload_entry(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, url: &str, destination: &str) -> Result<Option<bool>, Terminated> {
+// __dom.modulePreloadBegin(el, url, plan, integrity, destination, kind, host) -> the number of the graph of a
+// modulepreload of `url` (HTML "fetch a modulepreload module script graph"): its document's module map's entry of the
+// URL and the module type its `as` names (`destination`), fetched as the link is processed — in parallel, a slot of the
+// host's, landing as late as its server took — with its request plan `plan` and its `integrity` (none: the import
+// map's), its Resource Timing entry the link's (`kind`); one the map has, or is fetching, taken as it is. Its link's
+// event once it lands (`modulePreloadLoaded`): none of its descendants fetched, as HTML leaves them optional.
+fn module_preload_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(0);
+    let url = args.get(1).to_rust_string_lossy(scope);
+    let plan = args.get(2).uint32_value(scope).unwrap_or(0);
+    let integrity = string_arg(scope, args.get(3));
+    let destination = args.get(4).to_rust_string_lossy(scope);
+    let kind = args.get(5).uint32_value(scope).unwrap_or(0);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(6)) else { return };
+    let cid = realm_id(scope, &args);
     keep_host(scope, cid, host);
-    let key = (url.to_owned(), ModuleType::of_destination(destination));
-    let Some(map) = map_of(scope, cid) else { return Ok(None) };
-    match map.entries.get(&key) {
-        Some(Entry::Ready(..)) => Ok(Some(true)),
-        Some(&Entry::Fetching { slot, due, plan }) => {
-            land(scope, cid, &key, slot, due, plan)?;
-            Ok(Some(matches!(map_of(scope, cid).and_then(|map| map.entries.get(&key)), Some(Entry::Ready(..)))))
-        }
-        _ => Ok(None),
+    let key = (url, ModuleType::of_destination(&destination));
+    let began = realm(scope, cid).event_loop.clock;
+    if ensure_fetch(scope, cid, &key, plan, None, integrity, began, kind).is_err() {
+        return;
     }
+    let Some(gid) = new_graph(scope, cid, Root::Entry(key.clone()), plan, vec![(key, began)]) else { return };
+    if let Some(graph) = map_of(scope, cid).and_then(|map| map.graphs.iter_mut().find(|g| g.id == gid)) {
+        graph.single = true;
+    }
+    rv.set_uint32(gid);
 }
-// …and the response one fetched that loads (its `source`, its response's URL `base`), made the map's module script of
-// its URL and module type, its fetch options its link's `plan` — unless the map came to have one meanwhile: whether it
-// is one (a JSON one that is no JSON none, the link's `error`).
-pub(crate) fn preloaded(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, (url, destination, plan): (&str, &str, u32), source: Option<v8::Local<'_, v8::Value>>, base: Option<String>) -> Result<bool, Terminated> {
-    let ty = ModuleType::of_destination(destination);
-    let key = (url.to_owned(), ty);
-    if map_of(scope, cid).is_some_and(|map| matches!(map.entries.get(&key), Some(Entry::Ready(..)))) {
-        return Ok(true);
-    }
-    let Some(source) = source.filter(|s| s.is_string()) else { return Ok(false) };
-    let base = base.unwrap_or_else(|| url.to_owned());
-    let (base_value, ty_value) = (text(scope, &base), v8::Integer::new_from_unsigned(scope, ty as u32).into());
-    let answer = call(scope, host, H_MODULE_COMPILE, &[source, base_value, ty_value])?;
-    let Some(script) = script_of(scope, cid, answer, ty, url, plan) else { return Ok(false) };
-    let at = realm(scope, cid).event_loop.clock;
-    if let Some(map) = map_of(scope, cid) {
-        map.entries.insert(key, Entry::Ready(script, at));
-    }
-    Ok(true)
+// __dom.modulePreloadLoaded(gid) -> whether the modulepreload's module script was had (its link's `load`; else its
+// `error`) — its graph let go of, its entry the map's.
+fn module_preload_loaded_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let gid = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let _ = advance(scope, cid, gid, false);
+    let loaded = map_of(scope, cid).and_then(|map| {
+        let graph = map.graphs.iter().find(|g| g.id == gid)?;
+        let Root::Entry(key) = &graph.root else { return None };
+        Some(graph.waiting.is_empty() && matches!(map.entries.get(key), Some(Entry::Ready(..))))
+    });
+    drop_graph(scope, cid, gid, false);
+    rv.set_bool(loaded == Some(true));
 }
 
 // ── its result ──
@@ -1012,7 +1044,7 @@ fn module_graph_result_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let cid = realm_id(scope, &args);
     let _ = advance(scope, cid, gid, true);
     let outcome = map_of(scope, cid).and_then(|map| outcome(map, gid)).unwrap_or(Outcome::Null);
-    drop_graph(scope, cid, gid);
+    drop_graph(scope, cid, gid, false);
     let value = outcome_value(scope, outcome);
     rv.set(value);
 }
@@ -1058,7 +1090,7 @@ fn module_import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let json = url.split(['?', '#']).next().is_some_and(|path| path.ends_with(".json"));
     let key = (url, if json { ModuleType::Json } else { ModuleType::JavaScript });
     let now = realm(scope, cid).event_loop.clock;
-    if ensure_fetch(scope, cid, &key, plan, referrer.as_deref(), None, now).is_err() {
+    if ensure_fetch(scope, cid, &key, plan, referrer.as_deref(), None, now, 0).is_err() {
         return;
     }
     let Some(gid) = new_graph(scope, cid, Root::Entry(key.clone()), plan, vec![(key, now)]) else { return };
@@ -1066,7 +1098,7 @@ fn module_import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         return;
     }
     let outcome = map_of(scope, cid).and_then(|map| outcome(map, gid)).unwrap_or(Outcome::Null);
-    drop_graph(scope, cid, gid);
+    drop_graph(scope, cid, gid, false);
     let value = outcome_value(scope, outcome);
     rv.set(value);
 }

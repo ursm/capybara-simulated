@@ -620,7 +620,7 @@ pub(crate) fn text_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Globa
 // parse, or names no blob, a network error (Fetch), the link's load an `error` whatever it obtains;
 // its verdict the engine's (`judge`: what the link obtains, its integrity) and its entry filed.
 fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    use crate::link_resource::{OBTAINS_MODULEPRELOAD, OBTAINS_PREFETCH, OBTAINS_PRELOAD, OBTAINS_STYLESHEET};
+    use crate::link_resource::{OBTAINS_PREFETCH, OBTAINS_PRELOAD, OBTAINS_STYLESHEET};
     rv.set_uint32(LINK_ERROR);
     let kind = args.get(3).uint32_value(scope).unwrap_or(0);
     let obtains = kind >> 8;
@@ -647,8 +647,6 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         let destination = crate::script::preload_destination(&preload_as(scope, el, cid)).unwrap_or("");
         let r = Request { preload: Some((destination, 0)), ..r };
         run_preload(scope, host, r).map(link_done)
-    } else if obtains & OBTAINS_MODULEPRELOAD != 0 {
-        modulepreload(scope, host, &r, &module_destination).map(link_done)
     } else if obtains & OBTAINS_PREFETCH != 0 {
         match dispatch(scope, host, r) {
             Ok(None) => Ok(LINK_PENDING),
@@ -692,60 +690,6 @@ fn link_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::F
     let ok = link_verdict(scope, r, &facts, SRC_NETWORK, bytes, "no-cors", (module_destination, ""));
     file(scope, host, r, Answered::Network(resp.map(|resp| v8::Global::new(scope, v8::Local::<v8::Value>::from(resp)))))?;
     Ok(ok)
-}
-
-// …a modulepreload's (HTML "fetch a modulepreload module script graph"): its document's module map's entry where it has
-// one of the URL and the module type its `as` names (one being fetched landed now), else fetched — a controlling service
-// worker's answer (a script's request: `event.request.integrity` its metadata), else the asset cache's (`[body, meta,
-// bytes]`, judged by the response facts it kept — none for one cached before they were — its body none of a response it
-// refused), else the network's — and, one that loads, made the map's module script (module_map.rs `preloaded`), which
-// a module graph of the URL takes.
-fn modulepreload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, module_destination: &str) -> Result<bool, Terminated> {
-    use crate::subresource_judge::{facts_of, SRC_ASSET, SRC_SW_SYNC, S_NO_BODY};
-    if let Some(in_map) = crate::module_map::preload_entry(scope, r.cid, host, &r.url, module_destination)? {
-        return Ok(in_map);
-    }
-    let mut args = request_args(scope, r).to_vec();
-    let (binary, integrity) = (v8::Boolean::new(scope, false).into(), text(scope, &r.integrity));
-    args.extend([binary, integrity]);
-    if let Some(answer) = call(scope, host, H_SW_ANSWER, &args)? {
-        let local = v8::Local::new(scope, &answer);
-        let obj = v8::Local::<v8::Object>::try_from(local).ok();
-        let body = obj.and_then(|a| member(scope, a, "body_bytes").or_else(|| member(scope, a, "body")));
-        let no_body = if obj.and_then(|a| member(scope, a, "body")).is_none() { S_NO_BODY } else { 0 };
-        let facts = facts_of(scope, obj, r.kind & 0xff, SRC_SW_SYNC);
-        let ok = link_verdict(scope, r, &facts, SRC_SW_SYNC | no_body, body, "no-cors", (module_destination, ""));
-        file(scope, host, r, Answered::Worker(answer.clone()))?;
-        if ok {
-            let text = obj.and_then(|a| member(scope, a, "body"));
-            let base = obj.and_then(|a| member(scope, a, "url")).filter(|u| u.is_string()).map(|u| u.to_rust_string_lossy(scope));
-            return crate::module_map::preloaded(scope, r.cid, host, (&r.url, module_destination, r.plan), text, base);
-        }
-        return Ok(ok);
-    }
-    if crate::fetch_rules::fetch_route(&r.url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
-        return link_from_network(scope, host, r, module_destination);
-    }
-    let args = request_args(scope, r);
-    let got = call(scope, host, H_ASSET, &args)?.map(|g| v8::Local::new(scope, g));
-    let got = got.and_then(|g| v8::Local::<v8::Array>::try_from(g).ok());
-    let mut at = [None; 3];
-    if let Some(g) = got {
-        for (k, slot) in at.iter_mut().enumerate() {
-            *slot = g.get_index(scope, k as u32).filter(|v| !v.is_null_or_undefined());
-        }
-    }
-    let [body, meta, bytes] = at;
-    let meta = meta.and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
-    let facts = facts_of(scope, meta, r.kind & 0xff, SRC_ASSET);
-    let no_body = if body.is_none() { S_NO_BODY } else { 0 };
-    let ok = link_verdict(scope, r, &facts, SRC_ASSET | no_body, bytes.or(body), "no-cors", (module_destination, ""));
-    file(scope, host, r, Answered::Network(meta.map(|m| v8::Global::new(scope, v8::Local::<v8::Value>::from(m)))))?;
-    if !ok {
-        return Ok(false);
-    }
-    let base = meta.and_then(|m| member(scope, m, "url")).filter(|u| u.is_string() && u.to_rust_string_lossy(scope) != "").map(|u| u.to_rust_string_lossy(scope));
-    crate::module_map::preloaded(scope, r.cid, host, (&r.url, module_destination, r.plan), body, base)
 }
 
 // A controlled prefetch's answer (`obtainResume`): its verdict and entry (`prefetch_verdict`), and its element's `load`

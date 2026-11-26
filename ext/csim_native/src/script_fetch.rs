@@ -137,7 +137,7 @@ pub(crate) fn fetch_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId) -
 }
 
 // How long after now the fetch `id` of realm `cid` lands — its network leg's time, past the clock as it began; a module
-// graph's as its fetches have gone on by now (module_map.rs `due_in`) — none for a fetch it has no more.
+// graph's as far as can be told without its going on (module_map.rs `due_in`) — none for a fetch it has no more.
 pub(crate) fn due_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) -> Option<f64> {
     let clock = realm(scope, cid).event_loop.clock;
     let f = fetches_of(scope, cid).and_then(|f| find(f, id))?;
@@ -147,10 +147,22 @@ pub(crate) fn due_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) -> Opt
     // (…none left of it within a nanosecond: the clock a server's time moved on to in steps, Browser#server_slept_ms)
     Some(Some(f.began + f.delay - clock).filter(|due| *due > 1e-6).unwrap_or(0.0))
 }
-// …whether that is now: the fetch landed by the event loop's clock, or none of the realm's (one that answered at once).
+// …a module graph's gone on as far as the clock has come — its modules landed by now, their imports' fetches begun
+// (module_map.rs `advance_due`): what its landing asks as its task comes.
+pub(crate) fn advance_due(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) -> Result<Option<f64>, Terminated> {
+    match fetches_of(scope, cid).and_then(|f| find(f, id)).map(|f| match f.fetch {
+        Fetch::Module(gid) => Some(gid),
+        Fetch::Classic(_) => None,
+    }) {
+        Some(Some(gid)) => crate::module_map::advance_due(scope, cid, gid),
+        _ => Ok(due_in(scope, cid, id)),
+    }
+}
+// …whether that is now: the fetch landed by the event loop's clock — a module graph's every module in, as far as it has
+// gone on — or none of the realm's (one that answered at once). (…a terminated script's none: nothing runs then)
 pub(crate) fn due_now(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId) -> bool {
     let id = fetches_of(scope, cid).and_then(|f| f.list.iter().rev().find(|f| f.el == el).map(|f| f.id));
-    id.is_none_or(|id| due_in(scope, cid, id).is_none_or(|due| due <= 0.0))
+    id.is_none_or(|id| advance_due(scope, cid, id).is_ok_and(|due| due.is_none_or(|due| due <= 0.0)))
 }
 
 // __dom.scriptFetchDue(id) -> how many milliseconds after now the fetch `id` lands (`due_in`), -1 for none.
@@ -193,7 +205,7 @@ pub(crate) fn drop_fetch(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, ho
     match take(scope, cid, id).map(|f| f.fetch) {
         Some(Fetch::Classic(fetch)) => classic_script_drop(scope, host, fetch),
         Some(Fetch::Module(gid)) => {
-            crate::module_map::drop_graph(scope, cid, gid);
+            crate::module_map::drop_graph(scope, cid, gid, true);
             Ok(())
         }
         None => Ok(()),
