@@ -482,7 +482,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
     crate::dom::register(scope, ns, "beaconCors", beacon_cors_op, context_id);
     crate::dom::register(scope, ns, "blobResponse", blob_response_op, context_id);
-    crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "responseHeader", response_header_op, context_id);
     crate::dom::register(scope, ns, "fetchRoute", fetch_route_op, context_id);
@@ -498,49 +497,6 @@ pub(crate) fn byte_string(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_,
 fn bad_port_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let port = args.get(0).uint32_value(scope).unwrap_or(0);
     rv.set_bool(bad_port(port));
-}
-// __dom.interceptedHop(mode, redirectMode, url, method, requestOrigin, crossed, hops, status, type, responseUrl, redirected,
-// location, taint, seed) -> `intercepted_hop`: 0 to answer, 1 for an opaque redirect, [nextUrl, bits, taint, site] to
-// follow (bits: 1 the request a bodyless GET, 2 its Authorization dropped, 4 its chain at another origin; `taint` its
-// redirect-taint by name, `RedirectTaint::name`, the argument the one before this hop; `site` the Sec-Fetch-Site its chain
-// has latched with this hop's URL, `seed` that before it — null none — which a network leg after it seeds), or a network
-// error's message.
-fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [mode, redirect_mode, url, request_origin, response_type, response_url] = [0, 1, 2, 4, 8, 9].map(|k| args.get(k).to_rust_string_lossy(scope));
-    let method = byte_string(scope, args.get(3));
-    let location = (!args.get(11).is_null_or_undefined()).then(|| args.get(11).to_rust_string_lossy(scope));
-    let hop = InterceptedHop {
-        mode: &mode,
-        redirect_mode: &redirect_mode,
-        url: &url,
-        method: &method,
-        request_origin: &request_origin,
-        crossed: args.get(5).is_true(),
-        taint: RedirectTaint::named((!args.get(12).is_null_or_undefined()).then(|| args.get(12).to_rust_string_lossy(scope)).as_deref()),
-        hops: args.get(6).uint32_value(scope).unwrap_or(0),
-    };
-    let response = WorkerResponse {
-        status: args.get(7).uint32_value(scope).unwrap_or(0),
-        response_type: &response_type,
-        url: &response_url,
-        redirected: args.get(10).is_true(),
-        location: location.as_deref(),
-    };
-    match intercepted_hop(&hop, &response) {
-        HopOutcome::Answer => rv.set_int32(0),
-        HopOutcome::OpaqueRedirect => rv.set_int32(1),
-        HopOutcome::Follow(r, crossed) => {
-            // (…the Sec-Fetch-Site latch with this hop's URL in it, measured from the request's origin)
-            let seed = (!args.get(13).is_null_or_undefined()).then(|| args.get(13).to_rust_string_lossy(scope));
-            let site = crate::referrer::wider_site(seed.as_deref(), crate::referrer::fetch_site(&request_origin, &url));
-            let next = v8::String::new(scope, &r.url).unwrap();
-            let bits = v8::Integer::new(scope, r.to_get as i32 | (r.drop_authorization as i32) << 1 | (crossed as i32) << 2);
-            let taint = v8::String::new(scope, r.taint.name()).unwrap();
-            let site = v8::String::new(scope, site).unwrap();
-            rv.set(v8::Array::new_with_elements(scope, &[next.into(), bits.into(), taint.into(), site.into()]).into());
-        }
-        HopOutcome::Fail(message) => rv.set(v8::String::new(scope, &message).unwrap().into()),
-    }
 }
 // Beacon "sendBeacon" step 6: whether a beacon whose body's Content-Type is `content_type` ('' none) is a CORS request —
 // mode "cors" for a type that is no CORS-safelisted one, "no-cors" for any other or none.

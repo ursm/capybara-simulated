@@ -39,8 +39,8 @@ RSpec.describe 'Handle Fetch outcomes', :app_answers_every_host do
   let(:requests) { [] }
   let(:legs) { [] }
   let(:app) {
-    sw   = worker
-    log  = requests
+    sw    = worker
+    log   = requests
     raced = legs
     Rack::Builder.new {
       run lambda {|env|

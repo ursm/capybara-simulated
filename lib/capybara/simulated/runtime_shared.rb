@@ -115,9 +115,10 @@ module Capybara
         # The focus chain moved into this realm's browsing context (a focus() commit, or an
         # <iframe> focused in its container, which hands focus to the nested context).
         'focusChanged'                 => ->(b, *_) { b.focus_changed; nil },
-        # This realm is a service-worker client: reported at document load and again whenever
-        # control is installed, by the realm, because only it knows its own URL, frame type and
-        # controller. `a[3]` is the controlling worker's handle, 0 when uncontrolled.
+        # This realm is a service-worker client: reported by the realm as its document is created
+        # (`a[3]` the worker that controls it, 0 none) and again as it loads (`a[3]` nil: kept), as
+        # only it knows its own URL and frame type. The registry's partition, which it reads its
+        # controller in (sw_registry.rs `swController`).
         'noteClient'                   => ->(b, *a) { b.sw_note_client(a[0], a[1], a[2], a[3], a[4], site: a[5].to_s) },
         # A controlled worker's importScripts, through its SW's fetch event (synchronous
         # on the calling worker's thread — sw_import_script_fetch).

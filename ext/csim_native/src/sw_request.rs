@@ -282,6 +282,11 @@ impl SwChain {
                     r.body_b64.clear();
                 }
                 r.url = next.url;
+                // (…its referrer determined again for the hop, of the one it had: main fetch step 9, every pass)
+                if let Some(last) = r.referrer.clone().filter(|s| !s.is_empty()) {
+                    let policy = r.referrer_policy.clone();
+                    r.refer(&policy, &last);
+                }
                 self.hops += 1;
                 self.crossed = crossed;
                 self.taint = next.taint;
@@ -427,6 +432,8 @@ mod tests {
             body_b64: "Ym9keQ==".into(),
             mode: "cors".into(),
             redirect: "follow".into(),
+            referrer: Some("https://a.test/page?q".into()),
+            referrer_policy: "strict-origin-when-cross-origin".into(),
             ..SwRequest::default()
         };
         let mut chains = Chains::default();
@@ -439,7 +446,11 @@ mod tests {
         assert!(wire["headers"].get("Content-Type").is_none());
         assert_eq!(wire["headers"]["X-Kept"], "1");
         assert_eq!(chain.site.as_deref(), Some("same-origin"));
-        for _ in 1..20 {
+        assert_eq!(wire["referrer"], "https://a.test/page?q");
+        // (…a hop to another origin referred by its origin alone, as its policy has it)
+        assert!(matches!(chain.answer(&redirect(Some("https://b.test/x"))), ChainStep::Follow(_)));
+        assert_eq!(chain.request.referrer.as_deref(), Some("https://a.test/"));
+        for _ in 2..20 {
             assert!(matches!(chain.answer(&redirect(Some("/next"))), ChainStep::Follow(_)));
         }
         assert_eq!(chain.answer(&redirect(Some("/next"))), ChainStep::Fail("exceeded 20 redirects".into()));

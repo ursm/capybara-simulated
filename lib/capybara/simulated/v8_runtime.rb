@@ -1456,6 +1456,9 @@ module Capybara
       def reuse_frame_realm(id, url, body, content_type, parent_id, **made)
         realm = frame_realms.delete(id) or return nil
         loading_frame_realms[id] = realm
+        # (…the initial about:blank a service-worker client no more, as a window's: `reuse_window_realm`)
+        V8Runtime.engine_call(realm, 'swClientDiscarded')
+        @browser.sw_unregister_client(id)
         V8Runtime.engine_call(realm, 'renewDocument')
         load_frame_document(realm, url, body, content_type, parent_id, reused: true, **made)
         id

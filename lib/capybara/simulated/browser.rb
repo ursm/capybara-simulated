@@ -6007,8 +6007,11 @@ module Capybara
       # The leg is Handle Fetch's "fetch given request": `request` the request itself as the network takes it
       # (fetch_request.rs `fetchRequest` of the worker's `event.request`) — its method, headers, credentials, mode,
       # referrer — and a response of no ok status records nothing: the handler serves alone ("server faster, but not
-      # found" uses the handler's 200). (…a navigation's leg follows its redirects itself, its response committed at the
-      # final URL like any network navigation's — a gap: Fetch hands a navigate request's redirect to the navigation.)
+      # found" uses the handler's 200). Two gaps: a navigation's leg follows its redirects itself, its response committed
+      # at the final URL like any network navigation's (Fetch hands a navigate request's redirect to the navigation); and
+      # the request's client is the worker's realm as `fetchRequest` describes it there (its URL, origin and no
+      # ancestors), not the page's — the SameSite cookies and Sec-Fetch-Site of a cross-site frame's raced request judged
+      # as a top-level one's.
       private def sw_race_network(fetch_id, realm_id, request)
         fid = fetch_id.to_i
         return if WorkerHost.direct?(fid)
@@ -6813,9 +6816,6 @@ module Capybara
       # falls through to the network if no handler materializes. [handle, intercepts, script_url, scope] or nil.
       # (…for a client of top-level site `site`: sw_registry.rs)
       def sw_client_controller_for(url, site) = Native.sw_match_worker(@sw_partition, site.to_s, url.to_s, 'client')
-      # …and worker `handle` as a client's controller, in that shape — nil for none, and (`live`) for one whose thread is
-      # gone: reaped, or ended on its own.
-      def sw_controller(handle, live: true) = Native.sw_controller(@sw_partition, handle.to_i, live)
       # …whether its thread is there to answer.
       def sw_live?(handle) = Native.sw_worker_live(@sw_partition, handle.to_i)
 
@@ -9737,11 +9737,8 @@ module Capybara
         # it out to the main + frame realms + OTHER workers (see deliver_worker_messages).
         broadcast_out = ->(name, data, origin) { outbox << {handle: handle, kind: 'broadcast', name: name.to_s, data: data, origin: origin} }
         # Service-worker → main-thread signals ride the outbox (delivered by deliver_worker_messages):
-        # client.postMessage, clients.claim (→ set the client's controller), and a controlled fetch's
-        # respondWith result. `sw_has_fetch` is snapshotted after the SW script's initial run (the
-        # spec records fetch-handler presence at install time) so a claim can tell the client
-        # whether intercepting is worth the cross-isolate round-trip at all.
-        sw_has_fetch = false
+        # client.postMessage, clients.claim (→ the registry's controller of each client it claims), and a controlled
+        # fetch's respondWith result.
         # Streams a race-network leg already beat — their remaining frames are
         # swallowed by the fetch_stream hook (this worker's thread only).
         sw_race_dropped_streams = {}
@@ -10050,11 +10047,9 @@ module Capybara
         #   {phase:'activated'} — a rejected activate waitUntil still activates (the spec ignores activate failure for
         #     state).
         if service
-          sw_has_fetch = !!rt.call('swHasFetchListener')
-          # Publish the fetch-handler snapshot + script URL on the worker record so a NAVIGATION
-          # into this SW's scope can decide (Ruby-side) whether routing through it is worthwhile,
-          # and a freshly-built frame client can mint a `controller` naming this script.
-          Native.sw_set_worker_flag(@sw_partition, handle, 'fetch', sw_has_fetch)
+          # Publish the fetch-handler snapshot (the spec records fetch-handler presence after the script's initial run) on
+          # the registry's worker, so a request of a client it controls routes to it only where it intercepts.
+          Native.sw_set_worker_flag(@sw_partition, handle, 'fetch', !!rt.call('swHasFetchListener'))
           sw_fire_event = lambda do |event|
             next unless Native.sw_own_fire(@sw_partition, handle, event)
 

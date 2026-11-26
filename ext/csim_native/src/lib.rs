@@ -410,7 +410,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_worker_live", magnus::function!(sw_registry::worker_live_for_ruby, 2))?;
     native.define_module_function("sw_worker_activated", magnus::function!(sw_registry::worker_activated_for_ruby, 2))?;
     native.define_module_function("sw_match_worker", magnus::function!(sw_registry::match_worker_for_ruby, 4))?;
-    native.define_module_function("sw_controller", magnus::function!(sw_registry::controller_for_ruby, 3))?;
     native.define_module_function("sw_note_client", magnus::function!(sw_registry::note_client_for_ruby, 9))?;
     native.define_module_function("sw_client_owner", magnus::function!(sw_registry::client_owner_for_ruby, 2))?;
     native.define_module_function("sw_forget_window", magnus::function!(sw_registry::forget_window_for_ruby, 2))?;

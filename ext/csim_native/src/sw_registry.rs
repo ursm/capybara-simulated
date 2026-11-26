@@ -391,6 +391,7 @@ fn worker_new(partition: u64, handle: u32, site: String, script_url: String, scr
 }
 #[allow(clippy::too_many_arguments)]
 fn worker_new_living(partition: u64, handle: u32, site: String, script_url: String, script_type: String, script: Vec<u8>, registration: u32, life: crate::worker_records::Liveness) {
+    ANY_WORKER.store(true, std::sync::atomic::Ordering::Release);
     let worker = Worker {
         site,
         script_url,
@@ -532,6 +533,9 @@ pub(crate) fn client_controller_of(partition: u64, id: &str) -> Option<(u32, boo
     Some((handle, p.workers.get(&handle).is_some_and(Worker::intercepts)))
 }
 // ── For the bindings ──
+// Whether the process has made a service worker at all: until it has, no client has a controller, and a client's read of
+// it (every request's) takes no lock.
+static ANY_WORKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "swController", controller_op, context_id);
 }
@@ -540,6 +544,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // intercepts its requests alone (a controller with no `fetch` listener and no router rules answers none: Handle Fetch
 // skips it), what a request of its goes to. The registry's (`client_controller_of`), read as it is asked.
 fn controller_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if !ANY_WORKER.load(std::sync::atomic::Ordering::Acquire) {
+        return rv.set_uint32(0);
+    }
     let routing = args.get(0).is_true();
     let cid = crate::dom::realm_id(scope, &args);
     let state = crate::dom::realm(scope, cid).realm_state(cid);
@@ -1356,15 +1363,6 @@ pub(crate) fn match_worker_for_ruby(partition: u64, site: String, url: String, m
     };
     let (intercepts, script_url) = p.workers.get(&handle).map_or((true, String::new()), |w| (w.intercepts(), w.script_url.clone()));
     Some((handle, intercepts, script_url, scope.to_owned()))
-}
-// …and worker `handle` as a controller a client takes: `[handle, intercepts, script URL, the scope it serves ('' for
-// none)]`, nil for none — and, `live`, for one whose thread is gone.
-pub(crate) fn controller_for_ruby(partition: u64, handle: u32, live: bool) -> Option<(u32, bool, String, String)> {
-    let mut reg = lock();
-    let p = reg.existing(partition)?;
-    let w = p.workers.get(&handle).filter(|w| !(live && w.life.ended()))?;
-    let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map_or_else(String::new, |r| r.scope.clone());
-    Some((handle, w.intercepts(), w.script_url.clone(), scope))
 }
 // ── What the host does ──
 // What a job's or a lifecycle's step makes the host do, in order — the registry's state committed first, each a Ruby
