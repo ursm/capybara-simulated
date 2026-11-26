@@ -642,27 +642,23 @@ fn structured_deserialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         }
     }
     // (…a step that throws leaves the ports received so far to be closed — after it, with its exception caught: no
-    // script runs with one pending — and then its exception thrown again)
+    // script runs with one pending — and then its exception thrown again; a script terminated meanwhile, none run)
     let mut ports = Vec::new();
     let read = {
         v8::tc_scope!(let tc, scope);
-        match receive_and_read(tc, serialized, &mut ports) {
-            Some(value) => Ok(v8::Global::new(tc, value)),
-            None => Err(tc.exception().map(|e| v8::Global::new(tc, e))),
+        let read = receive_and_read(tc, serialized, &mut ports).map(|value| v8::Global::new(tc, value));
+        if read.is_none() && !tc.has_terminated() {
+            let held: Vec<v8::Local<v8::Value>> = ports.iter().map(|p| v8::Local::new(tc, p)).collect();
+            abandon(tc, &held);
         }
+        if read.is_none() {
+            tc.rethrow();
+        }
+        read
     };
+    let Some(value) = read else { return };
+    let value = v8::Local::new(scope, value);
     let ports: Vec<v8::Local<v8::Value>> = ports.iter().map(|p| v8::Local::new(scope, p)).collect();
-    let value = match read {
-        Ok(value) => v8::Local::new(scope, value),
-        Err(exception) => {
-            abandon(scope, &ports);
-            if let Some(exception) = exception {
-                let exception = v8::Local::new(scope, exception);
-                scope.throw_exception(exception);
-            }
-            return;
-        }
-    };
     if with_ports {
         let ports = v8::Array::new_with_elements(scope, &ports).into();
         rv.set(v8::Array::new_with_elements(scope, &[value, ports]).into());
@@ -792,7 +788,10 @@ fn structured_export(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let Some(serialized) = dom(scope).serialized.remove(&number) else { return };
     debug_assert!(!broadcast || serialized.held.is_empty(), "a broadcast transfers nothing");
     if broadcast && serialized.modules.is_empty() {
-        let Some(bytes) = v8::String::new(scope, &crate::data_url::base64_encode(&serialized.bytes)) else { return };
+        // (…one past the length of a string, a DataCloneError)
+        let Some(bytes) = v8::String::new(scope, &crate::data_url::base64_encode(&serialized.bytes)) else {
+            return throw_data_clone_error(scope, "The message is too large to be broadcast.");
+        };
         return rv.set(bytes.into());
     }
     let form = Step::named("transferForm");
