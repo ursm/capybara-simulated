@@ -74,6 +74,27 @@ impl RealmArena {
     pub(crate) fn current_focus_chain(&self, top: i32) -> Vec<Entry> {
         self.currently_focused_area(top).map_or_else(Vec::new, |area| self.focus_chain_of(area))
     }
+    // …and the area the traversable would have focused, its documents' as they stand, whether or not it has the system
+    // focus (navigables.rs `window_focus_chain`).
+    fn window_focused_area(&self, top: i32) -> Option<Entry> {
+        let realm = *self.window_focus_chain(top).last()?;
+        let focused = self.realm_state(realm).and_then(|st| st.focus).filter(|&f| self.document_realm_of(f) == Some(realm));
+        Some(focused.map_or(Entry::Viewport(realm), Entry::Element))
+    }
+
+    // The area realm `realm`'s document kept as the focus left it, down a kept container to what its frame's document
+    // kept, as the focus chain goes — its viewport where it kept none.
+    fn kept_area(&self, realm: i32) -> Entry {
+        let (mut at, mut kept) = (realm, None);
+        for _ in 0..crate::navigables::MAX_NESTING {
+            kept = self.realm_state(at).and_then(|st| st.focus).filter(|&f| self.document_realm_of(f) == Some(at));
+            match kept.and_then(|f| crate::focus::child_document_realm(self, f)) {
+                Some(child) => at = child,
+                None => break,
+            }
+        }
+        kept.map_or(Entry::Viewport(at), Entry::Element)
+    }
 
     // The realm of the document `entry` is of.
     fn entry_realm(&self, entry: Entry) -> Option<i32> {
@@ -100,11 +121,11 @@ impl RealmArena {
         }
     }
 
-    // `:focus-visible` latched as `el` is focused, in its realm: shown unless the user's last input there was a pointer's
-    // and `el` is no TEXT ENTRY — a textarea, a textual `<input>`, an editable element — whose ring a browser shows
-    // however focus came to it (Chrome; Selectors 4's heuristics: "If the active element matches :focus-visible, and a
-    // script causes focus to move elsewhere, the newly focused element should match :focus-visible", and a script's focus
-    // after a click that showed none shows none).
+    // `:focus-visible` latched as `el` is focused, in its realm: shown unless the focus is a pointer's — a press that
+    // focused an element, or a script's after one (a press on what takes no focus leaves none: `press_focus`) — and `el`
+    // is no TEXT ENTRY — a textarea, a textual `<input>`, an editable element — whose ring a browser shows however focus
+    // came to it (Chrome and Firefox, measured 2026-11-27: a script's focus after a click on a button or a text field shows
+    // none, after a click on the page's background one; Selectors 4's heuristics).
     pub(crate) fn latch_focus_ring(&mut self, el: NodeId) {
         let Some(realm) = self.document_realm_of(el) else { return };
         let arena = self.enter(realm);
@@ -130,13 +151,24 @@ pub(crate) enum Target {
     Viewport(i32),
 }
 
+// Who runs them: the user (a press, a key, the driver's own focusing) — whose focusing gives the system focus to the
+// window it is in, as a window manager gives it to the window clicked or typed into — or a script (`focus()`, a dialog's
+// or a popover's steps, autofocus, a fragment), which moves the focus within its window and takes no system focus from
+// another (Firefox, measured 2026-11-27: an opener's `focus()` of an element of its pop-up leaves the system focus with
+// the opener; HTML's window.focus() "may" raise the window, the focusing steps say nothing of it).
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum By {
+    User,
+    Script,
+}
+
 // HTML "focusing steps" for `target`: an element that is no focusable area replaced by the one it stands for (focus.rs
 // `focus_target`: a delegating shadow host's, a label's control) — nothing where there is none — a navigable container
 // by its content navigable's document (its viewport), then nothing where that is already the currently focused area of
 // its top-level traversable ("If new focus target is the currently focused area of a top-level traversable, then
 // return"), else the focus update steps from its top-level traversable's current focus chain to the new one. The area
 // focused, where the steps ran to their end (None: a script was terminated).
-pub(crate) fn focusing_steps(scope: &mut v8::PinScope<'_, '_>, target: Target) -> Option<Option<Entry>> {
+pub(crate) fn focusing_steps(scope: &mut v8::PinScope<'_, '_>, target: Target, by: By) -> Option<Option<Entry>> {
     let area = match target {
         Target::Element(el) => {
             let Some(found) = crate::focus::focus_target_of(scope, el)? else { return Some(None) };
@@ -151,16 +183,20 @@ pub(crate) fn focusing_steps(scope: &mut v8::PinScope<'_, '_>, target: Target) -
     let arena = &mut crate::dom::dom(scope).arena;
     let Some(realm) = arena.entry_realm(area) else { return Some(None) };
     let top = arena.top_level_realm(realm);
-    if arena.currently_focused_area(top) == Some(area) {
+    // (…a script's in a window that has not the system focus — while another has it — that window's own chain)
+    let system_chain = arena.focus_chain();
+    let system = by == By::User || system_chain.is_empty() || system_chain.first() == Some(&top);
+    let current = if system { arena.currently_focused_area(top) } else { arena.window_focused_area(top) };
+    if current == Some(area) {
         // (…a keyboard's re-interaction latches its ring again: `send_keys` to the focused element)
         if let Entry::Element(el) = area {
             arena.latch_focus_ring(el);
         }
         return Some(Some(area));
     }
-    let old = arena.current_focus_chain(top);
+    let old = current.map_or_else(Vec::new, |c| arena.focus_chain_of(c));
     let new = arena.focus_chain_of(area);
-    focus_update(scope, old, new, Some(area))?;
+    focus_update(scope, old, new, Some(area), system)?;
     Some(Some(area))
 }
 
@@ -185,7 +221,7 @@ pub(crate) fn unfocusing_steps(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> 
         return Some(());
     }
     let Some(&Entry::Document(top_doc)) = chain.last() else { return Some(()) };
-    focusing_steps(scope, Target::Viewport(top_doc)).map(drop)
+    focusing_steps(scope, Target::Viewport(top_doc), By::Script).map(drop)
 }
 
 // HTML "focus update steps" from `old` to `new` (`target`: the new focus target, none where the focus leaves the
@@ -199,15 +235,24 @@ pub(crate) fn unfocusing_steps(scope: &mut v8::PinScope<'_, '_>, el: NodeId) -> 
 //   entry is an element, let focus event target be entry. If entry is a Document object, let focus event target be that
 //   Document object's relevant global object."
 //
-// An element of the old chain whose document the new chain designates an area of loses its place as that document's
-// focused area BEFORE its blur — `document.activeElement` is the body, and `:focus` matches nothing, while its blur and
-// focusout run (Chrome) — which makes the steps re-entrant: a listener that moves the focus finds nothing to blur
-// again, and its focusing steps own the result (Discourse's ProseMirror alt text: `onBlur → … → view.focus()`), the rest
-// of these left unrun. A document the new chain leaves keeps its focused area, as HTML designates only the new chain's.
-// The focus chain moves as the first Window is told (`commit`), so `document.hasFocus()` answers for the new one in
-// every Window's `blur` and `focus` (Chrome); a window that loses the system focus to the new one's has its documents'
-// Windows blurred then, deepest first (HTML's "platform-specific conventions").
-fn focus_update(scope: &mut v8::PinScope<'_, '_>, mut old: Vec<Entry>, mut new: Vec<Entry>, target: Option<Entry>) -> Option<()> {
+// An element of the old chain loses its place as its document's focused area BEFORE its blur — `document.activeElement`
+// is the body, and `:focus` matches nothing, while its blur and focusout run — a document the focus leaves for another
+// of its traversable's included: HTML designates the new chain's areas and says nothing of the old's, and Chrome and
+// Firefox both empty them (measured 2026-11-27: an element blurred in a frame leaves the frame's `activeElement` its
+// body). Only the system focus leaving the traversable altogether (no new chain) leaves each document its area, as a
+// window deactivated keeps its focused element. It makes the steps re-entrant: a listener that moves the focus finds
+// nothing to blur again, and its focusing steps own the result (Discourse's ProseMirror alt text: `onBlur → … →
+// view.focus()`), the rest of these left unrun; likewise a `focus` listener's own move ends them before `focusin`
+// (Chrome, Firefox). The focus chain moves as the first Window is told (`commit`), so `document.hasFocus()` answers for
+// the new one in every Window's `blur` and `focus` (Chrome, Firefox); a window that loses the system focus to the new
+// one's has its documents' Windows blurred then, deepest first (HTML's "platform-specific conventions"). A script's
+// focus in a window without the system focus (`system` false) moves it in that window alone: no Window event, the
+// system focus where it was.
+//
+// Two explicit steps are kept where Chrome and Firefox both part from them: the container in the new chain gets its
+// `focus` and `focusin` (and in the old its `blur`), and a document staying on the chain fires no Window `blur` as the
+// focus goes into a frame of it — both engines fire none at the `<iframe>` and blur the page's Window.
+fn focus_update(scope: &mut v8::PinScope<'_, '_>, mut old: Vec<Entry>, mut new: Vec<Entry>, target: Option<Entry>, system: bool) -> Option<()> {
     let arena = &mut crate::dom::dom(scope).arena;
     arena.focus_updates = arena.focus_updates.wrapping_add(1);
     let update = arena.focus_updates;
@@ -226,7 +271,7 @@ fn focus_update(scope: &mut v8::PinScope<'_, '_>, mut old: Vec<Entry>, mut new: 
         match entry {
             Entry::Element(el) => {
                 let arena = &mut crate::dom::dom(scope).arena;
-                if let Some(realm) = arena.document_realm_of(el).filter(|r| new_docs.contains(r)) {
+                if let Some(realm) = arena.document_realm_of(el).filter(|_| !new_docs.is_empty()) {
                     if arena.realm_state(realm).and_then(|st| st.focus) == Some(el) {
                         arena.designate(realm, None);
                     }
@@ -237,9 +282,11 @@ fn focus_update(scope: &mut v8::PinScope<'_, '_>, mut old: Vec<Entry>, mut new: 
             Entry::Document(realm) => {
                 if !committed {
                     committed = true;
-                    commit(scope, &new_docs, &old_docs, &system_before)?;
+                    commit(scope, &new_docs, &old_docs, &system_before, system)?;
                 }
-                window_focus_event(scope, realm, "blur")?;
+                if system {
+                    window_focus_event(scope, realm, "blur")?;
+                }
             },
             Entry::Viewport(_) => {},
         }
@@ -249,7 +296,7 @@ fn focus_update(scope: &mut v8::PinScope<'_, '_>, mut old: Vec<Entry>, mut new: 
         }
     }
     if !committed {
-        commit(scope, &new_docs, &old_docs, &system_before)?;
+        commit(scope, &new_docs, &old_docs, &system_before, system)?;
         // (…a Window the system focus left, blurred there, whose listener moved the focus)
         if crate::dom::dom(scope).arena.focus_updates != update {
             return Some(());
@@ -268,9 +315,14 @@ fn focus_update(scope: &mut v8::PinScope<'_, '_>, mut old: Vec<Entry>, mut new: 
                 }
                 let related = if k + 1 == new.len() { related_focus } else { None };
                 fire_focus_event(scope, "focusGained", el, related)?;
+                if crate::dom::dom(scope).arena.focus_updates != update {
+                    return Some(());
+                }
+                fire_focus_event(scope, "focusIn", el, related)?;
             },
             Entry::Viewport(realm) => crate::dom::dom(scope).arena.designate(realm, None),
-            Entry::Document(realm) => window_focus_event(scope, realm, "focus")?,
+            Entry::Document(realm) if system => window_focus_event(scope, realm, "focus")?,
+            Entry::Document(_) => {},
         }
         if crate::dom::dom(scope).arena.focus_updates != update {
             return Some(());
@@ -279,13 +331,13 @@ fn focus_update(scope: &mut v8::PinScope<'_, '_>, mut old: Vec<Entry>, mut new: 
     Some(())
 }
 
-// The focus chain moved to the new one's documents (navigables.rs `set_focused_realm`), or out of the top-level
-// traversable (`lose_system_focus`) — the Windows of another window's documents that lost the system focus to it
-// blurred — and the host told where that moved the chain.
-fn commit(scope: &mut v8::PinScope<'_, '_>, new_docs: &[i32], old_docs: &[i32], system_before: &[i32]) -> Option<()> {
+// The focus chain moved to the new one's documents (navigables.rs `set_focused_realm`; the system focus with it where
+// `system`), or out of the top-level traversable (`lose_system_focus`) — the Windows of another window's documents that
+// lost the system focus to it blurred — and the host told where that moved the chain.
+fn commit(scope: &mut v8::PinScope<'_, '_>, new_docs: &[i32], old_docs: &[i32], system_before: &[i32], system: bool) -> Option<()> {
     let arena = &mut crate::dom::dom(scope).arena;
     let changed = match new_docs.first() {
-        Some(&realm) => arena.set_focused_realm(realm),
+        Some(&realm) => arena.set_focused_realm(realm, system),
         None => arena.lose_system_focus(),
     };
     if !changed {
@@ -318,7 +370,7 @@ fn lose_system_focus(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()>
     if old.is_empty() {
         return Some(());
     }
-    focus_update(scope, old, Vec::new(), None)
+    focus_update(scope, old, Vec::new(), None, true)
 }
 
 // HTML "update the rendering"'s focus fixup for realm `realm`'s document: "if the focused area of doc is not a focusable
@@ -335,7 +387,7 @@ fn focus_fixup(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()> {
     }
     let arena = &mut crate::dom::dom(scope).arena;
     if arena.focus_chain().contains(&realm) {
-        focusing_steps(scope, Target::Viewport(realm)).map(drop)
+        focusing_steps(scope, Target::Viewport(realm), By::Script).map(drop)
     } else {
         arena.designate(realm, None);
         Some(())
@@ -366,7 +418,7 @@ fn flush_autofocus_candidates(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> O
         }
         let Some(target) = crate::focus::focusable_area_of(scope, el)? else { continue };
         crate::dom::dom(scope).arena.autofocus_processed(top);
-        focusing_steps(scope, Target::Element(target))?;
+        focusing_steps(scope, Target::Element(target), By::Script)?;
         return Some(Some(target));
     }
 }
@@ -382,7 +434,7 @@ pub(crate) fn fragment_focus(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> Opti
         Some(_) => Target::Element(target),
         None => Target::Viewport(cid),
     };
-    focusing_steps(scope, area)?;
+    focusing_steps(scope, area, By::Script)?;
     crate::dom::dom(scope).arena.enter(cid).focus_start = Some(crate::focus::StartingPoint::Node(target));
     Some(())
 }
@@ -392,11 +444,15 @@ pub(crate) fn fragment_focus(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> Opti
 // `change`) — and Tab going on from the node pressed (Chrome).
 fn press_focus(scope: &mut v8::PinScope<'_, '_>, n: NodeId) -> Option<()> {
     match crate::focus::press_target_of(scope, n)? {
-        Some(target) => focusing_steps(scope, Target::Element(target)).map(drop),
+        Some(target) => focusing_steps(scope, Target::Element(target), By::User).map(drop),
         None => {
             let Some(realm) = crate::dom::dom(scope).arena.document_realm_of(n) else { return Some(()) };
-            focusing_steps(scope, Target::Viewport(realm))?;
-            crate::dom::dom(scope).arena.enter(realm).focus_start = Some(crate::focus::StartingPoint::Node(n));
+            focusing_steps(scope, Target::Viewport(realm), By::User)?;
+            // (…and no element the pointer focused: a script's focus after it shows its ring — Chrome and Firefox,
+            // `latch_focus_ring`)
+            let arena = crate::dom::dom(scope).arena.enter(realm);
+            arena.focus_start = Some(crate::focus::StartingPoint::Node(n));
+            arena.pointer_modality = false;
             Some(())
         },
     }
@@ -420,7 +476,7 @@ fn sequential_navigation(scope: &mut v8::PinScope<'_, '_>, cid: i32, reverse: bo
     match crate::focus::focus_navigation(scope, realm, current, reverse) {
         Some((to_realm, next)) => {
             crate::dom::dom(scope).arena.enter(to_realm).keyboard_modality();
-            focusing_steps(scope, Target::Element(next))?;
+            focusing_steps(scope, Target::Element(next), By::User)?;
             Some(true)
         },
         None => {
@@ -449,23 +505,28 @@ fn focus_window(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<()> {
     if arena.focus_chain().contains(&realm) {
         return Some(());
     }
-    // (…down a kept container to what its frame's document kept, as the focus chain goes)
-    let (mut at, mut kept) = (realm, None);
-    for _ in 0..crate::navigables::MAX_NESTING {
-        kept = arena.realm_state(at).and_then(|st| st.focus).filter(|&f| arena.document_realm_of(f) == Some(at));
-        match kept.and_then(|f| crate::focus::child_document_realm(arena, f)) {
-            Some(child) => at = child,
-            None => break,
-        }
-    }
-    let area = kept.map_or(Entry::Viewport(at), Entry::Element);
+    let area = arena.kept_area(realm);
     let top = arena.top_level_realm(realm);
     if arena.currently_focused_area(top) == Some(area) {
         return Some(());
     }
     let old = arena.current_focus_chain(top);
     let new = arena.focus_chain_of(area);
-    focus_update(scope, old, new, Some(area))
+    focus_update(scope, old, new, Some(area), true)
+}
+
+// The system focus to the window of realm `top`, as the window manager gives it: a pop-up `window.open` made with
+// transient activation, as it is made (Chrome: its document has the focus by its load; Firefox: once loaded — and one a
+// script opened with none leaves it with the opener, measured 2026-11-27) — the window that had it its Windows blurred
+// (`commit`) — and back to the opener's as one that had it closes (navigables.rs `discard_window`), its Windows
+// their `focus` and what its document kept its own, as a browser's window regaining the focus fires them (WPT
+// document-has-system-focus; headless Chrome and Firefox, measured 2026-11-27, refocus nothing as a pop-up closes: no
+// window manager does it there).
+pub(crate) fn window_takes_system_focus(scope: &mut v8::PinScope<'_, '_>, top: i32) -> Option<()> {
+    let arena = &crate::dom::dom(scope).arena;
+    let area = arena.kept_area(top);
+    let new = arena.focus_chain_of(area);
+    focus_update(scope, Vec::new(), new, Some(area), true)
 }
 
 // ── the ops ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -480,6 +541,17 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "focusFixup", focus_fixup_op, context_id);
     crate::dom::register(scope, ns, "flushAutofocus", flush_autofocus_op, context_id);
     crate::dom::register(scope, ns, "holdsFocus", holds_focus_op, context_id);
+    crate::dom::register(scope, ns, "windowOpened", window_opened_op, context_id);
+}
+
+// __dom.windowOpened(realm, activated): a new window `window.open` made — realm `realm`'s — the system focus's where the
+// script that opened it ran with transient activation (`activated`: as `open` began, before the pop-up's own steps
+// consumed it), as a window manager gives it to a window a user's gesture opened (`window_takes_system_focus`).
+fn window_opened_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(realm) = args.get(0).int32_value(scope) else { return };
+    if args.get(1).is_true() && crate::dom::dom(scope).arena.focus_chain().first() != Some(&realm) {
+        window_takes_system_focus(scope, realm);
+    }
 }
 
 // Whether what the focusing steps focused (`area`) is a focusable area no more — a `:focus`-conditioned style took its
@@ -494,12 +566,12 @@ fn fixup_owed(scope: &mut v8::PinScope<'_, '_>, area: Option<Entry>) -> bool {
 // for the element — the driver's own focusing, a label's activation, a reported validity problem, `select()`.
 fn focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let Some(area) = focusing_steps(scope, Target::Element(el)) else { return };
+    let Some(area) = focusing_steps(scope, Target::Element(el), By::User) else { return };
     rv.set_bool(fixup_owed(scope, area));
 }
 
 // __dom.focusMethod(nid, focusVisible) -> whether a rendering update is owed the focus fixup, or undefined where the
-// steps focused nothing: HTMLOrSVGElement's `focus(options)` — "If the allow focus steps given this's node document return
+// allow focus steps refused: HTMLOrSVGElement's `focus(options)` — "If the allow focus steps given this's node document return
 // false, then return. Run the focusing steps for this. If options["focusVisible"] is true, or does not exist but in an
 // implementation-defined way the user agent determines it would be best to do so, then indicate focus" (`focusVisible`:
 // 1 true, 0 false, -1 absent, the ring then latched as the focus moved). The bindings scroll this into view after, unless
@@ -512,7 +584,8 @@ fn focus_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     if !crate::focus::allow_focus_steps(arena, realm) {
         return;
     }
-    let Some(Some(area)) = focusing_steps(scope, Target::Element(el)) else { return };
+    let Some(area) = focusing_steps(scope, Target::Element(el), By::Script) else { return };
+    let Some(area) = area else { return rv.set_bool(false) };
     if let (Entry::Element(focused), true) = (area, visible >= 0) {
         let arena = &mut crate::dom::dom(scope).arena;
         if let Some(realm) = arena.document_realm_of(focused).filter(|_| crate::focus::document_focus(arena, focused) == Some(focused)) {
@@ -533,7 +606,7 @@ fn unfocusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn focus_viewport_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(n) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let Some(realm) = crate::dom::dom(scope).arena.document_realm_of(n) else { return };
-    focusing_steps(scope, Target::Viewport(realm));
+    focusing_steps(scope, Target::Viewport(realm), By::User);
 }
 
 // __dom.pressFocus(nid): what a pointer's press on the node focuses (`press_focus`) — pointer-driven, its ring hidden.

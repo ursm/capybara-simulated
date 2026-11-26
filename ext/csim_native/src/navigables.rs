@@ -720,20 +720,24 @@ impl RealmArena {
     }
     // …and its browsing context discarded, the close's task run: stepped no more, gone as a WindowProxy of it reads it
     // (`lost_navigable`) — no `opener`, `closed` — its realm lingering inert.
-    pub(crate) fn discard_window(&mut self, key: i32) {
+    // The realm of the document of the window the system focus went to, where it had it.
+    pub(crate) fn discard_window(&mut self, key: i32) -> Option<i32> {
         let nav = &mut self.navigables;
-        let Some(&realm) = nav.window_realms.get(&key).filter(|_| nav.closed.contains(&key)) else { return };
+        let &realm = nav.window_realms.get(&key).filter(|_| nav.closed.contains(&key))?;
         nav.windows.retain(|&w| w != realm);
         nav.window_histories.remove(&key);
         nav.lost.insert(realm);
         // (…the system focus, where it had it, its opener's window's — open still — else the page's: Chrome 157 focuses
-        // the opener's window as a pop-up closes, no event fired, measured 2026-11-19)
+        // the opener's window as a pop-up closes, measured 2026-11-19)
+        let mut returned = None;
         if nav.system_focus == key {
             let opener = nav.openers.get(&key).copied().filter(|o| *o == 0 || nav.window_realms.get(o).is_some_and(|r| nav.windows.contains(r)));
             nav.system_focus = opener.unwrap_or(0);
+            returned = Some(nav.window_realms.get(&nav.system_focus).copied().filter(|r| nav.windows.contains(r)).unwrap_or(0));
         }
         self.note_discarded();
         self.note_linked();
+        returned
     }
     // The session history of the window realm `realm`'s document is of — a window's `window.open` made in this isolate,
     // or a frame's in its tree — and the realm of the window's document now: none for a realm of the page's tree, nor one
@@ -888,9 +892,9 @@ impl RealmArena {
         found
     }
     // The focus moved into realm `realm`'s document — an element of it, or its viewport: each ancestor's focused area its
-    // child navigable's container on the way (HTML "focusing steps"), and the top-level traversable its window is system
-    // focus. Whether that changed the focus chain.
-    pub(crate) fn set_focused_realm(&mut self, realm: i32) -> bool {
+    // child navigable's container on the way (HTML "focusing steps"), and, `take_system`, the top-level traversable its
+    // window is system focus. Whether that changed the focus chain.
+    pub(crate) fn set_focused_realm(&mut self, realm: i32, take_system: bool) -> bool {
         let before = self.focus_chain();
         let nav = &mut self.navigables;
         nav.focused_child.remove(&realm);
@@ -901,6 +905,10 @@ impl RealmArena {
                 nav.focused_child.insert(parent, child);
             }
             at = parent;
+        }
+        if !take_system {
+            self.refresh_focus_hidden();
+            return false;
         }
         self.navigables.system_focus = self.window_key(at);
         self.navigables.system_focus_lost = false;
@@ -949,6 +957,12 @@ impl RealmArena {
         // (…a window closing keeps it until the close is made and it is discarded — HTML moves no focus at `close()`, which
         // only queues "definitely close"; Chrome 157 keeps it on a pop-up whose close is declined, measured 2026-11-19)
         let top = nav.window_realms.get(&key).copied().filter(|r| nav.windows.contains(r)).unwrap_or(0);
+        self.window_focus_chain(top)
+    }
+    // …and those of the top-level traversable whose document is realm `top`'s as its own documents have them, whether
+    // or not it has the system focus: down each focused area that is a child navigable's container.
+    pub(crate) fn window_focus_chain(&self, top: i32) -> Vec<i32> {
+        let nav = &self.navigables;
         let mut chain = vec![top];
         while let Some(next) = chain.last().and_then(|r| nav.focused_child.get(r)).and_then(|&id| self.navigable_active_realm(id)) {
             if chain.len() > MAX_NESTING {
@@ -1870,11 +1884,14 @@ fn forget_page_openings_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let cid = realm_id(scope, &args);
     crate::dom::realm(scope, cid).forget_page_openings();
 }
-// __dom.discardWindow(key) — the window a script closed discarded (`discard_window`).
+// __dom.discardWindow(key) — the window a script closed discarded (`discard_window`), the system focus it had given back
+// with its events (focus_update.rs `window_takes_system_focus`).
 fn discard_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return };
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).discard_window(realm);
+    if let Some(top) = crate::dom::realm(scope, cid).discard_window(realm) {
+        crate::focus_update::window_takes_system_focus(scope, top);
+    }
 }
 // __dom.windowClosed(key) -> whether a script closed the window (`window_closed`).
 fn window_closed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

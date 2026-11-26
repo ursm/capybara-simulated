@@ -778,6 +778,7 @@ RSpec.describe 'Service Worker client enumeration' do
       globalThis.__popup = window.open();
       globalThis.__popup.document.body.innerHTML = '<input id="p">';
       globalThis.__popup.document.getElementById('p').focus();
+      globalThis.__popup.focus();
     JS
     clients = match_all(session, via: 'a', options: {'includeUncontrolled' => true})
 

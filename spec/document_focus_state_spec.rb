@@ -198,8 +198,12 @@ RSpec.describe 'document focus state' do
       expect(has_focus).to eq([true, false])
     end
 
+    # (…a script's `focus()` of the pop-up's element leaving the system focus with the page, as Firefox has it, and its
+    # `window.focus()` moving it)
     it 'leaves the page for a window it opened, and comes back as that one closes' do
       session.execute_script('window.w = open(""); w.document.body.innerHTML = "<input id=p>"; w.document.getElementById("p").focus()')
+      expect(session.evaluate_script('[document.hasFocus(), w.document.hasFocus(), w.document.activeElement.id]')).to eq([true, false, 'p'])
+      session.execute_script('w.focus()')
       expect(session.evaluate_script('[document.hasFocus(), w.document.hasFocus()]')).to eq([false, true])
       session.execute_script('w.close()')
       expect(session.evaluate_script('document.hasFocus()')).to be(true)

@@ -292,15 +292,15 @@ RSpec.describe 'Key gestures' do
     s.execute_script("const st = fr.contentDocument.createElement('style'); st.textContent = '#r { visibility: hidden }'; fr.contentDocument.head.append(st)")
     log(s)
     s.send_keys(:tab)
-    expect(path.()).to eq(['z', 'q', false])
+    expect(path.()).to eq(['z', 'BODY', false])
     expect(s.evaluate_script("fr.contentDocument.querySelectorAll(':focus').length")).to eq(0)
     expect(log(s).grep(/^(fr:)?(win)?(focus|blur)/)).to eq(['fr:blur q', 'fr:winblur', 'blur fr', 'focus z'])
     # (…Tab past the last: the focus to the user agent's controls, a new chain empty — the page's Window blurred, as
     # Chrome does — and back at the start, its Window focused first)
     s.send_keys(:tab)
-    expect(path.()).to eq(['z', 'q', false])
+    expect(path.()).to eq(['z', 'BODY', false])
     s.send_keys(:tab)
-    expect(path.()).to eq(['a', 'q', false])
+    expect(path.()).to eq(['a', 'BODY', false])
     expect(log(s).grep(/^(fr:)?(win)?(focus|blur)/)).to eq(['blur z', 'winblur', 'winfocus', 'focus a'])
     s.find('#a').send_keys(:tab, 'k')
     expect(path.()).to eq(['fr', 'p', true])
@@ -328,8 +328,9 @@ RSpec.describe 'Key gestures' do
   # `blur()` runs HTML's unfocusing steps: "If topDocument's node navigable has system focus, then run the focusing steps
   # for topDocument's viewport" — topDocument the old chain's last entry, the top-level one. So a field blurred in a frame
   # takes the focus out of the frame to the page's viewport: the field, the frame's Window and the `<iframe>` blurred, the
-  # frame's document keeping its focused area off the chain. (Chrome keeps the focus in the frame, on its viewport — the
-  # SPEC over Chrome.) "If old focus target is not one of the entries in old chain, then return": blurred again, nothing.
+  # frame's document's focused area emptied as the focus leaves it (HTML says nothing of the old chain's areas; Chrome and
+  # Firefox empty it). (Both keep the focus in the frame, on its viewport — the SPEC's explicit top-level viewport over
+  # them.) "If old focus target is not one of the entries in old chain, then return": blurred again, nothing.
   it 'blurs a field in a frame to the top-level document\'s viewport' do
     s = session_of(%(<input id=a><iframe id=fr srcdoc="<input id=p>"></iframe>))
     s.execute_script(<<~JS)
@@ -344,7 +345,7 @@ RSpec.describe 'Key gestures' do
     log(s)
     state = "[document.activeElement.nodeName, fr.contentDocument.activeElement.id, document.hasFocus(), fr.contentDocument.hasFocus(), fr.contentDocument.querySelectorAll(':focus').length]"
     s.execute_script("fr.contentDocument.getElementById('p').blur()")
-    expect(s.evaluate_script(state)).to eq(['BODY', 'p', true, false, 0])
+    expect(s.evaluate_script(state)).to eq(['BODY', '', true, false, 0])
     expect(log(s)).to eq(['fr:blur p', 'fr:winblur', 'blur fr'])
     s.execute_script("fr.contentDocument.getElementById('p').blur()")
     expect(log(s)).to eq([])

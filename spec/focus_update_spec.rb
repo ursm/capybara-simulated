@@ -4,6 +4,7 @@ require_relative 'support/session_teardown'
 # The focus update steps as the engine runs them (focus_update.rs): what moves the focus, what blurs and focuses on the
 # way, and when. Each figure Chrome's (2026-11-27) unless said otherwise.
 RSpec.describe 'Focus update steps' do
+  let(:popup) { '<!DOCTYPE html><meta charset="utf-8"><input id="p">' }
   let(:frame) { '<!DOCTYPE html><meta charset="utf-8"><input id="x"><button id="y">y</button>' }
   let(:page) {
     <<~HTML
@@ -19,7 +20,7 @@ RSpec.describe 'Focus update steps' do
     HTML
   }
   let(:session) {
-    pages = {'/frame' => frame, '/' => page}
+    pages = {'/frame' => frame, '/popup' => popup, '/' => page}
     simulated_session(->(env) { [200, {'content-type' => 'text/html; charset=utf-8'}, [pages.fetch(env['PATH_INFO'], '')]] })
   }
 
@@ -93,5 +94,45 @@ RSpec.describe 'Focus update steps' do
     expect(session.evaluate_script('[location.hash, document.activeElement.tagName]')).to eq(['#t', 'BODY'])
     session.find(:css, 'body').send_keys(:tab)
     expect(session.evaluate_script('document.activeElement.id')).to eq('after')
+  end
+
+  # A `focus` listener's own focus move ends the steps before `focusin` (Chrome, Firefox): a focus trap's `onfocus`.
+  it 'fires no focusin at an element a focus listener took the focus from' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const seen = [];
+        for (const t of ['focus', 'focusin', 'blur', 'focusout']) b.addEventListener(t, () => seen.push(t));
+        b.addEventListener('focus', () => b.blur());
+        a.focus(); b.focus();
+        return [seen.join(), document.activeElement.tagName];
+      })()
+    JS
+    expect(got).to eq(%w[focus,blur,focusout BODY])
+  end
+
+  # A press on what takes no focus leaves no pointer-focused element: a script's focus after it shows its ring (Chrome,
+  # Firefox), as one after a click on a button shows none.
+  it "shows the ring of a script's focus after a click on the page's background" do
+    session.find(:css, '#t').click
+    expect(session.evaluate_script("b.focus(); b.matches(':focus-visible')")).to be(true)
+    session.click_button('b')
+    expect(session.evaluate_script("before.focus(); before.matches(':focus-visible')")).to be(false)
+  end
+
+  # A pop-up a user's click opens takes the system focus — the page's Window blurred — and gives it back as it closes,
+  # the page's Window focused (Firefox; WPT document-has-system-focus). One a script opens with no activation leaves it.
+  it 'gives the system focus to a pop-up a click opens, and takes it back as that one closes' do
+    session.execute_script(<<~JS)
+      window.addEventListener('focus', (e) => { if (e.target === window) L('win:focus'); });
+      const o = document.createElement('button'); o.id = 'o'; o.textContent = 'open';
+      o.onclick = () => { window.w = window.open('/popup', 'pop'); };
+      document.body.append(o);
+      window.quiet = window.open('/popup', 'quiet');
+    JS
+    expect(session.evaluate_script('[document.hasFocus(), log.join()]')).to eq([true, ''])
+    session.click_button('open')
+    expect(session.evaluate_script('[document.hasFocus(), w.document.hasFocus(), log.join()]')).to eq([false, true, 'win:blur'])
+    session.execute_script('w.close()')
+    expect(session.evaluate_script('[document.hasFocus(), log.join()]')).to eq([true, 'win:blur,win:focus'])
   end
 end

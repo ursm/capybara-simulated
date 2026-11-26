@@ -101,8 +101,8 @@ RSpec.describe 'native arena upkeep', engine_global: true do
     got = session.evaluate_script(<<~JS)
       (() => {
         getComputedStyle(document.getElementById('w')).color;
-        document.getElementById('i').focus();
         location.hash = '#t';
+        document.getElementById('i').focus();
         const fd = document.querySelector('iframe').contentDocument;
         fd.getElementById('c').checked = true;
         fd.defaultView.getComputedStyle(fd.getElementById('c')).color;
