@@ -11,7 +11,7 @@
 // of its referrer source under the policy it is made under (main fetch steps 7-9): `event.request.referrer` is what the
 // network would have been sent, not the document URL.
 
-use magnus::{prelude::*, r_hash::ForEach, Error, RHash, Ruby, TryConvert, Value};
+use magnus::{prelude::*, r_hash::ForEach, Error, IntoValue, RHash, Ruby, TryConvert, Value};
 use serde_json::{Map, Value as Json};
 
 #[derive(Clone, Default)]
@@ -47,6 +47,11 @@ pub(crate) struct SwRequest {
     pub(crate) cookie_cross_site: bool,
     pub(crate) navigation_cross_site: bool,
     pub(crate) preload: Option<Json>,
+    // The request's client as the network judges it — its URL, its origin and its document's ancestors' origins
+    // (fetch_request.rs `Client`) — which a leg the host fetches of it is made by (a raced request's: Handle Fetch's
+    // "fetch given request", whose client is the page's, not the worker's); none of a navigation's, whose cookie
+    // verdicts it carries itself.
+    pub(crate) client: Option<(String, String, Vec<Option<String>>)>,
 }
 
 impl SwRequest {
@@ -111,6 +116,10 @@ impl SwRequest {
         if let Some(preload) = &self.preload {
             o.insert("preloadResponse".into(), preload.clone());
         }
+        if let Some((url, origin, ancestors)) = &self.client {
+            let ancestors: Vec<Json> = ancestors.iter().map(|a| a.as_deref().map_or(Json::Null, Json::from)).collect();
+            o.insert("client".into(), serde_json::json!({"url": url, "origin": origin, "ancestors": ancestors}));
+        }
         Json::Object(o).to_string()
     }
 }
@@ -130,6 +139,9 @@ impl SwRequest {
 // `about:client`) and the `referrer_policy` it is made under, `reload`, `history`, `initiator`, `site_seed`, `origin_null`, `cookie_cross_site`,
 // `navigation_cross_site`, `client_id`, `resulting_client_id`, `replaces_client_id`, `preload` (its JSON).
 pub(crate) fn sw_request_for_ruby(ruby: &Ruby, params: RHash) -> Result<String, Error> {
+    Ok(request_of(ruby, params)?.wire())
+}
+fn request_of(ruby: &Ruby, params: RHash) -> Result<SwRequest, Error> {
     let get = |key: &str| params.aref::<_, Value>(ruby.to_symbol(key));
     let text = |key: &str| -> Result<String, Error> { Ok(Option::<String>::try_convert(get(key)?)?.unwrap_or_default()) };
     let option = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -206,7 +218,60 @@ pub(crate) fn sw_request_for_ruby(ruby: &Ruby, params: RHash) -> Result<String, 
     if r.method == "GET" || r.method == "HEAD" {
         r.body_b64.clear();
     }
-    Ok(r.wire())
+    Ok(r)
+}
+
+// Native::SwChain — a chain the host runs (a script, a style sheet or an image the parser or a module graph waits on,
+// answered in place): `SwChain.new(params)` of `Native.sw_request`'s params and the client's `origin`; `#wire` the
+// request of its hop; `#answer(status, type, url, redirected, location)` what the worker's response to it does — `[0,
+// hops, hop URL]`, `[1, hop URL]`, `[2, the next hop's wire]`, `[3, why]` (`swChainAnswer`); `#fallthrough` the request
+// at the hop the worker let through, nil at its first (`swChainFallthrough`): `[method, URL, headers, redirect-taint,
+// Sec-Fetch-Site latched]`.
+#[magnus::wrap(class = "Capybara::Simulated::Native::SwChain", free_immediately)]
+pub(crate) struct RbSwChain(std::cell::RefCell<SwChain>);
+impl RbSwChain {
+    fn new(ruby: &Ruby, params: RHash) -> Result<Self, Error> {
+        let origin = Option::<String>::try_convert(params.aref::<_, Value>(ruby.to_symbol("origin"))?)?.unwrap_or_default();
+        let request = request_of(ruby, params)?;
+        Ok(RbSwChain(std::cell::RefCell::new(SwChain { request, origin, hops: 0, crossed: false, taint: Default::default(), site: None })))
+    }
+    fn wire(&self) -> String {
+        self.0.borrow().request.wire()
+    }
+    fn answer(ruby: &Ruby, rb_self: &Self, status: u32, response_type: String, url: String, redirected: bool, location: Option<String>) -> Value {
+        let response = crate::fetch_rules::WorkerResponse {
+            status,
+            response_type: if response_type.is_empty() { "default" } else { &response_type },
+            url: &url,
+            redirected,
+            location: location.as_deref(),
+        };
+        match rb_self.0.borrow_mut().answer(&response) {
+            ChainStep::Answer(hops, url) => (0, hops, url).into_value_with(ruby),
+            ChainStep::OpaqueRedirect(url) => (1, url).into_value_with(ruby),
+            ChainStep::Follow(wire) => (2, wire).into_value_with(ruby),
+            ChainStep::Fail(why) => (3, why).into_value_with(ruby),
+        }
+    }
+    fn fallthrough(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
+        let c = rb_self.0.borrow();
+        if c.hops == 0 {
+            return Ok(ruby.qnil().as_value());
+        }
+        let headers = ruby.hash_new();
+        for (name, value) in &c.request.headers {
+            headers.aset(name.as_str(), value.as_str())?;
+        }
+        Ok((c.request.method.as_str(), c.request.url.as_str(), headers, c.taint.name(), c.site.clone()).into_value_with(ruby))
+    }
+}
+pub(crate) fn define(native: magnus::RModule, ruby: &Ruby) -> Result<(), Error> {
+    let class = native.define_class("SwChain", ruby.class_object())?;
+    class.define_singleton_method("new", magnus::function!(RbSwChain::new, 1))?;
+    class.define_method("wire", magnus::method!(RbSwChain::wire, 0))?;
+    class.define_method("answer", magnus::method!(RbSwChain::answer, 5))?;
+    class.define_method("fallthrough", magnus::method!(RbSwChain::fallthrough, 0))?;
+    Ok(())
 }
 
 // A controlled client's request through its service worker, hop by hop (Fetch "HTTP fetch" over Handle Fetch, then
@@ -414,6 +479,14 @@ mod tests {
         assert_eq!(wire["referrer"], "");
         assert!(wire.get("mode").is_none());
         assert!(wire.get("keepalive").is_none());
+    }
+
+    #[test]
+    fn the_wire_carries_its_client_as_the_network_judges_it() {
+        let r = SwRequest { client: Some(("https://b.test/f".into(), "https://b.test".into(), vec![Some("https://a.test".into()), None])), ..SwRequest::default() };
+        let wire: Json = serde_json::from_str(&r.wire()).unwrap();
+        assert_eq!(wire["client"], serde_json::json!({"url": "https://b.test/f", "origin": "https://b.test", "ancestors": ["https://a.test", null]}));
+        assert!(serde_json::from_str::<Json>(&SwRequest::default().wire()).unwrap().get("client").is_none());
     }
 
     #[test]

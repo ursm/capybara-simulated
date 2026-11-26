@@ -145,13 +145,18 @@ fn or_undefined<'s>(scope: &mut v8::PinScope<'s, '_>, referrer: Option<&str>) ->
 // What a service worker's fetch event is given of a request (sw_request.rs `SwRequest`): its referrer the one the
 // network would be sent — of `source` under the policy it is made under, its own, its container's or the default
 // (`request_policy`), none where `source` is none — its `Accept` its destination's where it has none.
-fn worker_request(url: &str, headers: Vec<(String, String)>, destination: &str, policy: &str, source: Option<&str>) -> SwRequest {
+// (…its client `client`'s)
+fn worker_request(url: &str, headers: Vec<(String, String)>, destination: &str, policy: &str, client: &Client) -> SwRequest {
+    worker_request_referred(url, headers, destination, policy, client.referrer.as_deref(), client)
+}
+fn worker_request_referred(url: &str, headers: Vec<(String, String)>, destination: &str, policy: &str, source: Option<&str>, client: &Client) -> SwRequest {
     let policy = request_policy(policy, "");
     let mut r = SwRequest { url: url.to_owned(), headers, destination: destination.to_owned(), referrer_policy: policy.to_owned(), ..SwRequest::default() };
     match source {
         Some(source) => r.refer(policy, source),
         None => r.referrer = Some(String::new()),
     }
+    r.client = Some((client.url.clone(), client.origin.clone(), client.ancestors.clone()));
     r.accept_default();
     r
 }
@@ -222,31 +227,29 @@ fn fetch_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     // (…the chain of hops through the worker where one answers it: sw_request.rs `SwChain`)
     let worker = (route == ROUTE_SERVICE_WORKER).then(|| {
         let headers = headers.iter().map(|(n, v)| (byte_text(n), byte_text(v))).collect();
-        let mut w = worker_request(&request.url, headers, &request.destination, policy, referrer.as_deref());
+        let mut w = worker_request_referred(&request.url, headers, &request.destination, policy, referrer.as_deref(), &client);
         request.method.clone_into(&mut w.method);
         (w.mode, w.credentials, w.redirect, w.cache, w.integrity) =
             (request.mode.clone(), request.credentials.clone(), request.redirect.clone(), request.cache.clone(), request.integrity.clone());
         (w.keepalive, w.head_first) = (request.keepalive, head_first);
-        let chain = crate::dom::realm(scope, cid).realm_state_mut(cid).map_or(0, |s| s.sw_chains.begin(w, client.origin.clone()));
-        v8::Integer::new_from_unsigned(scope, chain).into()
+        chain(scope, cid, w, &client)
     });
     let preloaded = preloaded.unwrap_or_else(|| v8::undefined(scope).into());
     answer(scope, rv, route, described, worker, &[preloaded]);
 }
 
-// __dom.eventSourceRequest(state, controller, clientId) -> [route, request, worker]: the request an EventSource's connection makes
+// __dom.eventSourceRequest(state, controller) -> [route, request, worker]: the request an EventSource's connection makes
 // (HTML "establish the connection", at construction and at each reconnection) of the source `state` wraps (event_source_
 // state.rs) — a GET of its URL, `Accept: text/event-stream` and, on a reconnection, the last event ID string its stream
 // left where that is not empty (`Last-Event-ID`, a header the user agent sets, which asks no CORS-preflight: fetch_plan.rs
 // `ua_headers`), its mode `cors`, its credentials mode as `withCredentials` says, the HTTP cache bypassed (`no-store`),
 // its referrer its client — and the leg that answers it: the service worker controlling the calling realm
-// (`controller`, 0 none) for an http(s) URL — its fetch event's request then (the wire, sw_request.rs, of the client
-// `clientId`) — else the network.
+// (`controller`, 0 none) for an http(s) URL — its chain of hops through the worker then (sw_request.rs `SwChain`) — else
+// the network.
 fn event_source_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some((url, with_credentials, last_event_id)) = crate::event_source_state::request_facts(scope, args.get(0)) else { return };
     let controlled = args.get(1).int32_value(scope).unwrap_or(0) != 0;
-    let client_id = args.get(2).to_rust_string_lossy(scope);
     let client = Client::of(&mut dom(scope).arena, cid);
     let credentials = if with_credentials { "include" } else { "same-origin" };
     let mut headers = vec![("Accept", "text/event-stream")];
@@ -274,10 +277,9 @@ fn event_source_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let described = host_record(scope, fields, &client);
     let worker = (route == ROUTE_SERVICE_WORKER).then(|| {
         let headers = headers.iter().map(|(n, v)| ((*n).to_owned(), (*v).to_owned())).collect();
-        let mut w = worker_request(&url, headers, "", client.policy, client.referrer.as_deref());
+        let mut w = worker_request(&url, headers, "", client.policy, &client);
         (w.method, w.mode, w.credentials, w.redirect, w.cache) = ("GET".into(), "cors".into(), credentials.into(), "follow".into(), "no-store".into());
-        w.client_id = client_id;
-        text(scope, &w.wire())
+        chain(scope, cid, w, &client)
     });
     answer(scope, rv, route, described, worker, &[]);
 }
@@ -336,22 +338,25 @@ fn import_script_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     answer(scope, rv, ROUTE_NETWORK, described, None, &[]);
 }
 
-// __dom.subresourceWorkerRequest(plan, integrity, url, accept, clientId) -> the request the controlling service worker's
-// fetch event is given (the wire, sw_request.rs) of the request a subresource of `plan` makes of `url` (subresource_plan.rs
-// `plan`: its mode and credentials, the referrer policy it is made under — its element's `referrerpolicy` among them —
-// and its destination), of `integrity` metadata, its `Accept` `accept`: referred by the calling realm, its client
-// `clientId`.
+// __dom.subresourceWorkerRequest(plan, integrity, url, accept) -> the chain of hops through the controlling service worker
+// (sw_request.rs `SwChain`) of the request a subresource of `plan` makes of `url` (subresource_plan.rs `plan`: its mode
+// and credentials, the referrer policy it is made under — its element's `referrerpolicy` among them — and its
+// destination), of `integrity` metadata, its `Accept` `accept`: referred by the calling realm.
 fn subresource_worker_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let plan = args.get(0).uint32_value(scope).unwrap_or(0);
     let integrity = if args.get(1).is_string() { args.get(1).to_rust_string_lossy(scope) } else { String::new() };
-    let [url, accept, client_id] = [2, 3, 4].map(|k| args.get(k).to_rust_string_lossy(scope));
+    let [url, accept] = [2, 3].map(|k| args.get(k).to_rust_string_lossy(scope));
     let (mode, credentials, own, _) = crate::subresource_plan::fields(plan);
     let client = Client::of(&mut dom(scope).arena, cid);
     let headers = vec![("Accept".to_owned(), accept)];
-    let mut w = worker_request(&url, headers, crate::subresource_plan::destination(plan), request_policy(own, client.policy), client.referrer.as_deref());
+    let mut w = worker_request(&url, headers, crate::subresource_plan::destination(plan), request_policy(own, client.policy), &client);
     (w.method, w.mode, w.credentials, w.redirect, w.cache, w.integrity) =
         ("GET".into(), mode.into(), credentials.into(), "follow".into(), "default".into(), integrity);
-    w.client_id = client_id;
-    rv.set(text(scope, &w.wire()));
+    rv.set(chain(scope, cid, w, &client));
+}
+// The chain of `request`'s hops through the worker, kept by the realm `cid` that made it, its client `client`: its number.
+fn chain<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, request: SwRequest, client: &Client) -> v8::Local<'s, v8::Value> {
+    let chain = crate::dom::realm(scope, cid).realm_state_mut(cid).map_or(0, |s| s.sw_chains.begin(request, client.origin.clone()));
+    v8::Integer::new_from_unsigned(scope, chain).into()
 }

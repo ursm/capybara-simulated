@@ -2263,7 +2263,7 @@ module Capybara
         c.attach('@swSkipWaitingRequest', ->             { sw_hooks[:skip_waiting]&.call; nil }) if sw_hooks[:skip_waiting]
         c.attach('@swSoftUpdate',         ->             { sw_hooks[:soft_update]&.call; nil }) if sw_hooks[:soft_update]
         c.attach('@swNoteRouterRules',    ->             { sw_hooks[:router]&.call; nil }) if sw_hooks[:router]
-        c.attach('@swRaceNetwork', ->(fetch_id, realm_id, request) { sw_hooks[:race_network]&.call(fetch_id, realm_id, request); nil }) if sw_hooks[:race_network]
+        c.attach('@swRaceNetwork', ->(fetch_id, realm_id, request, client) { sw_hooks[:race_network]&.call(fetch_id, realm_id, request, client); nil }) if sw_hooks[:race_network]
         c.attach('@swExtended',           ->(on)         { sw_hooks[:extended]&.call(on); nil }) if sw_hooks[:extended]
         c.attach('@swEventSettled',       ->(ok)         { sw_hooks[:event_settled]&.call(ok); nil }) if sw_hooks[:event_settled]
         c.attach('@swFetchRespond', ->(fetch_id, resp, realm_id, spent = 0, took = 0) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id, spent, took); nil }) if sw_hooks[:fetch_respond]

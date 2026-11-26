@@ -331,6 +331,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     fetch_plan::define(native, ruby)?;
     navigate::define(native, ruby)?;
     worker_script_fetch::define(native, ruby)?;
+    sw_request::define(native, ruby)?;
     // Each session's CORS-preflight cache, and the headers a CORS response exposes (cors.rs).
     native.define_module_function("cors_preflight_cache_new", magnus::function!(cors::cache_new_for_ruby, 0))?;
     native.define_module_function("cors_preflight_cache_clear", magnus::function!(cors::cache_clear_for_ruby, 1))?;

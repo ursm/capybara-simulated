@@ -5654,7 +5654,10 @@ module Capybara
         # module's cors+same-origin, a worker's module preload same-origin — its `integrity` the element's raw attribute,
         # verbatim (event.request.integrity reflects it even when unparseable), its referrer that the policy it is made
         # under sends (its element's `referrerpolicy`, else its policy container's).
-        req = Native.sw_request(
+        # Hop by hop (sw_request.rs `SwChain`, as a fetch()'s): a redirect the worker answers with followed, the worker's
+        # again at its next hop; one it lets through the network's — the request as it was made at the first hop (nil:
+        # the caller's own fetch), else the request at that hop, its response a redirected one.
+        chain = Native::SwChain.new(
           kind:            'script',
           url:             url.to_s,
           mode:            mode.to_s,
@@ -5663,12 +5666,30 @@ module Capybara
           credentials:     credentials.to_s,
           client_id:       client_id.to_s,
           referrer_policy: referrer_policy.to_s,
-          referrer_source: referrer.to_s
+          referrer_source: referrer.to_s,
+          origin:          url_origin(referrer.to_s) || url_origin(url.to_s)
         )
-        r = sw_direct_fetch(handle.to_i, req, -handle.to_i, follower:) or return nil
-        return nil if r['fallthrough']
-        return {'blocked' => true} if r['networkError']
+        wire = chain.wire
+        r = nil
+        loop do
+          r = sw_direct_fetch(handle.to_i, wire, -handle.to_i, follower:)
+          if r.nil? || r['fallthrough']
+            at = chain.fallthrough or return nil
+            r = sw_hop_from_network(at, mode, credentials, referrer, referrer_policy, destination) or return {'blocked' => true}
+            break
+          end
+          return {'blocked' => true} if r['networkError']
 
+          kind, *step = chain.answer((r['status'] || 200).to_i, r['type'].to_s, r['url'].to_s, r['redirected'] == true, (loc = header_field(r['headers'] || {}, 'location')) && Array(loc).first)
+          case kind
+          when 0
+            hops, hop_url = step
+            r = r.merge('redirected' => true, 'url' => r['url'].to_s.empty? ? hop_url : r['url']) if hops.positive?
+            break
+          when 2 then wire = step.first
+          else return {'blocked' => true}
+          end
+        end
         # HTML "fetch a classic script" / "obtain a stylesheet": a non-ok response
         # fails the load (error event, nothing executes) — EXCEPT an opaque one
         # satisfying a NO-CORS request, which reports status 0 and still
@@ -5710,6 +5731,26 @@ module Capybara
           **response,
           'url'            => r['url'].to_s,
           'referrerPolicy' => (policy = header_field(headers, 'referrer-policy')) && Array(policy).join(',')
+        }
+      end
+
+      # …the network's answer to a hop the worker let through (`at`, `Native::SwChain#fallthrough`: its method, URL, headers,
+      # redirect-taint and the Sec-Fetch-Site its chain latched), in the shape a worker's answer has — a redirected
+      # response, its URL list past one — nil for a network error.
+      private def sw_hop_from_network(at, mode, credentials, referrer, referrer_policy, destination)
+        method, target, headers, taint, site = at
+        res = rack_fetch(method, target, '', headers, 'follow', (mode.to_s unless mode.to_s == 'no-cors'), credentials: credentials.to_s, referrer: referrer.to_s, referrer_policy: referrer_policy,
+                                                                    redirect_taint: taint, site_seed: site, origin_null: taint != 'same-origin', redirected: true, dest: destination.to_s)
+        return nil unless resource_loaded?(res)
+
+        bytes = res['body_bytes'] || res['body'].to_s.b
+        {
+          'status'     => res['status'].to_i,
+          'type'       => res['type'] || 'basic',
+          'headers'    => res['headers'] || {},
+          'url'        => res['url'].to_s.empty? ? target : res['url'].to_s,
+          'redirected' => true,
+          'body_b64'   => Base64.strict_encode64(bytes)
         }
       end
 
@@ -6007,17 +6048,18 @@ module Capybara
       # The leg is Handle Fetch's "fetch given request": `request` the request itself as the network takes it
       # (fetch_request.rs `fetchRequest` of the worker's `event.request`) — its method, headers, credentials, mode,
       # referrer — and a response of no ok status records nothing: the handler serves alone ("server faster, but not
-      # found" uses the handler's 200). Two gaps: a navigation's leg follows its redirects itself, its response committed
-      # at the final URL like any network navigation's (Fetch hands a navigate request's redirect to the navigation); and
-      # the request's client is the worker's realm as `fetchRequest` describes it there (its URL, origin and no
-      # ancestors), not the page's — the SameSite cookies and Sec-Fetch-Site of a cross-site frame's raced request judged
-      # as a top-level one's.
-      private def sw_race_network(fetch_id, realm_id, request)
+      # found" uses the handler's 200). Its client the request's (`client`: the page's URL, origin and ancestors, which its
+      # cookies and Fetch Metadata are judged by — sw_request.rs), not the worker realm the request was described in; a
+      # navigation's none, whose verdicts it carries. A navigation's redirect (its mode `manual`, Fetch hands it to the
+      # navigation) is no ok status: the handler's answer is the one the navigation takes, as any.
+      private def sw_race_network(fetch_id, realm_id, request, client)
         fid = fetch_id.to_i
         return if WorkerHost.direct?(fid)
 
         request = request.to_h
-        request = request.merge('redirect' => 'follow') if request['mode'] == 'navigate'
+        if (client = client&.to_h)
+          request = request.merge('clientUrl' => client['url'], 'clientOrigin' => client['origin'], 'ancestors' => client['ancestors'] || [])
+        end
         r = begin
           rack_fetch_request(request, '')
         rescue StandardError
@@ -9783,7 +9825,7 @@ module Capybara
           # A race-network-and-fetch-handler route matched: run the network leg on a
           # host thread concurrently with the fetch-event dispatch the worker is
           # about to (possibly synchronously-blocking) run. See sw_race_network.
-          race_network:   ->(fetch_id, realm_id, request) { sw_race_network(fetch_id, realm_id, request) },
+          race_network:   ->(fetch_id, realm_id, request, client) { sw_race_network(fetch_id, realm_id, request, client) },
           # The install handler registered Static Routing API rules (addRoutes) — the
           # rules themselves live in the worker isolate (evaluated at its dispatch
           # point); the host records only their EXISTENCE, which keeps a router SW
