@@ -192,8 +192,11 @@ fn unreadable_format(u: &style::font_face::UrlSource) -> bool {
 // The faces of a family stack (a computed `font-family`, as its value serializes) at a weight / style bucket
 // (`bold`, `italic`, `bold:italic`, ``), as indices into `faces`: with `all`, every face of every family of the stack
 // in the order a character picks from them — family by family, each family's best match first (a tie to the later
-// rule) — else the one face of the first family that has any. CSS Fonts 4 §5.2: the same style first, then the nearest
-// weight.
+// rule) — else the stack's first available font among them: the first family's face, its best match whose
+// `unicode-range` does not exclude U+0020 (CSS Fonts 4 §5.2 "first available font"; WPT
+// fontface-descriptor-updates: a face scoped to U+0000 is no line's metrics) — its best match where every one excludes
+// it, as Chrome lays a line out by a split scoped to letters alone. CSS Fonts 4 §5.2: the same style first, then the
+// nearest weight.
 pub(crate) fn pick(faces: &[FaceRecord], stack: &str, bucket: &str, all: bool) -> Vec<usize> {
     let want = if bucket.contains("bold") { 700.0 } else { 400.0 };
     let italic = bucket.contains("italic");
@@ -211,7 +214,8 @@ pub(crate) fn pick(faces: &[FaceRecord], stack: &str, bucket: &str, all: bool) -
         // (…best first, and of equal ones the LATER rule)
         scored.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
         if !all {
-            return vec![scored[0].1];
+            let first = scored.iter().find(|&&(_, i)| faces[i].covers(0x20)).unwrap_or(&scored[0]);
+            return vec![first.1];
         }
         out.extend(scored.into_iter().map(|(_, i)| i));
     }
@@ -619,6 +623,12 @@ mod tests {
         assert_eq!(pick(&faces, "a", "italic", false), vec![2]);
         assert_eq!(pick(&faces, "x, B", "bold", false), vec![3]);
         assert_eq!(pick(&faces, "a, b", "", true), vec![0, 1, 2, 3]);
+        // (…the first available font is one whose range does not exclude the space: the later rule scoped away from it
+        // is no primary, the earlier one is — and where every face excludes it, the best match all the same)
+        let scoped = |range: Option<Vec<(u32, u32)>>| FaceRecord { ranges: range, ..face("u", (400.0, 400.0), false) };
+        let split = [scoped(Some(vec![(0, 0xff)])), scoped(Some(vec![(0, 0)]))];
+        assert_eq!(pick(&split, "u", "", false), vec![0]);
+        assert_eq!(pick(&split[1..], "u, b", "", false), vec![0]);
         assert!(pick(&faces, "serif", "", false).is_empty());
     }
 
