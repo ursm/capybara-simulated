@@ -943,6 +943,8 @@ pub(crate) struct RealmArena {
     // processing tasks that apply it (media.rs).
     pub(crate) media: std::collections::HashMap<NodeId, crate::media::Media>,
     pub(crate) media_arrived: std::collections::HashMap<NodeId, crate::media::MediaResource>,
+    // …and whether they play with no user activation, the session's say (the driver's `autoplay:`).
+    pub(crate) autoplay: bool,
     // Each document's map of preloaded resources, by preload key (preload_map.rs).
     pub(crate) preloads: std::collections::HashMap<crate::preload_map::Key, crate::preload_map::Preloaded>,
     // The requests the engine made whose service worker's `fetch` event is yet to answer, by the token it handed the
@@ -955,10 +957,10 @@ pub(crate) struct RealmArena {
     pub(crate) sheet_requests: std::collections::HashMap<NodeId, crate::sheet_fetch::SheetRequest>,
     // Each image element's requests, from its first update (image_requests.rs).
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
-    // …the fetches of theirs the host makes on a thread of its own, by the id it numbers them with, until it hands the
-    // result back (image_requests.rs `HostFetch`), and each document's list of available images (`AvailableImages`).
-    pub(crate) image_fetches: std::collections::HashMap<u32, crate::image_requests::HostFetch>,
+    // …each document's list of available images (`AvailableImages`), and the requests lazy loading put off, until they
+    // intersect the viewport (`imageLazyResume`).
     pub(crate) available_images: crate::image_requests::AvailableImages,
+    pub(crate) lazy_images: Vec<(NodeId, u32)>,
     // The video elements' decoded frames (media.rs `mediaFrame`): each one's first, which a canvas draws — none until a
     // video decodes, and none again once a load fails.
     pub(crate) video_frames: std::collections::HashMap<NodeId, crate::image_requests::Pixels>,
@@ -1412,7 +1414,7 @@ impl RealmArena {
         self.state = RealmState { faces, sheets, state_epoch: state_epoch + 1, ..RealmState::default() };
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
-        self.forget_image_fetches_of(cid);
+        self.forget_available_images_of(cid);
         self.forget_navigables_of(cid, true);
         self.forget_freed_scroll_events();
         self.forget_freed_frame_navigations();
@@ -1446,7 +1448,7 @@ impl RealmArena {
     pub(crate) fn discard_realm(&mut self, cid: i32) {
         self.observers.drop_realm(cid);
         // (…its image fetches aborted, as a discarded document's are: their elements let go)
-        self.forget_image_fetches_of(cid);
+        self.forget_available_images_of(cid);
         self.forget_navigables_of(cid, false);
         self.discard_timers(cid);
         self.discard_resize_observers(cid);
@@ -1486,7 +1488,7 @@ impl RealmArena {
         }
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
-        self.forget_image_fetches_of(cid);
+        self.forget_available_images_of(cid);
         self.forget_navigables_of(cid, true);
         self.forget_freed_scroll_events();
         self.forget_freed_frame_navigations();
@@ -1554,6 +1556,7 @@ impl RealmArena {
         self.sheet_requests.retain(|id, _| live(slots, id));
         self.video_frames.retain(|id, _| live(slots, id));
         self.images.retain(|id, _| live(slots, id));
+        self.lazy_images.retain(|(id, _)| live(slots, id));
         self.element_watchers.retain(|id, _| live(slots, id));
         self.referrer_policies.retain(|doc, _| live(slots, doc));
         self.request_policies.retain(|id, _| live(slots, id));
@@ -3390,6 +3393,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "canvasFont", canvas_font, context_id);
     register(scope, ns, "canvasSpacing", canvas_spacing, context_id);
     register(scope, ns, "setTouchInput", set_touch_input, context_id);
+    register(scope, ns, "setAutoplay", set_autoplay, context_id);
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
@@ -5958,6 +5962,11 @@ fn canvas_spacing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 fn set_touch_input(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let touch = args.get(0).is_true();
     dom(scope).touch_input = touch;
+}
+
+// __dom.setAutoplay(on): whether the session's media elements play with no user activation (media.rs `allowed_to_play`).
+fn set_autoplay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    dom(scope).arena.autoplay = args.get(0).is_true();
 }
 
 // __dom.declSupportsCondition(text) -> `CSS.supports(conditionText)`.

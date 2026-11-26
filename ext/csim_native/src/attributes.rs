@@ -583,7 +583,7 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     // `load` fired again, Chrome and Firefox, csim-bench img13 `i4`)
     let svg = n.ns == web_atoms::ns!(svg);
     let image = match tag {
-        "img" if n.is_html() => key == "src" && value.is_some() || changed && matches!(key, "src" | "srcset" | "crossorigin" | "referrerpolicy"),
+        "img" if n.is_html() => key == "src" && value.is_some() || changed && matches!(key, "src" | "srcset" | "sizes" | "crossorigin" | "referrerpolicy" | "loading"),
         "image" if svg => changed && matches!(qualified(key), "href" | "xlink:href" | "crossorigin"),
         "input" if n.is_html() => changed && matches!(key, "src" | "type" | "crossorigin"),
         _ => false,

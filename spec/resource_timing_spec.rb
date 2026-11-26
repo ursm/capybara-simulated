@@ -87,7 +87,7 @@ RSpec.describe 'resource timing', :app_answers_every_host do
     JS
   end
 
-  # Wait for an image the page just added: its bytes arrive on a host thread.
+  # Wait for an image the page just added: its response lands as a task.
   def await_images(s)
     Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('Array.from(document.images).every(function (i) { return i.complete; })') }
   end

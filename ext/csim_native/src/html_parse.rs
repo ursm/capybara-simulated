@@ -1268,6 +1268,9 @@ impl<'s> Build<'s> {
             list.push((name, value));
         }
         crate::dom::replace_attributes(scope, self.cid, id, list, exact, Some((namespaced, Vec::new())));
+        if media {
+            crate::dom::realm(scope, self.cid).media_created(id);
+        }
         if !names.is_empty() {
             self.steps.push((id, names, 0));
         }

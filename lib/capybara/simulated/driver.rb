@@ -96,7 +96,10 @@ module Capybara
       # go to the network; by default it is a network error (Browser#dispatched).
       # An Array of `host` / `host:port` lets those alone (a local streaming
       # server: `['localhost:4020']`).
-      def initialize(app, viewport: nil, user_agent: nil, touch: false, external_network: false)
+      # `autoplay: true` lets a media element play with no user having interacted with the page, audible or not — as
+      # Chrome's `--autoplay-policy=no-user-gesture-required` and Firefox's `media.autoplay.default` 0 do, which the
+      # web-platform-tests' runner sets; by default an audible one's play() is rejected (media.rs `allowed_to_play`).
+      def initialize(app, viewport: nil, user_agent: nil, touch: false, external_network: false, autoplay: false)
         # `Capybara.disable_animation` is delivered to the real drivers by a SERVER
         # middleware (session.rb adds AnimationDisabler to the Puma stack), which
         # injects `animation-duration: 0s !important` CSS into every HTML response.
@@ -138,6 +141,7 @@ module Capybara
         @viewport        = viewport
         @user_agent      = user_agent
         @touch           = touch
+        @autoplay        = autoplay
         # …and whether its requests may go to hosts the app does not serve (Browser#dispatched).
         @external_network = external_network
         # …and how many windows it has made: each mints its contexts' ids in a space of its own (Browser#client_space),
@@ -176,6 +180,7 @@ module Capybara
                     window_number:   @client_spaces - 1).tap do |b|
           @windows_by_number[b.window_number] = b
           b.touch_input        = @touch
+          b.autoplay           = @autoplay
           b.default_viewport   = @viewport   if @viewport
           b.default_user_agent = @user_agent if @user_agent
         end

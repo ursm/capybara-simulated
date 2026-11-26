@@ -2348,7 +2348,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
   it 'loads an <img> resource asynchronously (pending request, then load event + drawImage)' do
     session = simulated_session(app)
     session.visit('/')
-    # The fetch runs on a host thread, as a browser's does: within the assigning script the
+    # The fetch is made as the stable state comes, its response landing as a task: within the assigning script the
     # element models the spec's PENDING request — `complete` false, no intrinsic size, and a
     # drawImage of it is the silent no-op the spec prescribes for a not-fully-decodable image.
     out = session.evaluate_async_script(<<~JS)

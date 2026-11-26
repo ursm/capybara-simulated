@@ -45,7 +45,10 @@ RSpec.describe 'Fixes from the 2026-10-21 survey' do
   it 'rejects play() for a media element whose source is not supported' do
     got = session.evaluate_async_script(<<~JS)
       const done = arguments[0];
+      // (…muted, as one on a page no user has interacted with must be to be allowed to play at all: HTML play() rejects
+      // with a NotAllowedError before it looks at the error)
       const v = document.createElement('video');
+      v.muted = true;
       v.onerror = () => v.play().then(() => done('resolved'), (e) => done(e.name + ' ' + v.error.code));
       v.src = 'data:text/plain,nope';
     JS

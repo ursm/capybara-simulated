@@ -218,12 +218,15 @@ RSpec.describe 'Media element state' do
     s = media_session(requests)
     s.execute_script(<<~'JS')
       window.log = [];
+      // (…muted: an audible element on a page no user has interacted with is not allowed to play, `m9`)
       const v = window.v = document.createElement('video');
+      v.muted = true;
       v.preload = 'NONE';
       for (const t of ['loadstart', 'suspend', 'play', 'waiting', 'loadedmetadata']) v.addEventListener(t, () => log.push(t));
       v.src = 'm.webm?c';
       const auto = window.auto = document.createElement('video');
       auto.preload = 'none';
+      auto.muted = true;
       auto.autoplay = true;
       auto.src = 'm.webm?e';
     JS
@@ -289,14 +292,19 @@ RSpec.describe 'Media element state' do
     requests = []
     s = media_session(requests)
     s.execute_script(<<~'JS')
+      // (…muted, each: an audible element on a page no user has interacted with is not allowed to play — Chrome and
+      // Firefox reject its play(), csim-bench img13 `m9`)
       window.early = document.createElement('video');
+      early.muted = true;
       early.preload = 'none';
       early.src = 'm.webm?early';
       early.play();
       window.next = document.createElement('video');
+      next.muted = true;
       next.preload = 'none';
       next.innerHTML = '<source src="missing.webm"><source src="m.webm?next">';
       window.removed = document.createElement('video');
+      removed.muted = true;
       removed.preload = 'none';
       removed.innerHTML = '<source src="missing.webm"><source src="m.webm?after-removed">';
       window.log = [];

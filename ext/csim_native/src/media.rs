@@ -6,8 +6,9 @@
 // resource is fetched whole, a video's decoded to its size, duration and first frame (video.rs), an audio's not decoded
 // at all, its duration read off its container (audio.rs) — +Infinity where it says none, as HTML has it for one "not
 // known" — and the media data processing steps,
-// each event the element owes fired from a media element task (`queue_task`): the resource's, which delay the document's
-// load until the element has its first frame (`loadeddata`), as load gates. The bindings only call in (media.js) and
+// each event the element owes fired from a media element task (`queue_task`) at its own turn, the document's load waiting
+// on the element's delaying-the-load-event flag until it has its first frame (`loadeddata`). The bindings only call in
+// (media.js) and
 // keep the MediaError and TimeRanges objects. Kept per element in the arena (`RealmArena::media`), from its first use.
 
 use crate::dom::{NodeId, RealmArena};
@@ -66,6 +67,13 @@ pub(crate) struct Media {
     candidate: Option<NodeId>,
     pointer: Option<NodeId>,
     waiting: bool,
+    // Its delaying-the-load-event flag (HTML §4.8.11.5): set as its resource selection begins, unset once it has its
+    // first frame, fails, waits for a candidate, or puts its fetch off — what its document's load waits on meanwhile
+    // (`media_delays_load`).
+    delaying: bool,
+    // When, on the event loop's clock, the task its resource's fetch lands in is due (as far after the fetch as its server
+    // took): what a visit steps to while it delays the load (`media_delays_load`, frame_navigation.rs `loadDueIn`).
+    due: f64,
 }
 
 // An element's state before its first use.
@@ -93,6 +101,8 @@ static INITIAL: Media = Media {
     candidate: None,
     pointer: None,
     waiting: false,
+    delaying: false,
+    due: 0.0,
 };
 
 impl Default for Media {
@@ -150,6 +160,7 @@ impl RealmArena {
         if m.network == NETWORK_EMPTY && n.plain_attr("src").is_none() {
             let m = self.media_mut(media);
             m.network = NETWORK_NO_SOURCE;
+            m.delaying = true;
             return Some((m.load, false));
         }
         if !m.waiting || m.pointer.and_then(at).is_some_and(|pointer| index < pointer) {
@@ -163,6 +174,17 @@ impl RealmArena {
 
 pub(crate) fn is_media(n: &crate::dom::NodeData) -> bool {
     n.is_html_named("video") || n.is_html_named("audio")
+}
+impl RealmArena {
+    // A media element created with its attributes — the parser's, a clone's: one with a `muted` attribute muted (HTML
+    // §4.8.11.13: "when a media element is created, if the element has a muted content attribute specified, then the
+    // muted IDL attribute should be set to true"); one an `setAttribute('muted')` gave it later not (Chrome and Firefox
+    // reject its play() as an unmuted one's, csim-bench img13 `m9`).
+    pub(crate) fn media_created(&mut self, id: NodeId) {
+        if self.get(id).is_some_and(|n| is_media(n) && n.plain_attr("muted").is_some()) {
+            self.media_mut(id).muted = true;
+        }
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -315,7 +337,7 @@ fn media_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         _ => &[],
     };
     if !owed.is_empty() {
-        queue_events(scope, id, owed, false);
+        queue_events(scope, id, owed);
     }
 }
 
@@ -323,7 +345,9 @@ fn media_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // — `host` the steps its fetch is made by: this load the current one (what an earlier one queued superseded); an
 // `abort` for a load under way or done, and, for an element that had any state, an `emptied` — a `timeupdate` too where
 // its position was not at the start — fired from a task, its state forgotten (no media data, paused, at the start, no
-// duration, no frame); no error; then the resource selection algorithm (`invoke_selection`).
+// duration, no frame), its pending play promises rejected with an AbortError; no error; its playback rate its default
+// one (Chrome and Firefox: 1 after `playbackRate = 2; load()`, rv `rate`); then the resource selection algorithm
+// (`invoke_selection`).
 fn media_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
@@ -350,6 +374,7 @@ fn media_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         m.duration = f64::NAN;
     }
     m.error = 0;
+    m.rate = m.default_rate;
     m.deferred = false;
     m.play_requested = false;
     m.children = false;
@@ -362,8 +387,11 @@ fn media_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         arena.video_frames.remove(&id);
     }
     if !owed.is_empty() {
-        queue_events(scope, id, &owed, false);
+        queue_events(scope, id, &owed);
     }
+    // (…its pending play promises rejected with an AbortError at once: HTML "take pending play promises and reject")
+    let el = crate::dom::node_value(scope, Some(id));
+    settle_play(scope, el, ABORTED);
     invoke_selection(scope, cid, id, host);
 }
 
@@ -376,6 +404,7 @@ fn invoke_selection(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, host
         return;
     }
     m.network = NETWORK_NO_SOURCE;
+    m.delaying = true;
     select_soon(scope, cid, id, host, false);
 }
 // __dom.mediaInvoke(media, host) — `invoke_selection` for an element created with a `src` (the parser's, a clone's,
@@ -421,7 +450,9 @@ fn run_select(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         return;
     }
     if resumed.is_true() {
-        crate::dom::dom(scope).arena.media_mut(id).network = NETWORK_LOADING;
+        let m = crate::dom::dom(scope).arena.media_mut(id);
+        m.network = NETWORK_LOADING;
+        m.delaying = true;
         next_candidate(scope, cid, id, load, host);
     } else {
         select(scope, cid, id, load, host);
@@ -439,20 +470,22 @@ fn select(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, load: u32, hos
     let src = n.plain_attr("src").map(str::to_owned);
     let source_child = n.children.iter().any(|&c| arena.get(c).is_some_and(|c| c.is_html_named("source")));
     if src.is_none() && !source_child {
-        arena.media_mut(id).network = NETWORK_EMPTY;
-        return;
+        let m = arena.media_mut(id);
+        m.network = NETWORK_EMPTY;
+        m.delaying = false;
+        return load_settled(scope);
     }
     let url = src.as_deref().filter(|s| !s.is_empty()).and_then(|s| arena.parse_document_url(doc, s)).map(|u| u.href().to_owned());
     let m = arena.media_mut(id);
     m.network = NETWORK_LOADING;
     m.children = src.is_none();
-    queue_events(scope, id, &["loadstart"], true);
+    queue_events(scope, id, &["loadstart"]);
     if src.is_none() {
         return next_candidate(scope, cid, id, load, host);
     }
     match url {
         Some(url) => fetch_selected(scope, cid, id, load, url, host),
-        None => queue_task(scope, id, Task::Failed, None, true),
+        None => queue_task(scope, id, Task::Failed, None),
     }
 }
 // The children mode's next candidate (§4.8.11.5), in tree order from its pointer, which moves to it: one that fails at
@@ -479,7 +512,8 @@ fn next_candidate(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, load: 
             let m = arena.media_mut(id);
             m.waiting = true;
             m.network = NETWORK_NO_SOURCE;
-            return;
+            m.delaying = false;
+            return load_settled(scope);
         };
         if let Some(media) = media.filter(|_| src.is_some()) {
             let viewport = crate::viewport::of(scope, cid).map(|v| v as f32);
@@ -494,7 +528,7 @@ fn next_candidate(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, load: 
         m.pointer = Some(source);
         match url {
             Some(url) => return fetch_selected(scope, cid, id, load, url, host),
-            None => queue_task(scope, id, Task::SourceError, Some(source), true),
+            None => queue_task(scope, id, Task::SourceError, Some(source)),
         }
     }
 }
@@ -511,7 +545,9 @@ fn fetch_selected(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, load: 
     if deferred {
         m.network = NETWORK_IDLE;
         m.deferred = true;
-        return queue_events(scope, id, &["suspend"], false);
+        m.delaying = false;
+        queue_events(scope, id, &["suspend"]);
+        return load_settled(scope);
     }
     fetch_resource(scope, cid, id, load, url, host);
 }
@@ -519,17 +555,17 @@ fn fetch_selected(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, load: 
 // a DOMParser's, template contents' — failing, such a document loading nothing.
 fn fetch_resource(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, load: u32, url: String, host: v8::Local<'_, v8::Function>) {
     let doc = crate::dom::node_document(scope, id).filter(|&doc| crate::dom::realm(scope, cid).document_fully_active(doc));
-    let outcome = match doc {
+    let (outcome, took) = match doc {
         Some(doc) => crate::subresource_obtain::fetch_media(scope, host, cid, id, doc, url, load),
-        None => crate::subresource_obtain::MediaFetched::Failed,
+        None => (crate::subresource_obtain::MediaFetched::Failed, 0.0),
     };
-    fetched(scope, cid, id, load, outcome, host);
+    fetched(scope, cid, id, load, outcome, took, host);
 }
 // What the fetch of the element `id`'s resource under `load` came to, while that is its current load: the resource,
 // whose media data processing runs from a task (`Task::Fetched`); a failure — the attribute mode's the element's own
 // (`Task::Failed`), the children mode's its candidate's, its `error` queued at it where it is the element's still, and the
 // next one tried; or, a service worker's to answer, nothing yet (subresource_obtain.rs hands it here then).
-pub(crate) fn fetched(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, load: u32, outcome: crate::subresource_obtain::MediaFetched, host: v8::Local<'_, v8::Function>) {
+pub(crate) fn fetched(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, load: u32, outcome: crate::subresource_obtain::MediaFetched, took: f64, host: v8::Local<'_, v8::Function>) {
     use crate::subresource_obtain::MediaFetched;
     if !is_current(&crate::dom::dom(scope).arena, id, load) {
         return;
@@ -537,42 +573,68 @@ pub(crate) fn fetched(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, lo
     match outcome {
         MediaFetched::Pending => {}
         MediaFetched::Arrived(resource) => {
-            crate::dom::dom(scope).arena.media_arrived.insert(id, resource);
-            queue_task(scope, id, Task::Fetched, None, true);
+            let arena = &mut crate::dom::dom(scope).arena;
+            arena.media_arrived.insert(id, resource);
+            let clock = arena.event_loop.clock;
+            arena.media_mut(id).due = clock + took;
+            queue_landing(scope, id, Task::Fetched, took);
         }
         MediaFetched::Failed => {
             let m = crate::dom::dom(scope).arena.media(id);
             if !m.children {
-                return queue_task(scope, id, Task::Failed, None, true);
+                return queue_landing(scope, id, Task::Failed, took);
             }
             if let Some(candidate) = m.candidate {
-                queue_task(scope, id, Task::SourceError, Some(candidate), true);
+                queue_task(scope, id, Task::SourceError, Some(candidate));
             }
             next_candidate(scope, cid, id, load, host);
         }
     }
 }
 
-// __dom.mediaPlay(media, host) -> HTML's play() (§4.8.11.8): false for an element whose resource is not supported (its
-// error MEDIA_ERR_SRC_NOT_SUPPORTED, every error this model has), the bindings' to reject; else the internal play steps —
-// an element whose network state is EMPTY invoking its resource selection algorithm, a paused element unpaused, its `play`
-// then — with no data to play from (up to HAVE_CURRENT_DATA) — `waiting`, or `playing`, queued; one playing already,
-// none — and the fetch `preload` put off, which playing triggers, made: true.
+// What `mediaPlay` answers: played, or rejected — the element not allowed to play (a NotAllowedError), its resource not
+// supported (a NotSupportedError).
+const PLAYED: u32 = 0;
+const NOT_ALLOWED: u32 = 1;
+const NOT_SUPPORTED: u32 = 2;
+
+// Whether the element `id` is allowed to play (HTML leaves it to the user agent; Chrome and Firefox agree, csim-bench
+// img13 `m9`): an inaudible one — muted, or at volume 0 — or one whose document's window has sticky activation (a user
+// has interacted with the page), or any, where the session allows it (`autoplay`, the driver's). What `autoplay` starts
+// by too.
+fn allowed_to_play(arena: &RealmArena, id: NodeId) -> bool {
+    let m = arena.media(id);
+    arena.autoplay || m.muted || m.volume == 0.0 || arena.get(id).is_some_and(|n| arena.sticky_activated(n.realm))
+}
+
+// __dom.mediaPlay(media, host) -> HTML's play() (§4.8.11.8), `PLAYED` or what rejects it: an element not allowed to play
+// (`allowed_to_play`), one whose resource is not supported (its error MEDIA_ERR_SRC_NOT_SUPPORTED, every error this model
+// has); else the internal play steps — an element whose network state is EMPTY invoking its resource selection
+// algorithm, a paused element unpaused, its `play` then — with no data to play from (up to HAVE_CURRENT_DATA) —
+// `waiting`, or `playing`, queued; one playing already, none — and the fetch `preload` put off, which playing triggers,
+// made.
 fn media_play(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(false);
-    let Some(id) = element(scope, args.get(0)) else { return };
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
+    let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(NOT_SUPPORTED) };
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return rv.set_uint32(NOT_SUPPORTED) };
     let cid = crate::dom::realm_id(scope, &args);
-    if crate::dom::dom(scope).arena.media(id).error != 0 {
-        return;
+    let arena = &crate::dom::dom(scope).arena;
+    if !allowed_to_play(arena, id) {
+        return rv.set_uint32(NOT_ALLOWED);
     }
-    rv.set_bool(true);
+    if arena.media(id).error != 0 {
+        return rv.set_uint32(NOT_SUPPORTED);
+    }
+    rv.set_uint32(PLAYED);
     invoke_selection(scope, cid, id, host);
+    // (…its promise pending, the bindings', until the element is playing — `RESOLVE`, "notify about playing" — or is
+    // paused or loaded again first)
     let m = crate::dom::dom(scope).arena.media_mut(id);
+    let has_data = m.ready > HAVE_CURRENT_DATA;
     if !m.playing {
         m.playing = true;
-        let next = if m.ready <= HAVE_CURRENT_DATA { "waiting" } else { "playing" };
-        queue_events(scope, id, &["play", next], false);
+        queue_events(scope, id, if has_data { &["play", "playing", RESOLVE] } else { &["play", "waiting"] });
+    } else if has_data {
+        queue_events(scope, id, &[RESOLVE]);
     }
     let m = crate::dom::dom(scope).arena.media_mut(id);
     m.play_requested = true;
@@ -583,8 +645,8 @@ fn media_play(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 // __dom.mediaPause(media, host) — the internal pause steps: an element whose network state is EMPTY invoking its
-// resource selection algorithm first; a playing element paused, its `timeupdate` then `pause` queued; one paused
-// already, none.
+// resource selection algorithm first; a playing element paused, its `timeupdate` then `pause` queued, its pending play
+// promises rejected with an AbortError after them; one paused already, none.
 fn media_pause(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
@@ -592,12 +654,12 @@ fn media_pause(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     invoke_selection(scope, cid, id, host);
     let m = crate::dom::dom(scope).arena.media_mut(id);
     if std::mem::take(&mut m.playing) {
-        queue_events(scope, id, &["timeupdate", "pause"], false);
+        queue_events(scope, id, &["timeupdate", "pause", ABORT_PLAY]);
     }
 }
 
 // Whether `load` is the element `id`'s current one, no later load superseding it.
-fn is_current(arena: &RealmArena, id: NodeId, load: u32) -> bool {
+pub(crate) fn is_current(arena: &RealmArena, id: NodeId, load: u32) -> bool {
     arena.media(id).load == load
 }
 
@@ -617,31 +679,48 @@ enum Task {
     SourceError = 5,
 }
 
-// A media element task of the element `id`'s current load queued — `gate`, one the document's load waits for (the
-// element's delaying-the-load-event flag, set from its resource selection until its first frame: a load gate,
-// bridge.entry.js `loadGateTask`) — `source` the `<source>` a candidate's error is fired at.
-fn queue_task(scope: &mut v8::PinScope<'_, '_>, id: NodeId, task: Task, source: Option<NodeId>, gate: bool) {
+// A media element task of the element `id`'s current load queued, each at its own turn of the event loop — `source` the
+// `<source>` a candidate's error is fired at. (The document's load waits on the element's delaying-the-load-event flag
+// meanwhile, not on these: `media_delays_load`.)
+fn queue_task(scope: &mut v8::PinScope<'_, '_>, id: NodeId, task: Task, source: Option<NodeId>) {
     let extra = crate::dom::node_value(scope, source);
-    queue_with(scope, id, task, extra, gate);
+    queue_with(scope, id, task, extra, 0.0);
+}
+// …the one its fetch's response lands in, `took` ms from now: as far after the fetch as its server took.
+fn queue_landing(scope: &mut v8::PinScope<'_, '_>, id: NodeId, task: Task, took: f64) {
+    let extra = v8::null(scope).into();
+    queue_with(scope, id, task, extra, took);
 }
 // …the events `events`, fired in turn while the load is the element's: one a listener supersedes — setting its `src`,
 // calling load() — drops the rest, as the load algorithm removes the element's queued tasks.
-fn queue_events(scope: &mut v8::PinScope<'_, '_>, id: NodeId, events: &[&str], gate: bool) {
+fn queue_events(scope: &mut v8::PinScope<'_, '_>, id: NodeId, events: &[&str]) {
     let items: Vec<v8::Local<v8::Value>> = events.iter().filter_map(|e| v8::String::new(scope, e)).map(Into::into).collect();
     let names = v8::Array::new_with_elements(scope, &items).into();
-    queue_with(scope, id, Task::Events, names, gate);
+    queue_with(scope, id, Task::Events, names, 0.0);
 }
-fn queue_with(scope: &mut v8::PinScope<'_, '_>, id: NodeId, task: Task, extra: v8::Local<'_, v8::Value>, gate: bool) {
+fn queue_with(scope: &mut v8::PinScope<'_, '_>, id: NodeId, task: Task, extra: v8::Local<'_, v8::Value>, delay: f64) {
     let load = crate::dom::dom(scope).arena.media(id).load;
     let el = crate::dom::node_value(scope, Some(id));
     let items = [el, v8::Integer::new_from_unsigned(scope, load).into(), v8::Integer::new_from_unsigned(scope, task as u32).into(), extra];
     let data = v8::Array::new_with_elements(scope, &items);
     let Some(step) = v8::Function::builder(run_task).data(data.into()).build(scope) else { return };
-    if gate {
-        let due = v8::Number::new(scope, 0.0).into();
-        crate::dom::call_host_step(scope, "loadGateTask", &[el, step.into(), due]);
-    } else {
-        crate::timers::queue_task(scope, step);
+    crate::timers::queue_task_in(scope, step, delay);
+}
+// …and the document's load asked about again, a media element delaying it no more (bridge.entry.js
+// `realmHooks.loadBlockerSettled`).
+fn load_settled(scope: &mut v8::PinScope<'_, '_>) {
+    crate::dom::call_host_step(scope, "loadBlockerSettled", &[]);
+}
+impl RealmArena {
+    // Whether a media element of realm `cid`'s delays its document's load (its delaying-the-load-event flag).
+    pub(crate) fn media_delays_load(&self, cid: i32) -> bool {
+        self.media.iter().any(|(&id, m)| m.delaying && self.get(id).is_some_and(|n| n.realm == cid))
+    }
+    // …and when, on the clock, the earliest of those has work due: its fetch's landing, else now (its tasks queued now).
+    pub(crate) fn media_load_due(&self, cid: i32) -> Option<f64> {
+        let clock = self.event_loop.clock;
+        let delaying = self.media.iter().filter(|&(&id, m)| m.delaying && self.get(id).is_some_and(|n| n.realm == cid));
+        delaying.map(|(_, m)| m.due.max(clock)).reduce(f64::min)
     }
 }
 fn run_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -663,7 +742,9 @@ fn run_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         Task::SourceError => return fire(scope, extra, "error"),
         Task::Failed => {
             failure_steps(&mut crate::dom::dom(scope).arena, id);
-            return fire(scope, el, "error");
+            fire(scope, el, "error");
+            settle_play(scope, el, NOT_SUPPORTED);
+            return load_settled(scope);
         }
         Task::Fetched => {
             fire(scope, el, "progress");
@@ -673,7 +754,7 @@ fn run_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             crate::dom::dom(scope).arena.media_mut(id).network = NETWORK_IDLE;
             fire(scope, el, "suspend");
             if current(scope) {
-                queue_task(scope, id, Task::Metadata, None, true);
+                queue_task(scope, id, Task::Metadata, None);
             }
             return;
         }
@@ -684,11 +765,29 @@ fn run_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         if !current(scope) {
             return;
         }
-        fire(scope, el, ty);
+        match ty.as_str() {
+            RESOLVE => settle_play(scope, el, PLAYED),
+            ABORT_PLAY => settle_play(scope, el, ABORTED),
+            _ => fire(scope, el, ty),
+        }
     }
     if task == Task::Metadata && current(scope) {
-        queue_task(scope, id, Task::Data, None, true);
+        queue_task(scope, id, Task::Data, None);
     }
+    if task == Task::Data {
+        load_settled(scope);
+    }
+}
+// What an event list may hold beside events: its pending play promises resolved ("notify about playing"), or rejected
+// with an AbortError (paused first).
+const RESOLVE: &str = "!resolve";
+const ABORT_PLAY: &str = "!abort";
+// …settled by the bindings (media.js `settlePlayPromises`): `PLAYED` resolved, else rejected — `ABORTED` with an
+// AbortError, `NOT_SUPPORTED` with a NotSupportedError.
+const ABORTED: u32 = 3;
+fn settle_play(scope: &mut v8::PinScope<'_, '_>, el: v8::Local<'_, v8::Value>, how: u32) {
+    let how = v8::Integer::new_from_unsigned(scope, how).into();
+    crate::dom::call_host_step(scope, "settlePlayPromises", &[el, how]);
 }
 // (…an Event of no interface more, that does not bubble)
 fn fire(scope: &mut v8::PinScope<'_, '_>, target: v8::Local<'_, v8::Value>, ty: &str) {
@@ -716,6 +815,7 @@ fn failure_steps(arena: &mut RealmArena, id: NodeId) {
     m.error = MEDIA_ERR_SRC_NOT_SUPPORTED;
     m.failures += 1;
     m.network = NETWORK_NO_SOURCE;
+    m.delaying = false;
 }
 // The resource's metadata (§4.8.11.5 "media data processing", §4.8.11.7): its duration — a video's decoded, an audio's
 // its container's — a video's size and taint, HAVE_METADATA, and the seek to the default
@@ -756,18 +856,19 @@ fn metadata_steps(arena: &mut RealmArena, id: NodeId) -> Vec<&'static str> {
 }
 // …and its data: HAVE_ENOUGH_DATA (nothing streams: all of it is there), a video's first frame what a canvas draws; the
 // events it owes — `loadeddata`, `canplay`, then — not paused — `playing`, or where `autoplay` has it play, `play` and
-// `playing` — and `canplaythrough`. (The element delays its document's load no more: it ran as a load gate.)
+// `playing` — and `canplaythrough` — the element delaying its document's load no more (after `loadeddata`, as HTML has it).
 fn data_steps(arena: &mut RealmArena, id: NodeId) -> Vec<&'static str> {
-    let autoplay = arena.get(id).is_some_and(|n| n.plain_attr("autoplay").is_some());
+    let autoplay = arena.get(id).is_some_and(|n| n.plain_attr("autoplay").is_some()) && allowed_to_play(arena, id);
     let Some(resource) = arena.media_arrived.remove(&id) else { return Vec::new() };
     let m = arena.media_mut(id);
     m.ready = HAVE_ENOUGH_DATA;
+    m.delaying = false;
     let mut events = vec!["loadeddata", "canplay"];
     if m.playing {
-        events.push("playing");
+        events.extend(["playing", RESOLVE]);
     } else if autoplay {
         m.playing = true;
-        events.extend(["play", "playing"]);
+        events.extend(["play", "playing", RESOLVE]);
     }
     events.push("canplaythrough");
     if let MediaResource::Video { frame: Some(frame), .. } = resource {

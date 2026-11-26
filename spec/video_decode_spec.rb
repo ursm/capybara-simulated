@@ -89,7 +89,9 @@ RSpec.describe 'video decode' do
       const done = arguments[0];
       const names = ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'play', 'playing', 'waiting'];
       const watch = (setup) => new Promise(resolve => {
+        // (…muted: an audible element on a page no user has interacted with is not allowed to play, csim-bench img13 `m9`)
         const v = document.createElement('video'), log = [];
+        v.muted = true;
         names.forEach(n => v.addEventListener(n, () => log.push(n)));
         setup(v);
         setTimeout(() => resolve(log), 100);

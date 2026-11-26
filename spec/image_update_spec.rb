@@ -127,4 +127,55 @@ RSpec.describe 'update the image data' do
     poll_until { s.evaluate_script('log.length') >= 2 }
     expect(s.evaluate_script('log')).to eq(['load true', 't700'])
   end
+
+  # HTML lazy loading: an `<img loading=lazy>` below the fold is fetched once it nears the viewport, the page's `load`
+  # never waiting for it (Chrome and Firefox; Chrome fetches nothing before, csim-bench img13 `i9`).
+  it 'puts a lazy image off until it nears the viewport, the load waiting for none' do
+    requests = []
+    s = image_session(png, small, requests)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      document.body.innerHTML = '<div style="height: 5000px"></div><img id=lazy loading=lazy src="/b.png">';
+      lazy.onload = () => log.push('lazy load');
+    JS
+    s.evaluate_script('new Promise((r) => setTimeout(r, 200))')
+    expect([s.evaluate_script('[log.join(), lazy.complete]'), requests]).to eq([['', false], []])
+    s.execute_script('lazy.scrollIntoView()')
+    poll_until { s.evaluate_script('log.length') >= 1 }
+    expect(requests).to eq(['/b.png'])
+  end
+
+  # `sizes` gives the width-described candidates their density: at an 800px viewport, `sizes="(min-width: 600px) 25vw"`
+  # is 200px, so a `400w` is 2x and a `200w` 1x — the 1x taken (HTML "parse a sizes attribute").
+  it 'selects among width descriptors by the source size sizes gives' do
+    s = image_session(png, small)
+    s.current_window.resize_to(800, 600)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const i = new Image();
+      i.sizes = '(min-width: 600px) 25vw, 100vw';
+      i.srcset = '/a.png 400w, /b.png 200w';
+      i.onload = () => log.push(i.currentSrc.split('/').pop());
+    JS
+    poll_until { s.evaluate_script('log.length') >= 1 }
+    expect(s.evaluate_script('log')).to eq(['b.png'])
+  end
+
+  # An image the list of available images takes decodes, its `currentSrc` its URL at once (Chrome and Firefox, rv `dec`).
+  it 'decodes an image the list of available images takes' do
+    s = image_session(png, small)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const a = new Image();
+      a.onload = () => {
+        const b = new Image();
+        b.src = '/a.png';
+        log.push(b.currentSrc.split('/').pop());
+        b.decode().then(() => log.push('decoded'), (e) => log.push(e.name));
+      };
+      a.src = '/a.png';
+    JS
+    poll_until { s.evaluate_script('log.length') >= 2 }
+    expect(s.evaluate_script('log')).to eq(['a.png', 'decoded'])
+  end
 end

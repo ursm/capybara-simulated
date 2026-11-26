@@ -4,11 +4,12 @@
 // being decoded whole as it lands) and its image data — the decoded image's size, whether it taints a canvas it is drawn
 // into, the EXIF turn the decode applied, its natural size and its bitmap, which a canvas draws and the painter paints —
 // and the pixel density of its source; which instance of the algorithm was begun last, which alone takes effect at the
-// stable state it awaits; the document's list of available images, which a source in it takes at once; and the element
-// task each response lands in, which delays its document's load (a load gate: bridge.entry.js `loadGateTask`), fires its
-// `load` or `error` and settles the `decode()`s waiting on it (native-query-shadow.js `settleImageDecodes`). The request
-// itself — a preload's, a controlling service worker's, the network's — is subresource_obtain.rs `obtain_image`'s. Kept
-// per element in the arena (`RealmArena::images`), from its first update.
+// stable state it awaits; the document's list of available images, which a source in it takes at once; the requests lazy
+// loading puts off until they near the viewport; and the element task each response lands in — as far after its fetch as
+// its server took — which delays its document's load (a load gate: bridge.entry.js `loadGateTask`), fires its `load` or
+// `error` and settles the `decode()`s waiting on it (native-query-shadow.js `settleImageDecodes`). The request itself —
+// a preload's, a controlling service worker's, the network's — is subresource_obtain.rs `obtain_image`'s. Kept per
+// element in the arena (`RealmArena::images`), from its first update.
 
 use crate::dom::{NaturalSize, NodeId, RealmArena};
 
@@ -22,8 +23,8 @@ enum State {
 
 // An image request (HTML): its number — what a response for it, and its task, find it by — its current URL ('' for none),
 // the pixel density of its source (a `2x` candidate's 2: what its natural size is divided by), its state, its image data,
-// the key the list of available images keeps that data under once it is complete (none for a `blob:` URL's, whose bytes
-// are its store's), and what its response came to, held for the task that applies it — with the Resource Timing entry
+// the CORS mode the list of available images keeps that data under with its URL once it is complete (none for a `blob:`
+// URL's, whose bytes are its store's), and what its response came to, held for the task that applies it — with the Resource Timing entry
 // its host fetch files then, as it ends (`Filing`).
 #[derive(Clone)]
 struct Request {
@@ -32,9 +33,11 @@ struct Request {
     density: f64,
     state: State,
     data: Option<Data>,
-    key: Option<AvailableKey>,
+    key: Option<Mode>,
     landed: Option<Landed>,
     filing: Option<Filing>,
+    // The load gate its response's task is (its realm, its number), which an abort of it lets go of (`drop_gates`).
+    gate: Option<(i32, u32)>,
 }
 // A host fetch's entry to file as its response's task runs (subresource_obtain.rs `file_image`): the steps it is filed by,
 // the record the host answered with, its URL and its start on the page's clock.
@@ -48,7 +51,7 @@ struct Filing {
 
 impl Request {
     fn new(id: u32, url: String, density: f64) -> Request {
-        Request { id, url, density, state: State::Unavailable, data: None, key: None, landed: None, filing: None }
+        Request { id, url, density, state: State::Unavailable, data: None, key: None, landed: None, filing: None, gate: None }
     }
 }
 
@@ -133,41 +136,40 @@ impl ImageRequest {
     }
 }
 
-// The list of available images (HTML §4.8.4.3.2) of each realm's document, keyed by the URL and the CORS mode (none for
-// No CORS) — and, a CORS one, the document's origin, which is the realm's: the image data of each request that completed,
-// which a later "update the image data" for that key takes at once, whatever its response's caching said ("ignore
-// higher-layer caching": Chrome reads a `no-store` image's size at once the second time, csim-bench img13 `i2`). The user
-// agent may drop an entry at any time: past `AVAILABLE_IMAGES_MAX`, every one goes.
-type AvailableKey = (String, Option<String>);
+// The list of available images (HTML §4.8.4.3.2) of each realm's document, keyed by the URL and the CORS mode — and, a
+// CORS one, the document's origin, which is the realm's: the image data of each request that completed, which a later
+// "update the image data" for that key takes at once, whatever its response's caching said ("ignore higher-layer
+// caching": Chrome reads a `no-store` image's size at once the second time, csim-bench img13 `i2`). The user agent may
+// drop an entry at any time: past `AVAILABLE_IMAGES_BYTES` of decoded pixels, every one goes.
+// (…by realm and mode, then URL: a lookup by a `str`, never a copy of a `data:` URL that may be megabytes)
+type Mode = u8;
+const NO_CORS: Mode = 0;
+const ANONYMOUS: Mode = 1;
+const USE_CREDENTIALS: Mode = 2;
 #[derive(Default)]
-pub(crate) struct AvailableImages(std::collections::HashMap<(i32, AvailableKey), Data>);
-const AVAILABLE_IMAGES_MAX: usize = 1024;
+pub(crate) struct AvailableImages {
+    lists: std::collections::HashMap<(i32, Mode), std::collections::HashMap<String, Data>>,
+    bytes: usize,
+}
+const AVAILABLE_IMAGES_BYTES: usize = 256 << 20;
 
 impl AvailableImages {
-    fn get(&self, realm: i32, key: &AvailableKey) -> Option<&Data> {
-        self.0.get(&(realm, key.clone()))
+    fn get(&self, realm: i32, mode: Mode, url: &str) -> Option<&Data> {
+        self.lists.get(&(realm, mode))?.get(url)
     }
-    fn add(&mut self, realm: i32, key: AvailableKey, data: Data) {
-        if self.0.len() >= AVAILABLE_IMAGES_MAX {
-            self.0.clear();
+    fn add(&mut self, realm: i32, mode: Mode, url: String, data: Data) {
+        let size = data.size[0] as usize * data.size[1] as usize * 4;
+        if self.bytes + size > AVAILABLE_IMAGES_BYTES {
+            self.lists.clear();
+            self.bytes = 0;
         }
-        self.0.insert((realm, key), data);
+        self.bytes += size;
+        self.lists.entry((realm, mode)).or_default().insert(url, data);
     }
-}
-
-// An image's fetch the host makes on a thread of its own (subresource_obtain.rs `image_from_network`): the realm that
-// began it — whose document's load it delays, and which takes its result, wherever the element went meanwhile — the
-// element — held, as an element whose image is being fetched is kept from being collected — the request it is for, its
-// URL, and when it began on the page's clock (its Resource Timing entry's start) and on the event loop's (its server's
-// time counts from then: `imageFetchLand`), until the host hands the result back.
-pub(crate) struct HostFetch {
-    realm: i32,
-    node: NodeId,
-    _held: v8::Global<v8::Value>,
-    load: u32,
-    src: String,
-    start: f64,
-    began: f64,
+    fn forget_realm(&mut self, realm: i32) {
+        self.lists.retain(|&(r, _), _| r != realm);
+        self.bytes = self.lists.values().flat_map(|l| l.values()).map(|d| d.size[0] as usize * d.size[1] as usize * 4).sum();
+    }
 }
 
 impl RealmArena {
@@ -198,20 +200,14 @@ impl RealmArena {
     pub(crate) fn image_density(&self, id: NodeId) -> f64 {
         self.image(id).map(|r| r.current.density).filter(|&d| d > 0.0 && d.is_finite()).unwrap_or(1.0)
     }
-    // …realm `realm`'s fetches and list of available images forgotten with its nodes: a node id a later page reuses is
-    // no image of theirs, and its realm's document delays nothing any more.
-    pub(crate) fn forget_image_fetches_of(&mut self, realm: i32) {
-        self.image_fetches.retain(|_, f| f.realm != realm);
-        self.available_images.0.retain(|(r, _), _| *r != realm);
+    // …realm `realm`'s list of available images forgotten with its nodes: a node id a later page reuses is no image of
+    // theirs.
+    pub(crate) fn forget_available_images_of(&mut self, realm: i32) {
+        self.available_images.forget_realm(realm);
     }
     // Whether request `load` is `id`'s current or pending one (no later one aborted it).
     pub(crate) fn image_request_live(&self, id: NodeId, load: u32) -> bool {
         self.image(id).is_some_and(|r| r.live(load))
-    }
-    // Whether realm `realm`'s images delay its document's load event (HTML: an image's fetch in progress does): a live
-    // request the host is fetching. (…its response's task, once it has one, is a load gate: `queue_task`)
-    pub(crate) fn images_delay_load(&self, realm: i32) -> bool {
-        self.image_fetches.values().any(|f| f.realm == realm && self.get(f.node).is_some() && self.image_request_live(f.node, f.load))
     }
     // The current request's image data become `data` (none: no image), its natural size laid out by it — and what the
     // element shows moved, its box laid out again before an event a listener reads its size in, in the realm whose tree
@@ -239,8 +235,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageInfo", info, context_id);
     crate::dom::register(scope, ns, "imageUrl", url, context_id);
     crate::dom::register(scope, ns, "imageBitmap", bitmap_op, context_id);
-    crate::dom::register(scope, ns, "imageFetchRealm", fetch_realm, context_id);
-    crate::dom::register(scope, ns, "imageFetchLand", fetch_land, context_id);
+    crate::dom::register(scope, ns, "imageLazyPending", lazy_pending, context_id);
+    crate::dom::register(scope, ns, "imageLazyResume", lazy_resume, context_id);
 }
 
 fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
@@ -294,7 +290,7 @@ pub(crate) fn select_source(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: Node
     let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
     let arena = d.arena.enter_known(cid)?;
     let engine = d.styles.get(&cid);
-    crate::image_source::select(arena, id, &|media| crate::style::media_matches(engine, arena, screen, media))
+    crate::image_source::select(arena, id, screen.viewport, &|media| crate::style::media_matches(engine, arena, screen, media))
 }
 
 // What a caller of "update the image data" says of it: its stable state has come already (the parser's images: the
@@ -330,9 +326,9 @@ fn update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         }
         abort_all(scope, cid, id, State::Broken);
     } else if let Some(url) = source.filter(|s| !s.is_empty()).and_then(|s| arena.parse_document_url(doc, &s)) {
-        let key = available_key(arena, id, url.href());
-        if let Some(data) = arena.available_images.get(cid, &key).cloned() {
-            take_available(scope, cid, id, key, data);
+        let mode = cors_mode(arena, id);
+        if let Some(data) = arena.available_images.get(cid, mode, url.href()).cloned() {
+            take_available(scope, cid, id, url.href().to_owned(), mode, data);
             return;
         }
     }
@@ -357,10 +353,13 @@ fn run_stable_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let (update, cid) = (n.uint32_value(scope).unwrap_or(0), realm.int32_value(scope).unwrap_or(0));
     stable_state(scope, cid, id, update, host);
 }
-// The key of `url` in the list of available images, for the element's CORS mode.
-fn available_key(arena: &RealmArena, id: NodeId, url: &str) -> AvailableKey {
-    let mode = arena.get(id).and_then(|n| n.plain_attr("crossorigin")).map(|m| if m.eq_ignore_ascii_case("use-credentials") { "use-credentials" } else { "anonymous" });
-    (url.to_owned(), mode.map(str::to_owned))
+// The element's CORS mode, as the list of available images keys it: its `crossorigin` state.
+fn cors_mode(arena: &RealmArena, id: NodeId) -> Mode {
+    match arena.get(id).and_then(|n| n.plain_attr("crossorigin")) {
+        None => NO_CORS,
+        Some(m) if m.eq_ignore_ascii_case("use-credentials") => USE_CREDENTIALS,
+        Some(_) => ANONYMOUS,
+    }
 }
 // The element's requests aborted — the current one and the pending one (HTML "abort the image request": their data
 // forgotten, their fetches' tasks dropped) — and `request` its current one, none pending: what it shows its data, and
@@ -369,14 +368,21 @@ fn replace_current(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, reque
     let arena = crate::dom::realm(scope, cid);
     let r = arena.image_mut(id);
     let shown = r.current.data.is_some() || request.data.is_some();
-    r.current = request;
-    r.pending = None;
+    let old = std::mem::replace(&mut r.current, request);
+    let pending = r.pending.take();
     let data = r.current.data.clone();
     if shown {
         arena.show(id, data.as_ref());
     }
+    drop_gates(scope, std::iter::once(old).chain(pending));
     let el = crate::dom::node_value(scope, Some(id));
     settle_decodes(scope, el, false);
+}
+// …the load gates of `aborted`'s responses let go of: an aborted fetch delays its document's load no more.
+fn drop_gates(scope: &mut v8::PinScope<'_, '_>, aborted: impl Iterator<Item = Request>) {
+    for (cid, gate) in aborted.filter_map(|r| r.gate) {
+        crate::load_gates::drop_gate(scope, cid, gate);
+    }
 }
 // …one of no URL and no image data, `state`: an `<img>`'s broken (HTML), an SVG `<image>`'s or an `<input type=image>`'s
 // with no source none at all — nothing to draw, nothing broken (Chrome and Firefox: no pattern of one, no exception).
@@ -384,15 +390,16 @@ fn abort_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, state: Stat
     let made = crate::dom::realm(scope, cid).image_mut(id).make(String::new(), 1.0);
     replace_current(scope, cid, id, Request { state, ..made });
 }
-// …and the list of available images' entry for `key` taken (HTML "update the image data" step 8): a new current request
-// completely available with its data, and an element task queued that sets its URL and fires `load`.
-fn take_available(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, key: AvailableKey, data: Data) {
+// …and the list of available images' entry for `url` taken (HTML "update the image data" step 8): a new current request
+// completely available with its data, its URL `url` at once — where HTML sets it in the task, Chrome and Firefox read it
+// right after the `src` is set (csim-bench img13 `i2`, rv `mut`) — and an element task queued that fires `load`.
+fn take_available(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, url: String, mode: Mode, data: Data) {
     let r = crate::dom::realm(scope, cid).image_mut(id);
     r.update += 1;
     r.stable = r.update;
-    let made = r.make(String::new(), 1.0);
+    let made = r.make(url, 1.0);
     let load = made.id;
-    replace_current(scope, cid, id, Request { state: State::Complete, data: Some(data), key: Some(key), ..made });
+    replace_current(scope, cid, id, Request { state: State::Complete, data: Some(data), key: Some(mode), ..made });
     queue_task(scope, id, load, Task::Available, 0.0);
 }
 
@@ -433,23 +440,86 @@ fn stable_state(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, update: 
         queue_task(scope, id, load, Task::Error, 0.0);
         return;
     };
-    let key = (!url.starts_with("blob:")).then(|| available_key(arena, id, &url));
+    let key = (!url.starts_with("blob:")).then(|| cors_mode(arena, id));
     let r = arena.image_mut(id);
     // (…nor one the current request is coming from still — as HTML has it for one partially available, a resource here
     // being nothing until it is whole: a parsed image re-appended fetches it once)
     let coming = r.current.state == State::Unavailable && r.current.url == url && r.pending.is_none();
     if coming || r.pending.as_ref().is_some_and(|p| p.url == url) {
+        // (…one a lazy image put off, its `loading` no longer lazy: its fetch made now — HTML's "lazy load resumption
+        // steps" as its `loading` turns eager)
+        if !lazy(arena, id) {
+            resume(scope, cid, id, host);
+        }
         return;
     }
     let mut request = r.make(url.clone(), density);
     request.key = key;
     let load = request.id;
     if r.current.state == State::Complete {
-        r.pending = Some(request);
+        let old = r.pending.replace(request);
+        drop_gates(scope, old.into_iter());
     } else {
         replace_current(scope, cid, id, request);
     }
+    // HTML "will lazy load element steps": an `<img loading=lazy>`'s fetch put off until it intersects the viewport
+    // (`imageLazyResume`), delaying its document's load by nothing meanwhile — Chrome and Firefox fire a page's `load`
+    // with one below the fold still unloaded, Chrome fetching nothing of it (csim-bench img13 `i9`).
+    let arena = crate::dom::realm(scope, cid);
+    if lazy(arena, id) {
+        arena.lazy_images.push((id, load));
+        return;
+    }
     crate::subresource_obtain::obtain_image(scope, host, cid, id, doc, url, load);
+}
+// Whether the element's `loading` is in the Lazy state (ASCII case-insensitively `lazy`; an `<img>`'s alone here).
+fn lazy(arena: &RealmArena, id: NodeId) -> bool {
+    arena.get(id).is_some_and(|n| n.is_html_named("img") && n.plain_attr("loading").is_some_and(|l| l.eq_ignore_ascii_case("lazy")))
+}
+// The lazy load resumption steps of the element's request put off, if it has one: its fetch made.
+fn resume(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, host: v8::Local<'_, v8::Function>) {
+    let arena = crate::dom::realm(scope, cid);
+    let Some(at) = arena.lazy_images.iter().position(|&(el, _)| el == id) else { return };
+    let (_, load) = arena.lazy_images.remove(at);
+    let url = arena.image(id).and_then(|r| {
+        let request = if r.current.id == load { Some(&r.current) } else { r.pending.as_ref().filter(|p| p.id == load) };
+        request.map(|q| q.url.clone())
+    });
+    let (Some(url), Some(doc)) = (url, crate::dom::node_document(scope, id)) else { return };
+    crate::subresource_obtain::obtain_image(scope, host, cid, id, doc, url, load);
+}
+// The margin a lazy image's intersection with the viewport is taken with (HTML's "lazy load root margin", the user
+// agent's to choose): Chrome's on a fast connection.
+const LAZY_ROOT_MARGIN: f64 = 1250.0;
+
+// __dom.imageLazyPending() -> whether an image of the calling realm's document has a fetch its lazy loading put off: what
+// the rendering update asks before it lays out to resume one (timers.js).
+fn lazy_pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    rv.set_bool(arena.lazy_images.iter().any(|&(el, _)| arena.get(el).is_some_and(|n| n.realm == cid)));
+}
+// __dom.imageLazyResume(host) — at the rendering update, its layout current: the lazy load intersection observer's steps
+// for the calling realm's lazy images — each that intersects the viewport, grown by `LAZY_ROOT_MARGIN`, its fetch made
+// (`resume`); one gone, or whose request a later one aborted, forgotten.
+fn lazy_resume(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let mut lazy = std::mem::take(&mut arena.lazy_images);
+    lazy.retain(|&(el, load)| arena.get(el).is_some() && arena.image(el).is_some_and(|r| r.live(load)));
+    arena.lazy_images = lazy;
+    let margin = [crate::intersection::Margin { value: LAZY_ROOT_MARGIN, percent: false }; 4];
+    let root = arena.root_intersection_rect(None, &margin);
+    let due: Vec<NodeId> = arena
+        .lazy_images
+        .iter()
+        .map(|&(el, _)| el)
+        .filter(|&el| arena.get(el).is_some_and(|n| n.realm == cid) && arena.observe_intersection(el, None, root, &[0.0]).intersection.is_some())
+        .collect();
+    for el in due {
+        resume(scope, cid, el, host);
+    }
 }
 
 // What an element task of an image's carries out (`run_task`): a request's response landed — its data shown, its `load`
@@ -477,7 +547,12 @@ fn land(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: u32, landed: Landed,
         let el = crate::dom::node_value(scope, Some(id));
         settle_decodes(scope, el, false);
     }
-    queue_task(scope, id, load, Task::Landed, due);
+    let gate = queue_task(scope, id, load, Task::Landed, due);
+    let arena = &mut crate::dom::dom(scope).arena;
+    let cid = arena.get(id).map_or(0, |n| n.realm);
+    if let Some(request) = arena.images.get_mut(&id).and_then(|r| r.request_mut(load)) {
+        request.gate = gate.map(|g| (cid, g));
+    }
     true
 }
 // …with an image decoded here (`decoded`: none for none), `tainted` its response's CORS-cross-origin, its task queued now.
@@ -541,18 +616,19 @@ pub(crate) fn land_record(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: u3
 // An element task of the image `id`'s for request `load` queued `due` ms from now (HTML "queue an element task on the DOM
 // manipulation task source"), its document's load waiting for it (a load gate, whose due a visit steps the event loop to:
 // frame_navigation.rs `loadDueIn`).
-fn queue_task(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: u32, task: Task, due: f64) {
+// …its gate's number (none for a cancelled one's, a plain task: its document's abort delays the load by none of its
+// fetches).
+fn queue_task(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: u32, task: Task, due: f64) -> Option<u32> {
     let el = crate::dom::node_value(scope, Some(id));
     let (n, t) = (v8::Integer::new_from_unsigned(scope, load).into(), v8::Integer::new_from_unsigned(scope, task as u32).into());
     let data = v8::Array::new_with_elements(scope, &[el, n, t]);
-    let Some(step) = v8::Function::builder(run_task).data(data.into()).build(scope) else { return };
-    // (…a cancelled one's no more: its document's abort delays the load by none of its fetches)
+    let step = v8::Function::builder(run_task).data(data.into()).build(scope)?;
     if task == Task::Cancelled {
         crate::timers::queue_task(scope, step);
-        return;
+        return None;
     }
     let due = v8::Number::new(scope, due.max(0.0)).into();
-    crate::dom::call_host_step(scope, "loadGateTask", &[el, step.into(), due]);
+    crate::dom::call_host_step(scope, "loadGateTask", &[el, step.into(), due])?.uint32_value(scope)
 }
 fn run_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(data) = v8::Local::<v8::Array>::try_from(args.data()) else { return };
@@ -564,13 +640,7 @@ fn run_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let arena = &mut crate::dom::dom(scope).arena;
     let Some(r) = arena.images.get_mut(&id).filter(|r| r.live(load)) else { return };
     let loaded = match task {
-        // (…its URL, the entry's, set now)
-        Task::Available => {
-            if let Some((url, _)) = r.current.key.clone() {
-                r.current.url = url;
-            }
-            true
-        }
+        Task::Available => true,
         Task::Error => false,
         Task::Cancelled => {
             if r.pending.as_ref().is_some_and(|p| p.id == load) {
@@ -606,9 +676,10 @@ fn run_task(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
                 }
             };
             r.current.data = data.clone();
-            if let (Some(key), Some(data)) = (r.current.key.clone(), data.clone()) {
+            if let (Some(mode), Some(data)) = (r.current.key, data.clone()) {
+                let url = r.current.url.clone();
                 let realm = arena.get(id).map_or(0, |n| n.realm);
-                arena.available_images.add(realm, key, data);
+                arena.available_images.add(realm, mode, url, data);
             }
             arena.show(id, data.as_ref());
             data.is_some()
@@ -627,16 +698,14 @@ fn settle_decodes(scope: &mut v8::PinScope<'_, '_>, el: v8::Local<'_, v8::Value>
 
 // __dom.imageFetchesStop() -> how many requests of the calling realm's document's images its abort cancelled (HTML "abort
 // a document": "cancel any instance of the fetch algorithm in the context of document, discarding any tasks queued for
-// them") — each the host is fetching, or whose response's task is still to run — its response landing into nothing,
-// delaying the load no more, broken on an element task with no event, as Firefox has it, where Chrome fires `error`. An
+// them") — each whose response's task is still to run — its response landing into nothing, delaying the load no more, broken on an element task with no event, as Firefox has it, where Chrome fires `error`. An
 // instance whose stable state has not come has made no request yet: it goes on to its `load` or its `error` as it would —
 // Chrome and Firefox, with a real image, for an `src` set, a node inserted or a `document.write` in the same task as the
 // `stop()` (rvfn x_real_*, 2026-11-06).
 fn fetches_stop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let arena = &mut crate::dom::dom(scope).arena;
-    let mut stopped: Vec<(NodeId, u32)> = arena.image_fetches.values().filter(|f| f.realm == cid).map(|f| (f.node, f.load)).collect();
-    arena.image_fetches.retain(|_, f| f.realm != cid);
+    let mut stopped = Vec::new();
     let ours: Vec<NodeId> = arena.images.keys().copied().filter(|&id| arena.get(id).is_some_and(|n| n.realm == cid)).collect();
     for id in ours {
         let Some(r) = arena.images.get_mut(&id) else { continue };
@@ -653,8 +722,8 @@ fn fetches_stop(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     }
 }
 
-// __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation, density]: the current request, as the
-// element's members and a canvas read it — its decoded bitmap's size, and its source's pixel density, which the natural
+// __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation, density, requested]: the current request,
+// as the element's members and a canvas read it — its decoded bitmap's size, and its source's pixel density, which the natural
 // size is that size divided by. `complete` HTML's: no `src` and no `srcset`, or no `srcset` and an empty `src`, or the
 // current request completely available or broken with none pending — and no instance of "update the image data" awaiting
 // its stable state, which makes the request that is pending: false at once after an `src` is set (WPT
@@ -664,10 +733,17 @@ fn info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
     let arena = &crate::dom::dom(scope).arena;
     let sourceless = arena.get(id).is_some_and(|n| n.plain_attr("srcset").is_none() && n.plain_attr("src").is_none_or(str::is_empty));
     let (settled, broken, data) = match arena.image(id) {
-        Some(r) => (!r.updating() && r.current.state != State::Unavailable, r.current.state == State::Broken, r.current.data.clone()),
+        // (…a request whose response came to no image broken as that is known, ahead of the task that says so: a
+        // `decode()` rejected before its `error`, `i7`)
+        Some(r) => (
+            !r.updating() && r.current.state != State::Unavailable,
+            r.current.state == State::Broken || matches!(r.current.landed, Some(Landed::Broken)),
+            r.current.data.clone(),
+        ),
         None => (false, false, None),
     };
     let density = arena.image_density(id);
+    let requested = arena.image(id).is_some_and(|r| r.update > 0);
     let (size, tainted, orientation) = data.map_or(([0, 0], false, 0), |d| (d.size, d.tainted, d.orientation));
     let items = [
         v8::Boolean::new(scope, sourceless || settled).into(),
@@ -677,6 +753,7 @@ fn info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
         v8::Boolean::new(scope, tainted).into(),
         v8::Integer::new_from_unsigned(scope, u32::from(orientation)).into(),
         v8::Number::new(scope, density).into(),
+        v8::Boolean::new(scope, requested).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
@@ -704,55 +781,25 @@ fn url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>
     rv.set(v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into));
 }
 
-// The host fetches request `load` of the image `node`'s — of realm `realm`'s making — on a thread of its own, as host
-// request `id`, `src` begun at `start` on the page's clock (`HostFetch`), its result handed back to the realm that began
-// it (`imageFetchLand`).
-pub(crate) fn begin_host_fetch(scope: &mut v8::PinScope<'_, '_>, realm: i32, id: u32, node: NodeId, load: u32, src: &str, start: f64) {
-    let element = crate::dom::node_value(scope, Some(node));
-    let _held = v8::Global::new(scope, element);
-    let arena = &mut crate::dom::dom(scope).arena;
-    let began = arena.event_loop.clock;
-    arena.image_fetches.insert(id, HostFetch { realm, node, _held, load, src: src.to_owned(), start, began });
-}
-// __dom.imageFetchLand(id, r, host) -> whether the host's request `id` was one the calling realm began (the host offers it
-// to each realm in turn): its record `r` landed (`land_record`), its entry filed as its task runs (subresource_obtain.rs
-// `file_image`), that task as far after it began as its server took — its sleeps (`slept`) and its modeled delay (`meta.delayMs`, a WPT
-// handler's virtualized `time.sleep`), virtual ms on the event loop's clock. Nothing lands of one whose element is gone,
-// nor of one a later request aborted, which files nothing either.
-fn fetch_land(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = args.get(0).uint32_value(scope).unwrap_or(0);
-    let cid = crate::dom::realm_id(scope, &args);
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(2)) else { return rv.set_bool(false) };
-    let arena = &mut crate::dom::dom(scope).arena;
-    let Some(f) = arena.image_fetches.get(&id) else { return rv.set_bool(false) };
-    if arena.get(f.node).is_none() {
-        arena.image_fetches.remove(&id);
-        return rv.set_bool(false);
-    }
-    if f.realm != cid {
-        return rv.set_bool(false);
-    }
-    let HostFetch { node, load, src, start, began, .. } = arena.image_fetches.remove(&id).expect("a fetch found above");
-    rv.set_bool(true);
-    if !arena.image_request_live(node, load) {
-        return;
-    }
-    let r = v8::Local::<v8::Object>::try_from(args.get(1)).ok();
+// Request `load` of the image `el`'s for `src`, begun at `start` on the page's clock, answered by the host with the record
+// `r` (subresource_obtain.rs `image_from_network`): landed (`land_record`) as far after it began as its server took — its
+// sleeps (`slept`, which the host counts as a script fetch's: Browser#image_fetch) and its modeled delay (`meta.delayMs`,
+// a WPT handler's virtualized `time.sleep`), virtual ms on the event loop's clock, a load gate whose due a visit steps to
+// — its entry filed as it lands (`file_image`; at once for one due now).
+pub(crate) fn land_fetched(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, el: NodeId, load: u32, src: &str, start: f64, r: Option<v8::Local<'_, v8::Object>>) -> Result<(), crate::font_files::Terminated> {
     let ms = |scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Object>>, k: &str| {
         obj.and_then(|o| crate::dom::member(scope, o, k)).and_then(|v| v.number_value(scope)).filter(|v| v.is_finite()).unwrap_or(0.0)
     };
     let meta = r.and_then(|r| crate::dom::member(scope, r, "meta")).and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
-    let took = ms(scope, r, "slept") + ms(scope, meta, "delayMs");
-    let due = began + took - crate::dom::dom(scope).arena.event_loop.clock;
-    let filing = Filing { host: v8::Global::new(scope, host), record: r.map(|r| v8::Global::new(scope, r)), src, start };
-    if let Some(request) = crate::dom::dom(scope).arena.images.get_mut(&node).and_then(|i| i.request_mut(load)) {
-        request.filing = Some(filing);
+    let due = ms(scope, r, "slept") + ms(scope, meta, "delayMs");
+    if due <= 0.0 {
+        crate::subresource_obtain::file_image(scope, host, el, src, start, r)?;
+    } else {
+        let (host, record) = (v8::Global::new(scope, host), r.map(|r| v8::Global::new(scope, r)));
+        if let Some(request) = crate::dom::dom(scope).arena.images.get_mut(&el).and_then(|i| i.request_mut(load)) {
+            request.filing = Some(Filing { host, record, src: src.to_owned(), start });
+        }
     }
-    land_record(scope, node, load, r, due);
-}
-// __dom.imageFetchRealm(id) -> the realm that began the host's request `id` — the one to hand its result to — or -1 for
-// none (a request of a realm gone, or of a page left).
-fn fetch_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = args.get(0).uint32_value(scope).unwrap_or(0);
-    rv.set_int32(crate::dom::dom(scope).arena.image_fetches.get(&id).map_or(-1, |f| f.realm));
+    land_record(scope, el, load, r, due);
+    Ok(())
 }

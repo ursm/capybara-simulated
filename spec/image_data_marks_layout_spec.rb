@@ -38,7 +38,7 @@ RSpec.describe "an image's data applied" do
         };
         setTimeout(() => { im.src = #{src}; t.getBoundingClientRect(); }, 30);
       JS
-      # (…its load waited for, not a wall-clock while: a host thread's fetch takes what it takes)
+      # (…its load waited for, not a wall-clock while: its response lands as a task)
       s.find('#loaded', visible: :all)
       3.times { s.evaluate_script('1') }
       top = s.evaluate_script("Math.round(document.getElementById('t').getBoundingClientRect().top)")

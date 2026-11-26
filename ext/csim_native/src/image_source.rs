@@ -110,38 +110,258 @@ fn leading_float(s: &str) -> f64 {
 
 // The URL `img` fetches ("select an image source", in brief): its picture's selected source's candidates, else its
 // own `srcset`'s, over its `src`. Where its own srcset has only densities and no `1x`, `src` joins it as `1x`
-// (`srcset="big 99x"` still fetches `src` at a device pixel ratio of 1). A candidate with a width is chosen first-come
-// (exact for one); else the smallest density at or above 1, else the largest. None where it names nothing. With it, the
-// candidate's pixel density — 1 for `src` alone, and for a width-described candidate (its `sizes` not modelled yet).
-pub(crate) fn select(arena: &RealmArena, img: NodeId, media_matches: &dyn Fn(&str) -> bool) -> Option<(String, f64)> {
+// (`srcset="big 99x"` still fetches `src` at a device pixel ratio of 1). Width-described candidates (`Nw`) take their
+// density from the source size its `sizes` gives (`source_size`), a density-described one in the same set dropped (HTML
+// "parse a srcset attribute": a set with a width descriptor is one of widths). The candidate chosen is the smallest
+// density at or above 1 (the display's ratio), else the largest — with its density. None where it names nothing.
+pub(crate) fn select(arena: &RealmArena, img: NodeId, viewport: (f32, f32), media_matches: &dyn Fn(&str) -> bool) -> Option<(String, f64)> {
     let node = arena.get(img)?;
     let picked = picture_source(arena, img, media_matches);
-    let srcset = match picked {
-        Some(s) => arena.get(s).and_then(|n| n.plain_attr("srcset")),
-        None => node.plain_attr("srcset"),
+    let (srcset, sizes) = match picked.and_then(|s| arena.get(s)) {
+        Some(s) => (s.plain_attr("srcset"), s.plain_attr("sizes")),
+        None => (node.plain_attr("srcset"), node.plain_attr("sizes")),
     };
     let src = node.plain_attr("src");
     let mut candidates = parse_srcset(srcset.unwrap_or(""));
     if candidates.is_empty() {
         return src.map(|s| (s.to_owned(), 1.0));
     }
-    let by_width = candidates.iter().any(|c| c.width.is_some());
-    if by_width {
-        return Some((candidates[0].url.to_owned(), 1.0));
-    }
-    if picked.is_none() && !candidates.iter().any(|c| c.density == 1.0) {
+    if candidates.iter().any(|c| c.width.is_some()) {
+        let size = source_size(sizes.unwrap_or(""), viewport, media_matches);
+        candidates.retain(|c| c.width.is_some());
+        for c in &mut candidates {
+            c.density = c.width.unwrap_or(0) as f64 / size;
+        }
+    } else if picked.is_none() && !candidates.iter().any(|c| c.density == 1.0) {
         if let Some(src) = src.filter(|s| !s.is_empty()) {
             candidates.push(Candidate { url: src, density: 1.0, width: None });
         }
     }
+    candidates.retain(|c| c.density.is_finite() && c.density > 0.0);
     candidates.sort_by(|a, b| a.density.total_cmp(&b.density));
     let chosen = candidates.iter().find(|c| c.density >= 1.0).or(candidates.last())?;
     Some((chosen.url.to_owned(), chosen.density))
 }
 
+// HTML "parse a sizes attribute" (§4.8.4.3.11), its source size: the first `<source-size>` of the comma-separated list
+// whose `<media-condition>` matches (one with none always does), its `<source-size-value>` — a length, `calc()` among
+// them — in CSS pixels on a `viewport`; 100vw where none does, or one is invalid (a negative one, a percentage), or the
+// list says `auto` (a lazy image's concrete width, which only layout knows: 100vw as HTML has it where none is taken).
+pub(crate) fn source_size(sizes: &str, viewport: (f32, f32), media_matches: &dyn Fn(&str) -> bool) -> f64 {
+    let vw = f64::from(viewport.0);
+    for item in split_top_level(sizes) {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        let (condition, value) = split_last_value(item);
+        if value.eq_ignore_ascii_case("auto") {
+            continue;
+        }
+        let Some(px) = css_length(value, viewport).filter(|v| *v >= 0.0) else { continue };
+        let condition = condition.trim();
+        if condition.is_empty() || media_matches(condition) {
+            return px;
+        }
+    }
+    vw
+}
+// …its list's items: split on commas outside parentheses.
+fn split_top_level(s: &str) -> Vec<&str> {
+    let (mut depth, mut start, mut out) = (0i32, 0, Vec::new());
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth <= 0 => {
+                out.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&s[start..]);
+    out
+}
+// …an item's last component value — a function with its parenthesised arguments (`calc(…)`), else its last token — and
+// what comes before it, the media condition.
+fn split_last_value(item: &str) -> (&str, &str) {
+    if item.ends_with(')') {
+        let mut depth = 0;
+        for (i, c) in item.char_indices().rev() {
+            match c {
+                ')' => depth += 1,
+                '(' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let name = item[..i].rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).map_or(0, |at| at + 1);
+                        // (…a bare parenthesised group is the media condition's own, no value at all)
+                        return if name == i { (item, "") } else { (&item[..name], &item[name..]) };
+                    }
+                }
+                _ => {}
+            }
+        }
+        return (item, "");
+    }
+    match item.rfind(|c: char| c.is_ascii_whitespace()) {
+        Some(at) => (&item[..at], &item[at + 1..]),
+        None => ("", item),
+    }
+}
+// A CSS `<length>` in px on a `viewport` — an absolute unit, a font-relative one at the initial 16px (ex and ch half of it),
+// a viewport-relative one, a unitless 0, or a `calc()` of them (`+`, `-` between lengths, `*` and `/` by numbers) — none
+// for anything else.
+fn css_length(text: &str, viewport: (f32, f32)) -> Option<f64> {
+    let mut p = LengthParser { s: text.trim().as_bytes(), at: 0, viewport: (f64::from(viewport.0), f64::from(viewport.1)) };
+    let value = p.value()?;
+    p.ws();
+    (p.at == p.s.len()).then_some(value)
+}
+struct LengthParser<'a> {
+    s: &'a [u8],
+    at: usize,
+    viewport: (f64, f64),
+}
+impl LengthParser<'_> {
+    fn ws(&mut self) {
+        while self.s.get(self.at).is_some_and(u8::is_ascii_whitespace) {
+            self.at += 1;
+        }
+    }
+    fn eat(&mut self, text: &str) -> bool {
+        let end = self.at + text.len();
+        let hit = self.s.get(self.at..end).is_some_and(|t| t.eq_ignore_ascii_case(text.as_bytes()));
+        if hit {
+            self.at = end;
+        }
+        hit
+    }
+    // A top-level value: a `calc()` or a dimension.
+    fn value(&mut self) -> Option<f64> {
+        self.ws();
+        if self.eat("calc(") {
+            let v = self.sum()?;
+            self.ws();
+            return self.eat(")").then_some(v);
+        }
+        self.dimension()?.1
+    }
+    // `a + b - c`: lengths; `*` / `/` by numbers (`term`).
+    fn sum(&mut self) -> Option<f64> {
+        let mut total = self.term()?.filter_length()?;
+        loop {
+            self.ws();
+            let sign = if self.eat("+") { 1.0 } else if self.eat("-") { -1.0 } else { return Some(total) };
+            total += sign * self.term()?.filter_length()?;
+        }
+    }
+    fn term(&mut self) -> Option<Term> {
+        let mut t = self.factor()?;
+        loop {
+            self.ws();
+            if self.eat("*") {
+                t = t.times(self.factor()?)?;
+            } else if self.eat("/") {
+                let Term::Number(d) = self.factor()? else { return None };
+                t = t.times(Term::Number(1.0 / d))?;
+            } else {
+                return Some(t);
+            }
+        }
+    }
+    fn factor(&mut self) -> Option<Term> {
+        self.ws();
+        if self.eat("(") || self.eat("calc(") {
+            let v = self.sum()?;
+            self.ws();
+            return self.eat(")").then_some(Term::Length(v));
+        }
+        let (number, length) = self.dimension()?;
+        Some(length.map_or(Term::Number(number), Term::Length))
+    }
+    // A number and its unit: (the number, its length in px — None for a bare number but 0).
+    fn dimension(&mut self) -> Option<(f64, Option<f64>)> {
+        self.ws();
+        let start = self.at;
+        let digit = |p: &Self, at: usize| p.s.get(at).is_some_and(u8::is_ascii_digit);
+        if matches!(self.s.get(self.at), Some(b'+' | b'-')) {
+            self.at += 1;
+        }
+        while digit(self, self.at) || self.s.get(self.at) == Some(&b'.') {
+            self.at += 1;
+        }
+        // (…an exponent, where an `e` is followed by digits — else it starts a unit: `em`, `ex`)
+        if matches!(self.s.get(self.at), Some(b'e' | b'E')) {
+            let signed = matches!(self.s.get(self.at + 1), Some(b'+' | b'-'));
+            let first = self.at + 1 + usize::from(signed);
+            if digit(self, first) {
+                self.at = first;
+                while digit(self, self.at) {
+                    self.at += 1;
+                }
+            }
+        }
+        let number: f64 = std::str::from_utf8(&self.s[start..self.at]).ok()?.parse().ok()?;
+        let unit_start = self.at;
+        while self.s.get(self.at).is_some_and(u8::is_ascii_alphabetic) {
+            self.at += 1;
+        }
+        let unit = std::str::from_utf8(&self.s[unit_start..self.at]).ok()?.to_ascii_lowercase();
+        let (vw, vh) = (self.viewport.0 / 100.0, self.viewport.1 / 100.0);
+        let px = match unit.as_str() {
+            "" => return Some((number, (number == 0.0).then_some(0.0))),
+            "px" => 1.0,
+            "em" | "rem" => 16.0,
+            "ex" | "ch" => 8.0,
+            "in" => 96.0,
+            "cm" => 96.0 / 2.54,
+            "mm" => 96.0 / 25.4,
+            "q" => 96.0 / 101.6,
+            "pt" => 96.0 / 72.0,
+            "pc" => 16.0,
+            "vw" | "svw" | "lvw" | "dvw" => vw,
+            "vh" | "svh" | "lvh" | "dvh" => vh,
+            "vmin" => vw.min(vh),
+            "vmax" => vw.max(vh),
+            _ => return None,
+        };
+        Some((number, Some(number * px)))
+    }
+}
+enum Term {
+    Number(f64),
+    Length(f64),
+}
+impl Term {
+    fn filter_length(self) -> Option<f64> {
+        match self {
+            Term::Length(v) => Some(v),
+            Term::Number(_) => None,
+        }
+    }
+    fn times(self, other: Term) -> Option<Term> {
+        match (self, other) {
+            (Term::Number(a), Term::Number(b)) => Some(Term::Number(a * b)),
+            (Term::Length(a), Term::Number(b)) | (Term::Number(b), Term::Length(a)) => Some(Term::Length(a * b)),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn takes_the_first_matching_source_size() {
+        let matches = |m: &str| m == "(min-width: 500px)";
+        assert_eq!(source_size("(min-width: 500px) 50vw, 100px", (800.0, 600.0), &matches), 400.0);
+        assert_eq!(source_size("(max-width: 1px) 10px, calc(100vw - 2 * 10px)", (800.0, 600.0), &matches), 780.0);
+        assert_eq!(source_size("auto, 2em", (800.0, 600.0), &matches), 32.0);
+        assert_eq!(source_size("-5px, bogus", (800.0, 600.0), &matches), 800.0);
+        assert_eq!(source_size("", (800.0, 600.0), &matches), 800.0);
+    }
 
     #[test]
     fn parses_candidates() {

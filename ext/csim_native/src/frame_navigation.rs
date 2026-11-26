@@ -1212,8 +1212,8 @@ fn load_due_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 // …when, on the clock, of realm `cid`'s document: a load gate's task (a style sheet's, an `@import` level's, a frame's
 // build), a script's landing — and, as HTML's iframe delays its document's load by its content's, the same of a child
-// navigable's document, however deep; a container's load owed with none of those due, now. (None of its images': the host's fetch threads
-// land them, whatever the clock — `images_delay_load`.)
+// navigable's document, however deep; a container's load owed with none of those due, now. (An image's response is a load gate
+// too, due as far after its fetch as its server took: image_requests.rs `land_fetched`.)
 fn load_due_at(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> Option<f64> {
     let arena = crate::dom::realm(scope, cid);
     let doc = arena.realm_document(cid)?;
@@ -1235,12 +1235,16 @@ fn load_due_at(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> Option<f64> {
             earliest(at);
         }
     }
-    // (…a container's load owed with nothing of its content's due — its document still to come — now)
+    // (…a media element's delaying it — its fetch's landing, or its tasks queued now: media.rs `media_load_due` — and a
+    // container's load owed with nothing of its content's due — its document still to come — now)
+    if let Some(at) = crate::dom::realm(scope, cid).media_load_due(cid) {
+        earliest(at);
+    }
     due.or(owed.then_some(clock))
 }
 impl RealmArena {
-    // Whether something delays realm `cid`'s document's load event now: its images (image_requests.rs
-    // `images_delay_load`), a load gate's work under way or one late that holds it (load_gates.rs), its containers' loads still owed
+    // Whether something delays realm `cid`'s document's load event now: an image's or an audio's request a service worker
+    // is yet to answer (subresource_obtain.rs `obtains_delay_load`), a load gate's work under way or one late that holds it (load_gates.rs), its containers' loads still owed
     // (`frame_loads_owed`), and its child navigables' documents
     // whose own load is delayed.
     // Whether realm `cid`'s document has a frame in it.
@@ -1248,7 +1252,8 @@ impl RealmArena {
         self.frame_navigations.0.keys().any(|&container| self.get(container).is_some_and(|n| n.realm == cid) && self.is_connected(container))
     }
     pub(crate) fn load_delayed_here(&self, cid: i32) -> bool {
-        self.images_delay_load(cid)
+        self.obtains_delay_load(cid)
+            || self.media_delays_load(cid)
             || self.realm_state(cid).is_some_and(|s| s.load_gates.running() || s.load_gates.holding())
             || frame_loads_owed(self, cid)
             || self.child_realms(cid).into_iter().any(|kid| self.realm_state(kid).is_some_and(|s| s.load_delay != 0))

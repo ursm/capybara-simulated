@@ -58,7 +58,7 @@ RSpec.describe 'cloneNode' do
     s = simulated_session(app).tap {|session| session.visit '/' }
     expect(log).to eq(['/'])
     s.execute_script('document.body.append(f)')
-    # (…the image fetched on a host thread, its load delivered when that is done: a parallel run's wall)
+    # (…the image's load a task, which the event loop reaches as the matcher polls)
     expect(poll_until { (r = s.evaluate_script('window.R')).empty? ? nil : r }).to eq(['attr:true'])
     expect(log).to eq(['/', '/tpl.png'])
     # (…and as imported, `document.importNode(template.content, true)`, which the page's document owns as it is made)

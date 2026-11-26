@@ -1027,7 +1027,9 @@ module WptRunner
       prev = ENV['CSIM_LOCAL_ALL_HOSTS']
       ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
       begin
-        Capybara::Session.new(:simulated, app)
+        # (…its media elements allowed to play with no user activation, as wptrunner runs Chrome and Firefox)
+        Capybara.register_driver(:simulated_wpt) {|a| Capybara::Simulated::Driver.new(a, autoplay: true) }
+        Capybara::Session.new(:simulated_wpt, app)
       ensure
         if prev.nil? then ENV.delete('CSIM_LOCAL_ALL_HOSTS') else ENV['CSIM_LOCAL_ALL_HOSTS'] = prev end
       end
@@ -1517,7 +1519,7 @@ module WptRunner
           advance      = true
           wait_started = nil
           hold_last    = nil
-        elsif s.driver.worker_drive_pending? || s.driver.browser.image_loads_pending?
+        elsif s.driver.worker_drive_pending?
           # Async-only frame with worker cross-thread work in flight (an SW
           # round-trip, a worker mid-boot / mid-message — in ANY window; the
           # driver aggregate matches the merged `async` above): the page is

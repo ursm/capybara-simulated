@@ -123,6 +123,7 @@ pub(crate) fn clone_into(
         crate::dom::replace_attributes(scope, cid, copy, attributes, attr_u16, Some(namespaces));
     }
     let arena = crate::dom::realm(scope, cid);
+    arena.media_created(copy);
     arena.clone_nonce(src, copy);
     // (…the copy's state and live value written as it is made, in no tree yet: nothing shows it, so no generation moves —
     // a clone read for its text alone keeps the page's rendered memo)

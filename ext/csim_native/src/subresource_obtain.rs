@@ -9,7 +9,7 @@
 // (`obtainResume`) — a `blob:` URL's bytes, the network's answer, a font file made of bytes or named by `local()`, and
 // the filing of an entry.
 
-use crate::dom::{member, realm, realm_id, register, NodeId};
+use crate::dom::{member, realm, realm_id, register, NodeId, RealmArena};
 use crate::font_files::Terminated;
 use crate::subresource_plan::{destination, fields, plan_in, J_CSS_IMAGE, J_EMBED, J_TIMED};
 
@@ -29,7 +29,6 @@ const H_LINK_EVENT: u32 = 12;
 pub(crate) const H_ASSET: u32 = 13;
 pub(crate) const H_CONTROLLER: u32 = 14;
 pub(crate) const H_CHARSET: u32 = 15;
-const H_IMAGE_START: u32 = 16;
 const H_MEDIA_BYTES: u32 = 18;
 pub(crate) const H_FRAME_NAVIGATION: u32 = 20;
 pub(crate) const H_LOAD_BLOCKER_SETTLED: u32 = 21;
@@ -95,6 +94,23 @@ impl Request {
     }
     pub(crate) fn doc(&self) -> Option<NodeId> {
         self.doc
+    }
+}
+
+impl RealmArena {
+    // Whether realm `cid`'s document's load waits on a request a controlling service worker's `fetch` event is yet to
+    // answer: an image's or an audio element's, no later request of the element's aborting it (HTML: an image's fetch
+    // delays the load until it ends, a media element's until it has its first frame).
+    pub(crate) fn obtains_delay_load(&self, cid: i32) -> bool {
+        use crate::subresource_judge::{J_AUDIO, J_IMAGE};
+        self.obtains.values().any(|r| {
+            r.cid == cid
+                && r.el.filter(|&el| self.get(el).is_some()).is_some_and(|el| match r.kind {
+                    J_IMAGE => self.image_request_live(el, r.load),
+                    J_AUDIO => crate::media::is_current(self, el, r.load),
+                    _ => false,
+                })
+        })
     }
 }
 
@@ -1302,29 +1318,13 @@ pub(crate) fn obtain_image(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_,
         let _ = image_from_network(scope, host, cid, el, &r.url, load, plan);
     }
 }
-// The network's answer to the image `el`'s request `load` of `url`, its request `plan`'s: an http(s) one fetched and
-// decoded on a host thread, landing as the host hands the result back (image_requests.rs `imageFetchLand`) — a real
-// browser never blocks the parser on an image, and an in-process request behind an ActiveStorage URL overlaps script
-// instead of serializing with the parse; a `blob:` one its blob, read from this VM's blob URL store (the host has none
-// of its bytes) — one revoked since the source was set is gone (Chrome: `error`); else — a data: one (host-local decode,
-// no fetch), a host thread that would not start — fetched and decoded at once, its entry filed (sized by the encoded
-// bytes the host decoded; a broken load a network error).
+// The network's answer to the image `el`'s request `load` of `url`, its request `plan`'s: a `blob:` one its blob, read
+// from this VM's blob URL store (the host has none of its bytes) — one revoked since the source was set is gone
+// (Chrome: `error`); else the host's — an http(s) one fetched now, as a script's is, its server's time counted
+// (Browser#image_fetch), a data: one decoded host-side — decoded, landing as far after it began as that server took
+// (image_requests.rs `land_fetched`).
 fn image_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, cid: i32, el: NodeId, url: &str, load: u32, plan: u32) -> Result<(), Terminated> {
-    use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_NETWORK};
-    let route = fetch_route(url, 0, "");
-    fn request<'s>(scope: &mut v8::PinScope<'s, '_>, url: &str, plan: u32, cid: i32) -> [v8::Local<'s, v8::Value>; 3] {
-        [text(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), v8::Integer::new(scope, cid).into()]
-    }
-    if route == ROUTE_NETWORK {
-        let args = request(scope, url, plan, cid);
-        let id = call(scope, host, H_IMAGE_START, &args)?.and_then(|id| v8::Local::new(scope, id).uint32_value(scope)).unwrap_or(0);
-        if id > 0 {
-            let started = now(scope, host)?;
-            crate::image_requests::begin_host_fetch(scope, cid, id, el, load, url, started);
-            return Ok(());
-        }
-    }
-    if route == ROUTE_BLOB {
+    if crate::fetch_rules::fetch_route(url, 0, "") == crate::fetch_rules::ROUTE_BLOB {
         let u = text(scope, url);
         let blob = call(scope, host, H_BLOB, &[u])?;
         let blob = blob.map(|b| v8::Local::new(scope, b)).and_then(|b| v8::Local::<v8::Object>::try_from(b).ok());
@@ -1334,12 +1334,10 @@ fn image_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::
         return Ok(());
     }
     let started = now(scope, host)?;
-    let args = request(scope, url, plan, cid);
+    let args = [text(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), v8::Integer::new(scope, cid).into()];
     let result = call(scope, host, H_LOAD_IMAGE, &args)?.map(|r| v8::Local::new(scope, r));
     let result = result.and_then(|r| v8::Local::<v8::Object>::try_from(r).ok());
-    file_image(scope, host, el, url, started, result)?;
-    crate::image_requests::land_record(scope, el, load, result, 0.0);
-    Ok(())
+    crate::image_requests::land_fetched(scope, host, el, load, url, started, result)
 }
 // …and its entry filed (performance.js `recordResourceTiming`): its initiator, its no-cors-ness and whether it is filed
 // at all the engine's (resource_timing.rs, J_IMAGE); the response's facts the host kept — its Server-Timing, its content
@@ -1429,15 +1427,21 @@ fn image_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Func
 //   - an audio's, fetched but not decoded: a controlling service worker's `fetch` event (the fetch IS the observable),
 //     else the network's, else a scheme's — its verdict (`judge`: one Fetch allows its mode, no HTTP 4xx / 5xx, and one
 //     with no media data at all errs too) its readiness, its duration read off its container (audio.rs);
-// its entry the answer's or the response's.
-pub(crate) fn fetch_media(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, cid: i32, el: NodeId, doc: NodeId, url: String, load: u32) -> MediaFetched {
+// its entry the answer's or the response's. With it, how long the network's server took — its sleeps, counted as a script
+// fetch's are (Browser#media_bytes) — the virtual ms after the fetch began it lands at.
+pub(crate) fn fetch_media(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, cid: i32, el: NodeId, doc: NodeId, url: String, load: u32) -> (MediaFetched, f64) {
     let video = realm(scope, cid).get(el).is_some_and(|n| n.is_html_named("video"));
     let kind = if video { crate::subresource_judge::J_VIDEO } else { crate::subresource_judge::J_AUDIO };
-    let Ok(started) = now(scope, host) else { return MediaFetched::Failed };
+    let Ok(started) = now(scope, host) else { return (MediaFetched::Failed, 0.0) };
     let plan = plan_in(realm(scope, cid), kind, Some(el), Some(doc), None);
     let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client: None, referrer: None, integrity: String::new(), preload: None, load, holds: None, initiator: if video { "video" } else { "audio" }, started };
-    let done = if video { fetch_video(scope, host, &r).map(|v| v.map_or(MediaFetched::Failed, MediaFetched::Arrived)) } else { fetch_audio(scope, host, r) };
-    done.unwrap_or(MediaFetched::Failed)
+    let mut took = 0.0;
+    let done = if video { fetch_video(scope, host, &r, &mut took).map(|v| v.map_or(MediaFetched::Failed, MediaFetched::Arrived)) } else { fetch_audio(scope, host, r, &mut took) };
+    (done.unwrap_or(MediaFetched::Failed), took)
+}
+// …the time a host's `{…, slept}` answer says its server took.
+fn slept_of(scope: &mut v8::PinScope<'_, '_>, got: Option<v8::Local<'_, v8::Object>>) -> f64 {
+    got.and_then(|g| member(scope, g, "slept")).and_then(|v| v.number_value(scope)).filter(|v| v.is_finite()).unwrap_or(0.0)
 }
 
 // What fetching a media element's resource came to: the resource, a failure — or a worker's to answer.
@@ -1447,7 +1451,7 @@ pub(crate) enum MediaFetched {
     Pending,
 }
 
-fn fetch_video(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<Option<crate::media::MediaResource>, Terminated> {
+fn fetch_video(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, took: &mut f64) -> Result<Option<crate::media::MediaResource>, Terminated> {
     use crate::subresource_judge::{facts_of, judge, Consumer, J_VIDEO, SRC_SW_SYNC, S_EMPTY, V_CROSS_ORIGIN, V_OK};
     let mut args = request_args(scope, r).to_vec();
     let (binary, integrity) = (v8::Boolean::new(scope, true).into(), text(scope, ""));
@@ -1473,6 +1477,7 @@ fn fetch_video(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Functio
         let args = request_args(scope, r);
         let got = call(scope, host, H_MEDIA_BYTES, &args)?.map(|g| v8::Local::new(scope, g));
         let got = got.and_then(|g| v8::Local::<v8::Object>::try_from(g).ok());
+        *took = slept_of(scope, got);
         let meta = got.and_then(|g| member(scope, g, "meta")).map(|m| v8::Global::new(scope, m));
         file(scope, host, r, Answered::Network(meta))?;
         let bytes = got.and_then(|g| member(scope, g, "bytes")).and_then(|b| view_bytes(scope, b));
@@ -1488,7 +1493,7 @@ fn fetch_video(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Functio
     Ok(Some(crate::media::MediaResource::Video { width: f64::from(video.width), height: f64::from(video.height), duration: video.duration, tainted, frame }))
 }
 
-fn fetch_audio(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: Request) -> Result<MediaFetched, Terminated> {
+fn fetch_audio(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: Request, took: &mut f64) -> Result<MediaFetched, Terminated> {
     let ctrl = call(scope, host, H_CONTROLLER, &[])?.and_then(|c| v8::Local::new(scope, c).uint32_value(scope)).unwrap_or(0);
     let r = if ctrl != 0 && crate::fetch_rules::fetch_route(&r.url, crate::fetch_rules::FETCH_CONTROLLED, "") == crate::fetch_rules::ROUTE_SERVICE_WORKER {
         match dispatch(scope, host, r)? {
@@ -1498,10 +1503,10 @@ fn fetch_audio(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Functio
     } else {
         r
     };
-    audio_from_network(scope, host, &r)
+    audio_from_network(scope, host, &r, took)
 }
 // …from the network (or a scheme): its readiness, or a failure.
-fn audio_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<MediaFetched, Terminated> {
+fn audio_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, took: &mut f64) -> Result<MediaFetched, Terminated> {
     use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_DATA, ROUTE_NETWORK};
     use crate::subresource_judge::{facts_of, Facts, SRC_NETWORK, SRC_SCHEME};
     let blocked = || Facts { network_error: true, ..Default::default() };
@@ -1517,6 +1522,7 @@ fn audio_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::
             let args = request_args(scope, r);
             let got = call(scope, host, H_MEDIA_BYTES, &args)?.map(|g| v8::Local::new(scope, g));
             let got = got.and_then(|g| v8::Local::<v8::Object>::try_from(g).ok());
+            *took = slept_of(scope, got);
             let meta = got.and_then(|g| member(scope, g, "meta"));
             file(scope, host, r, Answered::Network(meta.map(|m| v8::Global::new(scope, m))))?;
             let meta = meta.and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
@@ -1543,8 +1549,9 @@ fn audio_settled(r: &Request, facts: &crate::subresource_judge::Facts, source: u
 // verdict (an empty one's no media data), its entry filed; the outcome handed to the element (media.rs `fetched`).
 fn audio_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, answer: Option<v8::Local<'_, v8::Object>>, redirected: bool, render: Option<Vec<u8>>) -> Result<(), Terminated> {
     use crate::subresource_judge::{facts_of, SRC_SW_EVENT};
+    let mut took = 0.0;
     let done = match answer {
-        None => audio_from_network(scope, host, r)?,
+        None => audio_from_network(scope, host, r, &mut took)?,
         Some(answer) => {
             file(scope, host, r, Answered::Worker(v8::Global::new(scope, v8::Local::<v8::Value>::from(answer))))?;
             let bytes = render.filter(|b| !b.is_empty()).or_else(|| member(scope, answer, "bytes").and_then(|b| view_bytes(scope, b)));
@@ -1554,7 +1561,7 @@ fn audio_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Func
         }
     };
     if let Some(el) = r.el {
-        crate::media::fetched(scope, r.cid, el, r.load, done, host);
+        crate::media::fetched(scope, r.cid, el, r.load, done, took, host);
     }
     Ok(())
 }

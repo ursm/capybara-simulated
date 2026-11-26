@@ -78,6 +78,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "loadGatesForget", load_gates_forget_op, context_id);
 }
 
+// Gate `id` of realm `cid`'s let go of, still to run: the work it was for gone — an image request a later one aborted
+// (image_requests.rs) — its task running nothing, the load waiting for it no more.
+pub(crate) fn drop_gate(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) {
+    if let Some(gates) = gates_of(scope, cid) {
+        gates.gates.retain(|g| g.id != id);
+    }
+}
+
 fn gates_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut LoadGates> {
     realm(scope, cid).realm_state_mut(cid).map(|s| &mut s.load_gates)
 }

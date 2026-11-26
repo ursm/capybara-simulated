@@ -85,6 +85,10 @@ impl RealmArena {
         let now = self.event_loop.clock;
         self.realm_state(realm).is_some_and(|s| matches!(s.last_activation, Some(t) if now >= t && now < t + TRANSIENT_DURATION))
     }
+    // Whether realm `realm`'s window has sticky activation: it was ever activated (a consumed activation sticks).
+    pub(crate) fn sticky_activated(&self, realm: i32) -> bool {
+        self.realm_state(realm).is_some_and(|s| s.last_activation.is_some())
+    }
     // HTML "consume user activation" of realm `realm`'s window: every window of its top-level traversable's inclusive
     // descendant navigables that was ever activated, consumed (negative infinity) — what its having transient activation
     // was, too.

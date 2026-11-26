@@ -803,7 +803,11 @@ fn clock_followed(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 // the bindings' step (timers.js `queueTask`, which keeps the loop told it has work): its key, which `cancel_task` takes
 // back (None: no bindings to queue it, or a script was terminated).
 pub(crate) fn queue_task(scope: &mut v8::PinScope<'_, '_>, task: v8::Local<'_, v8::Function>) -> Option<i64> {
-    let delay = v8::Integer::new(scope, 0).into();
+    queue_task_in(scope, task, 0.0)
+}
+// …and one due `delay` ms from now: a response landing as far after its fetch as its server took (media.rs).
+pub(crate) fn queue_task_in(scope: &mut v8::PinScope<'_, '_>, task: v8::Local<'_, v8::Function>, delay: f64) -> Option<i64> {
+    let delay = v8::Number::new(scope, delay.max(0.0)).into();
     let key = crate::dom::call_host_step(scope, "setTimeout", &[task.into(), delay])?;
     key.integer_value(scope)
 }

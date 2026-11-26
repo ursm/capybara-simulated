@@ -93,4 +93,43 @@ RSpec.describe 'media element tasks' do
     poll_until { s.evaluate_script('log.some((e) => e.startsWith("window"))') }
     expect(s.evaluate_script('log')).to eq(['loadstart', 's1 error', 's2 error', 'loadedmetadata', 'loadeddata', 'window load 4'])
   end
+
+  # A parsed `<video>`: each stage of its media data processing a task of its own — a timer its `loadedmetadata` listener
+  # sets runs before its `loadeddata` — the window's `load` after it (Chrome and Firefox, csim-bench img13 `m8`).
+  it "runs a parsed element's stages as tasks of their own before the window's load" do
+    s = media_page(<<~HTML)
+      <video id=v src="/m.webm"></video>
+      <script>
+        window.log = [];
+        const v = document.getElementById('v');
+        v.addEventListener('loadedmetadata', () => { log.push('loadedmetadata'); setTimeout(() => log.push('T'), 0); });
+        v.addEventListener('loadeddata', () => log.push('loadeddata'));
+        addEventListener('load', () => log.push('window load'));
+      </script>
+    HTML
+    poll_until { s.evaluate_script('log.includes("window load")') }
+    expect(s.evaluate_script('log')).to eq(['loadedmetadata', 'T', 'loadeddata', 'window load'])
+  end
+
+  # The autoplay policy Chrome and Firefox share (csim-bench img13 `m9`): play() of an audible element on a page no user
+  # has interacted with is rejected with a NotAllowedError, a muted one's or one at volume 0 not; a pending play promise
+  # is rejected with an AbortError by a pause() before it plays, and resolved as it plays (rv `playp`); load() puts the
+  # playback rate back to the default one (rv `rate`).
+  it 'keeps the autoplay policy and settles play promises' do
+    s = media_page
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const mk = () => { const v = document.createElement('video'); v.src = '/m.webm'; return v; };
+      mk().play().then(() => log.push('audible played'), (e) => log.push('audible ' + e.name));
+      const quiet = mk(); quiet.volume = 0;
+      quiet.play().then(() => log.push('volume 0 played'), (e) => log.push('volume 0 ' + e.name));
+      const m = mk(); m.muted = true;
+      m.play().then(() => log.push('p1 resolved'), (e) => log.push('p1 ' + e.name));
+      m.pause();
+      m.oncanplaythrough = () => { m.oncanplaythrough = null; m.play().then(() => log.push('p2 resolved'), (e) => log.push('p2 ' + e.name)); };
+      const r = mk(); r.playbackRate = 2; r.load(); log.push('rate ' + r.playbackRate);
+    JS
+    poll_until { s.evaluate_script('log.length') >= 5 }
+    expect(s.evaluate_script('log').sort).to eq(['audible NotAllowedError', 'p1 AbortError', 'p2 resolved', 'rate 1', 'volume 0 played'])
+  end
 end
