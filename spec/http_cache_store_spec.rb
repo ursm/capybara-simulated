@@ -127,7 +127,8 @@ end
 # One fetch per URL per DOCUMENT, as a browser's memory cache gives: the cascade fetches a `<link>`'s sheet and its load
 # task asks for it again, a module graph fetches what a `modulepreload` link fetched — and a response with no cache
 # headers (every asset of a Rails app in test) crossed Rack twice per page, a failed one three times. A `no-store` one is
-# fetched every time, and a new document fetches afresh.
+# fetched every time it is fetched, and a new document fetches afresh — a `<link>`'s sheet once as it is connected, the
+# cascade and its load reading that fetch (sheet_fetch.rs `sheetFetchBegin`).
 RSpec.describe 'one fetch per asset per document' do
   def app(hits, extra_headers = {})
     ->(env) {
@@ -260,12 +261,14 @@ RSpec.describe 'one fetch per asset per document' do
     expect(hits.values_at('/s.css', '/t.css')).to eq([2, 1])
   end
 
-  # …but a module's: its modulepreload and its script take the one fetch of it, whichever comes first, as its document's
-  # module map's entry is one whatever its response's freshness (HTML "fetch a single module script").
-  it 'fetches a no-store one every time it is asked, a module once a document' do
+  # …a `no-store` sheet once a document as well: the one fetch its link makes as it is connected (HTML "fetch and process
+  # the linked resource"), which the cascade and its load read — and a module's: its modulepreload and its script take the
+  # one fetch of it, whichever comes first, as its document's module map's entry is one whatever its response's freshness
+  # (HTML "fetch a single module script").
+  it 'fetches a no-store sheet and a module once a document' do
     hits = Hash.new(0)
     visit_twice(hits, 'cache-control' => 'no-store')
-    expect(hits['/s.css']).to be > 2
+    expect(hits['/s.css']).to eq(2)
     expect(hits['/m.js']).to eq(2)
   end
 

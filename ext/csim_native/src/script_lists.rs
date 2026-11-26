@@ -41,6 +41,9 @@ struct BlockingSheet {
     el: NodeId,
     seq: u32,
     queued: bool,
+    // …and when, on the event loop's clock, its load task falls due: as late as its server took (sheet_fetch.rs
+    // `sheetFetchBegin`).
+    due: f64,
 }
 
 // What a landing is the landing of (`scriptLandingBegin`'s `kind`).
@@ -146,6 +149,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sheetBlockSettle", sheet_settle_op, context_id);
     register(scope, ns, "sheetWaitersParsed", waiters_parsed_op, context_id);
     register(scope, ns, "parserSheetWait", parser_sheet_wait_op, context_id);
+    register(scope, ns, "sheetsQueuedBlock", sheets_queued_block_op, context_id);
     register(scope, ns, "scriptPrepare", prepare_op, context_id);
     register(scope, ns, "scriptWaitNext", wait_next_op, context_id);
     register(scope, ns, "scriptRun", run_op, context_id);
@@ -484,19 +488,25 @@ fn sheet_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
     lists.sheet_seq += 1;
     let seq = lists.sheet_seq;
-    lists.sheets.push(BlockingSheet { el, seq, queued: false });
+    lists.sheets.push(BlockingSheet { el, seq, queued: false, due: 0.0 });
     lists.sheet_fetched = true;
 }
 
-// __dom.sheetBlockQueued(el, queued) -> the number of the style sheet `el` blocks scripts with, 0 for none — its load task
-// queued (`queued`), which ends it.
+// __dom.sheetBlockQueued(el, queued, delay) -> the number of the style sheet `el` blocks scripts with, 0 for none — its load
+// task queued (`queued`) `delay` ms on, which ends it.
 fn sheet_queued_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_uint32(0);
     let Some(el) = nid_arg(scope, &args, 0) else { return };
     let queued = args.get(1).is_true();
+    let delay = args.get(2).number_value(scope).unwrap_or(0.0);
     let cid = realm_id(scope, &args);
-    let Some(sheet) = lists_of(realm(scope, cid), cid).and_then(|lists| lists.sheets.iter_mut().find(|s| s.el == el)) else { return };
-    sheet.queued |= queued;
+    let arena = realm(scope, cid);
+    let clock = arena.event_loop.clock;
+    let Some(sheet) = lists_of(arena, cid).and_then(|lists| lists.sheets.iter_mut().find(|s| s.el == el)) else { return };
+    if queued {
+        sheet.queued = true;
+        sheet.due = clock + delay;
+    }
     rv.set_uint32(sheet.seq);
 }
 
@@ -579,6 +589,12 @@ fn waiters_parsed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(pairs_value(scope, &pairs));
 }
 
+// __dom.sheetsQueuedBlock() -> whether a style sheet whose load task is queued blocks the calling realm's scripts still: what
+// the parser's wait on its script spins the event loop for (`WAIT_SHEETS`).
+fn sheets_queued_block_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(lists_of(realm(scope, cid), cid).is_some_and(|lists| lists.sheets.iter().any(|s| s.queued)));
+}
 // __dom.parserSheetWait() -> the mark the parser's next script waits by (script.rs `parser_waits`, one its `async` scripts
 // land with) where a style sheet came to block scripts since it last asked, -1 where none did.
 fn parser_sheet_wait_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -623,6 +639,7 @@ struct Prepared {
 enum Wait {
     Begin,
     Spun { awaits: bool },
+    Sheets,
     Over,
 }
 
@@ -714,12 +731,14 @@ fn prepare(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, (by, awaited,
 // What the parser's wait on its script comes to next (`scriptWaitNext`): spin the event loop past the tasks queued by the
 // mark `arg` (bridge.entry.js `parserSpin`); run it on for the `arg` ms its server took past the clock (the host's tick,
 // Browser#server_slept_ms); spin it until the fetch `arg` has landed (`awaitLanding`); the wait over, the script to run;
-// the wait over, none to run — its fetch let go of.
+// the wait over, none to run — its fetch let go of; spin it, `arg` ms at most, until no style sheet whose load task is
+// queued blocks it (`sheetsQueuedBlock`).
 const WAIT_SPIN: u32 = 1;
 const WAIT_SERVER: u32 = 2;
 const WAIT_AWAIT: u32 = 3;
 const WAIT_GO: u32 = 4;
 const WAIT_STOP: u32 = 5;
+const WAIT_SHEETS: u32 = 6;
 
 // __dom.scriptWaitNext(id, host) -> `[what, arg]`: what the parser's wait on its script `id` comes to next (`WAIT_*`): HTML
 // "spin the event loop" until it is ready — the tasks queued before the wait first (a fetch's response a task queued as
@@ -768,12 +787,24 @@ fn wait_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32, host: v8::Loca
             set(arena, Wait::Over);
             Ok((WAIT_AWAIT, f64::from(fetch)))
         }
-        Wait::Spun { awaits: false } if blocking => {
-            set(arena, Wait::Over);
-            match crate::script_fetch::due_in(scope, cid, fetch) {
+        Wait::Spun { awaits: false } => {
+            set(arena, Wait::Sheets);
+            match crate::script_fetch::due_in(scope, cid, fetch).filter(|_| blocking) {
                 Some(due) if due > 0.0 => Ok((WAIT_SERVER, due)),
                 _ => wait_next(scope, cid, id, host),
             }
+        }
+        // (…and the style sheets that block it whose load task its server's time puts later still: HTML "spin the event
+        // loop until the parser's Document has no style sheet that is blocking scripts" — what a nested step of the event
+        // loop, whose server's sleeps run no event loop of their own, left to come)
+        Wait::Sheets => {
+            set(arena, Wait::Over);
+            let clock = arena.event_loop.clock;
+            let late = lists_of(arena, cid).map_or(0.0, |lists| lists.sheets.iter().filter(|s| s.queued).map(|s| s.due - clock).fold(0.0, f64::max));
+            if late > 0.0 {
+                return Ok((WAIT_SHEETS, late));
+            }
+            wait_next(scope, cid, id, host)
         }
         Wait::Spun { .. } | Wait::Over => {
             set(arena, Wait::Over);
@@ -1120,7 +1151,7 @@ mod tests {
         assert_eq!(lists.sheets_now(), 0);
         for seq in 1..=2 {
             lists.sheet_seq = seq;
-            lists.sheets.push(BlockingSheet { el: NodeId { idx: 1, generation: 0 }, seq, queued: false });
+            lists.sheets.push(BlockingSheet { el: NodeId { idx: 1, generation: 0 }, seq, queued: false, due: 0.0 });
         }
         assert_eq!(lists.sheets_now(), 2);
         assert!(lists.sheet_blocks_up_to(1) && lists.sheet_blocks_up_to(2));

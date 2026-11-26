@@ -41,6 +41,9 @@ pub(crate) struct SheetRequest {
     answers: HashMap<String, Option<v8::Global<v8::Value>>>,
     // (…a fetch through the asset cache that failed, and what it answered)
     failed: Option<(String, Option<v8::Global<v8::Value>>)>,
+    // (…and what the fetch its link began as it was connected answered — the cache's at once, or its slot's as its load task
+    // took it: `sheetFetchBegin` — which its readers take rather than ask the cache again)
+    answered: Option<(String, v8::Global<v8::Value>)>,
     // (…a `blob:` URL's sheet texts, by URL, `charset` and integrity)
     blob_texts: HashMap<String, Option<String>>,
     // (…and whether it made none — its fetch failed — which asking again would only fetch again)
@@ -51,6 +54,10 @@ pub(crate) struct SheetRequest {
 // request; an `@import`'s `blob:` sheets' texts.
 #[derive(Default)]
 pub(crate) struct RealmSheets {
+    // A `<link>`'s fetch of its sheet under way, begun as it was connected (`sheetFetchBegin`): the host's slot, by owner —
+    // and the owners whose fetch its document's abort cancelled (`sheetFetchesAbort`).
+    flights: HashMap<NodeId, u32>,
+    cancelled: std::collections::HashSet<NodeId>,
     encodings: HashMap<String, &'static str>,
     answers: HashMap<String, Option<v8::Global<v8::Value>>>,
     blob_texts: HashMap<String, Option<String>>,
@@ -61,6 +68,132 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sheetEncodingOf", sheet_encoding_of_op, context_id);
     register(scope, ns, "sheetsForget", sheets_forget_op, context_id);
     register(scope, ns, "styleResolveImports", resolve_imports_op, context_id);
+    register(scope, ns, "sheetFetchBegin", fetch_begin_op, context_id);
+    register(scope, ns, "sheetFetchLand", fetch_land_op, context_id);
+    register(scope, ns, "sheetFetchesAbort", fetches_abort_op, context_id);
+}
+
+// __dom.sheetFetchBegin(owner, url, plan, scanned, host) -> how many ms after now the response of the `<link>` `owner`'s
+// style sheet at `url` comes in, its request `plan`: HTML "fetch and process the linked resource" begun as the link is
+// connected, in parallel — the host's slot (browser.rb `script_fetch_start`, the asset cache's flight for its document,
+// which the cascade's fetch of the sheet joins: `asset_request`), its server's sleeps counted as the request is made — one
+// a preload scanner saw dated as its parse began (`scanned`) — and its load task queued that much later
+// (bridge.entry.js `maybeFireLinkLoad`). 0 for none begun: a scheme's, a preload's, a controlling worker's, one the
+// cache answers at once.
+fn fetch_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_double(0.0);
+    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let url = args.get(1).to_rust_string_lossy(scope);
+    let plan = args.get(2).uint32_value(scope).unwrap_or(0);
+    let scanned = args.get(3).is_true();
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return };
+    let cid = realm_id(scope, &args);
+    if let Ok(due) = fetch_begin(scope, cid, host, el, &url, plan, scanned) {
+        rv.set_double(due);
+    }
+}
+fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId, url: &str, plan: u32, scanned: bool) -> Result<f64, Terminated> {
+    use crate::subresource_obtain::{next_slot, slept_ms, H_SCRIPT_START};
+    forget_flight(scope, cid, host, el)?;
+    if crate::fetch_rules::fetch_route(url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
+        return Ok(0.0);
+    }
+    let doc = crate::node_handle::node_document_of(scope, el);
+    if owner_preload(scope, cid, host, Owner { id: el, doc }, url, plan)?.is_some() {
+        return Ok(0.0);
+    }
+    if call(scope, host, H_CONTROLLER, &[])?.is_some_and(|c| v8::Local::new(scope, c).uint32_value(scope).unwrap_or(0) != 0) {
+        return Ok(0.0);
+    }
+    let arena = realm(scope, cid);
+    let began = crate::script_fetch::began_at(arena, cid, scanned);
+    let clock = arena.event_loop.clock;
+    let client = match arena.get(el).map(|n| n.realm) {
+        Some(c) => v8::Integer::new(scope, c).into(),
+        None => v8::undefined(scope).into(),
+    };
+    let id = next_slot();
+    let args = [
+        text_value(scope, url),
+        v8::Integer::new_from_unsigned(scope, plan).into(),
+        v8::null(scope).into(),
+        client,
+        v8::Boolean::new(scope, true).into(),
+        v8::Number::new(scope, began).into(),
+        v8::Integer::new_from_unsigned(scope, id).into(),
+    ];
+    let Some(started) = call(scope, host, H_SCRIPT_START, &args)? else { return Ok(0.0) };
+    let started = v8::Local::new(scope, started);
+    if !started.is_number() {
+        keep_answer(scope, cid, el, url, plan, started);
+        return Ok(0.0);
+    }
+    let slept = slept_ms(scope, started);
+    if let Some(s) = realm(scope, cid).realm_state_mut(cid) {
+        s.sheet_fetches.flights.insert(el, id);
+    }
+    Ok((began + slept - clock).max(0.0))
+}
+// What became of a `<link>`'s fetch as its load task runs (`sheetFetchLand`): none was begun (its load obtains its sheet as
+// it is); it landed; its document's abort cancelled it — a network error.
+const FLIGHT_NONE: u32 = 0;
+const FLIGHT_LANDED: u32 = 1;
+const FLIGHT_CANCELLED: u32 = 2;
+// __dom.sheetFetchLand(owner, host, url, plan) -> what became of the `<link>` `owner`'s fetch begun as it was connected
+// (`FLIGHT_*`): its slot taken as its load task runs — its response the document's asset memo's, its cookies stored.
+fn fetch_land_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(FLIGHT_NONE);
+    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
+    let cid = realm_id(scope, &args);
+    let Some(state) = realm(scope, cid).realm_state_mut(cid) else { return };
+    if state.sheet_fetches.cancelled.remove(&el) {
+        return rv.set_uint32(FLIGHT_CANCELLED);
+    }
+    let Some(id) = state.sheet_fetches.flights.remove(&el) else { return };
+    let url = args.get(2).to_rust_string_lossy(scope);
+    let plan = args.get(3).uint32_value(scope).unwrap_or(0);
+    let id = v8::Integer::new_from_unsigned(scope, id).into();
+    let Ok(answer) = call(scope, host, crate::subresource_obtain::H_SCRIPT_TAKE, &[id]) else { return };
+    if let Some(answer) = answer {
+        let answer = v8::Local::new(scope, answer);
+        keep_answer(scope, cid, el, &url, plan, answer);
+    }
+    rv.set_uint32(FLIGHT_LANDED);
+}
+// …what answered the fetch, kept for the sheet its owner obtains: an answer of the asset cache's shape alone.
+fn keep_answer(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, url: &str, plan: u32, answer: v8::Local<'_, v8::Value>) {
+    if !answer.is_array() {
+        return;
+    }
+    let answer = v8::Global::new(scope, answer);
+    request_of(realm(scope, cid), el).answered = Some((format!("{} {url}", plan & PLAN_REQUEST), answer));
+}
+// __dom.sheetFetchesAbort(host) -> the `<link>`s whose fetch the calling realm's document's abort cancels (HTML "abort a
+// document": "cancel any instances of the fetch algorithm"), their slots let go of — each a network error, its load task
+// to run at once (bridge.entry.js `wakeLinkLoads`).
+fn fetches_abort_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let Some(state) = realm(scope, cid).realm_state_mut(cid) else { return };
+    let flights: Vec<(NodeId, u32)> = state.sheet_fetches.flights.drain().collect();
+    state.sheet_fetches.cancelled.extend(flights.iter().map(|&(el, _)| el));
+    for &(_, id) in &flights {
+        let id = v8::Integer::new_from_unsigned(scope, id).into();
+        if call(scope, host, crate::subresource_obtain::H_SCRIPT_FORGET, &[id]).is_err() {
+            return;
+        }
+    }
+    let owners: Vec<NodeId> = flights.into_iter().map(|(el, _)| el).collect();
+    rv.set(crate::dom::nodes_value(scope, cid, &owners));
+}
+// …and one a later fetch of the link's superseded (its `href` changed): let go of.
+fn forget_flight(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId) -> Result<(), Terminated> {
+    let Some(state) = realm(scope, cid).realm_state_mut(cid) else { return Ok(()) };
+    state.sheet_fetches.cancelled.remove(&el);
+    let Some(id) = state.sheet_fetches.flights.remove(&el) else { return Ok(()) };
+    let id = v8::Integer::new_from_unsigned(scope, id).into();
+    call(scope, host, crate::subresource_obtain::H_SCRIPT_FORGET, &[id]).map(drop)
 }
 
 // A sheet as a response of it makes it: its text — None where it failed (none, none to use, or one that is no style
@@ -395,7 +528,13 @@ fn network_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
 pub(crate) fn asset(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, url: &str, plan: u32, owner: Option<Owner>, referrer: Option<&str>) -> Result<Option<v8::Global<v8::Value>>, Terminated> {
     let key = format!("{} {url}", plan & PLAN_REQUEST);
     if let Some(o) = owner {
-        if let Some((k, failed)) = &request_of(realm(scope, cid), o.id).failed {
+        let request = request_of(realm(scope, cid), o.id);
+        if let Some((k, answered)) = &request.answered {
+            if *k == key {
+                return Ok(Some(answered.clone()));
+            }
+        }
+        if let Some((k, failed)) = &request.failed {
             if *k == key {
                 return Ok(failed.clone());
             }

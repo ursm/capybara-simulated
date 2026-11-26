@@ -7,9 +7,9 @@ require_relative 'support/every_host_local'
 
 # A subresource's request is the engine's plan of it (subresource_plan.rs `plan`): a module script's options carry its
 # own `referrerpolicy` alone, so a later `import()` takes its document's policy as it is then (Fetch "main fetch"); and a
-# link's request takes its `crossorigin` as its load task runs — one set right after the link is inserted is the one
-# its one fetch is made with. That is the driver's model of a link's fetch (a task after insertion), not the platform's:
-# HTML begins a sheet's fetch as the link is inserted, and a `crossorigin` change fetches it again — a backlog item.
+# link's sheet is fetched as the link is connected, under the `crossorigin` it has then — one set right after fetches it
+# again, as HTML's link processing has a `crossorigin` change do (sheet_fetch.rs `sheetFetchBegin`); a preload's request
+# takes its `crossorigin` as its load task runs.
 RSpec.describe 'a subresource request plan' do
   include PollUntil
 
@@ -41,7 +41,7 @@ RSpec.describe 'a subresource request plan' do
     expect(seen.assoc('/d.js')[1]).to eq('http://www.example.com/m.js')
   end
 
-  it "fetches a link once, with the crossorigin set before its load task ran" do
+  it "fetches a sheet as its link is connected and again with a crossorigin set after, a preload once" do
     session.visit '/'
     session.execute_script(<<~JS)
       for (const [rel, href] of [['preload', '/p.js'], ['stylesheet', '/c.css']]) {
@@ -54,7 +54,7 @@ RSpec.describe 'a subresource request plan' do
       }
     JS
     session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
-    expect(seen.select {|(path, _, _)| %w[/p.js /c.css].include?(path) }.map(&:first).sort).to eq(%w[/c.css /p.js])
+    expect(seen.select {|(path, _, _)| %w[/p.js /c.css].include?(path) }.map(&:first).sort).to eq(%w[/c.css /c.css /p.js])
   end
   # A media element's shown track is fetched by the media element's `crossorigin` (HTML's track processing model): a
   # CORS request — its Origin sent to the other origin — under a `crossorigin` video, and under one of none a same-origin
