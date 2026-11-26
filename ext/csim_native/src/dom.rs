@@ -1176,6 +1176,9 @@ pub(crate) struct RealmState {
     pub(crate) script_fetches: crate::script_fetch::ScriptFetches,
     // …and the lists its scripts land on, and the style sheets that block them (script_lists.rs).
     pub(crate) script_lists: crate::script_lists::ScriptLists,
+    // Its document's declarative refresh, `(delay ms, url)`, waiting for it to have completely loaded — a `Refresh` header's
+    // told before the parse begins, let go of as its next document begins (declarative_refresh.rs).
+    pub(crate) refresh_pending: Option<(f64, String)>,
     pub(crate) speculative: Option<std::ops::Range<u64>>,
     // …and the event loop's clock as it began, which those fetches began at.
     pub(crate) parse_began_at: f64,

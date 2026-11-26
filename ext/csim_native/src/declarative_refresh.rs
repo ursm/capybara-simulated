@@ -1,7 +1,9 @@
 // HTML's shared declarative refresh steps — a `<meta http-equiv=refresh>` inserted, a `Refresh` response header — the
 // engine's: what the value says (a delay in seconds and, optionally, a URL), whether the document refreshes at all (once,
-// the first that says it; its sandboxing may block a `<meta>`'s), and where to. The bindings wait out the delay from the
-// later of the document's load and the element's insertion, and navigate (location.js `realmHooks.declarativeRefresh`).
+// the first that says it; its sandboxing may block a `<meta>`'s), where to, and when its delay begins: as the document has
+// completely loaded, or now, where it has — kept till then (`RealmState::refresh_pending`, handed over as its loading
+// completes: document_lifecycle.rs `docFinishLoading`). The bindings wait out the delay and navigate (location.js
+// `realmHooks.declarativeRefresh`).
 
 use crate::dom::{nid_arg, realm, realm_id, register, NodeId, RealmArena};
 
@@ -92,20 +94,36 @@ impl RealmArena {
 fn forget_declarative_refresh_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    realm(scope, cid).document_states.set_will_refresh(doc, false);
+    let arena = realm(scope, cid);
+    arena.document_states.set_will_refresh(doc, false);
+    if let Some(state) = arena.realm_state_mut(cid) {
+        state.refresh_pending = None;
+    }
 }
 
-// __dom.declarativeRefresh(docNid, input, meta) -> `[delayMs, url]` (`declarative_refresh`), or null.
+// __dom.declarativeRefresh(docNid, input, meta) -> `[delayMs, url]` (`declarative_refresh`) where its delay begins now — the
+// document completely loaded — or null: none, or one kept till it is.
 fn declarative_refresh_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let input = args.get(1).to_rust_string_lossy(scope);
     let meta = args.get(2).is_true();
     let cid = realm_id(scope, &args);
-    let Some((delay, url)) = realm(scope, cid).declarative_refresh(cid, doc, &input, meta) else { return };
+    let arena = realm(scope, cid);
+    let Some(due) = arena.declarative_refresh(cid, doc, &input, meta) else { return };
+    if !arena.document_states.lifecycle(doc).is_completely_loaded() {
+        if let Some(state) = arena.realm_state_mut(cid) {
+            state.refresh_pending = Some(due);
+        }
+        return;
+    }
+    rv.set(refresh_value(scope, due));
+}
+// `[delayMs, url]` of a refresh due.
+pub(crate) fn refresh_value<'s>(scope: &mut v8::PinScope<'s, '_>, (delay, url): (f64, String)) -> v8::Local<'s, v8::Value> {
     let delay = v8::Number::new(scope, delay).into();
-    let Some(url) = v8::String::new(scope, &url) else { return };
-    rv.set(v8::Array::new_with_elements(scope, &[delay, url.into()]).into());
+    let url = v8::String::new(scope, &url).map_or_else(|| v8::null(scope).into(), Into::into);
+    v8::Array::new_with_elements(scope, &[delay, url]).into()
 }
 
 #[cfg(test)]

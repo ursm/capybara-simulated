@@ -88,6 +88,10 @@ impl Lifecycle {
     fn update_readiness(&mut self, ready: u32) -> bool {
         std::mem::replace(&mut self.ready, ready) != ready
     }
+    // HTML "the end" step 3: `interactive` from `loading` — whether that changed its readiness (none of a document past it).
+    pub(crate) fn the_end(&mut self) -> bool {
+        self.ready == READY_LOADING && self.update_readiness(READY_INTERACTIVE)
+    }
     // HTML "abort a parser", where its parser is active: whether it was. A navigation of its document's aborts the parse
     // alone (as it is planned, from a script the parse runs); `stop()` also what "the end" has left of it, up to its load
     // (Chrome and Firefox: none after a `stop()` in a DOMContentLoaded handler, nor with an image of its own pending) — the
@@ -141,7 +145,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "docLoadBegin", load_begin, context_id);
     crate::dom::register(scope, ns, "docOpen", open, context_id);
     crate::dom::register(scope, ns, "docMarkupSteps", markup_steps_op, context_id);
-    crate::dom::register(scope, ns, "docTheEnd", the_end, context_id);
     crate::dom::register(scope, ns, "docContentLoadedDue", content_loaded_due, context_id);
     crate::dom::register(scope, ns, "docContentLoadedEnd", content_loaded_end, context_id);
     crate::dom::register(scope, ns, "docLoadDue", load_due, context_id);
@@ -335,14 +338,6 @@ fn take_entry_url(scope: &mut v8::PinScope<'_, '_>, doc: NodeId, cid: i32, entry
     true
 }
 
-// __dom.docTheEnd(docNid) -> whether HTML "the end" step 3 changed the document's readiness: `interactive` from
-// `loading` (none of a document past that already).
-fn the_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let lc = lifecycle_of(scope, doc);
-    rv.set_bool(lc.ready == READY_LOADING && lc.update_readiness(READY_INTERACTIVE));
-}
-
 // __dom.docContentLoadedDue(docNid, generation) -> whether "the end"'s DOMContentLoaded task for document `generation`
 // fires it — taken: the document is that one still, not aborted, and none was fired for it.
 fn content_loaded_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -476,10 +471,20 @@ fn hide_page(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set_bool(std::mem::take(&mut lc.page_showing));
 }
 
-// __dom.docFinishLoading(docNid) — the document completely loaded (HTML "completely finish loading").
-fn finish_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.docFinishLoading(docNid) -> the document completely loaded (HTML "completely finish loading"): the declarative
+// refresh that waited for it, `[delayMs, url]`, its delay beginning now (declarative_refresh.rs) — or null for none.
+fn finish_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     lifecycle_of(scope, doc).completely_loaded = true;
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    if arena.realm_document(cid) != Some(doc) {
+        return;
+    }
+    if let Some(due) = arena.realm_state_mut(cid).and_then(|state| state.refresh_pending.take()) {
+        rv.set(crate::declarative_refresh::refresh_value(scope, due));
+    }
 }
 
 // __dom.docAbortParser(docNid, imagesCancelled, replaced) -> whether the document's parser was active, aborted now

@@ -33,6 +33,8 @@ pub(crate) struct ScriptLists {
     waiters_parsed: Vec<u32>,
     // The parser's scripts prepared and still to run — one at a time, but for one a script it runs writes (`scriptPrepare`).
     prepared: Vec<Prepared>,
+    // "The end" under way — of the realm's document, or of one a script that "the end" runs opened and closed again.
+    ends: Vec<TheEnd>,
 }
 
 struct BlockingSheet {
@@ -147,6 +149,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "scriptPrepare", prepare_op, context_id);
     register(scope, ns, "scriptWaitNext", wait_next_op, context_id);
     register(scope, ns, "scriptRun", run_op, context_id);
+    register(scope, ns, "theEndBegin", the_end_begin_op, context_id);
+    register(scope, ns, "theEndNext", the_end_next_op, context_id);
+    register(scope, ns, "theEndOver", the_end_over_op, context_id);
 }
 
 fn lists_of(arena: &mut RealmArena, cid: i32) -> Option<&mut ScriptLists> {
@@ -848,6 +853,210 @@ fn run_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let el = crate::dom::node_value(scope, Some(p.el));
     let items = [v8::Integer::new_from_unsigned(scope, what).into(), el, body];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// HTML "the end" (§13.2.7) for a document its parser ended, steps 3-6: its parser's scripts no end tag decided, its
+// readiness `interactive`, the `async` scripts its waits landed, its deferred scripts, each waited on in turn, those that
+// fetch nothing, and its DOMContentLoaded queued — each a step the bindings take as the engine hands it over
+// (bridge.entry.js `theEnd`).
+struct TheEnd {
+    id: u32,
+    doc: NodeId,
+    stage: Stage,
+    // The scripts of the stage under way still to come: a parse that handed none to a handler's (the XML parser's), in
+    // tree order (script.rs `parser_scripts`), or the `async` ones taken off the list.
+    queue: std::collections::VecDeque<NodeId>,
+    // Its document's number as its deferred scripts began: one a task their waits ran opened again runs none of them.
+    generation: u32,
+}
+#[derive(Clone, Copy, PartialEq)]
+enum Stage {
+    Begin,
+    EndTags,
+    Ready,
+    Landing,
+    Landed,
+    Deferred,
+    Unfetched,
+    Over,
+}
+
+// What it comes to next (`theEndNext`): nothing; its parser aborted — its readiness stepped on, none of it run; run the
+// parser's script `el` (`arg` 1 at its end tag, `BY_PARSER`); put it on the list of scripts to execute after parsing as its
+// end tag would, its fetch begun (`arg` script.rs `listParserScript`'s); its readiness `interactive`; run the listed one
+// `el` (`arg` 1 where "the end" waits on it); queue the task of one that fetches nothing; deliver the mutation records
+// queued; queue its DOMContentLoaded (`arg` its document's number).
+const END_DONE: u32 = 0;
+const END_ABORTED: u32 = 1;
+const END_RUN: u32 = 2;
+const END_LIST: u32 = 3;
+const END_READY: u32 = 4;
+const END_RUN_LISTED: u32 = 5;
+const END_UNFETCHED: u32 = 6;
+const END_DELIVER: u32 = 7;
+const END_CONTENT_LOADED: u32 = 8;
+
+// __dom.theEndBegin(docNid) -> the number of "the end" begun for the document.
+fn the_end_begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(0);
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let Some(lists) = lists_of(realm(scope, cid), cid) else { return };
+    lists.next += 1;
+    let id = lists.next;
+    lists.ends.push(TheEnd { id, doc, stage: Stage::Begin, queue: Default::default(), generation: 0 });
+    rv.set_uint32(id);
+}
+// __dom.theEndOver(id) — "the end" `id` over, however it ended.
+fn the_end_over_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    if let Some(lists) = lists_of(realm(scope, cid), cid) {
+        lists.ends.retain(|e| e.id != id);
+    }
+}
+
+// __dom.theEndNext(id) -> `[what, el, arg]`: what "the end" `id` comes to next (`END_*`).
+fn the_end_next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let (what, el, arg) = the_end_next(scope, cid, id);
+    let el = crate::dom::node_value(scope, el);
+    let items = [v8::Integer::new_from_unsigned(scope, what).into(), el, v8::Integer::new_from_unsigned(scope, arg).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+fn the_end_next(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) -> (u32, Option<NodeId>, u32) {
+    use crate::script::{BY_PARSER, SCRIPT_RUN};
+    const DONE: (u32, Option<NodeId>, u32) = (END_DONE, None, 0);
+    loop {
+        let arena = realm(scope, cid);
+        let Some(end) = lists_of(arena, cid).and_then(|lists| lists.ends.iter().find(|e| e.id == id)) else { return DONE };
+        let (doc, stage, generation) = (end.doc, end.stage, end.generation);
+        let set = |arena: &mut RealmArena, stage: Stage, queue: Vec<NodeId>| {
+            if let Some(end) = lists_of(arena, cid).and_then(|lists| lists.ends.iter_mut().find(|e| e.id == id)) {
+                end.stage = stage;
+                end.queue = queue.into();
+            }
+        };
+        let pop = |arena: &mut RealmArena| lists_of(arena, cid).and_then(|lists| lists.ends.iter_mut().find(|e| e.id == id)).and_then(|e| e.queue.pop_front());
+        let lc = arena.document_states.lifecycle(doc);
+        // (…a script of its document's, as it was parsed: one a script ran, or moved to another document, runs no more here
+        // — "execute the script element" returns where its node document is not its preparation-time one)
+        let runs = |scope: &mut v8::PinScope<'_, '_>, s: NodeId| {
+            realm(scope, cid).get(s).is_some_and(|n| n.script_flags & SCRIPT_RUN == 0) && crate::node_handle::node_document_of(scope, s) == Some(doc)
+        };
+        match stage {
+            // (…none of a document whose parser was aborted, nor what it had listed: HTML "abort a parser", "abort a
+            // document" cancelling its scripts' fetches)
+            Stage::Begin => {
+                if lc.is_aborted() {
+                    arena.forget_parser_scripts(cid);
+                    set(arena, Stage::Over, Vec::new());
+                    return (END_ABORTED, None, 0);
+                }
+                // (…"the end" of a document with no element at all too — an empty XML one, a parse error — which runs no
+                // script)
+                let root = arena.get(doc).and_then(|d| d.children.iter().copied().find(|&c| arena.get(c).is_some_and(|n| n.kind == crate::dom::NodeKind::Element)));
+                let scripts = root.map_or_else(Vec::new, |root| arena.parser_scripts(root));
+                set(arena, Stage::EndTags, scripts);
+            }
+            // A parse that handed NO scripts to a handler (the XML parser) leaves this pass to stand in for their end tags, in
+            // tree order, while the document is still `loading`: its parser-blocking ones and its import maps run, the others
+            // go on the list — each as its turn comes, where an earlier one's script may have removed it.
+            Stage::EndTags => {
+                let Some(s) = pop(arena) else {
+                    set(arena, Stage::Ready, Vec::new());
+                    continue;
+                };
+                let Some(n) = arena.get(s) else { continue };
+                if n.script_flags & SCRIPT_RUN != 0 {
+                    continue;
+                }
+                if crate::script::blocks_parser(n) || crate::script::script_type(n) == crate::script::IMPORT_MAP {
+                    return (END_RUN, Some(s), BY_PARSER);
+                }
+                let scripting = arena.document_states.has_browsing_context(doc);
+                return (END_LIST, Some(s), arena.list_parser_script(cid, s, scripting));
+            }
+            // …and then "the end": `interactive` FIRST (firing readystatechange), then the deferred scripts, then
+            // DOMContentLoaded — so a `defer` or module script sees `interactive` (Chrome and Firefox). `complete` comes with
+            // the window's load.
+            Stage::Ready => {
+                let changed = arena.document_states.lifecycle_mut(doc).the_end();
+                set(arena, Stage::Landing, Vec::new());
+                if changed {
+                    return (END_READY, None, 0);
+                }
+            }
+            // (…its document's number as of now, past its readystatechange: a task the deferred scripts' waits run that opens
+            // it again ends this "the end")
+            Stage::Landing => {
+                let taken = crate::script::take_parser_async(scope, cid, true);
+                let arena = realm(scope, cid);
+                let generation = arena.document_states.lifecycle(doc).generation();
+                set(arena, Stage::Landed, taken);
+                if let Some(end) = lists_of(arena, cid).and_then(|lists| lists.ends.iter_mut().find(|e| e.id == id)) {
+                    end.generation = generation;
+                }
+            }
+            // The `async` scripts that have landed as the parser waited (script.rs `take_parser_async`), run: one whose
+            // parser has waited on a fetch runs before DOMContentLoaded, and a DOMContentLoaded listener it adds hears it;
+            // one whose parser has not runs after it. Chrome and Firefox agree on both families (rvfn `l_listener_sync`,
+            // `d_sync_*`, `d_defer`, `e_mix*`, and `d_fast`, `z3_asy_fast`, `d_module`, 2026-11-06). Where among the parser's
+            // own scripts they part, and the place here is Firefox's, at the end of the parse: a blocking script's `stop()`
+            // cancels it, which both do (`h_ext_asy`).
+            Stage::Landed => {
+                let next = if lc.is_aborted() { None } else { pop(arena) };
+                let Some(s) = next else {
+                    set(arena, Stage::Deferred, Vec::new());
+                    continue;
+                };
+                if runs(scope, s) {
+                    return (END_RUN_LISTED, Some(s), 0);
+                }
+            }
+            // The list of scripts to execute after parsing, in the order their end tags put them on it (script.rs
+            // `take_parser_next`): modules, `defer` — the PARSER's scripts only (one a script inserted ran, or never runs —
+            // an innerHTML fragment's, a clone of a started script — on its own terms), and each whether or not an earlier
+            // one removed it since (`BY_PARSER_LIST`) — but not one moved into another document. "The end" waits on each
+            // one's fetch: spins the event loop until it has landed, the `async` ones whose fetches land first running as
+            // they do — none once its parser was aborted, or a task the wait ran opened its document again.
+            Stage::Deferred => {
+                if lc.is_aborted() || lc.generation() != generation {
+                    arena.forget_parser_scripts(cid);
+                    set(arena, Stage::Over, Vec::new());
+                    return DONE;
+                }
+                let Some(s) = arena.take_parser_next(cid) else {
+                    let taken = crate::script::take_parser_async(scope, cid, false);
+                    set(realm(scope, cid), Stage::Unfetched, taken);
+                    continue;
+                };
+                if runs(scope, s) {
+                    return (END_RUN_LISTED, Some(s), 1);
+                }
+            }
+            // …and those it never waited for: what DOMContentLoaded does not wait for, each a task of its own after it, ahead
+            // of the load, which does — their fetches' landings; one that fetches nothing (a `nomodule` one), a task queued
+            // now.
+            Stage::Unfetched => {
+                let Some(s) = pop(arena) else {
+                    set(arena, Stage::Over, Vec::new());
+                    return (END_DELIVER, None, 0);
+                };
+                if runs(scope, s) && crate::script_fetch::fetch_of(scope, cid, s) == 0 {
+                    return (END_UNFETCHED, Some(s), 0);
+                }
+            }
+            // …then DOMContentLoaded, as a task (HTML "the end" step 6).
+            Stage::Over => {
+                if let Some(lists) = lists_of(arena, cid) {
+                    lists.ends.retain(|e| e.id != id);
+                }
+                return (END_CONTENT_LOADED, None, lc.generation());
+            }
+        }
+    }
 }
 
 #[cfg(test)]

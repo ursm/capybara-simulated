@@ -393,10 +393,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "takeSwDeferredFrames", take_sw_deferred_frames, context_id);
     crate::dom::register(scope, ns, "swDeferredReplays", sw_deferred_replays, context_id);
     crate::dom::register(scope, ns, "setFrameNav", set_frame_nav, context_id);
-    crate::dom::register(scope, ns, "loadDelay", load_delay, context_id);
-    crate::dom::register(scope, ns, "oweContainerLoad", owe_container_load, context_id);
     crate::dom::register(scope, ns, "loadDelaySettled", load_delay_settled, context_id);
     crate::dom::register(scope, ns, "loadDelayedNow", load_delayed_now, context_id);
+    crate::dom::register(scope, ns, "loadTaskOwes", load_task_owes, context_id);
+    crate::dom::register(scope, ns, "loadTaskPays", load_task_pays, context_id);
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameNavUrl", frame_nav_url, context_id);
     crate::dom::register(scope, ns, "setFrameNavUrl", set_frame_nav_url, context_id);
@@ -1153,19 +1153,8 @@ fn load_delay_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mut u
     &mut arena.realm_state_mut(cid).expect("the realm entered").load_delay
 }
 
-// __dom.loadDelay() -> the calling realm's document's load delay (0 none, `LOAD_DELAYED`, `CONTAINER_LOAD_OWED`), which
-// its load steps set (document_lifecycle.rs `docLoadSteps`).
-fn load_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_uint32(u32::from(*load_delay_of(scope, cid)));
-}
-
-// __dom.oweContainerLoad(realm) -> whether realm `realm`'s document (the calling realm's, -1) has its load delayed, its
-// container's load then owed to its parent after it: what the parent's frame load steps leave to it.
-fn owe_container_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let realm = args.get(0).int32_value(scope).filter(|&r| r >= 0).unwrap_or_else(|| realm_id(scope, &args));
-    rv.set_bool(owe_container_load_of(scope, realm));
-}
+// Whether realm `realm`'s document has its load delayed — its container's load then owed to its parent after it: what the
+// parent's frame load steps leave to it.
 fn owe_container_load_of(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> bool {
     let held = load_delay_of(scope, realm);
     let delayed = *held != 0;
@@ -1173,6 +1162,33 @@ fn owe_container_load_of(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> bool {
         *held = CONTAINER_LOAD_OWED;
     }
     delayed
+}
+
+// The task that fires the calling realm's document's load — "the end"'s, or one a settled delay queued — and then the
+// container's load it owes its parent (bridge.entry.js `fireLoadTask`): __dom.loadTaskOwes(written) -> whether it owes it —
+// where the parent left that to it (`owe_container_load_of`), or a written document's (`written` 1, its container's own;
+// 0 where it was muted; -1 a parsed one's) — and __dom.loadTaskPays(owes, fired, written) -> whether it pays it now, the load
+// fired (`fired`) or not: delayed again, the container's left to the load that fires once nothing delays it; a written
+// document's whatever its window's load did, which an earlier load of its fired already.
+fn load_task_owes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let written = args.get(0).int32_value(scope).unwrap_or(-1);
+    let cid = realm_id(scope, &args);
+    rv.set_bool(if written < 0 { *load_delay_of(scope, cid) == CONTAINER_LOAD_OWED } else { written == 1 });
+}
+fn load_task_pays(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (owes, fired, written) = (args.get(0).is_true(), args.get(1).is_true(), args.get(2).is_true());
+    let cid = realm_id(scope, &args);
+    if !fired {
+        let delay = load_delay_of(scope, cid);
+        let delayed = *delay != 0;
+        if owes && delayed {
+            *delay = CONTAINER_LOAD_OWED;
+        }
+        if !written || delayed {
+            return rv.set_bool(false);
+        }
+    }
+    rv.set_bool(owes);
 }
 
 // __dom.loadDelaySettled() -> whether the calling realm's document's load was delayed and nothing delays it now
