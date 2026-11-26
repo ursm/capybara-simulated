@@ -164,6 +164,9 @@ module Capybara
       IMAGE_LOAD_BOOT_BUDGET_S = 0.25
       # How far a visit will step the virtual clock for its document's load (see await_document_load).
       VISIT_LOAD_BUDGET_MS = 10_000
+      # …and how many steps of nothing due later it takes before it lets go — work due now that the event loop does not
+      # run: one held for the host, a testdriver action, a frame's response not yet in.
+      VISIT_LOAD_STALLED_STEPS = 3
       # How long a session boundary (reset! / dispose) will wait for background
       # app-request threads to finish before abandoning them (see
       # drain_app_request_threads). Generous vs the normal ms-scale request.
@@ -13097,22 +13100,27 @@ module Capybara
 
       # A visit returns once its document has loaded, as a browser's driver waits for `load`: where the load waits on work
       # queued for later — a style sheet, a frame or a script whose server took its time, one a DOMContentLoaded listener
-      # inserted, an `@import` tree's next level (`loadAwaitsTime`) — the event loop is stepped to it, task by task, what the page's timers do meanwhile done as they would be (a timer due before the
-      # load runs before it); none past VISIT_LOAD_BUDGET_MS of virtual time, a resource that never lands left to a later
-      # drain.
+      # inserted, an `@import` tree's next level, its frames' the same however deep, as HTML's iframe delays its document's
+      # load by its content's — the event loop is stepped to the time that work is due (`loadDueIn`), task by task, a page
+      # timer due before it run as it would be. Never to a timer the load does not wait on: a load held by what no time
+      # brings — a testdriver action, a host's answer — lets go after VISIT_LOAD_STALLED_STEPS steps of nothing due later,
+      # and none goes past VISIT_LOAD_BUDGET_MS of virtual time, a resource that never lands left to a later drain. (The
+      # cap bounds the visit alone: the next read's clock step goes on from where it stopped, as any read's does —
+      # `tick_real_time` — so a 20 s sheet still lands, and a page timer still fires, at its own time.)
       def await_document_load
         return unless @timers_active
 
-        waited = 0
-        while waited < VISIT_LOAD_BUDGET_MS && @runtime.call('loadAwaitsTime')
-          delay = @runtime.next_timer_delay_ms
-          break if delay.negative?
+        waited = stalled = 0
+        while waited < VISIT_LOAD_BUDGET_MS && stalled < VISIT_LOAD_STALLED_STEPS
+          due = @runtime.call('loadDueIn').to_f
+          break if due.negative?
 
-          step = delay.clamp(1, VISIT_LOAD_BUDGET_MS - waited)
+          step = due.ceil.clamp(0, VISIT_LOAD_BUDGET_MS - waited)
+          stalled = step.zero? ? stalled + 1 : 0
           @runtime.run_loop_step(step, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
           waited += step
         end
-        @find_cache_dirty = true if waited.positive?
+        @find_cache_dirty = true if waited.positive? || stalled.positive?
       end
 
       # Run the page's own DUE-NOW init as the load ends — the `setTimeout(0)` a

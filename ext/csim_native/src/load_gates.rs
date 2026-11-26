@@ -22,6 +22,8 @@ struct Gate {
     order: u64,
     // What it runs.
     work: v8::Global<v8::Function>,
+    // When its task is queued for, on the event loop's clock.
+    due_at: f64,
 }
 // (…taken, its work is under way until it ends: a server's `sleep` in a script's fetch runs the event loop inside it, whose
 // `load` must not come before it, HTML "the end" spinning until the set of scripts that will execute as soon as possible
@@ -43,6 +45,10 @@ impl LoadGates {
     // Whether a gate's work is under way (`loadGateEnd`).
     pub(crate) fn running(&self) -> bool {
         !self.running.is_empty()
+    }
+    // When the earliest gate still to run is due, on the clock: none where none is.
+    pub(crate) fn earliest_due(&self) -> Option<f64> {
+        self.gates.iter().map(|g| g.due_at).reduce(f64::min)
     }
     // Whether a gate late on purpose delays the load still (`Gate::holds`).
     pub(crate) fn holding(&self) -> bool {
@@ -70,16 +76,16 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "loadGateEnd", load_gate_end_op, context_id);
     crate::dom::register(scope, ns, "flushLoadGates", flush_load_gates_op, context_id);
     crate::dom::register(scope, ns, "loadGatesForget", load_gates_forget_op, context_id);
-    crate::dom::register(scope, ns, "loadGatesPending", load_gates_pending_op, context_id);
 }
 
 fn gates_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut LoadGates> {
     realm(scope, cid).realm_state_mut(cid).map(|s| &mut s.load_gates)
 }
 
-// __dom.loadGate(el, delayed, holds, speculative, work) -> the number of a new gate of the calling realm's document for
+// __dom.loadGate(el, delayed, holds, speculative, work, due) -> the number of a new gate of the calling realm's document for
 // the element `el` (null for none), running `work`, `delayed` one late on purpose — that the load waits for all the same,
-// `holds` — its place in the event loop's sequence a speculative fetch's (`speculative`: timers.rs `SPECULATIVE`).
+// `holds` — its place in the event loop's sequence a speculative fetch's (`speculative`: timers.rs `SPECULATIVE`), its task
+// queued for `due` ms after now.
 fn load_gate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(work) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return rv.set_uint32(0) };
     let work = v8::Global::new(scope, work);
@@ -87,14 +93,16 @@ fn load_gate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let delayed = args.get(1).is_true();
     let holds = delayed && args.get(2).is_true();
     let speculative = args.get(3).is_true();
+    let due = args.get(5).number_value(scope).unwrap_or(0.0);
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
+    let due_at = arena.event_loop.clock + due.max(0.0);
     let frame = el.and_then(|el| arena.get(el)).is_some_and(|n| n.is_html_named("iframe") || n.is_html_named("frame"));
     let order = arena.task_place(cid, speculative);
     let Some(gates) = gates_of(scope, cid) else { return rv.set_uint32(0) };
     gates.next += 1;
     let id = gates.next;
-    gates.gates.push(Gate { id, el, delayed, frame, holds, order, work });
+    gates.gates.push(Gate { id, el, delayed, frame, holds, order, work, due_at });
     rv.set_uint32(id);
 }
 
@@ -163,12 +171,6 @@ pub(crate) fn flush(scope: &mut v8::PinScope<'_, '_>, cid: i32, run: v8::Local<'
     }
 }
 
-
-// __dom.loadGatesPending() -> whether a gate of the calling realm's document is still to run (`LoadGates::pending`).
-fn load_gates_pending_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_bool(gates_of(scope, cid).is_some_and(|g| g.pending()));
-}
 
 // __dom.loadGatesForget() — the calling realm's gates let go of: a new document begins in it, and the elements the old
 // one's were for belong to a document being replaced (left in, they would pile up one dead gate per navigation).

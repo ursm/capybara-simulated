@@ -127,6 +127,11 @@ impl ScriptLists {
     fn pending(&self) -> u32 {
         self.landings.iter().filter(|l| l.kind != Kind::Deferred).count() as u32
     }
+    // …the fetches of those still to land (script_fetch.rs): what the document's load waits on (frame_navigation.rs
+    // `loadDueIn`).
+    pub(crate) fn landing_fetches(&self) -> Vec<u32> {
+        self.landings.iter().filter(|l| l.kind != Kind::Deferred && l.state == State::Queued && l.fetch != 0).map(|l| l.fetch).collect()
+    }
     // The number of the last style sheet blocking scripts now (0 for none) — which a script prepared now waits for…
     fn sheets_now(&self) -> u32 {
         if self.sheets.is_empty() { 0 } else { self.sheet_seq }

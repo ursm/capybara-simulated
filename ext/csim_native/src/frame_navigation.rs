@@ -395,6 +395,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setFrameNav", set_frame_nav, context_id);
     crate::dom::register(scope, ns, "loadDelaySettled", load_delay_settled, context_id);
     crate::dom::register(scope, ns, "loadDelayedNow", load_delayed_now, context_id);
+    crate::dom::register(scope, ns, "loadDueIn", load_due_in, context_id);
     crate::dom::register(scope, ns, "loadTaskOwes", load_task_owes, context_id);
     crate::dom::register(scope, ns, "loadTaskPays", load_task_pays, context_id);
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
@@ -1200,6 +1201,42 @@ fn load_delayed_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     rv.set_bool(arena.load_delayed_here(cid) || arena.realm_state(cid).is_some_and(|s| s.load_gates.pending()));
+}
+// __dom.loadDueIn() -> how many ms after now the earliest work the calling realm's document's load still waits on is due —
+// 0 for work due now — -1 where its load came, or waits on nothing the event loop is to reach (`load_due_at`): what a
+// visit steps the event loop to before it returns (browser.rb `await_document_load`).
+fn load_due_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let clock = crate::dom::realm(scope, cid).event_loop.clock;
+    rv.set_double(load_due_at(scope, cid).map_or(-1.0, |at| (at - clock).max(0.0)));
+}
+// …when, on the clock, of realm `cid`'s document: a load gate's task (a style sheet's, an `@import` level's, a frame's
+// build), a script's landing — and, as HTML's iframe delays its document's load by its content's, the same of a child
+// navigable's document, however deep; a container's load owed with none of those due, now. (None of its images': the host's fetch threads
+// land them, whatever the clock — `images_delay_load`.)
+fn load_due_at(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> Option<f64> {
+    let arena = crate::dom::realm(scope, cid);
+    let doc = arena.realm_document(cid)?;
+    if arena.document_states.lifecycle(doc).is_load_fired() {
+        return None;
+    }
+    let (clock, owed) = (arena.event_loop.clock, frame_loads_owed(arena, cid));
+    let mut due = arena.realm_state(cid).and_then(|s| s.load_gates.earliest_due());
+    let mut earliest = |at: f64| due = Some(due.map_or(at, |d: f64| d.min(at)));
+    let fetches = arena.realm_state(cid).map(|s| s.script_lists.landing_fetches()).unwrap_or_default();
+    let kids = arena.child_realms(cid);
+    for fetch in fetches {
+        if let Some(d) = crate::script_fetch::due_in(scope, cid, fetch) {
+            earliest(clock + d);
+        }
+    }
+    for kid in kids {
+        if let Some(at) = load_due_at(scope, kid) {
+            earliest(at);
+        }
+    }
+    // (…a container's load owed with nothing of its content's due — its document still to come — now)
+    due.or(owed.then_some(clock))
 }
 impl RealmArena {
     // Whether something delays realm `cid`'s document's load event now: its images (image_requests.rs
