@@ -177,6 +177,15 @@ RSpec.describe 'the module map' do
       HTML
     end
 
+    # …and is over as soon as it fails: no waiting for its other imports (Firefox; Chrome waits out a parse error's).
+    it 'is over as soon as it fails' do
+      graphs = files.merge('/g.js' => "import '/missing.js'; import '/slow/400/x.js';")
+      expect(log_of(<<~HTML, graphs)).to eq('g:error t200')
+        <script>setTimeout(() => L.push('t200'), 200); setTimeout(done, 900);</script>
+        <script type="module" src="/g.js" onload="L.push('g:load')" onerror="L.push('g:error')"></script>
+      HTML
+    end
+
     # A JSON module nested past what a literal compiles to is JSON.parse's value all the same (Chrome).
     it 'imports a JSON module however deeply it nests' do
       deep = files.merge('/deep.json' => ('[' * 20_000) + (']' * 20_000))

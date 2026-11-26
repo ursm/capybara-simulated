@@ -81,7 +81,8 @@ pub(crate) fn destination(code: u32) -> &'static str {
 // one's a constructed sheet its source's rules replace (HTML "create a CSS module script"); a text one's its text.
 // KNOWN GAP (rusty_racer): HTML makes the three a synthetic module (CreateDefaultExportSyntheticModule), which the engine's
 // API cannot; a CSS module's sheet is constructed by the realm's `CSSStyleSheet` as the module evaluates, which a page that
-// replaced the global replaces.
+// replaced the global replaces — and a JSON one nested past `JSON_LITERAL_DEPTH` is parsed by the realm's `JSON.parse` as
+// it evaluates, so JSON that is none throws then, an evaluation error, not a parse error that keeps its graph from running.
 pub(crate) fn module_body(source: String, code: u32) -> Option<String> {
     let literal = |text: &str| serde_json::to_string(text).unwrap_or_default();
     Some(match ModuleType::of_code(code) {
@@ -281,8 +282,9 @@ pub(crate) struct ModuleMap {
 }
 
 enum Entry {
-    // Its fetch under way: the host's slot, landing at `due` on the event loop's clock.
-    Fetching { slot: u32, due: f64 },
+    // Its fetch under way: the host's slot, landing at `due` on the event loop's clock, made with the fetch options `plan`
+    // (the referring module's, or its graph's), which its own imports are fetched with.
+    Fetching { slot: u32, due: f64, plan: u32 },
     // None to be had: what a graph waiting on it reads as a failure; the next one to ask fetches again.
     Failed,
     // A module script, which came in at `at`.
@@ -518,7 +520,7 @@ fn ensure_fetch(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, plan: u32
     ];
     let started = call(scope, host, H_MODULE_START, &args)?.map(|s| v8::Local::new(scope, s)).filter(|s| s.is_number());
     let entry = match started {
-        Some(slept) => Entry::Fetching { slot: id, due: began + slept_ms(scope, slept) },
+        Some(slept) => Entry::Fetching { slot: id, due: began + slept_ms(scope, slept), plan },
         None => Entry::Failed,
     };
     if let Some(map) = map_of(scope, cid) {
@@ -579,14 +581,16 @@ fn module_requests(scope: &mut v8::PinScope<'_, '_>, source: v8::Local<'_, v8::S
 
 // The graph `gid` gone on with — as far as the event loop's clock has come (`sync`: every fetch it waits on taken now,
 // whatever its server's time: a dynamic import's, which a script waits inside) — how long until it next goes on, 0 for
-// a graph whose every module is in; None for none. The entries it waits on are come to in the order of the times they
+// a graph whose every module is in, or one a failure ended; None for none. The entries it waits on are come to in the order of the times they
 // come in (each fetch's landing; one in already, as the graph reached it), so a module's imports are requested in that
 // order — the host's slots, its server's view, the cookies its responses set — however many land by now.
 fn advance(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, sync: bool) -> Result<Option<f64>, Terminated> {
     let now = realm(scope, cid).event_loop.clock;
     let Some(map) = map_of(scope, cid) else { return Ok(None) };
     let Some(graph) = map.graphs.iter_mut().find(|g| g.id == gid) else { return Ok(None) };
-    let plan = graph.plan;
+    if graph.failed.is_some() {
+        return Ok(Some(0.0));
+    }
     let mut queue = Queue::default();
     let waiting = std::mem::take(&mut graph.waiting);
     queue.add(&map.entries, waiting);
@@ -597,7 +601,7 @@ fn advance(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, sync: bool) -> 
             queue.put_back(at, key, reached);
             break;
         }
-        if let Some(&Entry::Fetching { slot, due }) = map_of(scope, cid).and_then(|map| map.entries.get(&key)) {
+        if let Some(&Entry::Fetching { slot, due, plan }) = map_of(scope, cid).and_then(|map| map.entries.get(&key)) {
             land(scope, cid, &key, slot, due, plan)?;
         }
         walk(scope, cid, gid, Some(&key), reached)?;
@@ -605,6 +609,11 @@ fn advance(scope: &mut v8::PinScope<'_, '_>, cid: i32, gid: u32, sync: bool) -> 
         let Some(graph) = map.graphs.iter_mut().find(|g| g.id == gid) else { return Ok(None) };
         let reached = std::mem::take(&mut graph.waiting);
         queue.add(&map.entries, reached);
+        // (…a failure met: its loading rejected at once — onComplete run, none of its other descendants requested)
+        if graph.failed.is_some() {
+            next = None;
+            break;
+        }
     }
     let Some(map) = map_of(scope, cid) else { return Ok(None) };
     if let Some(graph) = map.graphs.iter_mut().find(|g| g.id == gid) {
@@ -654,7 +663,7 @@ impl Queue {
     }
 }
 // The entry `key`'s fetch, slot `slot`, landed at `due`: taken, compiled — a module script of the fetch options `plan`
-// (its graph's), or none.
+// (its fetch's), or none.
 fn land(scope: &mut v8::PinScope<'_, '_>, cid: i32, key: &Key, slot: u32, due: f64, plan: u32) -> Result<(), Terminated> {
     let Some(host) = host_of(scope, cid) else { return Ok(()) };
     let (id, ty) = (v8::Integer::new_from_unsigned(scope, slot).into(), v8::Integer::new_from_unsigned(scope, key.1 as u32).into());

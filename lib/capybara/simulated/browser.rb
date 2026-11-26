@@ -8956,21 +8956,18 @@ module Capybara
       def module_fetch_start(url, realm, plan, document, referrer, integrity, type, began, id, started, sw)
         realm = realm.to_i
         url   = url.to_s
-        @module_fetches[id.to_i] = {url: url, type: type.to_i, integrity: integrity.to_s, started: started.to_f}
+        @module_fetches[id.to_i] = {url: url, type: type.to_i, integrity: integrity.to_s, started: started.to_f, realm: realm}
         referrer = nil if referrer.to_s.empty?
         dest = MODULE_DESTINATIONS[type.to_i] || 'script'
         if (local = local_module_source(url, realm))
-          slot = {began: began.to_f, slept: 0.0, cookies: nil, request: nil, realm: realm, result: {local: local}}
-        elsif sw
-          handle, client_id, client_url, credentials, policy, client = sw
-          started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          answer = sw_script_subresource_fetch(handle, url, client_id, referrer || client_url, dest, 'cors', credentials || 'same-origin', integrity: integrity.to_s,
-                                                                                                                                     referrer_policy: policy, client: client)
-          # (…none where the worker let the request through: the network's)
-          slot = {began: began.to_f, slept: 0.0, cookies: nil, request: nil, realm: realm, result: {sw: answer, times: [started_at, Process.clock_gettime(Process::CLOCK_MONOTONIC)]}} if answer
+          @script_fetches[id.to_i] = {began: began.to_f, slept: 0.0, cookies: nil, request: nil, realm: realm, result: {local: local}}
+          return 0.0
         end
-        if slot
-          @script_fetches[id.to_i] = slot
+        # (…a controlling service worker's asked as it lands, as a classic script's is — one still activating then has
+        # activated: Handle Fetch waits for it — the network's where it lets the request through)
+        if sw
+          @script_fetches[id.to_i] = {began: began.to_f, slept: 0.0, cookies: nil, request: nil, realm: realm,
+                                      result: {worker: sw, network: [document, plan, referrer, dest]}}
           return 0.0
         end
 
@@ -8989,6 +8986,21 @@ module Capybara
         slot, wait = asset_slot(request, document, began, id)
         wait || slot[:slept]
       end
+      # …a controlling service worker's answer to a module's request, asked now (`sw` its worker context): its answer,
+      # timed — or, where the worker lets the request through, the network's, through the asset cache.
+      private def module_worker_answer(url, mod, result)
+        handle, client_id, client_url, credentials, policy, client = result[:worker]
+        document, plan, referrer, dest = result[:network]
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        answer = sw_script_subresource_fetch(handle, url, client_id, referrer || client_url, dest, 'cors', credentials || 'same-origin', integrity: mod[:integrity],
+                                                                                                                                   referrer_policy: policy, client: client)
+        return {sw: answer, times: [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]} if answer
+
+        _, credentials, policy = request_of_plan(plan)
+        Thread.current[:csim_asset_times] = nil
+        answered = external_asset_response(url, document, mod[:realm], policy, referrer: referrer, dest: dest, mode: 'cors', credentials: credentials, module_map: true)
+        {answered: answered || [nil, nil, nil], times: Thread.current[:csim_asset_times] || [started, Process.clock_gettime(Process::CLOCK_MONOTONIC)]}
+      end
       # …the milliseconds a request took, of its host times (`asset_fetch`'s `[started, ended]`), 0 for none.
       private def request_ms(times) = times ? (times[1] - times[0]) * 1000 : 0
       # …and as it lands: what came in, judged — `{source:, base:}`, the module's source text and its base URL (its
@@ -9004,6 +9016,7 @@ module Capybara
         store_kept_cookies(slot[:cookies])
         url    = mod[:url]
         result = slot[:result] or return nil
+        result = module_worker_answer(url, mod, result) if result[:worker]
         if (local = result[:local])
           source, content_type = local
           base = url
