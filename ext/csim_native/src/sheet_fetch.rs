@@ -49,8 +49,10 @@ pub(crate) struct SheetRequest {
     // (…and whether it made none — its fetch failed — which asking again would only fetch again)
     pub(crate) made_none: bool,
     // (…and whether its link's load task has processed it yet — HTML "process the linked resource" makes its sheet, which
-    // nothing reads before: `sheetFetchLand`)
+    // nothing reads before: `sheetFetchLand` — and whether the cascade was handed none for it as it waited, which it is to be
+    // handed again)
     pub(crate) processed: bool,
+    pub(crate) read_unprocessed: bool,
 }
 
 // A realm's own: the encodings its sheets decoded in, by URL; an `@import`'s service worker answers, by controller and
@@ -105,6 +107,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sheetFetchLand", fetch_land_op, context_id);
     register(scope, ns, "sheetFetchesAbort", fetches_abort_op, context_id);
     register(scope, ns, "sheetImportsLand", imports_land_op, context_id);
+    register(scope, ns, "sheetImportsForget", imports_forget_op, context_id);
 }
 
 // __dom.sheetFetchBegin(owner, url, plan, scanned, host) -> how many ms after now the response of the `<link>` `owner`'s
@@ -170,11 +173,14 @@ fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
         Flight::None => Ok(0.0),
     }
 }
-// …the owner's sheet processed from now (sheet_feed.rs `fetched_sheet`), the cascade made stale for it: a sheet it took
-// part in without, its key the same.
+// …the owner's sheet processed from now (sheet_feed.rs `fetched_sheet`) — the cascade made stale for it where it was
+// handed without it, its key the same (one never handed it since it was connected is stale already, its key moved).
 fn processed_now(arena: &mut crate::dom::RealmArena, cid: i32, el: NodeId) -> f64 {
-    request_of(arena, el).processed = true;
-    arena.stale_cascade(cid, true);
+    let request = request_of(arena, el);
+    request.processed = true;
+    if std::mem::take(&mut request.read_unprocessed) {
+        arena.stale_cascade(cid, true);
+    }
     0.0
 }
 // A style resource's fetch begun in parallel (`begin_flight`): the host's slot and how many ms after now its response
@@ -255,6 +261,16 @@ fn imports_land_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         }
     }
     rv.set_double(next.unwrap_or(if failed { IMPORTS_FAILED } else { IMPORTS_LOADED }));
+}
+// __dom.sheetImportsForget(owner) — the `@import` tree of the owner's sheet let go of: its sheet was made again of a block
+// that imports nothing, which its connection asks nothing of (bridge.entry.js `maybeFireStyleLoad`).
+fn imports_forget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    if let Some(s) = realm(scope, cid).realm_state_mut(cid) {
+        s.sheet_fetches.trees.remove(&el);
+        s.sheet_fetches.cancelled.remove(&el);
+    }
 }
 // …how many ms after now the owner's load task is to run for its `@import` tree — the sheet `made` — -1 where it has none
 // (sheet_feed.rs `sheetImportsDue`).

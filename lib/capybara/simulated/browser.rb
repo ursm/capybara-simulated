@@ -162,6 +162,8 @@ module Capybara
       # How long a boot will park for the page's own <img> fetches before letting the window
       # `load` defer to a later drain (see boot_response_into_ctx).
       IMAGE_LOAD_BOOT_BUDGET_S = 0.25
+      # How far a visit will step the virtual clock for its document's load (see await_document_load).
+      VISIT_LOAD_BUDGET_MS = 10_000
       # How long a session boundary (reset! / dispose) will wait for background
       # app-request threads to finish before abandoning them (see
       # drain_app_request_threads). Generous vs the normal ms-scale request.
@@ -13089,7 +13091,28 @@ module Capybara
           end
         end
         flush_page_init
+        await_document_load
         @load_navigations_due = true
+      end
+
+      # A visit returns once its document has loaded, as a browser's driver waits for `load`: where the load waits on work
+      # queued for later — a style sheet, a frame or a script whose server took its time, one a DOMContentLoaded listener
+      # inserted, an `@import` tree's next level (`loadAwaitsTime`) — the event loop is stepped to it, task by task, what the page's timers do meanwhile done as they would be (a timer due before the
+      # load runs before it); none past VISIT_LOAD_BUDGET_MS of virtual time, a resource that never lands left to a later
+      # drain.
+      def await_document_load
+        return unless @timers_active
+
+        waited = 0
+        while waited < VISIT_LOAD_BUDGET_MS && @runtime.call('loadAwaitsTime')
+          delay = @runtime.next_timer_delay_ms
+          break if delay.negative?
+
+          step = delay.clamp(1, VISIT_LOAD_BUDGET_MS - waited)
+          @runtime.run_loop_step(step, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
+          waited += step
+        end
+        @find_cache_dirty = true if waited.positive?
       end
 
       # Run the page's own DUE-NOW init as the load ends — the `setTimeout(0)` a

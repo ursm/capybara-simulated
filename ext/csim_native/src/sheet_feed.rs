@@ -210,7 +210,11 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
         // script reading it)
         let network = url.as_deref().is_some_and(|u| crate::fetch_rules::fetch_route(u, 0, "") == crate::fetch_rules::ROUTE_NETWORK);
         let request = crate::sheet_fetch::request_of(arena, owner);
-        if request.made_none || !pi && network && !request.processed {
+        if request.made_none {
+            return Ok(None);
+        }
+        if !pi && network && !request.processed {
+            request.read_unprocessed = true;
             return Ok(None);
         }
     }

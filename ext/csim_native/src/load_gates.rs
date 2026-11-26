@@ -70,6 +70,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "loadGateEnd", load_gate_end_op, context_id);
     crate::dom::register(scope, ns, "flushLoadGates", flush_load_gates_op, context_id);
     crate::dom::register(scope, ns, "loadGatesForget", load_gates_forget_op, context_id);
+    crate::dom::register(scope, ns, "loadGatesPending", load_gates_pending_op, context_id);
 }
 
 fn gates_of<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> Option<&'s mut LoadGates> {
@@ -162,6 +163,12 @@ pub(crate) fn flush(scope: &mut v8::PinScope<'_, '_>, cid: i32, run: v8::Local<'
     }
 }
 
+
+// __dom.loadGatesPending() -> whether a gate of the calling realm's document is still to run (`LoadGates::pending`).
+fn load_gates_pending_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(gates_of(scope, cid).is_some_and(|g| g.pending()));
+}
 
 // __dom.loadGatesForget() — the calling realm's gates let go of: a new document begins in it, and the elements the old
 // one's were for belong to a document being replaced (left in, they would pile up one dead gate per navigation).
