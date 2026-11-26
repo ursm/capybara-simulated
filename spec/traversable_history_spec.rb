@@ -1,13 +1,14 @@
 require 'capybara/simulated'
 require 'rusty_racer'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # Each top-level traversable has a session history of its own (session_history.rs): the page's, a pop-up's — a window
 # `window.open` made in the opener's isolate. What another window's script asks of it — a traversal of that history, a
 # navigation of it to a POST resource or to a `javascript:` URL — is a task of its own event loop (HTML "traverse the
 # history by a delta", "navigate": the steps after the source snapshot continue in the target's agent), never run while
 # the asking script is.
-RSpec.describe 'the session history of each traversable' do
+RSpec.describe 'the session history of each traversable', :app_answers_every_host do
   let(:requests) { [] }
   let(:app) {
     requests = self.requests

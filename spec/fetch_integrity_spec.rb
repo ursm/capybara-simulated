@@ -4,12 +4,13 @@ require 'capybara/simulated'
 require 'digest'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A `fetch()` of integrity metadata is a network error where its response's body matches none of it (Fetch "main
 # fetch"), the body read whole first: a service worker's answer streamed in chunks is checked against all of them, not
 # against what it had read so far (none). An opaque response is refused by any metadata — its body is null, which main
 # fetch refuses before SRI's matching would let metadata of no algorithm it knows through (Chrome and Firefox alike).
-RSpec.describe 'fetch() integrity' do
+RSpec.describe 'fetch() integrity', :app_answers_every_host do
   include PollUntil
 
   it "checks a worker's streamed answer against its whole body" do

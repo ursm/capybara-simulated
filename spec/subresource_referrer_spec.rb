@@ -8,7 +8,7 @@ require_relative 'support/every_host_local'
 # A document's subresources are requested by that document (Fetch "client"): their Referer its URL under its referrer
 # policy — or the one the element's `referrerpolicy` sets — a frame's style sheets, scripts, modules and fonts the
 # frame's, not the page's.
-RSpec.describe 'a subresource request' do
+RSpec.describe 'a subresource request', :app_answers_every_host do
   let(:referers) { {} }
   let(:session) do
     refs = referers

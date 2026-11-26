@@ -2,10 +2,11 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D, generated from their IDL: made by a canvas alone,
 # their engine in their slots, their overloads resolved and their arguments converted by the binding.
-RSpec.describe 'Canvas context bindings' do
+RSpec.describe 'Canvas context bindings', :app_answers_every_host do
   let(:session) {
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']] })
     s.visit('/')

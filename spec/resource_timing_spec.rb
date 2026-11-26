@@ -5,6 +5,7 @@ require 'timeout'
 require 'zlib'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # Resource Timing Level 2: every resource a document fetches is a `PerformanceResourceTiming`
 # entry — scripts, stylesheets, `@import`s, images, frames, fetch / XHR / beacon — that the page
@@ -20,7 +21,7 @@ require_relative 'support/poll_until'
 # and an opaque (no-cors) one neither its status nor its type. The entry is named by the
 # REQUEST URL (Fetch's "mark resource timing"), a redirect keeps that name and sets
 # `redirectStart`; a network error is an entry with nothing but its times.
-RSpec.describe 'resource timing' do
+RSpec.describe 'resource timing', :app_answers_every_host do
   GZIPPED = Zlib.gzip('var gz = 1;')
 
   def app

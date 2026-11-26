@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rusty_racer'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A window `window.open` opened at a URL — a realm of its opener's isolate — loads as a window does: made at its initial
 # about:blank, which fires no load, then navigated as a task of its own once its opener's script is done, its document
@@ -8,7 +9,7 @@ require_relative 'support/session_teardown'
 # listener its opener puts on it right after `open()` is on the Window its same-origin document keeps (HTML's window
 # reuse), called in that load's dispatch, `this` the opener's WindowProxy of it. Chrome 156 and Firefox 159, measured
 # 2026-10-31, every one.
-RSpec.describe 'the load of a pop-up' do
+RSpec.describe 'the load of a pop-up', :app_answers_every_host do
   let(:scripts) {
     {
       # (…a pop-up that logs what its document does, in its origin's localStorage, which its opener reads)

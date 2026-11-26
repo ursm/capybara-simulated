@@ -4,13 +4,14 @@ require 'socket'
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # HTML "establish the connection" of an EventSource over the network: its request fetched as every request is (Fetch: a
 # CORS GET of `text/event-stream`, the HTTP cache bypassed, its credentials as `withCredentials` says), a 200 of
 # `text/event-stream` (its parameters and case aside — Fetch's "extract a MIME type", a header's bytes each a character)
 # opening it, any other status or type, or a response the CORS check refuses, failing it — an `error` and no `open` — a
 # redirect followed first (redirect mode "follow"), and its messages of the origin of the URL the stream came from.
-RSpec.describe 'an EventSource connection' do
+RSpec.describe 'an EventSource connection', :external_network do
   # A server that answers its connections in turn with `responses` — each a status, its headers, a stream's open to any
   # origin unless they say otherwise, and its body, `data: <status>` unless it says otherwise; the request heads it read
   # kept in `heads`.

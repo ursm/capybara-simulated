@@ -65,8 +65,12 @@ module CapybaraShared
     'Capybara::Session Simulated #has_css? :style option should support Hash'                    => STYLE_HASH
   }.freeze
 
+  # (…Capybara's suite is written for a browser on the network: it visits hosts of its own and loads its drag-and-drop
+  # libraries from their CDNs — the driver's `external_network: true`, which a session sends nothing out without)
+  Capybara.register_driver(:simulated_capybara_shared) {|app| Capybara::Simulated::Driver.new(app, external_network: true) }
+
   def self.session
-    @session ||= Capybara::Session.new(:simulated, TestApp)
+    @session ||= Capybara::Session.new(:simulated_capybara_shared, TestApp)
   end
 
   # Measured per-group seconds (script/regen_capybara_group_weights.rb —

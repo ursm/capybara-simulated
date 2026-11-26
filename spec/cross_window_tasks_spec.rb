@@ -1,13 +1,14 @@
 require 'capybara/simulated'
 require 'rusty_racer'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # What a window's script asks of another window — a message it posts, a navigation of it, its close — is a task of THAT
 # window's event loop (HTML), never run while the asking script is: queued on its realm (a pop-up of its opener's
 # browsing context group is a realm of the opener's isolate), or, of a window a Browser hosts — the driver's own, a
 # `noopener` one, its own page's `close()` — recorded in the engine (session_history.rs `Asked`), taken as the window
 # steps — one not the active window as the active one's step takes it (Browser#take_window_tasks_in_background).
-RSpec.describe 'a task one window asks of another' do
+RSpec.describe 'a task one window asks of another', :app_answers_every_host do
   let(:scripts) {
     {
       # (…a pop-up whose unload and messages are logged in the origin's localStorage, which its opener reads)

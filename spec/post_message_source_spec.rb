@@ -9,7 +9,7 @@ require_relative 'support/every_host_local'
 # posting through a reference its page keeps posts as the frame, not as the page (B10) — and through the page's own
 # `postMessage` called on another window or on the page itself. Each `postMessage` is an operation of the engine's
 # (`incumbentOperation`), a native function, which V8's incumbent context answers.
-RSpec.describe "a message's source" do
+RSpec.describe "a message's source", :app_answers_every_host do
   include PollUntil
 
   let(:app) {

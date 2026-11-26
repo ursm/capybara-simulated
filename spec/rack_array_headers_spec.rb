@@ -3,12 +3,13 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A Rack 3 app may give a header as an Array of its fields; the driver's own reads of a response's headers — CORS's,
 # a preflight's, a download's, the response's type, the HTTP cache's, Basic authentication's — take them combined with
 # ", " as a browser builds the header list (http_cache.rs `combine`, Browser#header_text), where they had read the Array's
 # `inspect` or its first field; and a Location of more than one field is none to follow.
-RSpec.describe 'a response header given as an Array' do
+RSpec.describe 'a response header given as an Array', :app_answers_every_host do
   it 'is read as its fields combined, by CORS and a preflight' do
     app = lambda {|env|
       cors = {'access-control-allow-origin' => ['*'], 'access-control-allow-headers' => ['x-a', 'x-b'], 'access-control-allow-methods' => ['PUT']}

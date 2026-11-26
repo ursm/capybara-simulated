@@ -13,7 +13,7 @@ require_relative 'support/session_teardown'
 # attestation response reads its authenticator data and SubjectPublicKeyInfo public key; a credential serializes to JSON
 # and options parse from it, extension inputs too; `store` is a NotSupportedError for a public-key credential, as is a
 # request without `publicKey`, and `store` of anything but a Credential a TypeError.
-RSpec.describe 'WebAuthn bindings' do
+RSpec.describe 'WebAuthn bindings', :app_answers_every_host do
   let(:app) { ->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>']] } }
 
   # A script's result, the virtual clock taken past the lifetime timer of each request it waits on (§15.1's five minutes).

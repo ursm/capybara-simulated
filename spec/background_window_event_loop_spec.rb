@@ -1,12 +1,13 @@
 require 'capybara/simulated'
 require 'rusty_racer'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # Every window's event loop runs, as a browser's does: a window a Browser of its own hosts — a `noopener` pop-up, a
 # browsing context group of its own — that is not the active one runs what its channels bring it (a BroadcastChannel
 # post another window sent) and the timers that sets, as a wait polls the active window, with no command sent to it
 # (Browser#steps_pending?, B12).
-RSpec.describe 'a background window of a browsing context group of its own' do
+RSpec.describe 'a background window of a browsing context group of its own', :app_answers_every_host do
   let(:scripts) {
     {
       # (…a window that answers a BroadcastChannel post at once, one that answers on a timer, one whose own timer reports)

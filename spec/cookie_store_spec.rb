@@ -9,7 +9,7 @@ require_relative 'support/every_host_local'
 # cookie set with a Domain goes to every host that domain-matches it — a public suffix none — one set with a Path only to
 # the paths under it, an HttpOnly one to no `document.cookie`, an expired one nowhere, and a `__Host-` one only where it
 # is Secure, host-only and at `/`. (They had been a name → value table per host, which read none of these.)
-RSpec.describe 'the cookie store' do
+RSpec.describe 'the cookie store', :app_answers_every_host do
   include PollUntil
 
   let(:seen) { [] }

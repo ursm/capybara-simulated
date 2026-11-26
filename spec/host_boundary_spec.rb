@@ -11,7 +11,7 @@ require_relative 'support/every_host_local'
 # the steps the host calls by name are no page's to call (`hostSteps`, on the realm's host object), nor are the hooks
 # one module of the bindings installs for another or another realm's (`realmHooks`), none a global's; and a window's
 # parent and top are the host's to set, kept where no script can name them (`realmHooks`).
-RSpec.describe 'the host boundary' do
+RSpec.describe 'the host boundary', :app_answers_every_host do
   let(:pages) {
     {
       '/'       => '<!DOCTYPE html><meta charset=utf-8><body><input id=i><form id=f action=/sent><button id=b>go</button></form>',

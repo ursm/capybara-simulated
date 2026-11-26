@@ -1,12 +1,13 @@
 require 'capybara/simulated'
 require 'rusty_racer'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A window `window.open` opened at a URL is a window of its opener's browsing context group — its documents realms of the
 # opener's isolate — which its opener reaches through a WindowProxy (platform-globals.js `frameWindowProxyFor`). HTML's:
 # same origin, its Window and its Location are the real ones, whole; cross-origin, their CrossOriginProperties alone
 # (HTML §7.2.1.3), anything else a SecurityError — asked as each member is reached, by the origin of its active document.
-RSpec.describe 'a WindowProxy of a pop-up' do
+RSpec.describe 'a WindowProxy of a pop-up', :app_answers_every_host do
   # (…a page's script by its path: /opens opens a pop-up when its `f` is called, whose boot — /moves — navigates it)
   let(:scripts) {
     {

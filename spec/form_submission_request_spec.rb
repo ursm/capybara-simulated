@@ -9,7 +9,7 @@ require_relative 'support/every_host_local'
 # HTML "submit" builds a form's request — its action, method, entries — before it plans the navigation: what the page
 # does to the form after `submit()` returns is no part of what it sends. And a form whose node document is no longer
 # fully active cannot navigate at all.
-RSpec.describe "a form submission's request" do
+RSpec.describe "a form submission's request", :app_answers_every_host do
   include PollUntil
 
   html = ->(body) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]] }

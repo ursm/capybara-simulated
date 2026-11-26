@@ -6,7 +6,7 @@ require_relative 'support/every_host_local'
 # A window `window.open` made in its opener's isolate (RealmWindow) is a window of the session like any other: Capybara
 # switches to it, finds, clicks, fills, evaluates, reads its URL and title, navigates it, resizes it, paints it and
 # closes it — its documents' realms addressed in their host, its opener's page left as it is.
-RSpec.describe 'a window made in its opener\'s isolate' do
+RSpec.describe 'a window made in its opener\'s isolate', :app_answers_every_host do
   let(:app) {
     lambda do |env|
       body = case env['PATH_INFO']
@@ -846,7 +846,7 @@ end
 # …beside the frames of the page that opened it — one of another origin, one of its own: the driver's scope back at that
 # page's, its frames entered from there, however the window was addressed; and a frame's script finding the window by its
 # name, its own origin's or another's.
-RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its opener\'s page', :every_host_local do
+RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its opener\'s page', :every_host_local, :app_answers_every_host do
   let(:session) {
     simulated_session(lambda {|env|
       req         = Rack::Request.new(env)
@@ -1103,7 +1103,7 @@ end
 # (realm_location.rs `storage_key`): a frame of the opener's origin in it is a third party there — its Web Storage area,
 # its databases and its BroadcastChannels none of the opener's page's, as in Chrome and Firefox (privacycg/storage-
 # partitioning; WPT IndexedDB/idb-partitioned-basic, webmessaging/broadcastchannel/cross-partition).
-RSpec.describe 'a window of another site made in its opener\'s isolate', :every_host_local do
+RSpec.describe 'a window of another site made in its opener\'s isolate', :every_host_local, :app_answers_every_host do
   let(:session) {
     simulated_session(lambda {|env|
       body = if env['PATH_INFO'] == '/framed'

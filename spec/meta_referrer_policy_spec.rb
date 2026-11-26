@@ -1,10 +1,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A document's `<meta name="referrer">` (url_ops.rs `meta_referrer_steps`): its content ASCII-lowercased, a legacy
 # keyword mapped (`never` → no-referrer), the last valid one to be connected — what a frame's navigation of itself (a
 # link followed in it) sends its Referer by.
-RSpec.describe 'the meta referrer policy' do
+RSpec.describe 'the meta referrer policy', :app_answers_every_host do
   it "sets a frame's navigation Referer by the last valid meta connected" do
     referers = {}
     s = simulated_session(->(env) {

@@ -2,12 +2,13 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # The CORS-preflight cache (Fetch §4.9, cors.rs): a credentialed request's grant serves an uncredentialed request after
 # it, not the other way round; a preflight that fails, or the request after it, lets every entry of its origin and URL go
 # ("clear cache entries");
 # and a response's Access-Control-Expose-Headers that names a non-token exposes none of its names.
-RSpec.describe 'the CORS-preflight cache' do
+RSpec.describe 'the CORS-preflight cache', :app_answers_every_host do
   def cors_session(options)
     app = lambda {|env|
       origin = env['HTTP_ORIGIN'].to_s

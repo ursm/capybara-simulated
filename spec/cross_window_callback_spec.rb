@@ -1,6 +1,7 @@
 require 'capybara/simulated'
 require 'rusty_racer'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A function one window's script hands another window of its browsing context group — an argument of a method it calls
 # there, a value it sets there, a call's result — is that function itself: a pop-up's documents are realms of its
@@ -8,7 +9,7 @@ require_relative 'support/session_teardown'
 # that realm, thrown to the caller; one that is a listener of the receiving window reports its exception in its own
 # realm; calls that recurse from window to window overflow the one stack; and a function of a document navigated away
 # still runs, in that document's realm (Chrome and Firefox measured).
-RSpec.describe 'a function handed to another window of its group' do
+RSpec.describe 'a function handed to another window of its group', :app_answers_every_host do
   let(:pages) {
     {
       '/opener' => <<~JS,
@@ -89,7 +90,7 @@ end
 
 # …and one handed a pop-up of another site, navigated back to its opener's origin — a realm of its opener's isolate too
 # (Driver#open_aux_window), whose functions are its own: the function itself, called in the realm that made it.
-RSpec.describe 'a function handed to a pop-up of another site' do
+RSpec.describe 'a function handed to a pop-up of another site', :app_answers_every_host do
   let(:pages) {
     {
       '/opener' => <<~JS,

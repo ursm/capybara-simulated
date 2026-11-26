@@ -6,12 +6,13 @@ require 'json'
 require 'socket'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # What a service worker's Handle Fetch comes to: `event.handled`'s rejection (Create Fetch Event and Dispatch: a
 # "NetworkError" DOMException — Chrome and Firefox, measured), `event.clientId` of a navigation — the document that began
 # it, HTML's source snapshot params' fetch client (w3c/ServiceWorker#1832, merged 2026-07: "clientId reflects the
 # initiating client whenever one exists") — and a raced route, which is a GET's alone.
-RSpec.describe 'Handle Fetch outcomes' do
+RSpec.describe 'Handle Fetch outcomes', :app_answers_every_host do
   let(:worker) {
     <<~JS
       self.addEventListener('install', e => {
@@ -395,7 +396,7 @@ RSpec.describe 'Handle Fetch outcomes' do
       expect(session.text).to eq('updated')
     end
 
-    it "doesn't end a worker waiting on another host past the guard" do
+    it "doesn't end a worker waiting on another host past the guard", :external_network do
       server = TCPServer.new('127.0.0.1', 0)
       port = server.addr[1]
       thread = Thread.new {

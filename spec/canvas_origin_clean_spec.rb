@@ -8,7 +8,7 @@ require_relative 'support/every_host_local'
 # sets it again: not `restore()`, not `reset()` ("reset the rendering context to its default state" has no step for it),
 # and not a resize — the spec and Firefox, where Chrome cleans the bitmap on a resize (measured: `drawn:SecurityError
 # restore:SecurityError reset:SecurityError resize:clean`; Firefox SecurityError throughout).
-RSpec.describe 'canvas origin-clean flag' do
+RSpec.describe 'canvas origin-clean flag', :app_answers_every_host do
   let(:png) { File.binread(File.expand_path('wpt/images/green-1x1.png', __dir__)) }
 
   it 'stays cleared through restore(), reset() and a resize' do
