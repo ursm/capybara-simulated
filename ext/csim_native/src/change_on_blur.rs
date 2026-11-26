@@ -31,7 +31,7 @@ impl RealmArena {
     }
 
     // The control is focused: its value now is what a blur compares against, and nothing is edited yet.
-    fn change_armed(&mut self, id: NodeId) {
+    pub(crate) fn change_armed(&mut self, id: NodeId) {
         let Some(n) = self.get(id).filter(|n| is_change_on_blur_control(n)) else { return };
         let value = self.change_value(n);
         self.change_baselines.insert(id, (value, false));

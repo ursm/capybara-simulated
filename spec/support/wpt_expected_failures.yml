@@ -66685,23 +66685,6 @@ html/interaction/focus/document-level-focus-apis/document-has-system-focus.html:
 - Top-level document receives blur/focus events and loses system focus during opening/closing
   of a popup
 - "[harness] TIMEOUT"
-html/interaction/focus/focus-selection.html:
-- div has contenteditable=false
-- div has contenteditable=true
-html/interaction/focus/processing-model/focus-fixup-rule-one-no-dialogs.html:
-- "#button1"
-- "#button4"
-html/interaction/focus/processing-model/focusVisible.html:
-- 'FocusOptions.focusVisible: #contenteditable'
-- 'FocusOptions.focusVisible: #tabindex'
-- 'FocusOptions.focusVisible: button'
-- 'FocusOptions.focusVisible: input'
-html/interaction/focus/processing-model/preventScroll.html:
-- elm.focus() without arguments
-- elm.focus(null)
-- elm.focus(undefined)
-- 'elm.focus({preventScroll: false})'
-- elm.focus({})
 html/interaction/focus/processing-model/textarea-scroll-selection.html:
 - programatic focus() scrolls selection into view including ancestors
 html/interaction/focus/sequential-focus-navigation-starting-point.html:
@@ -66722,10 +66705,6 @@ html/interaction/focus/sequential-focus-navigation-starting-point.html:
 - Focus navigation starting point should not change when previous element is moved
   with moveBefore.
 - Focus navigation starting point should not change when previous element is removed.
-html/interaction/focus/the-autofocus-attribute/autofocus-area.html:
-- autofocus works on area element
-html/interaction/focus/the-autofocus-attribute/supported-elements.html:
-- Area element should support autofocus
 html/interaction/focus/the-autofocus-attribute/update-the-rendering.html:
 - '"Flush autofocus candidates" should be happen before a scroll event and animation
   frame callbacks'
@@ -67682,9 +67661,6 @@ html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with
 - "== html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-fixed-position-cb-ref.html"
 html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-fo-ancestor.html:
 - "== html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with-fixed-position-cb-ref.html"
-html/semantics/interactive-elements/the-dialog-element/focus-after-close.html:
-- Focus should not scroll if the previously focused element is outside the viewport
-- "[harness] TIMEOUT"
 html/semantics/interactive-elements/the-dialog-element/inert-node-is-unselectable.html:
 - Test that inert nodes cannot be selected. The test passes if the only text you can
   select is inside the dialog.
@@ -68200,8 +68176,6 @@ selection/selection-focused-element-becomes-nonfocusable.html:
 - Focused element is removed
 selection/textcontrols/focus.html:
 - focus() should cancel selection extension by pointer device
-selection/textcontrols/selectionchange-on-shadow-dom.html:
-- selectionchange event fired on a shadow dom bubble to the document
 selection/toString-user-select-none.html:
 - 'Selection.toString() excludes basic user-select: none content'
 - 'Selection.toString() excludes nested user-select: none content'

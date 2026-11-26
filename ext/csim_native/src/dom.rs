@@ -1021,6 +1021,8 @@ pub(crate) struct RealmArena {
     // first popover of a stack showed, which closing or hiding it gives focus back to — whichever realm's script opens and
     // closes it (focus.rs, popovers.rs).
     pub(crate) previously_focused: std::collections::HashMap<NodeId, NodeId>,
+    // How many focus update steps have begun: one that a listener's own moved the focus during stops (focus_update.rs).
+    pub(crate) focus_updates: u32,
     // Each focused text control's value as it was focused, and whether the user edited it since (change_on_blur.rs).
     pub(crate) change_baselines: crate::change_on_blur::ChangeBaselines,
     // The elements set through an element reference's IDL attribute, by element and attribute (element_references.rs).
@@ -3330,8 +3332,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "assignedSlotOf", assigned_slot_of, context_id);
     register(scope, ns, "assignedNodesOf", assigned_nodes_of, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
-    register(scope, ns, "latchFocusRing", latch_focus_ring, context_id);
-    register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
     register(scope, ns, "matches", matches, context_id);
     register(scope, ns, "closest", closest, context_id);
@@ -3409,6 +3409,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::scroll_into_view::install(scope, ns, context_id);
     crate::rendered::install(scope, ns, context_id);
     crate::focus::install(scope, ns, context_id);
+    crate::focus_update::install(scope, ns, context_id);
     crate::autofocus::install(scope, ns, context_id);
     crate::sheet_owners::install(scope, ns, context_id);
     crate::link_resource::install(scope, ns, context_id);
@@ -4540,39 +4541,6 @@ fn assigned_nodes_of(
     };
     let answer = nodes_value(scope, cid, &ids);
     rv.set(answer);
-}
-
-// __dom.latchFocusRing(focusedNid): the focus ring of the realm whose tree the element just focused is in, latched as
-// it is focused — whichever realm's code focused it: one a frame made, adopted here, is matched by this realm's
-// `:focus-visible` — shown (`:focus-visible` matches) unless the user's last driven input there was a pointer's and the
-// element is no TEXT ENTRY: a textarea, a textual `<input>`, an editable element — whose ring a browser shows however
-// focus came to it.
-fn latch_focus_ring(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let id = nid_arg(scope, &args, 0);
-    let cid = id.and_then(|id| dom(scope).arena.get(id).map(|n| n.realm)).unwrap_or_else(|| realm_id(scope, &args));
-    let arena = realm(scope, cid);
-    let text_entry = id.is_some_and(|id| {
-        arena.get(id).filter(|n| n.kind == NodeKind::Element).is_some_and(|n| {
-            n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::TEXTUAL)) || arena.is_editable(id)
-        })
-    });
-    let hidden = arena.pointer_modality && !text_entry;
-    arena.set_focus_ring_hidden(hidden);
-}
-
-// __dom.setFocusStart(nid): the realm document's sequential focus navigation starting point is that node (`focus_start`).
-fn set_focus_start(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let node = nid_arg(scope, &args, 0);
-    let cid = realm_id(scope, &args);
-    realm(scope, cid).focus_start = node;
 }
 
 // __dom.inspectNode(nid) -> [kind, localName, data, parentNid, state, hostNid, value, childNid, …] (`value` undefined

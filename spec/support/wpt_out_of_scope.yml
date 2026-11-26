@@ -63880,6 +63880,33 @@ html/semantics/forms/form-submission-0/form-double-submit-requestsubmit.html:
     produces. The test''s spec-ideal `expected` is null, so Chrome itself fails these
     4 combos (callSubmit + passSubmitter). Earned out per CLAUDE.md "spec-correct
     = what browsers actually do"; see memory form-submission-planned-nav.'
+html/semantics/forms/the-fieldset-element/disabled-003.html:
+- name: Disable deep-nested fieldsets should not hang
+  reason: 'Asserts the focus fixup SYNCHRONOUSLY as a fieldset is disabled (a Chromium
+    crash test, crbug.com/1427047, whose assert_not_equals runs right after the write),
+    against current HTML, which runs it in "update the rendering" — "For each doc
+    of docs, if the focused area of doc is not a focusable area, then run the focusing
+    steps for doc''s viewport … It might also happen to an input element when the
+    element gets disabled" — since whatwg/html#8392 (2023-01, before this test). The
+    gate''s own html/interaction/focus/processing-model/focus-fixup-rule-one-no-dialogs.html
+    asks the opposite for the same change (#button4: a fieldset disabled, the button
+    still document.activeElement after the write, in the animation frame callbacks
+    and the resize observations) and passes; no implementation passes both. Chrome
+    (measured 2026-11-27) blurs a disabled fieldset''s control at once but an input
+    disabled itself at the rendering update.'
+- name: Disable light-nested fieldsets should not crash
+  reason: 'Asserts the focus fixup SYNCHRONOUSLY as a fieldset is disabled (a Chromium
+    crash test, crbug.com/1427047, whose assert_not_equals runs right after the write),
+    against current HTML, which runs it in "update the rendering" — "For each doc
+    of docs, if the focused area of doc is not a focusable area, then run the focusing
+    steps for doc''s viewport … It might also happen to an input element when the
+    element gets disabled" — since whatwg/html#8392 (2023-01, before this test). The
+    gate''s own html/interaction/focus/processing-model/focus-fixup-rule-one-no-dialogs.html
+    asks the opposite for the same change (#button4: a fieldset disabled, the button
+    still document.activeElement after the write, in the animation frame callbacks
+    and the resize observations) and passes; no implementation passes both. Chrome
+    (measured 2026-11-27) blurs a disabled fieldset''s control at once but an input
+    disabled itself at the rendering update.'
 html/semantics/forms/the-input-element/input-type-checkbox-switch.tentative.window.js:
 - name: Cloning a switch control
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

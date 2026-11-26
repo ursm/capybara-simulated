@@ -71,6 +71,7 @@ mod font_face_set;
 mod font_face_state;
 mod font_resolve;
 mod focus;
+mod focus_update;
 // Native text metrics (fontations) — used IN-PROCESS by inline layout (mod layout): a font file registered
 // (`font::register_path`) to the handle a family's face is (font_resolve.rs, `walkFaces`).
 mod font;

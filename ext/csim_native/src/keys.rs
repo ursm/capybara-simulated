@@ -879,7 +879,7 @@ impl KeyGesture {
     fn send_keys(&mut self, arena: &mut RealmArena, how: u32, to: NodeId, atoms: Vec<Atom>) {
         let n = self.to;
         // (…keyboard-driven: `:focus-visible` applies)
-        arena.pointer_modality = false;
+        arena.keyboard_modality();
         // (…not one focused already — Selenium's active element, which it sends to as it is: a container whose frame's
         // document holds the focus is focused again by no key, which would take the focus out. Nor one its document kept
         // as its focused area as the focus went to the user agent's controls (`document.activeElement` yet): the keys go
@@ -1918,7 +1918,7 @@ fn key_action(arena: &mut RealmArena, keyboard: &mut Keyboard, cid: i32, down: b
     let fallback = arena.body_element(doc).or_else(|| arena.first_element_child(doc))?;
     let to = key_event_target(arena, cid, fallback);
     // (…keyboard-driven: `:focus-visible` applies)
-    arena.pointer_modality = false;
+    arena.keyboard_modality();
     let mut gesture = KeyGesture::new(cid, to, false);
     gesture.jobs.push_back(Job::Begin);
     let ty = if down { "keydown" } else { "keyup" };

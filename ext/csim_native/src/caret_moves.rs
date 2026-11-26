@@ -45,18 +45,32 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "focusCaret", focus_caret_op, context_id);
 }
 
-// __dom.focusCaret(editingHost, selectionState) -> [[node], offset] where an editing host just focused puts the caret:
-// its first caret position (caret.rs `caret_edge`, Chrome's) where its document's selection is not in it — undefined
-// where it is, which stays (Chrome and Firefox: a press's, which set it where it pressed first).
+// __dom.focusCaret(el, selectionState) -> [[node], offset] where focusing an element puts its document's selection, or
+// undefined where it stays — HTML's "platform-specific conventions for focusing new focus target": an editing host's
+// first caret position (caret.rs `caret_edge`, Chrome's) where the selection is not in it already (a press's, which set
+// it where it pressed first: Chrome and Firefox); a text control's the point before it in its parent, its own selection
+// the control's (Chrome, measured 2026-11-27; Firefox since bug 2032191 — WPT html/interaction/focus/focus-selection).
 fn focus_caret_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(host) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let Some(el) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let cid = realm_id(scope, &args);
-    let (_, range) = crate::selection::caret_points(scope, cid, args.get(1));
-    if range.is_some_and(|[start, _]| crate::ranges::contains(&dom(scope).arena, host, start.0)) {
-        return;
-    }
-    let Some((node, offset)) = crate::rendered::with_engine(scope, &args, |engine, arena, now| arena.caret_edge(engine, now, host, false)) else { return };
-    let items = [crate::dom::nodes_value(scope, cid, &[node]), v8::Integer::new_from_unsigned(scope, offset).into()];
+    let arena = &dom(scope).arena;
+    let control = arena.get(el).is_some_and(|n| n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::SELECT)));
+    let point = if control {
+        let Some(parent) = arena.parent_of(el) else { return };
+        let Some(index) = arena.get(parent).and_then(|p| p.children.iter().position(|&c| c == el)) else { return };
+        (parent, index as u32)
+    } else {
+        if !arena.is_editable(el) {
+            return;
+        }
+        let (_, range) = crate::selection::caret_points(scope, cid, args.get(1));
+        if range.is_some_and(|[start, _]| crate::ranges::contains(&dom(scope).arena, el, start.0)) {
+            return;
+        }
+        let Some(edge) = crate::rendered::with_engine(scope, &args, |engine, arena, now| arena.caret_edge(engine, now, el, false)) else { return };
+        edge
+    };
+    let items = [crate::dom::nodes_value(scope, cid, &[point.0]), v8::Integer::new_from_unsigned(scope, point.1).into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 

@@ -1,8 +1,8 @@
 // HTML autofocus (§6.6.7): each top-level document's AUTOFOCUS CANDIDATES — the elements carrying `autofocus` inserted
 // into it or a document in its frames, in the order they came — and its "autofocus processed flag", set once one has
 // taken focus, anything has, it is at a fragment, or a dialog has run its focusing steps. The rendering update takes the
-// candidates in turn (`autofocus_next`); which navigable a candidate's document is in, and whether it can take focus,
-// the bindings answer — they hold the frames and ask the style engine — and they ask again where one cannot.
+// candidates in turn (`autofocus_next`; focus_update.rs `flush_autofocus_candidates`, which asks which navigable a
+// candidate's document is in, and whether it can take focus, and asks again where one cannot).
 
 use std::collections::HashMap;
 
@@ -30,6 +30,10 @@ impl Autofocus {
                 flag[0].set(1);
             }
         }
+    }
+    // Whether the top-level document `top` is owed a flush of its candidates — no longer: the flush begins.
+    pub(crate) fn take_pending(&mut self, top: NodeId) -> bool {
+        self.pending.remove(&top)
     }
     // Whether a top-level document of realm `realm` is owed a flush of its candidates (`pending`).
     pub(crate) fn pending_in(&self, arena: &RealmArena, realm: i32) -> bool {
@@ -119,10 +123,6 @@ impl RealmArena {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "autofocusInsert", insert_op, context_id);
-    crate::dom::register(scope, ns, "autofocusProcessed", processed_op, context_id);
-    crate::dom::register(scope, ns, "autofocusNext", next_op, context_id);
-    crate::dom::register(scope, ns, "atFragment", at_fragment_op, context_id);
-    crate::dom::register(scope, ns, "autofocusPending", pending_op, context_id);
     // (…and the flag, a view on the isolate's one buffer)
     let store = {
         let autofocus = &mut crate::dom::dom(scope).arena.autofocus;
@@ -135,11 +135,21 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     }
 }
 
-// __dom.autofocusInsert(topNid, nodeNid) -> whether the top-level document holds a candidate (`autofocus_insert`).
+// __dom.autofocusInsert(nid) -> whether a flush is owed: HTML's autofocus insertion steps for the inserted node — "Let
+// target be the element's node document. If target is not fully active, then return. If target's active sandboxing
+// flag set has the sandboxed automatic features browsing context flag, then return. If the allow focus steps given target
+// return false, then return. Let topDocument be target's node navigable's top-level traversable's active document"
+// (`autofocus_insert`).
 fn insert_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(top), Some(node)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return rv.set_bool(false) };
-    let cid = crate::dom::realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).autofocus_insert(top, node));
+    let Some(node) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let arena = &mut crate::dom::dom(scope).arena;
+    let Some(realm) = arena.document_realm_of(node) else { return rv.set_bool(false) };
+    let active = arena.realm_document(realm).is_some_and(|d| arena.document_fully_active(d));
+    if !active || arena.sandboxed(realm, crate::sandbox::AUTOMATIC_FEATURES) || !crate::focus::allow_focus_steps(arena, realm) {
+        return rv.set_bool(false);
+    }
+    let Some(top) = arena.realm_document(arena.top_level_realm(realm)) else { return rv.set_bool(false) };
+    rv.set_bool(arena.autofocus_insert(top, node));
 }
 
 // The end of the dialog focusing steps and the popover focusing steps, `control` focused: its top-level document's
@@ -152,40 +162,6 @@ pub(crate) fn processed_for(scope: &mut v8::PinScope<'_, '_>, control: NodeId) {
     if crate::realm_location::realms_same_origin(scope, realm, top) {
         crate::dom::dom(scope).arena.autofocus_processed(top_doc);
     }
-}
-
-// __dom.autofocusProcessed(topNid): the top-level document's autofocus is processed (`autofocus_processed`).
-fn processed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(top) = nid_arg(scope, &args, 0) else { return };
-    let cid = crate::dom::realm_id(scope, &args);
-    crate::dom::realm(scope, cid).autofocus_processed(top);
-}
-
-// __dom.autofocusNext(topNid, focused) -> [the next candidate] (`autofocus_next`), as `nodes_value` answers, or
-// undefined for none.
-fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(top) = nid_arg(scope, &args, 0) else { return };
-    let focused = args.get(1).is_true();
-    let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let Some(next) = arena.autofocus_next(top, focused) else { return };
-    rv.set(crate::dom::nodes_value(scope, cid, &[next]));
-}
-
-// __dom.autofocusPending(topNid, take) -> whether the top-level document is owed a flush of its candidates — no longer,
-// where `take` (the flush beginning).
-fn pending_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(top) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let pending = &mut crate::dom::dom(scope).arena.autofocus.pending;
-    rv.set_bool(if args.get(1).is_true() { pending.remove(&top) } else { pending.contains(&top) });
-}
-
-// __dom.atFragment(docNid, …) -> whether any of the documents is at a fragment (`at_fragment`).
-fn at_fragment_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let docs: Vec<NodeId> = (0..args.length()).filter_map(|i| nid_arg(scope, &args, i)).collect();
-    let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    rv.set_bool(docs.into_iter().any(|d| arena.at_fragment(d)));
 }
 
 #[cfg(test)]

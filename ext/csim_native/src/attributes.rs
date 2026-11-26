@@ -296,7 +296,7 @@ const INVALID_NAME: i32 = 7;
 const STEP_IMAGE: u32 = 1; // an image's source changed: "update the image data"
 const STEP_SCRIPT: u32 = 1 << 1; // a script's `src` added: prepare it
 const STEP_SHEET: u32 = 1 << 2; // a `<link>`'s or `<style>`'s that selects or obtains its sheet: it follows
-const STEP_DISABLED: u32 = 1 << 3; // `disabled` set: the focused element unfocused where it no longer can be
+const STEP_FOCUS_FIXUP: u32 = 1 << 3; // the focused element's or an ancestor's: the focus fixup owed a frame
 const STEP_NAMED: u32 = 1 << 4; // an `id` or a `name` set: a named property
 const STEP_CANVAS: u32 = 1 << 5; // a canvas's `width` / `height`: its bitmap reset
 const STEP_DETAILS: u32 = 1 << 7; // a details element's `open` came or went: its toggle, its group closed
@@ -591,6 +591,12 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     if image {
         steps |= STEP_IMAGE;
     }
+    // (…any of the focused element's or an ancestor's — a `disabled`, a `hidden`, an `inert`, a style — may leave it no
+    // focusable area: the rendering update's focus fixup owed a frame)
+    let focus = arena.realm_state(n.realm).and_then(|st| st.focus);
+    if focus.is_some_and(|f| f == id || arena.shadow_including_ancestor(id, f)) {
+        steps |= STEP_FOCUS_FIXUP;
+    }
     if !plain {
         return steps;
     }
@@ -618,7 +624,6 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
         };
     steps |= flag(link_sheet || (owner && tag == "style" && matches!(local, "media" | "title" | "type")), STEP_SHEET);
     steps |= flag(link_sheet && (matches!(local, "rel" | "href" | "crossorigin" | "type") || (local == "disabled" && !set)), STEP_LINK_RESOURCE);
-    steps |= flag(local == "disabled" && set, STEP_DISABLED);
     steps |= flag(matches!(local, "id" | "name") && value.is_some_and(|v| !v.is_empty()), STEP_NAMED);
     steps |= flag(html && tag == "canvas" && matches!(local, "width" | "height"), STEP_CANVAS);
     steps |= flag(html && tag == "details" && local == "open" && came_or_went, STEP_DETAILS);

@@ -48,8 +48,8 @@ RSpec.describe 'custom element reaction timing' do
 
   # Only a write a step makes ITSELF joins the reaction queue of the change it belongs to; a write from page code a step
   # calls into — a form-associated callback, a `blur` listener — is an API call of its own, and calls back before it
-  # returns. An upgrade calls back for a namespaced attribute by local name and namespace too. Chrome-measured (Chrome
-  # blurs a newly disabled element later, a separate difference; the order inside the listener is what is held here).
+  # returns. An upgrade calls back for a namespaced attribute by local name and namespace too. Chrome-measured (the order
+  # inside the listener is what is held here).
   it 'calls back before a write from page code a step runs returns, and on upgrade by local name' do
     html = <<~HTML
       <!DOCTYPE html><fieldset id="fs"><x-f id="xf"></x-f></fieldset><button id="btn">b</button><x-u id="xu"></x-u>
@@ -81,7 +81,7 @@ RSpec.describe 'custom element reaction timing' do
           const btn = document.getElementById('btn');
           btn.focus();
           btn.addEventListener('blur', () => { xb.setAttribute('z', '1'); log.push('in-blur:' + xb._z); });
-          btn.setAttribute('disabled', '');
+          btn.blur();
           R.blur = log; }
         { const log = [];
           const u = document.getElementById('xu');
