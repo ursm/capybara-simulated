@@ -36,6 +36,19 @@ impl RealmArena {
         }
         self.observers.note_observations(cid);
     }
+    // …or its rule set moved by what its engine was handed already — an `@import` landed into a document sheet's tree
+    // (sheet_fetch.rs `sheetImportsLand`): its generation moves, what reads by it — the layout's gate, the `@font-face`
+    // rules (cascade.js `currentFontFaces`) — reads again, and nothing is handed the engine again for it.
+    pub(crate) fn rules_handed(&mut self, cid: i32) {
+        let Some(state) = self.realm_state_mut(cid) else { return };
+        let g = &state.generations;
+        let fed = g.get(GEN_STYLE_FED) == g.get(GEN_CASCADE);
+        g.bump(GEN_CASCADE);
+        if fed {
+            g.set(GEN_STYLE_FED, g.get(GEN_CASCADE));
+        }
+        self.observers.note_observations(cid);
+    }
 }
 
 // Realm `cid`'s style engine handed what it is to style with, where it was not yet: its document's cascade rebuilt

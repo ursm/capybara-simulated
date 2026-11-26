@@ -249,10 +249,14 @@ fn imports_land_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     }
     let Some(mut tree) = state.sheet_fetches.trees.remove(&el) else { return };
     let landed = std::mem::take(&mut tree.under_way);
+    let moved = !landed.is_empty();
     if hand_over(scope, cid, host, landed, true, &mut tree).is_err() {
         return;
     }
     let arena = realm(scope, cid);
+    if moved {
+        arena.rules_handed(cid);
+    }
     let clock = arena.event_loop.clock;
     let (next, failed) = (!tree.under_way.is_empty()).then(|| (tree.due_at - clock).max(0.0)).map_or((None, tree.failed), |d| (Some(d), false));
     if next.is_some() {
