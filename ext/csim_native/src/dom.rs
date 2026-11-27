@@ -2792,6 +2792,9 @@ pub(crate) struct Dom {
     // holds in its internal field — its brand, which a node's object is told by (`node_handle::handle_of`).
     pub(crate) node_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) node_brand: Option<v8::Global<v8::External>>,
+    // The private key every platform object of the bindings' carries (clone.rs `platformBrand`): what a structured clone
+    // tells one by, whatever its prototype.
+    pub(crate) platform_brand: Option<v8::Global<v8::Private>>,
     // The private key each realm's global carries its realm id under (`realm_of_global`) — a property no script sees,
     // not a context's embedder data: a context slot gives V8 a finalizer to run at teardown (rusty_racer's
     // `id_of_context` says why it keeps none either).

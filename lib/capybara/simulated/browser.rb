@@ -7111,7 +7111,7 @@ module Capybara
       # A service worker's message to client `e[:client]`, to the realm the registry says it is — none for a gone one's.
       private def sw_client_message_route(e)
         browser, realm = (key = Native.sw_client_owner(@sw_partition, e[:client].to_s)) && sw_window_realm(key)
-        return Native.structured_drop(e[:data].to_s) unless browser
+        return Native.structured_drop(@session_partition, e[:data].to_s) unless browser
 
         browser.sw_client_message_told(realm, browser.restamped(e[:data], self), e[:handle])
       end
@@ -7261,7 +7261,8 @@ module Capybara
       def deliver_port_message((kind, id), end_id, data)
         if kind == :worker
           w = @workers[id]
-          return if !w || sw_redundant?(id)
+          # (…a worker gone, or redundant: nothing reads it, what its wire holds let go of — clone.rs `drop_wire`)
+          return Native.structured_drop(@session_partition, data.to_s) if !w || sw_redundant?(id)
 
           @worker_host.owe(WorkerHost::MESSAGE, 1)
           w[:inbox] << {kind: 'port_msg', end: end_id, data: data}
@@ -7271,6 +7272,8 @@ module Capybara
           @runtime.call('portEndDeliver', end_id, data)
         elsif @runtime.frame_realm_alive?(id)
           @runtime.realm_call(id, 'portEndDeliver', end_id, data)
+        else
+          Native.structured_drop(@session_partition, data.to_s)
         end
       end
 
@@ -7889,11 +7892,13 @@ module Capybara
         false
       end
 
-      # A message to a worker that no isolate will read — a postMessage's wire, or one a hash of the inbox carries: what its
-      # wire holds let go of (clone.rs `drop_wire`).
+      # A message to a worker that no isolate will read — a postMessage's wire, or a message of the inbox that carries one
+      # (a service worker's, a port's, a client's): what its wire holds let go of (clone.rs `drop_wire`).
+      UNREAD_MESSAGE_KINDS = %w[sw_message port_msg sw_client_message].freeze
+      private_constant :UNREAD_MESSAGE_KINDS
       private def drop_unread_message(msg)
-        data = msg.is_a?(Hash) ? msg[:data] : msg
-        Native.structured_drop(data) if data.is_a?(String)
+        data = msg.is_a?(Hash) ? (msg[:data] if UNREAD_MESSAGE_KINDS.include?(msg[:kind])) : msg
+        Native.structured_drop(@session_partition, data) if data.is_a?(String)
       end
 
       # Everything that must happen once a worker is out of `@workers`, whether or not we waited for
@@ -7917,6 +7922,8 @@ module Capybara
           # registry — worker_records.rs `Liveness`, the registry's worker's too)
           @worker_host << {handle: handle.to_i, kind: 'sw_reaped'}
         end
+        # Its port ends closed, what was held for them let go of (port_channels.rs `forget_worker`).
+        Native.port_forget_worker(@session_partition, @window_number, handle.to_i)
         # Its agents gone: the locks it held let go, its IndexedDB connections closed (agents.rs `drop_owner`).
         Native.agents_drop_owner(w[:agent_owner]) if w[:agent_owner]
         # Hand back every plain postMessage this worker still owes a reply for — queued OR already
@@ -10571,9 +10578,12 @@ module Capybara
         # counter; balance it here so worker_pending? can't stick true after this thread dies.
         @worker_host.release(WorkerHost::BUSY, 1) if busy_held
         release_init.call   # guarantee the init count is released on an early raise
-        # Its WebSockets and EventSources go with it (HTML "worker event loop" teardown: each made to disappear).
+        # Its WebSockets and EventSources go with it (HTML "worker event loop" teardown: each made to disappear) — and its
+        # port ends, closed, what was held for them let go of (port_channels.rs `forget_worker`): a worker that closed
+        # itself is reaped only as its Worker is terminated, or the session reset.
         ws_drop_client(handle)
         event_source_drop_worker(handle)
+        Native.port_forget_worker(@session_partition, @window_number, handle.to_i)
         # Take the runtime back from the boundary BEFORE destroying it, and destroy it while
         # holding the lock: terminating a disposed isolate is a use-after-free, and the two calls
         # are on different threads. Whoever holds the lock owns the pointer for that moment.

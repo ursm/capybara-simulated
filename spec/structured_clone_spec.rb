@@ -20,6 +20,10 @@ RSpec.describe 'Structured clone of platform objects' do
         [200, {'content-type' => 'text/javascript'}, ["onmessage = (e) => postMessage([e.data, new QuotaExceededError('wq', { quota: 3, requested: 4 })]);"]]
       when '/close.js'
         [200, {'content-type' => 'text/javascript'}, ["onmessage = (e) => { e.ports[0].close(); postMessage('closed'); };"]]
+      when '/hold.js'
+        [200, {'content-type' => 'text/javascript'}, ["onmessage = (e) => { self.kept = e.ports[0]; postMessage('held'); close(); };"]]
+      when '/files.js'
+        [200, {'content-type' => 'text/javascript'}, ['onmessage = (e) => postMessage([e.data[0][0] instanceof File, e.data[0][0] === e.data[1][0]]);']]
       when '/idle.js'
         [200, {'content-type' => 'text/javascript'}, ['']]
       when '/refuse.js'
@@ -306,6 +310,69 @@ RSpec.describe 'Structured clone of platform objects' do
         await new Promise((r) => setTimeout(r, 0)); done([values, source.locked]); })();
     JS
     expect(got).to eq([[1], false])
+  end
+
+  # (…a File two FileLists hold, and the value besides, is one object read back — HTML's one memory for the whole
+  # value; Chrome 158 makes one per FileList, Firefox 161 one) — to a worker too
+  it 'reads back one File for every FileList and the value that hold it' do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], f = new File(['shared'], 's.txt'), d1 = new DataTransfer(), d2 = new DataTransfer();
+      d1.items.add(f);
+      d2.items.add(f);
+      d2.items.add(new File(['o'], 'o.txt'));
+      const [a, b, c] = structuredClone([d1.files, d2.files, f]);
+      const w = new Worker('/files.js');
+      w.onmessage = (e) => done([a[0] === c, b[0] === c, b[0] instanceof File, b[1].name, e.data]);
+      w.postMessage([d1.files, d2.files]);
+    JS
+    expect(got).to eq([true, true, true, 'o.txt', [true, true]])
+  end
+
+  # (…a transferred stream piped as the spec's pipe is: its source pulled once till the stream is read from, and nothing
+  # of the source's reaching the stream once it is cancelled — no uncaught error in the reading realm)
+  it "pulls a transferred stream's source as it is read, and stops at its cancel" do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], errors = [];
+      addEventListener('error', (e) => errors.push(e.message));
+      let pulls = 0;
+      const lazy = new ReadableStream({ pull(c) { pulls++; c.enqueue(pulls); } }, { highWaterMark: 0 });
+      structuredClone(lazy, { transfer: [lazy] });
+      const source = new ReadableStream({ start(c) { c.enqueue(1); c.enqueue(2); } });
+      const reader = structuredClone(source, { transfer: [source] }).getReader();
+      reader.read().then(({ value }) => reader.cancel('bye').then(() => setTimeout(() => done([pulls, value, source.locked, errors]), 50)));
+    JS
+    expect(got).to eq([1, 1, false, []])
+  end
+
+  # (…a worker that closed itself holding a port's end lets what is posted to it go)
+  it 'holds nothing for a port whose worker closed itself' do
+    session.visit '/'
+    partition = session.driver.browser.session_partition
+    held = Capybara::Simulated::Native.structured_exports_held(partition)
+    session.evaluate_async_script(<<~JS)
+      const done = arguments[0], c = new MessageChannel(), w = new Worker('/hold.js');
+      w.onmessage = () => setTimeout(() => { for (let i = 0; i < 5; i++) c.port1.postMessage(new Uint8Array(1 << 10)); setTimeout(done, 50); }, 50);
+      w.postMessage(null, [c.port2]);
+    JS
+    expect(poll_until { Capybara::Simulated::Native.structured_exports_held(partition) == held }).to be(true)
+  end
+
+  # (…a platform object whose prototype a page set to null or %Object.prototype% is told by its brand, as Chrome and
+  # Firefox tell it by its internal slots)
+  it 'clones or refuses a platform object by its brand whatever its prototype' do
+    session.visit '/'
+    out = probe(<<~JS)
+      const port = new MessageChannel().port1, event = new Event('x'), e = new DOMException('m', 'AbortError');
+      const file = new File(['f'], 'f.txt');
+      [port, event, e].forEach((o) => Object.setPrototypeOf(o, null));
+      Object.setPrototypeOf(file, Object.prototype);
+      const copy = structuredClone(e), fileCopy = structuredClone(file);
+      return [err(() => structuredClone(port)), err(() => structuredClone(event)), copy instanceof DOMException, copy.name,
+              fileCopy instanceof File, fileCopy.name];
+    JS
+    expect(out).to eq(['DataCloneError', 'DataCloneError', true, 'AbortError', true, 'f.txt'])
   end
 
   it "keeps a FileList's files the Files the value holds, and builds its descriptors as data" do

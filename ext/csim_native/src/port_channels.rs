@@ -37,9 +37,9 @@ fn other_end(end: &str) -> String {
 
 // A message reaching end `end`: its holder's to be delivered, or held for its next one — or nowhere, at a closed end,
 // its serialization let go of (clone.rs `drop_wire`).
-fn receive(end: &mut End, data: String) -> Option<Holder> {
+fn receive(partition: u64, end: &mut End, data: String) -> Option<Holder> {
     if end.closed {
-        crate::clone::drop_wire(&data);
+        crate::clone::drop_wire(partition, &data);
         return None;
     }
     match &end.at {
@@ -74,7 +74,7 @@ pub(crate) fn gone(partition: u64, end: String, held: Vec<String>, kind: String,
     }
     let mut to = None;
     for data in held {
-        if let Some(holder) = receive(e, data.clone()) {
+        if let Some(holder) = receive(partition, e, data.clone()) {
             to.get_or_insert_with(|| (holder, Vec::new())).1.push(data);
         }
     }
@@ -85,7 +85,7 @@ pub(crate) fn gone(partition: u64, end: String, held: Vec<String>, kind: String,
 // holder, nil where it waits for one (or the end is closed or unknown).
 pub(crate) fn redeliver(partition: u64, end: String, data: String) -> Option<Holder> {
     let mut reg = lock();
-    receive(reg.get_mut(&(partition, end))?, data)
+    receive(partition, reg.get_mut(&(partition, end))?, data)
 }
 
 // A port closed at its end: nothing more is delivered to it, and an end whose other is closed too is forgotten.
@@ -99,7 +99,7 @@ pub(crate) fn closed(partition: u64, end: String) {
         reg.insert((partition, end), End { closed: true, ..End::default() })
     };
     // (…what was held for it, which nothing will read now, let go of)
-    gone.into_iter().flat_map(|e| e.pending).for_each(|data| crate::clone::drop_wire(&data));
+    gone.into_iter().flat_map(|e| e.pending).for_each(|data| crate::clone::drop_wire(partition, &data));
 }
 
 // A message posted at end `from` (none where that end is closed, or unknown: a worker's post and its close in one turn
@@ -108,11 +108,11 @@ pub(crate) fn closed(partition: u64, end: String) {
 pub(crate) fn post(partition: u64, from: String, data: String) -> Option<(String, Holder)> {
     let mut reg = lock();
     if reg.get(&(partition, from.clone())).is_none_or(|e| e.closed) {
-        crate::clone::drop_wire(&data);
+        crate::clone::drop_wire(partition, &data);
         return None;
     }
     let to = other_end(&from);
-    let holder = receive(reg.entry((partition, to.clone())).or_default(), data)?;
+    let holder = receive(partition, reg.entry((partition, to.clone())).or_default(), data)?;
     Some((to, holder))
 }
 
@@ -123,7 +123,19 @@ pub(crate) fn forget_window(partition: u64, window: u32) {
     for e in lock().iter_mut().filter(|((p, _), _)| *p == partition).map(|(_, e)| e) {
         if e.at.as_ref().is_some_and(|(_, w, _)| *w == window) {
             let gone = std::mem::replace(e, End { closed: true, ..End::default() });
-            gone.pending.iter().for_each(|data| crate::clone::drop_wire(data));
+            gone.pending.iter().for_each(|data| crate::clone::drop_wire(partition, data));
+        }
+    }
+}
+
+// …and a worker gone (its window's `window`, by its handle): every end it held closed, the messages held for it let go
+// of — nothing is delivered to its ports any more, as for a window gone.
+pub(crate) fn forget_worker(partition: u64, window: u32, handle: i64) {
+    let holder: Holder = ("worker".to_owned(), window, handle);
+    for e in lock().iter_mut().filter(|((p, _), _)| *p == partition).map(|(_, e)| e) {
+        if e.at.as_ref() == Some(&holder) {
+            let gone = std::mem::replace(e, End { closed: true, ..End::default() });
+            gone.pending.iter().for_each(|data| crate::clone::drop_wire(partition, data));
         }
     }
 }

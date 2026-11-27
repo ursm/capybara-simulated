@@ -347,7 +347,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("keepalive_retire", magnus::function!(keepalive::retire, 2))?;
     native.define_module_function("keepalive_clear", magnus::function!(keepalive::clear, 1))?;
     native.define_module_function("structured_exports_held", magnus::function!(clone::exports_held_for_ruby, 1))?;
-    native.define_module_function("structured_drop", magnus::function!(clone::drop_wire_for_ruby, 1))?;
+    native.define_module_function("structured_drop", magnus::function!(clone::drop_wire_for_ruby, 2))?;
     // …and its HTTP authentication entries (http_auth.rs).
     native.define_module_function("http_auth_new", magnus::function!(http_auth::new_for_ruby, 0))?;
     native.define_module_function("http_auth_clear", magnus::function!(http_auth::clear_for_ruby, 1))?;
@@ -493,6 +493,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("port_end_closed", magnus::function!(port_channels::closed, 2))?;
     native.define_module_function("port_post", magnus::function!(port_channels::post, 3))?;
     native.define_module_function("port_forget_window", magnus::function!(port_channels::forget_window, 2))?;
+    native.define_module_function("port_forget_worker", magnus::function!(port_channels::forget_worker, 3))?;
     native.define_module_function("port_channels_clear", magnus::function!(port_channels::clear, 1))?;
     native.define_module_function("storage_partition_new", magnus::function!(storage_areas::partition_new, 0))?;
     native.define_module_function("storage_clear", magnus::function!(storage_areas::clear, 1))?;

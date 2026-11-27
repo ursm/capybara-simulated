@@ -5,12 +5,12 @@
 // ArrayBuffers and their views, errors, arrays and ordinary objects, cycles and shared references kept — to bytes any
 // realm of any isolate reads back. A platform object is the bindings' to say (structured-clone.js `cloneDescribe`), asked
 // of every object that is no ordinary one: undefined for none (a page's class instance, which V8 writes as an ordinary
-// object), what the object's serialization steps make of it — plain data, the platform objects it names written by
-// their places among the value's (a FileList's Files: a File the value holds besides is one object read back) — or a
-// throw, a DataCloneError, for one that is not [Serializable]. The value is written with each platform object's place,
-// and each one's data after it, those it names first. Reading — where no script may run while V8 reads — each one's data
-// is read back, in that order, and handed to the bindings (`cloneMake`), which make the platform object of the reading
-// realm; and then the value, each place the object made for it.
+// object), what the object's serialization steps make of it — plain data, the platform objects it names listed in its
+// `named` (a FileList's Files), each put there as its place among the value's, so a File the value holds besides, or
+// another FileList names too, is one object read back — or a throw, a DataCloneError, for one that is not
+// [Serializable]. The value is written with each platform object's place, and their data after it. Reading — where no
+// script may run while V8 reads — their data is read back, and handed to the bindings (`cloneMake`), which make the
+// platform objects of the reading realm, each after those it names; and then the value, each place the object made.
 //
 // The transfer list is the engine's to check and move: each a transferable — an ArrayBuffer, or one the bindings say is
 // (`transferCheck`) — listed once, and not detached; the value serialized, an ArrayBuffer it lists written by its place
@@ -39,6 +39,33 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "structuredFromBytes", structured_from_bytes, context_id);
     register(scope, ns, "structuredExport", structured_export, context_id);
     register(scope, ns, "structuredImport", structured_import, context_id);
+    register(scope, ns, "platformBrand", platform_brand_op, context_id);
+}
+
+// The brand of the bindings' platform objects: a private key (`Dom::platform_brand`), the isolate's, set on each as its
+// slots are made (webidl.js `stampSlots`) — which a structured clone reads to tell one whose prototype a page set to
+// %Object.prototype% or null from the ordinary object it then looks like, as Chrome and Firefox tell it by its internal
+// slots. (A V8 private on a Proxy is refused: a legacy platform object's brand is its target's.)
+fn platform_brand<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
+    if let Some(brand) = dom(scope).platform_brand.as_ref() {
+        let brand = brand as *const v8::Global<v8::Private>;
+        // SAFETY: the Dom keeps the global for the isolate's life.
+        return Some(v8::Local::new(scope, unsafe { &*brand }));
+    }
+    let name = v8::String::new(scope, "csim#platform")?;
+    let brand = v8::Private::for_api(scope, Some(name));
+    dom(scope).platform_brand = Some(v8::Global::new(scope, brand));
+    Some(brand)
+}
+// __dom.platformBrand(object): `object` branded a platform object.
+fn platform_brand_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    if object.is_proxy() {
+        return;
+    }
+    let Some(brand) = platform_brand(scope) else { return };
+    let yes = v8::Boolean::new(scope, true).into();
+    object.set_private(scope, brand, yes);
 }
 
 // What a serialization is for, as the bindings number it (`structuredSerialize`'s `mode`) — which says what it may
@@ -165,29 +192,34 @@ enum Asked {
 }
 
 // The platform objects a value holds, by their places in the order they were found — each with what its serialization
-// steps made of it — and, as each one's data is written, the places of those it names.
-#[derive(Default)]
-struct Platform {
-    objects: Vec<v8::Global<v8::Object>>,
-    described: Vec<v8::Global<v8::Value>>,
-    named: Vec<u32>,
+// steps made of it — kept in two arrays of the realm's, not a handle each; and their places by identity hash, for an
+// object named again (`place_of`).
+struct Platform<'h> {
+    objects: v8::Local<'h, v8::Array>,
+    described: v8::Local<'h, v8::Array>,
+    count: u32,
     by_hash: HashMap<i32, Vec<u32>>,
 }
 
-impl Platform {
+impl<'h> Platform<'h> {
+    fn new(scope: &mut v8::PinScope<'h, '_>) -> Self {
+        Platform { objects: v8::Array::new(scope, 0), described: v8::Array::new(scope, 0), count: 0, by_hash: HashMap::new() }
+    }
+
     // (…the place of an object found before — one the value holds, named again by another's data, a FileList's every
     // File — by its identity hash, those of the same hash compared)
     fn place_of(&self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> Option<u32> {
         let places = self.by_hash.get(&object.get_identity_hash().get())?;
-        places.iter().copied().find(|&place| v8::Local::new(scope, &self.objects[place as usize]) == object)
+        places.iter().copied().find(|&place| self.objects.get_index(scope, place).is_some_and(|o| o.strict_equals(object.into())))
     }
 
     // …and a new one found, at the next place.
     fn add(&mut self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>, description: v8::Local<'_, v8::Value>) -> u32 {
-        let place = self.objects.len() as u32;
-        self.objects.push(v8::Global::new(scope, object));
-        self.described.push(v8::Global::new(scope, description));
+        let place = self.count;
+        self.objects.set_index(scope, place, object.into());
+        self.described.set_index(scope, place, description);
         self.by_hash.entry(object.get_identity_hash().get()).or_default().push(place);
+        self.count += 1;
         place
     }
 }
@@ -196,26 +228,26 @@ impl Platform {
 // asked about, the objects the transfer list holds other than ArrayBuffers by their places, the platform objects found,
 // the SharedArrayBuffers kept where they may be shared, the WebAssembly.Modules' compiled modules kept where they may be
 // shared (`ModuleRule`), and this realm's %Object.prototype%, which an ordinary object of it has — and whether what it
-// writes is a platform object's data, which may name one found before (V8 hands the value's own each once).
+// writes is platform objects' data, which names none but in its `named`, each a place by then.
 struct Serializer<'h> {
     describe: &'h Step,
     asked: RefCell<Option<Asked>>,
     listed: &'h [(u32, v8::Local<'h, v8::Object>)],
-    platform: &'h RefCell<Platform>,
+    platform: &'h RefCell<Platform<'h>>,
     data: bool,
     shared: Option<&'h Shared>,
     modules: ModuleRule<'h>,
     object_prototype: Option<v8::Local<'h, v8::Value>>,
+    brand: Option<v8::Local<'h, v8::Private>>,
 }
 
 impl Serializer<'_> {
-    // The place of platform object `object`: the one it was found at, or — described now — a new one; None where it is
-    // none (its description undefined), or describing it threw.
+    // The place of platform object `object`, described now at a new one — V8 hands the value's each once; none where it
+    // is none (its description undefined), or describing it threw. Platform objects' data names none in place.
     fn platform_place(&self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> Option<Option<u32>> {
         if self.data {
-            if let Some(place) = self.platform.borrow().place_of(scope, object) {
-                return Some(Some(place));
-            }
+            throw_data_clone_error(scope, "A platform object's data names a platform object but in its `named`.");
+            return None;
         }
         let description = self.describe.call(scope, &[object.into()])?;
         if description.is_undefined() {
@@ -276,11 +308,18 @@ impl v8::ValueSerializerImpl for Serializer<'_> {
             None => {
                 let proto = object.get_prototype(scope)?;
                 if proto.is_null() || self.object_prototype.is_some_and(|p| p == proto) {
-                    // (…but a Node whose prototype a page set so, which its brand tells — its handle, not its
-                    // prototype, as Chrome and Firefox tell it by its internal slots. A platform object of the
-                    // bindings' slots is told by a private field of theirs no API reads, and is taken for the ordinary
-                    // object its prototype says: a deliberate gap — asking the bindings of every ordinary object is the
-                    // cost of the plain data every message is)
+                    // (…but a platform object whose prototype a page set so, which its brand tells — not its prototype,
+                    // as Chrome and Firefox tell it by its internal slots: the bindings' (`platform_brand`), or a Node's
+                    // handle)
+                    if self.brand.is_some_and(|brand| object.has_private(scope, brand) == Some(true)) {
+                        return match self.platform_place(scope, object)? {
+                            Some(place) => {
+                                *self.asked.borrow_mut() = Some(Asked::Platform(place));
+                                Some(true)
+                            }
+                            None => Some(false),
+                        };
+                    }
                     if object.internal_field_count() > 0 && crate::node_handle::handle_of(scope, object.into()).is_some() {
                         throw_data_clone_error(scope, "A Node could not be cloned.");
                         return None;
@@ -324,7 +363,6 @@ impl v8::ValueSerializerImpl for Serializer<'_> {
             Asked::Platform(place) => {
                 serializer.write_uint32(PLATFORM);
                 serializer.write_uint32(place);
-                self.platform.borrow_mut().named.push(place);
             }
         }
         Some(true)
@@ -332,22 +370,13 @@ impl v8::ValueSerializerImpl for Serializer<'_> {
 }
 
 // The deserializer's delegate: the transferables' counterparts in this realm by their places (none for an ArrayBuffer's),
-// the platform objects made so far by theirs, and the SharedArrayBuffers' memory and the WebAssembly.Modules' compiled
-// modules by theirs.
+// the platform objects made by theirs (none yet as their data is read), and the SharedArrayBuffers' memory and the
+// WebAssembly.Modules' compiled modules by theirs.
 struct Deserializer<'a> {
     received: &'a [Option<v8::Global<v8::Value>>],
-    made: &'a [Option<v8::Global<v8::Object>>],
+    made: Option<v8::Local<'a, v8::Array>>,
     shared: Vec<v8::SharedRef<v8::BackingStore>>,
     modules: Vec<Arc<v8::CompiledWasmModule>>,
-    // (…reading platform objects' data, none of them made yet: each it names read as a marker, an empty object of the
-    // engine's holding the place under `MARKER`, which `resolve` puts the object made in place of — and whether any was)
-    markers: Option<(&'a std::cell::Cell<bool>, v8::Global<v8::Private>)>,
-}
-
-// The private key a marker holds its place under (`Deserializer::markers`).
-fn marker_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
-    let name = v8::String::new(scope, "csim#cloneMarker")?;
-    Some(v8::Private::for_api(scope, Some(name)))
 }
 
 impl v8::ValueDeserializerImpl for Deserializer<'_> {
@@ -360,19 +389,12 @@ impl v8::ValueDeserializerImpl for Deserializer<'_> {
         if !deserializer.read_uint32(&mut how) || !deserializer.read_uint32(&mut place) {
             return None;
         }
-        if how == TRANSFERRED {
-            let received = v8::Local::new(scope, self.received.get(place as usize)?.as_ref()?);
-            return v8::Local::<v8::Object>::try_from(received).ok();
-        }
-        if let Some((marked, key)) = &self.markers {
-            let marker = v8::Object::new(scope);
-            let key = v8::Local::new(scope, key);
-            let place = v8::Integer::new_from_unsigned(scope, place).into();
-            marker.set_private(scope, key, place)?;
-            marked.set(true);
-            return Some(marker);
-        }
-        Some(v8::Local::new(scope, self.made.get(place as usize)?.as_ref()?))
+        let object = if how == TRANSFERRED {
+            v8::Local::new(scope, self.received.get(place as usize)?.as_ref()?)
+        } else {
+            self.made?.get_index(scope, place)?
+        };
+        v8::Local::<v8::Object>::try_from(object).ok()
     }
 
     fn get_shared_array_buffer_from_id<'s>(&self, scope: &mut v8::PinScope<'s, '_>, place: u32) -> Option<v8::Local<'s, v8::SharedArrayBuffer>> {
@@ -450,9 +472,10 @@ fn write(
     modules: ModuleRule<'_>,
 ) -> Option<Written> {
     let describe = Step::named("cloneDescribe");
-    let platform = RefCell::new(Platform::default());
+    let platform = RefCell::new(Platform::new(scope));
     let object_prototype = v8::Object::new(scope).get_prototype(scope);
-    let delegate = |modules, data| Serializer { describe: &describe, asked: RefCell::new(None), listed, platform: &platform, data, shared, modules, object_prototype };
+    let brand = platform_brand(scope);
+    let delegate = |modules, data| Serializer { describe: &describe, asked: RefCell::new(None), listed, platform: &platform, data, shared, modules, object_prototype, brand };
     let serializer = v8::ValueSerializer::new(scope, Box::new(delegate(modules, false)));
     serializer.write_header();
     for &(place, buffer) in buffers {
@@ -461,23 +484,30 @@ fn write(
     let context = scope.get_current_context();
     serializer.write_value(context, value)?;
     let main = serializer.release();
-    // (…each platform object's data, as found — its own may name more — one value after another in one stream, with the
-    // places each names)
-    if platform.borrow().described.is_empty() {
+    if platform.borrow().count == 0 {
         return Some(Written { entries: Vec::new(), main });
     }
+    // (…each one's `named` put as their places — one not found before described at a new one, whose own may name more)
+    let key: v8::Local<v8::Name> = v8::String::new(scope, "named")?.into();
     let mut named: Vec<Vec<u32>> = Vec::new();
+    while (named.len() as u32) < platform.borrow().count {
+        let description = platform.borrow().described;
+        let description = description.get_index(scope, named.len() as u32)?;
+        named.push(match v8::Local::<v8::Object>::try_from(description) {
+            Ok(description) if description.has_own_property(scope, key) == Some(true) => place_named(scope, description, key, &platform)?,
+            _ => Vec::new(),
+        });
+    }
     let serializer = v8::ValueSerializer::new(scope, Box::new(delegate(ModuleRule::Refuse, true)));
     serializer.write_header();
     for &(place, buffer) in buffers {
         serializer.transfer_array_buffer(place, buffer);
     }
-    while named.len() < platform.borrow().described.len() {
-        let description = v8::Local::new(scope, &platform.borrow().described[named.len()]);
-        platform.borrow_mut().named.clear();
+    for place in 0..named.len() as u32 {
+        let description = platform.borrow().described;
+        let description = description.get_index(scope, place)?;
         let context = scope.get_current_context();
         serializer.write_value(context, description)?;
-        named.push(std::mem::take(&mut platform.borrow_mut().named));
     }
     let stream = serializer.release();
     let mut order = Vec::with_capacity(named.len());
@@ -494,9 +524,61 @@ fn write(
     entries.extend_from_slice(&stream);
     Some(Written { entries, main })
 }
+// (…the platform objects a description's `named` lists, each put there as its place — found before, or described at a
+// new one, all those not found described in one call of the bindings' (`cloneDescribeAll`); a DataCloneError for
+// anything that is no [Serializable] platform object — and those places)
+fn place_named(
+    scope: &mut v8::PinScope<'_, '_>,
+    description: v8::Local<'_, v8::Object>,
+    key: v8::Local<'_, v8::Name>,
+    platform: &RefCell<Platform<'_>>,
+) -> Option<Vec<u32>> {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(description.get(scope, key.into())?) else { return Some(Vec::new()) };
+    let mut places: Vec<Option<u32>> = Vec::with_capacity(list.length() as usize);
+    let mut unknown = Vec::new();
+    for i in 0..list.length() {
+        let Some(object) = list.get_index(scope, i).and_then(|o| v8::Local::<v8::Object>::try_from(o).ok()) else {
+            throw_data_clone_error(scope, "An object could not be cloned.");
+            return None;
+        };
+        let found = platform.borrow().place_of(scope, object);
+        if found.is_none() {
+            unknown.push(object.into());
+        }
+        places.push(found);
+    }
+    if !unknown.is_empty() {
+        let objects = v8::Array::new_with_elements(scope, &unknown);
+        let described = Step::named("cloneDescribeAll").call(scope, &[objects.into()])?;
+        let described = v8::Local::<v8::Array>::try_from(described).ok()?;
+        let mut next = 0;
+        for i in 0..list.length() {
+            if places[i as usize].is_some() {
+                continue;
+            }
+            let object = v8::Local::<v8::Object>::try_from(objects.get_index(scope, next)?).ok()?;
+            let description = described.get_index(scope, next)?;
+            next += 1;
+            // (…one the same `named` lists again found once it is described)
+            let found = platform.borrow().place_of(scope, object);
+            places[i as usize] = Some(match found {
+                Some(place) => place,
+                None if description.is_undefined() => {
+                    throw_data_clone_error(scope, "An object could not be cloned.");
+                    return None;
+                }
+                None => platform.borrow_mut().add(scope, object, description),
+            });
+        }
+    }
+    let places: Vec<u32> = places.into_iter().map(|p| p.unwrap_or(0)).collect();
+    for (i, &place) in places.iter().enumerate() {
+        list.set_index(scope, i as u32, v8::Integer::new_from_unsigned(scope, place).into());
+    }
+    Some(places)
+}
 // (…the order the platform objects are made in as they are read back: each after those its data names, each once — a
-// cycle among them, which no data a platform object's steps make holds, made as it is reached, the object it names left
-// a marker)
+// cycle among them, which no data a platform object's steps make holds, made as it is reached)
 fn make_order(named: &[Vec<u32>], place: usize, placed: &mut [bool], order: &mut Vec<u32>) {
     if placed[place] {
         return;
@@ -515,11 +597,11 @@ fn read_value<'s>(
     bytes: &[u8],
     buffers: &[(u32, v8::Local<'_, v8::ArrayBuffer>)],
     received: &[Option<v8::Global<v8::Value>>],
-    made: &[Option<v8::Global<v8::Object>>],
+    made: Option<v8::Local<'_, v8::Array>>,
     shared: Vec<v8::SharedRef<v8::BackingStore>>,
     modules: Vec<Arc<v8::CompiledWasmModule>>,
 ) -> Option<v8::Local<'s, v8::Value>> {
-    let delegate = Deserializer { received, made, shared, modules, markers: None };
+    let delegate = Deserializer { received, made, shared, modules };
     let deserializer = v8::ValueDeserializer::new(scope, Box::new(delegate), bytes);
     let context = scope.get_current_context();
     deserializer.read_header(context)?;
@@ -529,10 +611,9 @@ fn read_value<'s>(
     deserializer.read_value(context)
 }
 
-// …and a value with its platform objects (`write`'s bytes): each platform object's data read back — one stream, no
-// script run while V8 reads it, the objects each names markers — then made ones of this realm by the bindings
-// (`cloneMake`, given a run of data at a time), in the order written, those its data names put in place of their markers
-// first; then the value.
+// …and a value with its platform objects (`write`'s bytes): their data read back — one stream, no script run while V8
+// reads it — then made objects of this realm by the bindings, in one call (`cloneMake`: each in the order written, its
+// `named` places the objects made of them); then the value.
 fn read<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     written: &Written,
@@ -541,89 +622,41 @@ fn read<'s>(
     shared: Vec<v8::SharedRef<v8::BackingStore>>,
     modules: Vec<Arc<v8::CompiledWasmModule>>,
 ) -> Option<v8::Local<'s, v8::Value>> {
-    let mut made: Vec<Option<v8::Global<v8::Object>>> = Vec::new();
+    let mut made = None;
     if !written.entries.is_empty() {
         let bytes = &written.entries;
         let word = |at: usize| -> Option<u32> { Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?)) };
         let count = word(0)? as usize;
-        let order: Vec<usize> = (0..count).map(|i| word(8 + 4 * i).map(|p| p as usize)).collect::<Option<_>>()?;
-        let mut described = Vec::with_capacity(count);
-        let mut marked = Vec::with_capacity(count);
+        let order: Vec<u32> = (0..count).map(|i| word(8 + 4 * i)).collect::<Option<_>>()?;
+        let described = v8::Array::new(scope, count as i32);
         {
-            let any = std::cell::Cell::new(false);
-            let key = marker_key(scope)?;
-            let key = v8::Global::new(scope, key);
-            let delegate = Deserializer { received, made: &[], shared: Vec::new(), modules: Vec::new(), markers: Some((&any, key)) };
+            let delegate = Deserializer { received, made: None, shared: Vec::new(), modules: Vec::new() };
             let deserializer = v8::ValueDeserializer::new(scope, Box::new(delegate), bytes.get(8 + 4 * count..)?);
             let context = scope.get_current_context();
             deserializer.read_header(context)?;
             for &(place, buffer) in buffers {
                 deserializer.transfer_array_buffer(place, buffer);
             }
-            for _ in 0..count {
+            for place in 0..count as u32 {
                 let description = deserializer.read_value(context)?;
-                described.push(v8::Global::new(scope, description));
-                marked.push(any.replace(false));
+                described.set_index(scope, place, description)?;
             }
         }
-        made = (0..count).map(|_| None).collect();
-        let make = Step::named("cloneMake");
-        // (…a run of data that names no object made at once; one that does after the run before it, its markers resolved)
-        let mut at = 0;
-        while at < order.len() {
-            let run = if marked[order[at]] { 1 } else { order[at..].iter().take_while(|&&p| !marked[p]).count() };
-            let data: Vec<v8::Local<v8::Value>> = order[at..at + run].iter().map(|&p| v8::Local::new(scope, &described[p])).collect();
-            if marked[order[at]] {
-                let key = marker_key(scope)?;
-                resolve(scope, data[0], key, &made);
-            }
-            let data = v8::Array::new_with_elements(scope, &data);
-            let objects = v8::Local::<v8::Array>::try_from(make.call(scope, &[data.into()])?).ok()?;
-            for (i, &place) in order[at..at + run].iter().enumerate() {
-                let object = v8::Local::<v8::Object>::try_from(objects.get_index(scope, i as u32)?).ok()?;
-                made[place] = Some(v8::Global::new(scope, object));
-            }
-            at += run;
-        }
+        // (…the objects made kept in an array of no prototype, which no page's indexed setter on Array.prototype sees)
+        let objects = v8::Array::new(scope, count as i32);
+        let null = v8::null(scope).into();
+        objects.set_prototype(scope, null)?;
+        // (…the order written passed but where it is another than the one they were found in: no data names one)
+        let order: v8::Local<v8::Value> = if order.iter().enumerate().all(|(i, &p)| p as usize == i) {
+            v8::undefined(scope).into()
+        } else {
+            let order: Vec<v8::Local<v8::Value>> = order.into_iter().map(|p| v8::Integer::new_from_unsigned(scope, p).into()).collect();
+            v8::Array::new_with_elements(scope, &order).into()
+        };
+        Step::named("cloneMake").call(scope, &[described.into(), order, objects.into()])?;
+        made = Some(objects);
     }
-    read_value(scope, &written.main, buffers, received, &made, shared, modules)
-}
-// (…the markers a platform object's data holds — in its own properties, or its arrays' or objects' — each replaced by
-// the object made of the data it stands for: an array's by index, as a FileList's files are)
-fn resolve(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, key: v8::Local<'_, v8::Private>, made: &[Option<v8::Global<v8::Object>>]) {
-    if let Ok(array) = v8::Local::<v8::Array>::try_from(value) {
-        for i in 0..array.length() {
-            let Some(member) = array.get_index(scope, i) else { continue };
-            if let Some(made) = resolved(scope, member, key, made) {
-                array.set_index(scope, i, made);
-            }
-        }
-        return;
-    }
-    let Ok(object) = v8::Local::<v8::Object>::try_from(value) else { return };
-    let Some(names) = object.get_own_property_names(scope, v8::GetPropertyNamesArgs::default()) else { return };
-    for i in 0..names.length() {
-        let Some(name) = names.get_index(scope, i) else { continue };
-        let Some(member) = object.get(scope, name) else { continue };
-        if let Some(made) = resolved(scope, member, key, made) {
-            object.set(scope, name, made);
-        }
-    }
-}
-// …a member's: the object made in place of a marker, none for anything else (whose own markers are resolved in place).
-fn resolved<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    member: v8::Local<'_, v8::Value>,
-    key: v8::Local<'_, v8::Private>,
-    made: &[Option<v8::Global<v8::Object>>],
-) -> Option<v8::Local<'s, v8::Value>> {
-    let member = v8::Local::<v8::Object>::try_from(member).ok()?;
-    if member.has_private(scope, key) != Some(true) {
-        resolve(scope, member.into(), key, made);
-        return None;
-    }
-    let place = member.get_private(scope, key)?.uint32_value(scope)?;
-    Some(v8::Local::new(scope, made.get(place as usize)?.as_ref()?).into())
+    read_value(scope, &written.main, buffers, received, made, shared, modules)
 }
 
 // A transferable of the transfer list: an ArrayBuffer, or an object the bindings move — a MessagePort or another.
@@ -1140,14 +1173,16 @@ fn close_imported(
     abandon(scope, &ports);
 }
 
-// A message's wire let go of unread (workers.js `encodeMessage`: `{"k":<token>,…}`) — at a closed port's end, in the
-// inbox of a worker that ended, to a service worker client that is gone: the serialization its token holds let go of
-// with it. (A broadcast's wire holds its serialization itself, and nothing here.)
-pub(crate) fn drop_wire(wire: &str) {
-    let Some(at) = wire.find("\"k\":") else { return };
-    let digits: String = wire[at + 4..].chars().take_while(char::is_ascii_digit).collect();
-    if let Ok(token) = digits.parse::<u64>() {
-        exports().by_token.remove(&token);
+// A message's wire let go of unread — at a closed port's end, in the inbox of a worker that ended, to a service worker
+// client that is gone: the serialization its token holds let go of with it, where it is session `partition`'s. A wire
+// is workers.js `encodeMessage`'s, `{"k":<token>,"a":<time>}` — its token first, nothing else read of it; one whose
+// token is a broadcast's text holds its serialization itself, and nothing here.
+pub(crate) fn drop_wire(partition: u64, wire: &str) {
+    let Some(token) = wire.strip_prefix("{\"k\":").map(|rest| rest.split(|c: char| !c.is_ascii_digit()).next().unwrap_or("")) else { return };
+    let Ok(token) = token.parse::<u64>() else { return };
+    let mut exports = exports();
+    if exports.by_token.get(&token).is_some_and(|e| e.partition == partition) {
+        exports.by_token.remove(&token);
     }
 }
 
@@ -1162,9 +1197,9 @@ pub(crate) fn clear(partition: u64) {
 pub(crate) fn exports_held_for_ruby(partition: u64) -> usize {
     exports().by_token.values().filter(|e| e.partition == partition).count()
 }
-// — for the host — Native.structured_drop(wire): `drop_wire`.
-pub(crate) fn drop_wire_for_ruby(wire: String) {
-    drop_wire(&wire);
+// — for the host — Native.structured_drop(partition, wire): `drop_wire`.
+pub(crate) fn drop_wire_for_ruby(partition: u64, wire: String) {
+    drop_wire(partition, &wire);
 }
 
 #[cfg(test)]
