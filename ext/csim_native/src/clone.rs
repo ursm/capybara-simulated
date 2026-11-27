@@ -5,9 +5,9 @@
 // ArrayBuffers and their views, errors, arrays and ordinary objects, cycles and shared references kept — to bytes any
 // realm of any isolate reads back. A platform object is the bindings' to say (structured-clone.js `cloneDescribe`), asked
 // of every object that is no ordinary one: undefined for none (a page's class instance, which V8 writes as an ordinary
-// object), what the object's serialization steps make of it — plain data, the platform objects it names listed in its
-// `named` (a FileList's Files), each put there as its place among the value's, so a File the value holds besides, or
-// another FileList names too, is one object read back — or a throw, a DataCloneError, for one that is not
+// object), what the object's serialization steps make of it — plain data, or, where it names platform objects (a
+// FileList its Files), the pair `[data, named]`, each of `named` put there as its place among the value's, so a File the
+// value holds besides, or another FileList names too, is one object read back — or a throw, a DataCloneError, for one that is not
 // [Serializable]. The value is written with each platform object's place, and their data after it. Reading — where no
 // script may run while V8 reads — their data is read back, and handed to the bindings (`cloneMake`), which make the
 // platform objects of the reading realm, each after those it names; and then the value, each place the object made.
@@ -192,34 +192,44 @@ enum Asked {
 }
 
 // The platform objects a value holds, by their places in the order they were found — each with what its serialization
-// steps made of it — kept in two arrays of the realm's, not a handle each; and their places by identity hash, for an
-// object named again (`place_of`).
-struct Platform<'h> {
-    objects: v8::Local<'h, v8::Array>,
-    described: v8::Local<'h, v8::Array>,
-    count: u32,
-    by_hash: HashMap<i32, Vec<u32>>,
+// steps made of it; and their places by identity hash, for an
+// object named again (`place_of`) — made as the first is looked for: an object's identity hash is made as it is first
+// asked for, which most values, naming none again, never need.
+#[derive(Default)]
+struct Platform {
+    objects: Vec<v8::Global<v8::Object>>,
+    described: Vec<v8::Global<v8::Value>>,
+    by_hash: Option<HashMap<i32, Vec<u32>>>,
+    // (…the places of those whose data names others: a description `[data, named]`)
+    naming: Vec<u32>,
 }
 
-impl<'h> Platform<'h> {
-    fn new(scope: &mut v8::PinScope<'h, '_>) -> Self {
-        Platform { objects: v8::Array::new(scope, 0), described: v8::Array::new(scope, 0), count: 0, by_hash: HashMap::new() }
-    }
-
+impl Platform {
     // (…the place of an object found before — one the value holds, named again by another's data, a FileList's every
     // File — by its identity hash, those of the same hash compared)
-    fn place_of(&self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> Option<u32> {
-        let places = self.by_hash.get(&object.get_identity_hash().get())?;
-        places.iter().copied().find(|&place| self.objects.get_index(scope, place).is_some_and(|o| o.strict_equals(object.into())))
+    fn place_of(&mut self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> Option<u32> {
+        if self.by_hash.is_none() {
+            let mut by_hash: HashMap<i32, Vec<u32>> = HashMap::new();
+            for (place, found) in self.objects.iter().enumerate() {
+                by_hash.entry(v8::Local::new(scope, found).get_identity_hash().get()).or_default().push(place as u32);
+            }
+            self.by_hash = Some(by_hash);
+        }
+        let places = self.by_hash.as_ref()?.get(&object.get_identity_hash().get())?;
+        places.iter().copied().find(|&place| v8::Local::new(scope, &self.objects[place as usize]) == object)
     }
 
     // …and a new one found, at the next place.
     fn add(&mut self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>, description: v8::Local<'_, v8::Value>) -> u32 {
-        let place = self.count;
-        self.objects.set_index(scope, place, object.into());
-        self.described.set_index(scope, place, description);
-        self.by_hash.entry(object.get_identity_hash().get()).or_default().push(place);
-        self.count += 1;
+        let place = self.objects.len() as u32;
+        self.objects.push(v8::Global::new(scope, object));
+        self.described.push(v8::Global::new(scope, description));
+        if let Some(by_hash) = self.by_hash.as_mut() {
+            by_hash.entry(object.get_identity_hash().get()).or_default().push(place);
+        }
+        if description.is_array() {
+            self.naming.push(place);
+        }
         place
     }
 }
@@ -227,13 +237,13 @@ impl<'h> Platform<'h> {
 // The serializer's delegate: the bindings' step that describes a platform object, what was found of the object V8 last
 // asked about, the objects the transfer list holds other than ArrayBuffers by their places, the platform objects found,
 // the SharedArrayBuffers kept where they may be shared, the WebAssembly.Modules' compiled modules kept where they may be
-// shared (`ModuleRule`), and this realm's %Object.prototype%, which an ordinary object of it has — and whether what it
-// writes is platform objects' data, which names none but in its `named`, each a place by then.
+// shared (`ModuleRule`), this realm's %Object.prototype%, which an ordinary object of it has, and the bindings' brand —
+// and whether what it writes is platform objects' data, which names none but in its `named`, each a place by then.
 struct Serializer<'h> {
     describe: &'h Step,
     asked: RefCell<Option<Asked>>,
     listed: &'h [(u32, v8::Local<'h, v8::Object>)],
-    platform: &'h RefCell<Platform<'h>>,
+    platform: &'h RefCell<Platform>,
     data: bool,
     shared: Option<&'h Shared>,
     modules: ModuleRule<'h>,
@@ -246,7 +256,7 @@ impl Serializer<'_> {
     // is none (its description undefined), or describing it threw. Platform objects' data names none in place.
     fn platform_place(&self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>) -> Option<Option<u32>> {
         if self.data {
-            throw_data_clone_error(scope, "A platform object's data names a platform object but in its `named`.");
+            throw_data_clone_error(scope, "A platform object's data names a platform object but in its `[data, named]`.");
             return None;
         }
         let description = self.describe.call(scope, &[object.into()])?;
@@ -472,7 +482,7 @@ fn write(
     modules: ModuleRule<'_>,
 ) -> Option<Written> {
     let describe = Step::named("cloneDescribe");
-    let platform = RefCell::new(Platform::new(scope));
+    let platform = RefCell::new(Platform::default());
     let object_prototype = v8::Object::new(scope).get_prototype(scope);
     let brand = platform_brand(scope);
     let delegate = |modules, data| Serializer { describe: &describe, asked: RefCell::new(None), listed, platform: &platform, data, shared, modules, object_prototype, brand };
@@ -484,28 +494,32 @@ fn write(
     let context = scope.get_current_context();
     serializer.write_value(context, value)?;
     let main = serializer.release();
-    if platform.borrow().count == 0 {
+    if platform.borrow().objects.is_empty() {
         return Some(Written { entries: Vec::new(), main });
     }
-    // (…each one's `named` put as their places — one not found before described at a new one, whose own may name more)
-    let key: v8::Local<v8::Name> = v8::String::new(scope, "named")?.into();
     let mut named: Vec<Vec<u32>> = Vec::new();
-    while (named.len() as u32) < platform.borrow().count {
-        let description = platform.borrow().described;
-        let description = description.get_index(scope, named.len() as u32)?;
-        named.push(match v8::Local::<v8::Object>::try_from(description) {
-            Ok(description) if description.has_own_property(scope, key) == Some(true) => place_named(scope, description, key, &platform)?,
-            _ => Vec::new(),
-        });
+    // (…the platform objects each one's data names put as their places — one not found before described at a new one,
+    // whose own may name more)
+    let mut at = 0;
+    loop {
+        // (…the borrow let go of before the next is described: `place_named` adds)
+        let next = platform.borrow().naming.get(at).copied();
+        let Some(place) = next else { break };
+        let description = v8::Local::new(scope, &platform.borrow().described[place as usize]);
+        let description = v8::Local::<v8::Array>::try_from(description).ok()?;
+        let places = place_named(scope, description, &platform)?;
+        named.resize(platform.borrow().objects.len(), Vec::new());
+        named[place as usize] = places;
+        at += 1;
     }
+    named.resize(platform.borrow().objects.len(), Vec::new());
     let serializer = v8::ValueSerializer::new(scope, Box::new(delegate(ModuleRule::Refuse, true)));
     serializer.write_header();
     for &(place, buffer) in buffers {
         serializer.transfer_array_buffer(place, buffer);
     }
     for place in 0..named.len() as u32 {
-        let description = platform.borrow().described;
-        let description = description.get_index(scope, place)?;
+        let description = v8::Local::new(scope, &platform.borrow().described[place as usize]);
         let context = scope.get_current_context();
         serializer.write_value(context, description)?;
     }
@@ -524,16 +538,11 @@ fn write(
     entries.extend_from_slice(&stream);
     Some(Written { entries, main })
 }
-// (…the platform objects a description's `named` lists, each put there as its place — found before, or described at a
-// new one, all those not found described in one call of the bindings' (`cloneDescribeAll`); a DataCloneError for
-// anything that is no [Serializable] platform object — and those places)
-fn place_named(
-    scope: &mut v8::PinScope<'_, '_>,
-    description: v8::Local<'_, v8::Object>,
-    key: v8::Local<'_, v8::Name>,
-    platform: &RefCell<Platform<'_>>,
-) -> Option<Vec<u32>> {
-    let Ok(list) = v8::Local::<v8::Array>::try_from(description.get(scope, key.into())?) else { return Some(Vec::new()) };
+// (…the platform objects a description `[data, named]` names, each put in `named` as its place — found before, or
+// described at a new one, all those not found described in one call of the bindings' (`cloneDescribeAll`); a
+// DataCloneError for anything that is no [Serializable] platform object — and those places)
+fn place_named(scope: &mut v8::PinScope<'_, '_>, description: v8::Local<'_, v8::Array>, platform: &RefCell<Platform>) -> Option<Vec<u32>> {
+    let Ok(list) = v8::Local::<v8::Array>::try_from(description.get_index(scope, 1)?) else { return Some(Vec::new()) };
     let mut places: Vec<Option<u32>> = Vec::with_capacity(list.length() as usize);
     let mut unknown = Vec::new();
     for i in 0..list.length() {
@@ -541,7 +550,7 @@ fn place_named(
             throw_data_clone_error(scope, "An object could not be cloned.");
             return None;
         };
-        let found = platform.borrow().place_of(scope, object);
+        let found = platform.borrow_mut().place_of(scope, object);
         if found.is_none() {
             unknown.push(object.into());
         }
@@ -560,7 +569,7 @@ fn place_named(
             let description = described.get_index(scope, next)?;
             next += 1;
             // (…one the same `named` lists again found once it is described)
-            let found = platform.borrow().place_of(scope, object);
+            let found = platform.borrow_mut().place_of(scope, object);
             places[i as usize] = Some(match found {
                 Some(place) => place,
                 None if description.is_undefined() => {
@@ -628,7 +637,7 @@ fn read<'s>(
         let word = |at: usize| -> Option<u32> { Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?)) };
         let count = word(0)? as usize;
         let order: Vec<u32> = (0..count).map(|i| word(8 + 4 * i)).collect::<Option<_>>()?;
-        let described = v8::Array::new(scope, count as i32);
+        let mut described = Vec::with_capacity(count);
         {
             let delegate = Deserializer { received, made: None, shared: Vec::new(), modules: Vec::new() };
             let deserializer = v8::ValueDeserializer::new(scope, Box::new(delegate), bytes.get(8 + 4 * count..)?);
@@ -637,15 +646,15 @@ fn read<'s>(
             for &(place, buffer) in buffers {
                 deserializer.transfer_array_buffer(place, buffer);
             }
-            for place in 0..count as u32 {
-                let description = deserializer.read_value(context)?;
-                described.set_index(scope, place, description)?;
+            for _ in 0..count {
+                described.push(deserializer.read_value(context)?);
             }
         }
-        // (…the objects made kept in an array of no prototype, which no page's indexed setter on Array.prototype sees)
-        let objects = v8::Array::new(scope, count as i32);
-        let null = v8::null(scope).into();
-        objects.set_prototype(scope, null)?;
+        let described = v8::Array::new_with_elements(scope, &described);
+        // (…the objects made kept in an array with no hole — each place undefined till its object is made — so no page's
+        // indexed setter on Array.prototype is met as one is put in, and it is read back as fast as it is written)
+        let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+        let objects = v8::Array::new_with_elements(scope, &vec![undefined; count]);
         // (…the order written passed but where it is another than the one they were found in: no data names one)
         let order: v8::Local<v8::Value> = if order.iter().enumerate().all(|(i, &p)| p as usize == i) {
             v8::undefined(scope).into()
