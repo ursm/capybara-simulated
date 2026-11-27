@@ -7090,10 +7090,12 @@ module Capybara
       # How far the host's clock (`Time.now`, which a test's `travel_to` moves) stands off the real one, in milliseconds —
       # the real one read as `real_ms`, the same read the document's time origin is taken from: what a window's document's
       # time origin holds as the host boots it (agent_clock.rs `TimeOrigin`). (Read apart, the work between them — the
-      # realm's rebuild, tens of ms under load — set the page's `Date` that far behind the host's clock.)
+      # realm's rebuild, tens of ms under load — set the page's `Date` that far behind the host's clock.) Fractional, as
+      # the epoch it is added to is: `Date` floors their sum once (agent_clock.rs `date_now`) — the offset truncated to
+      # whole milliseconds first read up to 1 ms below a frozen time's own millisecond.
       def time_travel_offset_ms(real_ms)
         @travel_sample = Time.now.to_f
-        @travel_offset = (@travel_sample * 1000 - real_ms).to_i
+        @travel_offset = @travel_sample * 1000 - real_ms
       end
 
       # …and what a document this isolate loads into a window the page opened holds, beside a live opener whose `Date` the
@@ -7104,7 +7106,7 @@ module Capybara
       TRAVEL_JITTER_MS = 100
       def window_travel_offset_ms
         now    = Time.now.to_f
-        offset = ((now - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
+        offset = (now - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000
         kept = @travel_sample && (now == @travel_sample || (offset - @travel_offset).abs <= TRAVEL_JITTER_MS)
         @travel_sample = now
         kept ? @travel_offset : (@travel_offset = offset)

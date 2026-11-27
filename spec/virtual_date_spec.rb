@@ -208,6 +208,19 @@ RSpec.describe 'the virtual clock’s Date', engine_global: true do
     expect(s.evaluate_script('Date.now()') / 1000.0 - frozen.to_f).to be_between(-0.001, 5)
   end
 
+  # …and of a frozen time with a part of a millisecond, at every visit: the host's offset kept to the fraction, `Date`
+  # flooring the time once — an offset truncated first read a millisecond below the frozen time's own.
+  it 'reads a frozen time of a part of a millisecond to its millisecond, visit after visit' do
+    frozen = Time.at((Time.now + 86_400).to_r.floor(3) + Rational(1, 1_000_000))
+    allow(Time).to receive(:now).and_return(frozen)
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>p']] })
+    reads = Array.new(12) {
+      s.visit '/'
+      s.evaluate_script('Date.now()') / 1000.0 - frozen.to_f
+    }
+    expect(reads.min).to be >= -0.001
+  end
+
   # …and a `travel_back` reaches the next document loaded, its `Date` what its server just rendered it with: a pop-up's, a
   # document that pop-up navigates to, and the next one the page's window boots — where the live opener's stays where it
   # was. And a `travel_to` a pop-up of a real page's (its opener's `Date` staying real). (A clock that has not moved leaves
