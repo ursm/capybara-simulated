@@ -346,7 +346,8 @@ RSpec.describe 'Structured clone of platform objects' do
     expect(got).to eq([1, 1, false, []])
   end
 
-  # (…a worker that closed itself holding a port's end lets what is posted to it go)
+  # (…a worker that closed itself holding a port's end lets what is posted to it go — what was posted before it took
+  # the end, handed to it with the end and never read, too)
   it 'holds nothing for a port whose worker closed itself' do
     session.visit '/'
     partition = session.driver.browser.session_partition
@@ -356,23 +357,13 @@ RSpec.describe 'Structured clone of platform objects' do
       w.onmessage = () => setTimeout(() => { for (let i = 0; i < 5; i++) c.port1.postMessage(new Uint8Array(1 << 10)); setTimeout(done, 50); }, 50);
       w.postMessage(null, [c.port2]);
     JS
-    expect(poll_until { Capybara::Simulated::Native.structured_exports_held(partition) == held }).to be(true)
-  end
-
-  # (…a platform object whose prototype a page set to null or %Object.prototype% is told by its brand, as Chrome and
-  # Firefox tell it by its internal slots)
-  it 'clones or refuses a platform object by its brand whatever its prototype' do
-    session.visit '/'
-    out = probe(<<~JS)
-      const port = new MessageChannel().port1, event = new Event('x'), e = new DOMException('m', 'AbortError');
-      const file = new File(['f'], 'f.txt');
-      [port, event, e].forEach((o) => Object.setPrototypeOf(o, null));
-      Object.setPrototypeOf(file, Object.prototype);
-      const copy = structuredClone(e), fileCopy = structuredClone(file);
-      return [err(() => structuredClone(port)), err(() => structuredClone(event)), copy instanceof DOMException, copy.name,
-              fileCopy instanceof File, fileCopy.name];
+    session.evaluate_async_script(<<~JS)
+      const done = arguments[0], c = new MessageChannel(), w = new Worker('/hold.js');
+      for (let i = 0; i < 5; i++) c.port1.postMessage(new Uint8Array(1 << 10));
+      w.onmessage = () => setTimeout(done, 100);
+      w.postMessage(null, [c.port2]);
     JS
-    expect(out).to eq(['DataCloneError', 'DataCloneError', true, 'AbortError', true, 'f.txt'])
+    expect(poll_until { Capybara::Simulated::Native.structured_exports_held(partition) == held }).to be(true)
   end
 
   it "keeps a FileList's files the Files the value holds, and builds its descriptors as data" do

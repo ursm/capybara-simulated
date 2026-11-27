@@ -5427,7 +5427,7 @@ module Capybara
         # A worker whose thread died (script blocked / load raise → __error → onerror) keeps
         # its registry entry until an explicit terminate; a post to it must be a NO-OP (as in
         # real browsers) — counting it would strand `POSTED` forever.
-        return unless w && w[:thread]&.alive?
+        return Native.structured_drop(@session_partition, data.to_s) unless w && w[:thread]&.alive?
         kind = @worker_host.worker_kind(handle.to_i)
         # Counted globally (what settle reads) AND per worker, so a worker that dies still owing
         # replies can hand back exactly what it holds. A LISTEN-ONLY worker never answers at all,
@@ -7262,7 +7262,7 @@ module Capybara
         if kind == :worker
           w = @workers[id]
           # (…a worker gone, or redundant: nothing reads it, what its wire holds let go of — clone.rs `drop_wire`)
-          return Native.structured_drop(@session_partition, data.to_s) if !w || sw_redundant?(id)
+          return Native.structured_drop(@session_partition, data.to_s) if !w || !w[:thread]&.alive? || sw_redundant?(id)
 
           @worker_host.owe(WorkerHost::MESSAGE, 1)
           w[:inbox] << {kind: 'port_msg', end: end_id, data: data}
@@ -7901,6 +7901,27 @@ module Capybara
         Native.structured_drop(@session_partition, data) if data.is_a?(String)
       end
 
+      # What a worker's inbox still holds as it will read no more — its thread ended (its own `close()`, a raise), or the
+      # worker reaped: each message's wire let go of, and each answer owed for one posted to `host` — a service worker's
+      # message and a port's acknowledged, a broadcast's, a controlled fetch fallen through to the network.
+      private def drain_unread_inbox(handle, inbox, host)
+        until inbox.empty?
+          msg = begin
+            inbox.pop(true)
+          rescue ThreadError
+            break
+          end
+          drop_unread_message(msg)
+          next unless msg.is_a?(Hash)
+
+          case msg[:kind]
+          when 'sw_message', 'port_msg' then host << {handle: handle.to_i, kind: 'swack'}
+          when 'broadcast'  then host << {handle: handle.to_i, kind: 'bcack'}
+          when 'fetch'      then sw_deliver_fetch_response(handle.to_i, msg[:fetch_id].to_i, WorkerHost::FALLTHROUGH, host, msg[:realm_id].to_i)
+          end
+        end
+      end
+
       # Everything that must happen once a worker is out of `@workers`, whether or not we waited for
       # its thread: drain what it will never answer, release the counters it still holds, and revoke
       # what it created. Load-bearing — the counter reset at the end only fires when the LAST worker
@@ -7936,21 +7957,7 @@ module Capybara
         # are covered by the `ensure` acks in run_worker; only a respondWith parked on a worker
         # timer that never fires can still strand a fetch (the client promise then just never
         # settles, like a real dead SW).
-        until w[:inbox].empty?
-          msg = begin
-            w[:inbox].pop(true)
-          rescue ThreadError
-            break
-          end
-          drop_unread_message(msg)
-          next unless msg.is_a?(Hash)
-
-          case msg[:kind]
-          when 'sw_message', 'port_msg' then @worker_host << {handle: handle.to_i, kind: 'swack'}
-          when 'broadcast'  then @worker_host << {handle: handle.to_i, kind: 'bcack'}
-          when 'fetch'      then sw_deliver_fetch_response(handle.to_i, msg[:fetch_id].to_i, WorkerHost::FALLTHROUGH, @worker_host, msg[:realm_id].to_i)
-          end
-        end
+        drain_unread_inbox(handle, w[:inbox], @worker_host)
         # A streaming respondWith whose worker died mid-body never emits its terminal frame: error the
         # client's stream (so a pending body read rejects, not hangs); the fetch each open stream still
         # holds is released with it, so settle can reach idle.
@@ -10585,6 +10592,14 @@ module Capybara
         ws_drop_client(handle)
         event_source_drop_worker(handle)
         outbox << {handle: handle, kind: 'ports_forget'}
+        # (…and the messages it took to read at their times and never read, let go of — workers.js `dropUnreadWires` — and
+        # those its inbox still holds)
+        begin
+          rt&.call('dropUnreadWires')
+        rescue StandardError
+          nil
+        end
+        drain_unread_inbox(handle, inbox, outbox)
         # Take the runtime back from the boundary BEFORE destroying it, and destroy it while
         # holding the lock: terminating a disposed isolate is a use-after-free, and the two calls
         # are on different threads. Whoever holds the lock owns the pointer for that moment.
