@@ -7922,8 +7922,6 @@ module Capybara
           # registry — worker_records.rs `Liveness`, the registry's worker's too)
           @worker_host << {handle: handle.to_i, kind: 'sw_reaped'}
         end
-        # Its port ends closed, what was held for them let go of (port_channels.rs `forget_worker`).
-        Native.port_forget_worker(@session_partition, @window_number, handle.to_i)
         # Its agents gone: the locks it held let go, its IndexedDB connections closed (agents.rs `drop_owner`).
         Native.agents_drop_owner(w[:agent_owner]) if w[:agent_owner]
         # Hand back every plain postMessage this worker still owes a reply for — queued OR already
@@ -8078,6 +8076,8 @@ module Capybara
           end
           sw_client_message_route(e)
         end
+        # A worker's thread ended: its port ends closed, after what it posted on them (port_channels.rs `forget_worker`).
+        group['ports_forgotten'].each {|e, _| Native.port_forget_worker(@session_partition, @window_number, e[:handle].to_i) }
         # A controlled fetch's respondWith result → resolve the pending client fetch in the
         # realm that issued it (fetch ids are per-realm, so realm_id disambiguates collisions).
         # A NEGATIVE realm_id names a WORKER client (-worker handle, realmHooks.swInterceptFetch):
@@ -10579,11 +10579,12 @@ module Capybara
         @worker_host.release(WorkerHost::BUSY, 1) if busy_held
         release_init.call   # guarantee the init count is released on an early raise
         # Its WebSockets and EventSources go with it (HTML "worker event loop" teardown: each made to disappear) — and its
-        # port ends, closed, what was held for them let go of (port_channels.rs `forget_worker`): a worker that closed
-        # itself is reaped only as its Worker is terminated, or the session reset.
+        # port ends, closed, what was held for them let go of (port_channels.rs `forget_worker`) — a worker that closed
+        # itself is reaped only as its Worker is terminated, or the session reset — by the outbox, after what it posted
+        # on them: a delivery's ends are taken before its messages, which a closed end would drop.
         ws_drop_client(handle)
         event_source_drop_worker(handle)
-        Native.port_forget_worker(@session_partition, @window_number, handle.to_i)
+        outbox << {handle: handle, kind: 'ports_forget'}
         # Take the runtime back from the boundary BEFORE destroying it, and destroy it while
         # holding the lock: terminating a disposed isolate is a use-after-free, and the two calls
         # are on different threads. Whoever holds the lock owns the pointer for that moment.

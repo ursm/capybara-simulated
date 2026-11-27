@@ -34,6 +34,7 @@ const GROUPS: &[(&str, &[&str])] = &[
     ("try_activate", &["sw_try_activate"]),
     ("port_message", &["port_msg"]),
     ("client_message", &["sw_client_msg"]),
+    ("ports_forgotten", &["ports_forget"]),
     ("fetch_response", &["fetch_response"]),
     ("stream_frame", &["fr_start", "fr_chunk", "fr_close", "fr_error"]),
     ("swack", &["swack"]),
