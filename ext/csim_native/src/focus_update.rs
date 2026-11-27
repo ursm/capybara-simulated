@@ -622,16 +622,28 @@ fn focusing_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 const FOCUS_MOVED: u32 = 0;
 const FOCUS_FIXUP_OWED: u32 = 1;
 const FOCUS_CENTRED: u32 = 2;
-// The generations a scroll into view depends on: the layout's and the tree's, the style state's, the scroll's.
-fn centring_generations(arena: &RealmArena) -> [u32; 8] {
-    std::array::from_fn(|i| arena.generations.get(i))
+// The generations a scroll into view depends on, in realm `realm` entered: the layout's and the tree's, the style
+// state's, the scroll's — and those of the documents of its ancestor navigables, whose scrolling boxes it scrolls too
+// (layout.js `scrollFrameTarget`), folded into one word: none for a top-level document's, which walks nothing.
+fn centring_key(arena: &RealmArena, realm: i32) -> ([u32; 8], u64) {
+    let own = std::array::from_fn(|i| arena.generations.get(i));
+    let mut ancestors = 0u64;
+    let mut at = realm;
+    while let Some(parent) = arena.live_container(at).and_then(|c| arena.get(c)).map(|n| n.realm) {
+        let Some(st) = arena.realm_state(parent) else { break };
+        for g in [crate::dom::GEN_DIRTY, crate::dom::GEN_TREE, crate::dom::GEN_STYLE_STATE, crate::dom::GEN_SCROLL] {
+            ancestors = ancestors.wrapping_mul(31).wrapping_add(u64::from(st.generations.get(g)));
+        }
+        at = parent;
+    }
+    (own, ancestors)
 }
 
-// __dom.focusMethod(nid, focusVisible) -> `FOCUS_*`, or undefined where the allow focus steps refused: HTMLOrSVGElement's `focus(options)` — "If the allow focus steps given this's node document return
-// false, then return. Run the focusing steps for this. If options["focusVisible"] is true, or does not exist but in an
-// implementation-defined way the user agent determines it would be best to do so, then indicate focus" (`focusVisible`:
-// 1 true, 0 false, -1 absent, the ring then latched as the focus moved). The bindings scroll this into view after, unless
-// `preventScroll`.
+// __dom.focusMethod(nid, focusVisible) -> `FOCUS_*`, or undefined where the allow focus steps refused:
+// HTMLOrSVGElement's `focus(options)` — "If the allow focus steps given this's node document return false, then return.
+// Run the focusing steps for this. If options["focusVisible"] is true, or does not exist but in an implementation-defined
+// way the user agent determines it would be best to do so, then indicate focus" (`focusVisible`: 1 true, 0 false, -1
+// absent, the ring then latched as the focus moved). The bindings scroll this into view after, unless `preventScroll`.
 fn focus_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let visible = args.get(1).int32_value(scope).unwrap_or(-1);
@@ -643,12 +655,15 @@ fn focus_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let updates = arena.focus_updates;
     let Some(area) = focusing_steps(scope, Target::Element(el), By::Script) else { return };
     let Some(area) = area else { return rv.set_uint32(FOCUS_MOVED) };
-    // (…the element focused already: its ring as it was — "indicate focus" moves no ring of a focus that did not move,
-    // Chrome: `focus({focusVisible: true})` of a button focused without one shows none — and its scroll skipped where it
-    // is centred already)
+    // (…the element focused already: its ring as it was but where `focusVisible` is true, which indicates focus whether or
+    // not the focus moved — HTML's step is unconditional, where Chrome and Firefox show no ring for a button focused
+    // without one — and its scroll skipped where it is centred already)
     if crate::dom::dom(scope).arena.focus_updates == updates {
         let arena = crate::dom::dom(scope).arena.enter(realm);
-        let centred = arena.focus_centred == Some((el, centring_generations(arena)));
+        if visible == 1 && crate::focus::document_focus(arena, el) == Some(el) {
+            arena.set_focus_ring(crate::dom::RING_SHOWN);
+        }
+        let centred = arena.focus_centred == Some((el, centring_key(arena, realm)));
         return rv.set_uint32(if centred { FOCUS_CENTRED } else { FOCUS_MOVED });
     }
     if let (Entry::Element(focused), true) = (area, visible >= 0) {
@@ -664,7 +679,7 @@ fn focus_centred_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    arena.focus_centred = Some((el, centring_generations(arena)));
+    arena.focus_centred = Some((el, centring_key(arena, cid)));
 }
 
 // __dom.unfocusingSteps(nid): HTMLOrSVGElement's `blur()` (`unfocusing_steps`).

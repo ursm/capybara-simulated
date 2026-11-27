@@ -7087,11 +7087,13 @@ module Capybara
         nil
       end
 
-      # How far the host's clock (`Time.now`, which a test's `travel_to` moves) stands off the real one, in milliseconds:
-      # what a window's document's time origin holds as the host boots it (agent_clock.rs `TimeOrigin`).
-      def time_travel_offset_ms
+      # How far the host's clock (`Time.now`, which a test's `travel_to` moves) stands off the real one, in milliseconds —
+      # the real one read as `real_ms`, the same read the document's time origin is taken from: what a window's document's
+      # time origin holds as the host boots it (agent_clock.rs `TimeOrigin`). (Read apart, the work between them — the
+      # realm's rebuild, tens of ms under load — set the page's `Date` that far behind the host's clock.)
+      def time_travel_offset_ms(real_ms)
         @travel_sample = Time.now.to_f
-        @travel_offset = ((@travel_sample - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i
+        @travel_offset = (@travel_sample * 1000 - real_ms).to_i
       end
 
       # …and what a document this isolate loads into a window the page opened holds, beside a live opener whose `Date` the
@@ -13162,6 +13164,8 @@ module Capybara
         # its server's misreads every "x minutes ago", every expiry it is sent. A document's own clock is the one that
         # never goes back, `performance.now()` its own from 0 — agent_clock.rs)
         @clock_epoch_ms = Process.clock_gettime(Process::CLOCK_REALTIME, :float_millisecond)
+        # (…and the host's clock's offset from it, of the same read)
+        epoch_offset_ms = time_travel_offset_ms(@clock_epoch_ms)
         # (…a new environment, as every document is, though its realm is the last one's: V8Runtime#init_page_realm)
         @runtime.rebuild_ctx(client_id: client_id)
         # (…and the event loop's virtual time it is taken at, which runs on from the last page's: a worker made at a later
@@ -13192,7 +13196,7 @@ module Capybara
         opts = {
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
-          'timeTravelOffsetMs' => time_travel_offset_ms,
+          'timeTravelOffsetMs' => epoch_offset_ms,
           'clockEpochMs'       => @clock_epoch_ms,
           'init'               => init,
           'html'               => document_payload(html)

@@ -174,9 +174,8 @@ RSpec.describe 'the virtual clock’s Date', engine_global: true do
     s.visit '/'
     poll_until { s.evaluate_script("document.querySelector('iframe').contentDocument?.body?.textContent == '/f'") }
     s.execute_script('window.d0 = Date.now(); window.o0 = performance.timeOrigin; window.p0 = performance.now()')
-    # (…a `Date.now()` whole milliseconds, floored, against a frozen time of microseconds — and the host's offset taken in
-    # whole milliseconds too, truncated (browser.rb `time_travel_offset_ms`): two floors, up to 2 ms below it)
-    expect(s.evaluate_script('d0') / 1000.0 - frozen.to_f).to be_between(-0.002, 5)
+    # (…a `Date.now()` whole milliseconds, floored, against a frozen time of microseconds)
+    expect(s.evaluate_script('d0') / 1000.0 - frozen.to_f).to be_between(-0.001, 5)
     sleep 1
     s.execute_script(<<~JS)
       window.w = open('/p');
@@ -193,6 +192,20 @@ RSpec.describe 'the virtual clock’s Date', engine_global: true do
     expect(s.evaluate_script('Date.now() - frames[0].Date.now()').abs).to be <= 2
     expect(s.evaluate_script('Date.now() - w.Date.now()').abs).to be <= 2
     expect(worker - page).to be_between(-50, 50)
+  end
+
+  # …the page's time origin and the host's offset taken from one read of the real clock: a slow rebuild of its realm (the
+  # work between them, tens of ms under load) sets its `Date` behind the host's clock no more.
+  it "reads the host's moved clock however long its realm took to rebuild" do
+    frozen = Time.now + 86_400
+    allow(Time).to receive(:now).and_return(frozen)
+    allow_any_instance_of(Capybara::Simulated::V8Runtime).to receive(:rebuild_ctx).and_wrap_original do |original, *args, **kw|
+      sleep 0.05
+      original.call(*args, **kw)
+    end
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>p']] })
+    s.visit '/'
+    expect(s.evaluate_script('Date.now()') / 1000.0 - frozen.to_f).to be_between(-0.001, 5)
   end
 
   # …and a `travel_back` reaches the next document loaded, its `Date` what its server just rendered it with: a pop-up's, a

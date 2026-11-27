@@ -191,8 +191,12 @@ RSpec.describe 'Focus update steps' do
     expect(tall.evaluate_script("scrollTo(0, 0); fr.contentDocument.getElementById('y').scrollIntoView(); scrollY > 2000")).to be(true)
   end
 
-  # `focus({focusVisible})` of the element focused already indicates nothing anew: the focus did not move (Chrome).
-  it 'leaves the ring of an element focused already as it was' do
+  # `focus({focusVisible: false})` of the element focused already leaves its ring as it was; `focusVisible: true`
+  # indicates focus all the same — HTML's step is unconditional (Chrome and Firefox show none for a focused button a click
+  # left without one).
+  it 'leaves the ring of an element focused already, but shows it where focusVisible is true' do
+    session.click_button('b')
+    expect(session.evaluate_script("[b.matches(':focus-visible'), (b.focus({focusVisible: true}), b.matches(':focus-visible'))]")).to eq([false, true])
     got = session.evaluate_script(<<~JS)
       (() => {
         b.focus({focusVisible: true});
